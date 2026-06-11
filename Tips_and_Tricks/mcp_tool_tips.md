@@ -1,216 +1,692 @@
 # ⚒️ MCP Tool Tips — The VibeForge Developer's Field Guide
 
-> **TL;DR** — An LLM cannot guess your tool's intent from its name alone. Every field in your tool definition is a signal. The more precise your signals, the smarter your tool behaves. This guide shows you exactly where to put those signals and why each one matters.
+> **TL;DR** — An LLM cannot infer your tool’s real purpose from the name alone. Every MCP tool field is a signal. The clearer your schema and guidance, the more reliably the model can choose, parameterize, and safely use the tool.
+
+This guide is a **best-practices companion** to the **Model Context Protocol (MCP) Tool schema**. It focuses on how to make tools easier for models to use correctly — while staying accurate to the latest MCP specification.
 
 ---
 
-## ⚠️ What Happens Without This
+## Why This Matters
 
-Picture this: you ship a tool called `process-item`. No description. Parameters named `data` and `opts`. No examples. No negative rules.
+Imagine you ship a tool named `process-item`.
 
-The model stares at it like a vending machine with no labels. It starts guessing. Sometimes it guesses right. More often it calls your tool when the user was just brainstorming, or skips it entirely when the user needed it most. In worst-case scenarios it gets stuck in a loop — calling your tool, getting confused by the output, calling it again.
+No meaningful description.  
+No parameter descriptions.  
+No examples.  
+No hints about whether it is read-only, destructive, retry-safe, or dependent on outside systems.
 
-**Ambiguous tools don't just perform poorly — they erode trust in your entire system.**
+The model sees a black box.
 
-The fixes are not complicated. They are specific. This guide walks you through all of them.
+It starts guessing:
+
+- maybe this is a save tool
+- maybe it mutates data
+- maybe it is safe to retry
+- maybe it is just for formatting
+- maybe it should be used for a brainstorming request
+
+Sometimes it guesses right. Often it doesn’t.
+
+**Poorly described tools don’t just reduce accuracy — they reduce trust in the entire system.**
+
+The good news: the fixes are straightforward.  
+The better news: the MCP schema already gives you several built-in places to provide those signals.
 
 ---
 
-## Part 1 — The Anatomy of a Well-Forged Tool
+## Part 1 — What an MCP Tool Actually Looks Like
 
-These six fields are the skeleton of every MCP tool. Skipping any of them is like shipping a car without dashboard gauges — it may run, but nobody knows what's happening inside.
+A modern MCP Tool is centered on these schema-defined fields:
 
-| Field | What It Does | Common Mistake |
+| Field | Purpose | Notes |
 |---|---|---|
-| `name` | Unique identifier, 3–64 chars | Too generic (`"tool1"`) or too verbose (`"vibeforge-artifact-management-crud-interface-v2"`) |
-| `version` | Semantic version (`1.0.0`) | Omitting it entirely — breaks reproducibility when tools evolve |
-| `type` | Always `"tool"` | Forgetting this field; some runtimes reject the definition silently |
-| `description` | High-level intent + when NOT to call | Writing only what the tool does, never what it *doesn't* do |
-| `input_schema` | JSON Schema for every parameter | Fields with no `description` — the model has no guidance on what to send |
-| `output_schema` | JSON Schema for responses | Skipping this entirely — the model can't reason about what it gets back |
+| `name` | Stable identifier for the tool | Required |
+| `title` | Human-readable display name | Optional but useful |
+| `description` | High-level purpose and usage guidance | Optional, but extremely important |
+| `inputSchema` | JSON Schema for tool inputs | Required |
+| `outputSchema` | JSON Schema for structured output | Optional |
+| `annotations` | Behavioral hints for clients/models | Optional |
+| `execution` | Execution-related properties | Optional |
+| `icons` | UI display metadata | Optional |
+| `_meta` | Extension space for implementation-specific metadata | Optional |
 
-> **Pro tip:** Your `description` is the single most leveraged field in the entire definition. The model reads it first, reasons against it, and decides whether to invoke the tool at all. Treat it like a routing contract, not a tooltip.
+> **Important:** Some things teams often include in internal tool definitions — such as `version`, `type: "tool"`, embedded `auth`, or custom prompt blocks like `normalize` / `validate` / `infer` — are **not standard MCP Tool schema fields**. If you use them, treat them as implementation conventions, not MCP-spec fields.
 
 ---
 
-## Part 2 — Four Levers of LLM Precision
+## Part 2 — Three Layers of Good MCP Tool Design
 
-Think of your tool definition as four concentric layers. Each layer adds a finer level of guidance. Miss an outer layer and the inner ones lose half their power.
+Think of MCP tool quality in three layers:
 
-### 🔵 Layer 1 — `description` (The Front Door)
+### Layer 1 — Schema-Valid MCP Fields
 
-This is the first thing the model sees. It maps high-level user intent to your tool. Done well, it answers three questions at once:
+These are the fields the MCP Tool schema actually supports:
 
-- What does this tool accomplish?
-- What user phrases or intents should trigger it?
-- What should **never** trigger it?
+- `name`
+- `title`
+- `description`
+- `inputSchema`
+- `outputSchema`
+- `annotations`
+- `execution`
+- `icons`
+- `_meta`
 
-**Without negative rules**, the model treats your tool as a candidate for anything vaguely related. Add two or three explicit "Do NOT call for..." statements and watch false-positive invocations drop dramatically.
+These fields are your first and best chance to help both clients and models understand the tool.
 
+---
+
+### Layer 2 — Tool Authoring Conventions
+
+These are not part of the MCP schema itself, but they are still valuable:
+
+- example user → tool mappings
+- rules about when not to call the tool
+- internal normalization logic
+- clarification policies
+- validation playbooks
+- action preference order
+
+These can live in:
+
+- your developer documentation
+- `_meta`
+- server-side logic
+- client orchestration prompts
+- internal testing guides
+
+They are useful — just don’t present them as official MCP Tool fields.
+
+---
+
+### Layer 3 — Runtime / System Concerns
+
+These usually belong outside the Tool object itself:
+
+- authentication
+- authorization
+- rate limits
+- retries
+- human approval flows
+- external network controls
+- server policy enforcement
+
+These are critical to production systems, but they are not modeled as standard top-level MCP Tool fields.
+
+---
+
+## Part 3 — The Highest-Leverage Field: `description`
+
+Your tool’s `description` is still one of the most important signals you can provide.
+
+A strong description answers three questions:
+
+1. What does this tool do?
+2. When should it be used?
+3. When should it **not** be used?
+
+### Weak vs strong descriptions
+
+```json
+{ "description": "Handles prompts." }
 ```
-// ❌ Weak
-"description": "Handles prompts."
 
-// ✅ Strong
-"description": "CRUD interface for saved prompt artifacts. Call when the user
-wants to persist, retrieve, rename, or delete a stored item. Do NOT call for
-brainstorming, drafting, or general advice. Example mappings: 'Save this prompt'
--> create; 'Get my last prompt' -> get; 'Rename prompt 123' -> update."
-```
-
----
-
-### 🟢 Layer 2 — `input_schema.properties.*.description` (The Parameter Guide)
-
-Every parameter your tool accepts is an opportunity to teach the model what good input looks like. Don't just name the field — describe it with examples, formats, and constraints.
-
-```
-// ❌ Weak
-"title": { "type": "string" }
-
-// ✅ Strong
-"title": {
-  "type": "string",
-  "minLength": 3,
-  "maxLength": 256,
-  "description": "Short, outcome-oriented title. Example: 'Glass Receipt: cost per agent'."
-}
-```
-
-The `minLength`/`maxLength` hints aren't just validation — they calibrate the model's expectations for what "a title" looks like in your domain.
-
----
-
-### 🟡 Layer 3 — `prompts` Blocks (The Reasoning Engine)
-
-The `prompts` section is where you teach the model *how to think* about your tool, not just when to call it. Three blocks cover the full reasoning funnel:
-
-- **`normalize`** — Translate loose user language into a structured action. The model lands here first.
-- **`validate`** — Enforce that the required fields for the chosen action are actually present. If they're missing, return a clarifying question instead of calling the tool with bad data.
-- **`infer`** — When intent is genuinely ambiguous, use context to pick the most likely action. Ask one question if confidence is still low.
-
-Think of these three as: *What did they mean? → Do I have what I need? → If still unsure, ask once.*
-
----
-
-### 🔴 Layer 4 — `metadata` (The Discovery Layer)
-
-Tags, usage hints, and extra examples in `metadata` act as a secondary index. They help the model surface your tool in broader retrieval contexts and give it additional worked examples to pattern-match against. Don't underestimate this layer — it's often what tips a borderline invocation decision in the right direction.
-
----
-
-## Part 3 — Teaching the Model to Think: The Prompt Blocks in Detail
-
-| Block | Job | What Breaks Without It |
-|---|---|---|
-| `normalize` | Maps natural language → `{ action, payload }` | Model invents its own action names or passes raw user text as the payload |
-| `validate` | Guards against missing required fields | Tool receives incomplete data, returns errors, model retries blindly |
-| `infer` | Resolves ambiguity using context | Model picks the wrong action on a coin flip, or asks five questions instead of one |
-
-**The normalize block needs at least 3 example mappings.** Not because 3 is magic — because concrete examples anchor the model's pattern recognition. Abstractions alone drift. Examples stick.
-
-**The validate block should return a question, not an error.** When required fields are missing, the right response is *asking for them*, not failing silently. Keep the question short and direct.
-
-**The infer block should have a confidence threshold.** Below `0.7`, ask one question. Above it, commit. A model that asks five clarifying questions feels broken. A model that commits confidently on reasonable context feels intelligent.
-
----
-
-## Part 4 — Five Laws of Tool Craftsmanship
-
-These aren't preferences. They're the difference between a tool that works and a tool that works *reliably*.
-
-**1. Always state when NOT to call the tool.**
-
-The model considers every available tool for every user message. Negative rules are circuit breakers. Without them, your tool leaks into conversations it was never meant for.
-
-> *"Do NOT call for brainstorming, speculative drafting, or when the user asks for general advice."*
-
-**2. Embed exactly 3 concrete examples in description and normalize.**
-
-Three examples establish a pattern. One is a fluke. Two is a coincidence. Three is a rule the model can generalize from. Make them short, outcome-anchored, and cover different action types.
-
-**3. Keep parameter descriptions prescriptive, not descriptive.**
-
-"A string for the title" tells the model nothing useful. "A short, outcome-oriented title, 3–256 characters. Example: 'Glass Receipt: cost per agent'" tells the model exactly what to produce.
-
-**4. Use CRUD verbs for action enums: `create | get | update | delete`.**
-
-These four verbs map cleanly to the model's training on databases, APIs, and file systems. Custom verb names like `persist`, `fetch`, `modify`, or `remove` introduce unnecessary translation overhead. Stick to the standard four.
-
-**5. Ask one clarifying question when required fields are missing.**
-
-One. Not a list. Not a form. One direct question targeting the most critical missing field. The user answers it, you have what you need, the interaction moves forward. Multi-question clarification flows feel like bureaucracy. Keep it surgical.
-
----
-
-## Part 5 — Three Patterns Every Tool Should Know
-
-These three patterns cover the vast majority of real-world user intent. Learn them, annotate your tool with them, and you'll handle 80% of interactions without ambiguity.
-
----
-
-### Pattern A — The Save Intent
-
-> **User says:** *"Save this as a new prompt"*
-> **Maps to:** `create` with `{ title, body }`
-
-**Why this mapping works:** The verb "save" combined with "new" signals unambiguous creation intent. No existing ID is referenced. The payload is whatever the user just produced. This is the cleanest pattern — a single-pass normalize with no inference needed.
-
----
-
-### Pattern B — The Fetch Intent
-
-> **User says:** *"Get my last saved prompt"*
-> **Maps to:** `get`
-
-**Why this mapping works:** "Get" + "last" signals retrieval without modification. The recency qualifier ("last") gives the tool enough context to identify the target without an explicit ID. Your infer block can resolve "last" against `recent_actions` in `requester_context`.
-
----
-
-### Pattern C — The Change Intent
-
-> **User says:** *"Rename prompt 123 to 'Cost Audit'"*
-> **Maps to:** `update` with `{ id: '123', title: 'Cost Audit' }`
-
-**Why this mapping works:** An explicit ID (`123`) and a change verb (`rename`) are present. The normalize block should always check for existing IDs first — their presence is the strongest signal that the user intends an update, not a create. Never create a duplicate when an ID is in the message.
-
----
-
-## Part 6 — The Full Reference Schema
-
-The schema below is a complete, production-ready MCP tool definition implementing every principle in this guide. Read it alongside the annotations table that follows.
+That tells the model almost nothing.
 
 ```json
 {
-  "name": "vibeforge-crud-tool",
-  "version": "1.0.0",
-  "type": "tool",
-  "description": "Architecture-led CRUD interface for persistent artifacts. Use this tool when the user expresses a clear intent to create, fetch, update, or delete a stored item. Do NOT call for brainstorming, speculative drafting, or when the user asks for general advice. Example mappings: 'Save this as a new prompt' -> create; 'Get my last prompt' -> get; 'Rename prompt 123' -> update.",
-  "auth": {
-    "type": "external",
-    "fields": {
-      "credential_id": {
-        "type": "string",
-        "required": true,
-        "description": "Reference to a stored credential. Example: 'cred_abc123'."
-      }
-    }
-  },
-  "input_schema": {
+  "description": "Create, retrieve, update, or delete saved prompt artifacts. Use this tool when the user explicitly wants to persist, fetch, rename, modify, or remove a stored prompt. Do not use it for brainstorming, drafting, or general advice."
+}
+```
+
+That gives the model a much better routing contract.
+
+### Recommended description pattern
+
+A strong MCP tool description usually contains:
+
+- the tool’s primary job
+- explicit trigger intents
+- at least one negative rule
+- brief examples if they fit naturally
+
+### Example
+
+```json
+{
+  "description": "Create, retrieve, update, or delete persistent artifacts. Use when the user explicitly wants to save, fetch, rename, modify, or remove a stored item. Do not use for brainstorming, drafting, or general advice. Examples: 'Save this prompt', 'Get my last artifact', 'Rename item 123'."
+}
+```
+
+> **Practical rule:** negative guidance is one of the easiest ways to reduce false-positive tool calls.
+
+---
+
+## Part 4 — `inputSchema`: Where Precision Starts
+
+`inputSchema` is required by MCP and should be treated as more than validation.
+
+It is also **guidance**.
+
+A model reads your schema to infer:
+
+- which fields matter
+- what “good” input looks like
+- how specific values should be
+- which inputs are required
+
+### Weak schema
+
+```json
+{
+  "inputSchema": {
     "type": "object",
+    "properties": {
+      "title": { "type": "string" }
+    }
+  }
+}
+```
+
+This is valid, but not very helpful.
+
+### Stronger schema
+
+```json
+{
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 256,
+        "description": "Short, outcome-oriented title. Example: 'Glass Receipt: cost per agent'."
+      }
+    },
+    "required": ["title"]
+  }
+}
+```
+
+This gives both validation and shape guidance.
+
+### Recommended `inputSchema` practices
+
+- add `description` to every meaningful property
+- use `enum` for closed action sets
+- use `minLength` / `maxLength` for bounded strings
+- use `required` deliberately
+- prefer explicit structure over generic blobs
+- use `additionalProperties: false` when you want stricter contracts
+- use richer JSON Schema constructs where helpful
+
+---
+
+## Part 5 — `outputSchema`: Make Results Predictable
+
+`outputSchema` is optional in MCP, but very useful.
+
+It tells clients and models what structured output the tool returns. If your tool returns structured content, define it clearly.
+
+### Good reasons to include `outputSchema`
+
+- predictable downstream reasoning
+- easier client rendering
+- cleaner chaining between tools
+- less dependence on parsing free-form text
+
+### Example
+
+```json
+{
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string",
+        "description": "Result status, such as 'success' or 'error'."
+      },
+      "data": {
+        "type": "object",
+        "description": "Structured result payload for successful operations."
+      },
+      "errors": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Error messages, if any."
+      }
+    },
+    "required": ["status"]
+  }
+}
+```
+
+### Guidance
+
+- if you define `outputSchema`, return output that actually conforms to it
+- keep success and error shapes understandable
+- avoid making free-form text the only useful output when structured output is possible
+
+---
+
+## Part 6 — `annotations`: Native MCP Tool Guidance
+
+This is one of the most underused and highest-value parts of the MCP Tool schema.
+
+`annotations` are built-in hints that help clients and models reason about tool behavior.
+
+### MCP tool annotations
+
+| Annotation | Meaning |
+|---|---|
+| `title` | Alternate human-readable title hint |
+| `readOnlyHint` | Tool does not modify its environment |
+| `destructiveHint` | Tool may perform destructive updates |
+| `idempotentHint` | Repeated calls with same input have no additional effect |
+| `openWorldHint` | Tool interacts with external or changing world state |
+
+### Why these matter
+
+These annotations help answer questions like:
+
+- Is this safe to call casually?
+- Should the client require confirmation?
+- Is retrying safe?
+- Could this tool interact with outside systems?
+- Should output be treated as crossing a trust boundary?
+
+### Examples
+
+#### Read-only lookup tool
+
+```json
+{
+  "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+  }
+}
+```
+
+#### Delete tool
+
+```json
+{
+  "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "idempotentHint": false,
+    "openWorldHint": false
+  }
+}
+```
+
+#### Web search tool
+
+```json
+{
+  "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true
+  }
+}
+```
+
+### Practical rules
+
+- set `readOnlyHint: true` for list/search/fetch/inspect tools
+- set `destructiveHint: true` for delete/overwrite/send/commit/execute actions with meaningful side effects
+- set `idempotentHint: true` only when retries are truly safe
+- set `openWorldHint: true` for tools that depend on external systems, remote APIs, the internet, or changing real-world state
+
+> **Important:** annotations are hints, not guarantees. The MCP guidance is explicit that clients should treat annotations as untrusted unless they come from a trusted server, and the default posture is intentionally cautious when annotations are absent.
+
+---
+
+## Part 7 — Trust Boundaries and `openWorldHint`
+
+`openWorldHint` deserves special attention.
+
+Unlike the other common annotation booleans, `openWorldHint` is not just about whether a tool is safe to call. It is also about **what kind of data may come back** and whether that data may originate from an external or changing environment.
+
+### Why this matters
+
+A tool marked `openWorldHint: true` may:
+
+- return content from the public internet
+- surface data from external SaaS systems
+- bring untrusted text into the model context
+- combine with other tools in ways that increase session risk
+
+### Practical trust-boundary guidance
+
+When a tool is open-world:
+
+- assume its outputs may contain untrusted content
+- avoid treating retrieved text as trusted instructions
+- consider stricter approval or review policies when mixed with write-capable tools
+- be especially careful when chaining open-world tools with tools that can mutate state, send messages, or access private data
+
+### Recommended author guidance
+
+Use `openWorldHint: true` when the tool reaches beyond a closed domain such as:
+
+- the public internet
+- third-party APIs
+- remote user-generated content
+- external enterprise systems outside the local trust boundary
+
+Use `openWorldHint: false` when the tool operates within a clearly bounded, closed domain such as:
+
+- a local static knowledge base
+- an internal deterministic dataset
+- a fixed repository snapshot
+- a constrained local computation
+
+> **Design note:** `openWorldHint` is best understood as a trust-boundary and provenance signal, not just a “web tool” flag.
+
+---
+
+## Part 8 — `title`, `name`, and Display Clarity
+
+Use `name` for stable identity.  
+Use `title` for clear human presentation.
+
+### Good pattern
+
+```json
+{
+  "name": "artifact_crud",
+  "title": "Artifact CRUD"
+}
+```
+
+### Bad pattern
+
+```json
+{
+  "name": "tool1"
+}
+```
+
+### Guidance
+
+- keep `name` stable, machine-oriented, and concise
+- keep `title` readable and UI-friendly
+- do not rely on the tool name alone to communicate purpose
+
+---
+
+## Part 9 — `_meta`: Use for Extensions, Not Core Meaning
+
+`_meta` is the schema-approved place for implementation-specific metadata.
+
+Use it when you need extra data that is useful to your own clients or systems but is **not standard MCP Tool schema**.
+
+### Good uses for `_meta`
+
+- internal authoring examples
+- testing hints
+- implementation-specific policies
+- UI metadata not covered elsewhere
+- compatibility data for a known client
+
+### Example
+
+```json
+{
+  "_meta": {
+    "vibeforgeGuidance": {
+      "examples": [
+        "Save this as a new prompt -> create",
+        "Get my last prompt -> get",
+        "Rename prompt 123 to Cost Audit -> update"
+      ],
+      "clarificationPolicy": "Ask one concise question when required fields are missing."
+    }
+  }
+}
+```
+
+### Do not misuse `_meta`
+
+Do not use `_meta` as an excuse to hide a weak schema.
+
+If something belongs in:
+
+- `description`
+- `inputSchema`
+- `outputSchema`
+- `annotations`
+
+put it there first.
+
+---
+
+## Part 10 — `execution` and `icons`
+
+These fields are often overlooked.
+
+### `execution`
+
+Use `execution` for execution-related metadata when your implementation supports it. This is part of the MCP Tool schema and may matter for task-oriented or asynchronous execution environments.
+
+### `icons`
+
+Use `icons` when you want the tool to render more clearly in clients with UI support.
+
+These fields are not usually the primary source of model guidance, but they are still part of the modern schema and worth considering when building polished tools.
+
+---
+
+## Part 11 — What MCP Does *Not* Standardize Inside the Tool Object
+
+These are common and useful patterns, but they are **not standard top-level MCP Tool fields**.
+
+### Not MCP Tool schema fields
+
+- `version`
+- `type: "tool"`
+- `auth`
+- `metadata`
+- `prompts.normalize`
+- `prompts.validate`
+- `prompts.infer`
+
+### Where those ideas belong instead
+
+| Concern | Better home |
+|---|---|
+| Tool versioning | documentation, release metadata, `_meta`, or server versioning |
+| auth details | transport, server config, auth layer |
+| normalization logic | server/client orchestration |
+| validation policy | JSON Schema + runtime validation |
+| ambiguity policy | assistant prompt, orchestrator, or server logic |
+| examples for internal routing | docs or `_meta` |
+
+These ideas are still useful. Just don’t present them as part of the official MCP Tool schema.
+
+---
+
+## Part 12 — Recommended Tool Guidance Beyond the Schema
+
+Even though MCP does not standardize embedded `normalize`, `validate`, and `infer` blocks in the Tool object, those are still excellent design concepts.
+
+Use them as **tool-authoring practices**:
+
+### 1. Normalize user intent
+
+Map loose user language into your tool’s expected structure.
+
+Examples:
+
+- `"Save this as a new prompt"` → `action = "create"`
+- `"Get my last saved prompt"` → `action = "get"`
+- `"Rename prompt 123 to 'Cost Audit'"` → `action = "update"`
+
+### 2. Validate required information
+
+Before calling the tool, ensure the chosen action has the required fields.
+
+If not, ask **one concise clarifying question**.
+
+### 3. Infer carefully under ambiguity
+
+When the user is ambiguous:
+
+- prefer strong explicit signals like IDs and action verbs
+- ask one clarifying question if confidence is low
+- avoid repeated multi-question interrogations
+
+These are great orchestration behaviors — just keep them outside the official Tool schema unless you are storing them in `_meta` for your own systems.
+
+---
+
+## Part 13 — Stricter JSON Schema Patterns for Higher-Reliability Tools
+
+If you want tools to behave more predictably, it often helps to make the schema stricter.
+
+The MCP spec supports modern JSON Schema patterns, and the current guidance defaults schemas to **JSON Schema 2020-12** when `$schema` is not explicitly provided. That means you can use richer JSON Schema patterns than just `type`, `properties`, and `required`.
+
+### Useful strictness patterns
+
+#### 1. `additionalProperties: false`
+
+Use this when you want to prevent invented or misspelled fields.
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string" },
+    "title": { "type": "string" }
+  }
+}
+```
+
+This is especially useful when the model might otherwise hallucinate extra keys.
+
+#### 2. `enum`
+
+Use enums for closed action sets or state values.
+
+```json
+{
+  "type": "string",
+  "enum": ["create", "get", "update", "delete"]
+}
+```
+
+This reduces ambiguity and encourages stable tool calling.
+
+#### 3. `oneOf` for action-specific shapes
+
+If different actions require meaningfully different payloads, `oneOf` can make that explicit.
+
+```json
+{
+  "type": "object",
+  "oneOf": [
+    {
+      "properties": {
+        "action": { "const": "get" },
+        "payload": {
+          "type": "object",
+          "required": ["id"],
+          "properties": {
+            "id": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["action", "payload"]
+    },
+    {
+      "properties": {
+        "action": { "const": "create" },
+        "payload": {
+          "type": "object",
+          "required": ["title", "body"],
+          "properties": {
+            "title": { "type": "string" },
+            "body": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["action", "payload"]
+    }
+  ]
+}
+```
+
+This can be more precise than a single permissive `payload` object.
+
+#### 4. `const` for discriminators
+
+Use `const` inside branches when you want each schema variant to declare exactly one action or mode.
+
+#### 5. `pattern`, `format`, `minItems`, and bounds
+
+Use these to communicate expected shapes for identifiers, emails, URLs, lists, and bounded text.
+
+### Practical guidance
+
+- use stricter schemas when the tool contract is stable and mistakes are expensive
+- use looser schemas when exploratory input is expected
+- do not add complexity for its own sake — schema strictness should serve usability and safety
+
+> **Recommendation:** for write tools, transactional tools, and tools with expensive side effects, stricter schemas are often worth the extra effort.
+
+---
+
+## Part 14 — A Simple Starter Example
+
+If your audience includes beginners, it helps to show a minimal but still spec-accurate example first.
+
+This version keeps the schema approachable:
+
+- one object-shaped `inputSchema`
+- one object-shaped `outputSchema`
+- clear descriptions
+- useful annotations
+- no advanced branching constructs
+
+This is often a good starting point for:
+
+- first MCP tools
+- internal tools with simple inputs
+- tools where action-specific validation can be handled in runtime logic
+
+```json
+{
+  "name": "vibeforge_crud_tool",
+  "title": "Artifact CRUD",
+  "description": "Create, retrieve, update, or delete persistent artifacts. Use when the user explicitly wants to save, fetch, rename, modify, or remove a stored item. Do not use for brainstorming, drafting, or general advice.",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
     "properties": {
       "action": {
         "type": "string",
         "enum": ["create", "get", "update", "delete"],
-        "description": "Operation to perform. Use 'create' to persist new artifacts; 'get' to retrieve; 'update' to modify; 'delete' to remove."
+        "description": "Operation to perform."
       },
       "payload": {
         "type": "object",
-        "description": "Structured data for the action. For create: { title, body, tags }. For update: { id, title?, body?, tags? }. For get/delete: { id }.",
+        "description": "Action-specific data. For create: title, body, tags. For update: id plus changed fields. For get or delete: id.",
+        "additionalProperties": false,
         "properties": {
           "id": {
             "type": "string",
-            "description": "Unique identifier for the artifact. Required for get, update, delete."
+            "description": "Artifact identifier. Typically used for get, update, and delete."
           },
           "title": {
             "type": "string",
@@ -222,91 +698,372 @@ The schema below is a complete, production-ready MCP tool definition implementin
             "type": "string",
             "minLength": 1,
             "maxLength": 8192,
-            "description": "Full artifact text. Keep focused: state the outcome, the constraints, and the expected result."
+            "description": "Artifact body text. State the outcome, constraints, and expected result clearly."
           },
           "tags": {
             "type": "array",
-            "items": { "type": "string" },
-            "description": "Categorical tags; use for discovery and policy routing."
+            "items": {
+              "type": "string"
+            },
+            "description": "Categorical tags for discovery and routing."
           }
         }
       },
-      "requester_context": {
+      "requesterContext": {
         "type": "object",
-        "description": "Optional context to help inference: { user_id, role, recent_actions }."
+        "description": "Optional caller context to support implementation-specific inference."
       }
     },
     "required": ["action"]
   },
-  "output_schema": {
+  "outputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
+    "additionalProperties": false,
     "properties": {
       "status": {
         "type": "string",
-        "description": "Result status. Example: 'success', 'error'."
+        "description": "Result status, such as 'success' or 'error'."
       },
       "data": {
         "type": "object",
-        "description": "Returned payload for get/create/update operations."
+        "description": "Structured result payload for successful operations."
       },
       "errors": {
         "type": "array",
-        "items": { "type": "string" },
+        "items": {
+          "type": "string"
+        },
         "description": "List of error messages, if any."
       }
     },
     "required": ["status"]
   },
-  "prompts": {
-    "normalize": "Map user language to a structured action. Rules: 1) If user asks to persist or save content -> action='create'. 2) If user asks to retrieve a named or recent item -> action='get'. 3) If user asks to change an existing item -> action='update'. 4) If user asks to remove an item -> action='delete'. Examples: 'Save this as a new prompt' -> { action: 'create', payload: { title: '...', body: '...' } }; 'Get my last saved prompt' -> { action: 'get' }; 'Rename prompt 123 to \"Cost Audit\"' -> { action: 'update', payload: { id: '123', title: 'Cost Audit' } }. Do NOT call this tool for brainstorming, drafting, or when the user asks for general advice.",
-    "validate": "Confirm required fields exist for the chosen action. If required fields are missing, return a short clarifying question instead of calling the tool. Validation rules: create -> payload.title and payload.body required; get/delete -> payload.id required; update -> payload.id and at least one of title/body/tags required. Keep clarifying questions short and direct.",
-    "infer": "When user intent is ambiguous, infer the most likely action using requester_context and recent_actions. If confidence < 0.7, ask one clarifying question. Preference order: update (if an id or 'change' verb present), create (if user provides content), get (if user asks for 'show' or 'fetch'), delete (if user uses 'remove' or 'delete')."
-  },
-  "metadata": {
-    "category": "mcp-tool",
-    "tags": ["Glass Box AI", "Architecture-led delivery", "CRUD", "vibeforge"],
-    "llm_usage": "Call only for explicit CRUD intent. Outcome focus: executive clarity, governance posture, and investment sequencing.",
-    "examples": [
-      "User: 'Save this as a new prompt' -> { action: 'create', payload: { title: '...', body: '...' } }",
-      "User: 'Get my last prompt' -> { action: 'get' }",
-      "User: 'Rename prompt 123 to \"Cost Audit\"' -> { action: 'update', payload: { id: '123', title: 'Cost Audit' } }"
-    ]
+  "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "idempotentHint": false,
+    "openWorldHint": false
   }
 }
 ```
 
-### What to Notice in This Schema
+### Why this example is beginner-friendly
 
-| Location | What It Does | Why It's There |
-|---|---|---|
-| `description` | 3 example mappings + 1 negative rule | Routing contract — the model's first decision gate |
-| `action.enum` | Standard CRUD verbs only | Eliminates translation overhead from custom verb names |
-| `action.description` | Per-verb usage guidance | Prevents the model from picking `delete` when `update` was intended |
-| `payload.description` | Shape of payload per action type | Teaches the model what to construct *before* it fills parameters |
-| `title.minLength/maxLength` | Bounds on string length | Calibrates model output to your domain's expectations |
-| `body.description` | Outcome-focused writing guidance | Produces better artifact content, not just valid schema |
-| `requester_context` | Optional inference fuel | Gives the infer block real data to work with |
-| `prompts.normalize` | 4 rules + 3 examples + 1 negative rule | Full routing specification in a single block |
-| `prompts.validate` | Per-action required field rules | Prevents bad data from reaching your backend |
-| `prompts.infer` | Confidence threshold + preference order | Deterministic disambiguation without over-asking |
-| `metadata.examples` | 3 additional user→tool mappings | Reinforces normalize patterns in the discovery layer |
+- it uses only the most common MCP Tool fields
+- it avoids `oneOf`, `const`, and `anyOf`
+- it is still fully spec-aligned
+- it leaves room for runtime clarification when the input is incomplete
+
+> **Good default:** start with a simple schema when the tool contract is easy to explain and mistakes are low-cost.
 
 ---
 
-## Part 7 — Before You Ship: The Forge QA Checklist
+## Part 15 — A Stricter Reference Tool
 
-Run through this before every tool release. Every unchecked box is a potential bad invocation in production.
+When you want stronger validation and clearer action-specific shapes, you can move to a stricter schema.
 
-- [ ] `description` includes **when to call** and at least one **when NOT to call** rule
-- [ ] `input_schema` fields all have `description` — no bare `"type": "string"` parameters
-- [ ] `input_schema` string fields have `maxLength` where unbounded input would be a problem
-- [ ] `prompts.normalize` contains **3 example user→action mappings**
-- [ ] `prompts.validate` lists **required fields per action** with a clarifying question fallback
-- [ ] `prompts.infer` has a **confidence threshold** and a **preference order** for actions
-- [ ] `metadata.examples` includes **at least 3 user→tool mappings**
-- [ ] Tool has been tested with **ambiguous input** — does it ask one question or hallucinate?
-- [ ] Tool has been tested with **missing required fields** — does it ask or fail silently?
-- [ ] Tool has been tested with **out-of-scope input** — does it decline gracefully?
+This version is often a better fit for:
+
+- write tools
+- tools with expensive or irreversible side effects
+- tools where different actions require clearly different payload shapes
+- systems where you want more correctness enforced in schema instead of runtime logic
+
+```json
+{
+  "name": "vibeforge_crud_tool",
+  "title": "Artifact CRUD",
+  "description": "Create, retrieve, update, or delete persistent artifacts. Use when the user explicitly wants to save, fetch, rename, modify, or remove a stored item. Do not use for brainstorming, drafting, or general advice.",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "allOf": [
+      {
+        "oneOf": [
+          {
+            "properties": {
+              "action": {
+                "const": "get",
+                "description": "Retrieve an existing artifact."
+              },
+              "payload": {
+                "type": "object",
+                "description": "Lookup payload.",
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Artifact identifier."
+                  }
+                },
+                "required": ["id"]
+              }
+            },
+            "required": ["action", "payload"]
+          },
+          {
+            "properties": {
+              "action": {
+                "const": "delete",
+                "description": "Delete an existing artifact."
+              },
+              "payload": {
+                "type": "object",
+                "description": "Delete payload.",
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Artifact identifier."
+                  }
+                },
+                "required": ["id"]
+              }
+            },
+            "required": ["action", "payload"]
+          },
+          {
+            "properties": {
+              "action": {
+                "const": "create",
+                "description": "Create a new artifact."
+              },
+              "payload": {
+                "type": "object",
+                "description": "Create payload.",
+                "additionalProperties": false,
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 256,
+                    "description": "Short, outcome-oriented title. Example: 'Glass Receipt: cost per agent'."
+                  },
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 8192,
+                    "description": "Artifact body text. State the outcome, constraints, and expected result clearly."
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 0,
+                    "description": "Categorical tags for discovery and routing."
+                  }
+                },
+                "required": ["title", "body"]
+              }
+            },
+            "required": ["action", "payload"]
+          },
+          {
+            "properties": {
+              "action": {
+                "const": "update",
+                "description": "Update an existing artifact."
+              },
+              "payload": {
+                "type": "object",
+                "description": "Update payload.",
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Artifact identifier."
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 256,
+                    "description": "Updated title."
+                  },
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 8192,
+                    "description": "Updated artifact body text."
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Updated tags."
+                  }
+                },
+                "required": ["id"],
+                "anyOf": [
+                  { "required": ["title"] },
+                  { "required": ["body"] },
+                  { "required": ["tags"] }
+                ]
+              }
+            },
+            "required": ["action", "payload"]
+          }
+        ]
+      }
+    ],
+    "properties": {
+      "requesterContext": {
+        "type": "object",
+        "description": "Optional caller context to support implementation-specific inference."
+      }
+    }
+  },
+  "outputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "status": {
+        "type": "string",
+        "description": "Result status, such as 'success' or 'error'."
+      },
+      "data": {
+        "type": "object",
+        "description": "Structured result payload for successful operations."
+      },
+      "errors": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "List of error messages, if any."
+      }
+    },
+    "required": ["status"]
+  },
+  "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "idempotentHint": false,
+    "openWorldHint": false
+  },
+  "_meta": {
+    "vibeforgeGuidance": {
+      "examples": [
+        "User: 'Save this as a new prompt' -> { action: 'create', payload: { title: '...', body: '...' } }",
+        "User: 'Get my last prompt' -> { action: 'get' }",
+        "User: 'Rename prompt 123 to \"Cost Audit\"' -> { action: 'update', payload: { id: '123', title: 'Cost Audit' } }"
+      ],
+      "clarificationPolicy": "Ask one direct question when the chosen action is missing required fields."
+    }
+  }
+}
+```
+
+### Why this example is stricter
+
+- it uses `oneOf` to separate action-specific shapes
+- it uses `const` to discriminate actions
+- it uses `anyOf` to require at least one mutable field on update
+- it reduces ambiguity at the schema level instead of relying as much on runtime logic
+
+> **Good next step:** start simple, then move to stricter schemas when the tool becomes more critical or side effects become more expensive.
+
+---
+
+## Part 16 — What to Notice in the Reference Tool
+
+| Location | Why It Matters |
+|---|---|
+| `name` | Stable machine identifier |
+| `title` | Better presentation in clients |
+| `description` | First routing contract for models |
+| `inputSchema` | Defines both validation and input expectations |
+| `oneOf` | Distinguishes action-specific shapes |
+| `const` | Makes each action branch explicit |
+| `additionalProperties: false` | Prevents loose or invented fields where strictness is desirable |
+| `outputSchema` | Makes structured results easier to reason about |
+| `annotations` | Native MCP behavior hints |
+| `_meta` | Safe place for implementation-specific extensions |
+
+---
+
+## Part 17 — The Forge QA Checklist
+
+Run this checklist before shipping any MCP tool.
+
+### Schema validity
+
+- [ ] Uses `inputSchema`, not `input_schema`
+- [ ] Uses `outputSchema`, not `output_schema`
+- [ ] Includes only valid MCP Tool fields unless extensions are intentionally placed in `_meta`
+- [ ] Does not present `version`, `type`, `auth`, `metadata`, or embedded prompt blocks as standard MCP Tool fields
+- [ ] Root input schema is an object
+- [ ] Root output schema is an object if `outputSchema` is provided
+
+### Tool guidance quality
+
+- [ ] `description` explains when to call the tool
+- [ ] `description` includes at least one “do not use for…” rule
+- [ ] input properties have meaningful `description` text
+- [ ] enums or discriminators are used where action sets are closed
+- [ ] string lengths are bounded where useful
+- [ ] outputs are predictable and documented
+
+### Behavioral hints
+
+- [ ] `annotations.readOnlyHint` is set correctly
+- [ ] `annotations.destructiveHint` reflects real side effects
+- [ ] `annotations.idempotentHint` reflects retry safety
+- [ ] `annotations.openWorldHint` reflects external-world interaction
+- [ ] open-world tool outputs are treated as potentially untrusted content
+
+### Authoring and orchestration quality
+
+- [ ] example user → tool mappings exist somewhere in docs or `_meta`
+- [ ] ambiguous requests are handled with at most one clarifying question
+- [ ] missing required fields trigger a concise clarification instead of a blind tool call
+- [ ] out-of-scope requests are declined instead of force-fit into the tool
+
+### Schema strictness
+
+- [ ] `additionalProperties: false` is used where unexpected keys would be harmful
+- [ ] `oneOf` / `anyOf` / `const` are used where action-specific shapes improve correctness
+- [ ] strictness level matches the tool’s operational risk
+
+---
+
+## Part 18 — Five Laws of MCP Tool Craftsmanship
+
+**1. Always say when not to use the tool.**  
+Negative guidance reduces false positives.
+
+**2. Describe every important input field.**  
+Bare schemas validate; described schemas guide.
+
+**3. Use `annotations` intentionally.**  
+These are native MCP behavior hints — use them.
+
+**4. Keep schema and orchestration separate.**  
+Put MCP fields in the Tool object. Put normalization, clarification, and internal routing logic in docs, `_meta`, or runtime logic.
+
+**5. Prefer explicit structure over implied behavior.**  
+Models do better when actions, constraints, and outputs are concrete.
+
+---
+
+## Part 19 — Recommended Heuristics That Are Not Spec Requirements
+
+Some patterns are very effective, but they are **recommendations**, not MCP requirements.
+
+Examples:
+
+- including a few concrete user → tool examples
+- using CRUD verbs for common persistence tools
+- asking one clarifying question when a required field is missing
+- preferring concise, outcome-oriented titles
+- adding a negative rule to the description
+
+These are often high-value conventions, but they should be presented as **recommended practices**, not as mandatory parts of the MCP spec.
+
+> **Good standard:** be strict about the schema, and pragmatic about the heuristics.
 
 ---
 
