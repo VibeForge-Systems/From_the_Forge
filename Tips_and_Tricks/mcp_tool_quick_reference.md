@@ -3,6 +3,8 @@
 > **Use this card when designing or reviewing an MCP tool definition.**
 >
 > Goal: make the tool easy for models to choose correctly, easy for clients to render safely, and accurate to the latest MCP Tool schema.
+>
+> Companion cards: `mcp_prompts_quick_reference.md`, `mcp_resources_quick_reference.md` • Full guide: `mcp_tool_tips.md`
 
 ---
 
