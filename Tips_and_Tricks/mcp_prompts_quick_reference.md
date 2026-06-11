@@ -3,6 +3,8 @@
 > **Use this card when designing or reviewing MCP prompts.**
 >
 > Goal: make prompts easy for clients to surface, easy for users to understand, and easy for models to fill with the right arguments.
+>
+> Companion cards: `mcp_tool_quick_reference.md`, `mcp_resources_quick_reference.md` • Full guide: `mcp_tool_tips.md`
 
 ---
 
