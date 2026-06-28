@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ==========================================================================
+  VibeForge Systems - Windows Environment Bundle
+  openshell.xml - Open-Shell (Classic Start Menu) settings
+
+  This is a starting profile: a Windows 7-style Start menu with the Aero skin.
+  It is imported EXPLICITLY by apply-shell.ps1 via:
+
+      ClassicStartMenu.exe -xml "<this file>"
+
+  Open-Shell does not auto-read any ProgramData file, so the import step is
+  what actually applies it. To customize:
+    1. Tune the Start menu through Open-Shell's "Settings" UI on a reference
+       machine (enable "Show all settings" for the full surface).
+    2. Use "Backup -> Save to XML file" to export.
+    3. Replace this file with that export and commit it.
+
+  TO REVERT: open Open-Shell settings -> "Backup" -> "Reset all settings".
+  ==========================================================================
+-->
+<Settings component="StartMenu">
+  <!-- Win7 = the Windows 7-style two-column menu. Alternatives: Classic1, Classic2. -->
+  <MenuStyle>Win7</MenuStyle>
+  <!-- Replace the Windows 11 Start button with the Open-Shell (Aero orb) button. -->
+  <EnableStartButton>1</EnableStartButton>
+  <StartButtonType>AeroButton</StartButtonType>
+  <!-- Aero skin to match the classic look. -->
+  <SkinW7>Windows Aero</SkinW7>
+  <!-- Open the menu on the left Win/Start key as users expect. -->
+  <StartMenuRight>1</StartMenuRight>
+  <!-- Search box visible at the bottom of the menu. -->
+  <SearchBox>Normal</SearchBox>
+  <!-- Show recently used and pinned programs. -->
+  <RecentPrograms>Recent</RecentPrograms>
+</Settings>

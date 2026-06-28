@@ -1,0 +1,32 @@
+Windows Registry Editor Version 5.00
+
+; ============================================================================
+; VibeForge Systems - Windows Environment Bundle
+; explorer.reg - File Explorer baselines (per-user, HKCU)
+;
+; Developer-friendly Explorer defaults plus the Windows 10 "classic" right-click
+; context menu on Windows 11. All values are per-user and reversible.
+;
+; TO REVERT:
+;   - File extension / hidden-file toggles: set the values back to their
+;     defaults (HideFileExt=1, Hidden=2) or change them in Folder Options.
+;   - Classic context menu: delete the CLSID key below, then restart Explorer.
+; ============================================================================
+
+[HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced]
+; Show known file extensions (0 = show). Essential for dev work.
+"HideFileExt"=dword:00000000
+; Show hidden files and folders (1 = show).
+"Hidden"=dword:00000001
+; Open File Explorer to "This PC" instead of Quick Access (1 = This PC).
+"LaunchTo"=dword:00000001
+; Show the full path in the title bar / address bar.
+"FullPath"=dword:00000001
+; Keep protected operating-system files hidden (1 = stay hidden) for safety.
+"ShowSuperHidden"=dword:00000000
+
+; --- Restore the Windows 10 classic right-click context menu -----------------
+; An empty default value under this CLSID's InprocServer32 tells Windows 11 to
+; fall back to the full classic context menu (no "Show more options" step).
+[HKEY_CURRENT_USER\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32]
+@=""

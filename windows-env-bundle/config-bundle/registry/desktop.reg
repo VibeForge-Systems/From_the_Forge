@@ -1,0 +1,31 @@
+Windows Registry Editor Version 5.00
+
+; ============================================================================
+; VibeForge Systems - Windows Environment Bundle
+; desktop.reg - Desktop / shell UX baselines (per-user, HKCU)
+;
+; Small, conservative desktop defaults that pair with the Windows 10-style
+; shell. All values are per-user and reversible.
+;
+; TO REVERT: set each value back to its default (noted inline) or change it in
+; Settings, then restart Explorer.
+; ============================================================================
+
+[HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced]
+; Align the taskbar to the left, Windows 10-style (0 = left, 1 = center).
+"TaskbarAl"=dword:00000000
+; Hide the Task View button on the taskbar (0 = hide). Default is 1.
+"ShowTaskViewButton"=dword:00000000
+; Hide the Widgets button on the taskbar (0 = hide). Default is 1.
+"TaskbarDa"=dword:00000000
+; Hide the Chat / Teams button on the taskbar (0 = hide). Default is 1.
+"TaskbarMn"=dword:00000000
+
+[HKEY_CURRENT_USER\Control Panel\Desktop]
+; Snappier menu show delay for a more responsive feel (default "400").
+"MenuShowDelay"="200"
+
+[HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Search]
+; Collapse the taskbar search to an icon rather than a full box (1 = icon only).
+; Default is 2 (search box). Set to 0 to hide search entirely.
+"SearchboxTaskbarMode"=dword:00000001

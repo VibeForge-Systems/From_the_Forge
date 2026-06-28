@@ -1,0 +1,51 @@
+# ============================================================================
+# VibeForge Systems - Windows Environment Bundle release pipeline
+#
+# Packages windows-env-bundle/ into a versioned, checksummed zip and publishes
+# it as a GitHub Release.
+#
+# This lives at the REPO ROOT (.github/workflows/) because GitHub only runs
+# workflows from there - a workflow nested inside a subdirectory never fires.
+#
+# Trigger: scoped tag prefix so this bundle versions independently of the rest
+# of the From_the_Forge collection. Example:
+#     git tag winenv-v1.0.0
+#     git push origin winenv-v1.0.0
+# Or run on demand from the Actions tab (workflow_dispatch).
+# ============================================================================
+name: Release Windows Env Bundle
+
+on:
+  push:
+    tags:
+      - "winenv-v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write   # required for softprops/action-gh-release to publish
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Package bundle
+        shell: pwsh
+        run: |
+          $zip = "windows-env-bundle.zip"
+          Compress-Archive -Path "windows-env-bundle\*" -DestinationPath $zip -Force
+          $hash = (Get-FileHash -Path $zip -Algorithm SHA256).Hash
+          "$hash  $zip" | Out-File -FilePath "SHA256SUMS.txt" -Encoding ascii
+          Write-Host "Packaged $zip ($hash)"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            windows-env-bundle.zip
+            SHA256SUMS.txt
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

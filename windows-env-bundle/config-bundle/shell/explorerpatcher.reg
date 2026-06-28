@@ -1,0 +1,33 @@
+Windows Registry Editor Version 5.00
+
+; ============================================================================
+; VibeForge Systems - Windows Environment Bundle
+; explorerpatcher.reg - ExplorerPatcher (EP) profile
+;
+; EP stores all of its settings under HKCU\Software\ExplorerPatcher. These
+; values restore a Windows 10-style shell on Windows 11. Every value is
+; documented and reversible.
+;
+; TO REVERT: delete the HKCU\Software\ExplorerPatcher key (or open EP's
+; "Properties" UI and choose "Restore default settings"), then restart Explorer.
+;
+; NOTE: EP exposes far more options through its settings UI. This file pins
+; only the load-bearing choices so a fresh workstation lands deterministically.
+; ============================================================================
+
+[HKEY_CURRENT_USER\Software\ExplorerPatcher]
+; Use the Windows 10 taskbar instead of the Windows 11 one (1 = Win10 taskbar).
+"OldTaskbar"=dword:00000001
+; Combine taskbar buttons / always show labels off -> classic grouping (0 = always combine).
+"TaskbarGlomLevel"=dword:00000000
+; Mitigations that keep the classic taskbar stable after Windows updates.
+"ClassicThemeMitigations"=dword:00000001
+; Show the classic (Windows 10) Start menu shell, deferring the menu itself to Open-Shell.
+"Start_ShowClassicMode"=dword:00000001
+; Disable the Windows 11 immersive context menu in the taskbar/Start surfaces.
+"ImmersiveContextMenu"=dword:00000000
+; Restore the Windows 10 Alt+Tab window switcher.
+"AltTabWindows"=dword:00000000
+; Use the classic battery / network / volume flyouts.
+"OldNetworkFlyout"=dword:00000001
+"OldSoundFlyout"=dword:00000001
