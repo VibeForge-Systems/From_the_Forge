@@ -1,0 +1,7 @@
+# VibeForge Windows Environment Bundle — enforce CRLF for Windows artifacts so
+# they check out identically on every machine (deterministic by design).
+*.ps1   text eol=crlf
+*.psd1  text eol=crlf
+*.reg   text eol=crlf
+*.xml   text eol=crlf
+*.md    text eol=lf

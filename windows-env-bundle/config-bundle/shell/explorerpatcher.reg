@@ -1,0 +1,50 @@
+Windows Registry Editor Version 5.00
+
+; ============================================================================
+; VibeForge Systems - Windows Environment Bundle
+; explorerpatcher.reg - ExplorerPatcher (EP) profile
+;
+; Restores a Windows 10-style shell on Windows 11. Value names, hives, and
+; option values below are verified against ExplorerPatcher's own settings
+; template (valinet/ExplorerPatcher: ep_gui/resources/settings.reg). EP reads
+; these at Explorer startup, so they take effect on the Explorer restart that
+; setup.ps1 performs at the end of the run - no rundll reload needed.
+;
+; TO REVERT: delete the HKCU\Software\ExplorerPatcher key and reset the standard
+; Explorer values below to their Windows 11 defaults (noted inline), then
+; restart Explorer. EP's Properties UI also offers "Restore default settings".
+;
+; NOTE: the classic (Windows 10) right-click context menu is restored in
+; explorer.reg via the blanked CLSID, so it is not duplicated here.
+; ============================================================================
+
+; --- ExplorerPatcher's own settings (HKCU\Software\ExplorerPatcher) ----------
+[HKEY_CURRENT_USER\Software\ExplorerPatcher]
+; Taskbar style: 1 = "Windows 10". (0 = Windows 11 default; 2 = EP's own Win10
+; implementation, which is more robust on 22H2+ - switch to 2 if you hit glitches.)
+"OldTaskbar"=dword:00000001
+; Keep the classic taskbar stable across Windows feature updates.
+"ClassicThemeMitigations"=dword:00000001
+; Render EP's Windows 10 context menus flat rather than immersive/dark.
+"DisableImmersiveContextMenu"=dword:00000001
+; Network tray icon opens the classic Network & Sharing Center (1). Default 0.
+"ReplaceNetwork"=dword:00000001
+
+; --- Standard Windows values EP's GUI writes (HKCU\...\Explorer\Advanced) -----
+[HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced]
+; Always combine taskbar buttons / hide labels, Windows 10-style (0 = combine).
+"TaskbarGlomLevel"=dword:00000000
+"MMTaskbarGlomLevel"=dword:00000000
+; Prefer the Windows 10 Start shell where the build still supports it. On current
+; Win11 this is effectively a no-op - Open-Shell provides the actual Start menu.
+"Start_ShowClassicMode"=dword:00000001
+
+; --- Classic Alt+Tab switcher (HKCU\...\Explorer) ----------------------------
+[HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer]
+; 3 = "Windows 10" Alt+Tab. Default is 0 (Windows 11).
+"AltTabSettings"=dword:00000003
+
+; --- Classic volume flyout (HKCU\...\Windows NT\...\MTCUVC) -------------------
+[HKEY_CURRENT_USER\Software\Microsoft\Windows NT\CurrentVersion\MTCUVC]
+; 0 = the old (Windows 7-style) volume flyout. Default 1 = Windows 10 flyout.
+"EnableMtcUvc"=dword:00000000
