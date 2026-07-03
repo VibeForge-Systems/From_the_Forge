@@ -1,36 +1,46 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0"?>
 <!--
   ==========================================================================
   VibeForge Systems - Windows Environment Bundle
   openshell.xml - Open-Shell (Classic Start Menu) settings
 
-  This is a starting profile: a Windows 7-style Start menu with the Aero skin.
-  It is imported EXPLICITLY by apply-shell.ps1 via:
+  A Windows 7-style Start menu with the Aero skin. Imported NON-INTERACTIVELY
+  by apply-shell.ps1 via:
 
-      ClassicStartMenu.exe -xml "<this file>"
+      StartMenu.exe -xml C:\ProgramData\VibeForge\openshell.xml
 
-  Open-Shell does not auto-read any ProgramData file, so the import step is
-  what actually applies it. To customize:
-    1. Tune the Start menu through Open-Shell's "Settings" UI on a reference
-       machine (enable "Show all settings" for the full surface).
-    2. Use "Backup -> Save to XML file" to export.
-    3. Replace this file with that export and commit it.
+  Schema notes (verified against Open-Shell source, Src/Lib/Settings.cpp):
+    - Root element MUST be <Settings component="StartMenu" ...>.
+    - Each setting is <Name value="..."/> - the value is an ATTRIBUTE, and enum
+      settings use the option NAME string (e.g. "Win7"), not a number.
+    - Import is a FULL REPLACE: any setting not listed here is reset to default,
+      so only list what you want to change.
+    - Unknown/misspelled elements are silently ignored.
 
-  TO REVERT: open Open-Shell settings -> "Backup" -> "Reset all settings".
+  Import gotchas (both enforced by apply-shell.ps1):
+    - The XML path must be ABSOLUTE and contain NO SPACES - StartMenu.exe cuts
+      the path at the first space, so "C:\Program Files\..." would be truncated.
+    - The binary is StartMenu.exe (Open-Shell). ClassicStartMenu.exe was the old
+      discontinued Classic Shell name and does not exist in Open-Shell.
+
+  To customize: tune Open-Shell's Settings UI on a reference machine, then
+  "Backup -> Save to XML file" (== StartMenu.exe -backup <path>) and replace
+  this file with that export.
+
+  TO REVERT: Open-Shell settings -> "Backup" -> "Reset all settings".
   ==========================================================================
 -->
-<Settings component="StartMenu">
-  <!-- Win7 = the Windows 7-style two-column menu. Alternatives: Classic1, Classic2. -->
-  <MenuStyle>Win7</MenuStyle>
+<Settings component="StartMenu" version="4.4.198">
+  <!-- Win7 = the Windows 7-style two-column menu. Also valid: Classic1, Classic2. -->
+  <MenuStyle value="Win7"/>
+  <!-- Built-in Aero skin to match the classic look. -->
+  <SkinW7 value="Windows Aero"/>
   <!-- Replace the Windows 11 Start button with the Open-Shell (Aero orb) button. -->
-  <EnableStartButton>1</EnableStartButton>
-  <StartButtonType>AeroButton</StartButtonType>
-  <!-- Aero skin to match the classic look. -->
-  <SkinW7>Windows Aero</SkinW7>
-  <!-- Open the menu on the left Win/Start key as users expect. -->
-  <StartMenuRight>1</StartMenuRight>
-  <!-- Search box visible at the bottom of the menu. -->
-  <SearchBox>Normal</SearchBox>
-  <!-- Show recently used and pinned programs. -->
-  <RecentPrograms>Recent</RecentPrograms>
+  <EnableStartButton value="1"/>
+  <!-- Valid: AeroButton, ClasicButton (sic - one 's'), CustomButton. -->
+  <StartButtonType value="AeroButton"/>
+  <!-- Search box at the bottom of the menu. Valid: Hide, Normal, Tab. -->
+  <SearchBox value="Normal"/>
+  <!-- Show recently used programs. Valid: None, Recent, Frequent. -->
+  <RecentPrograms value="Recent"/>
 </Settings>

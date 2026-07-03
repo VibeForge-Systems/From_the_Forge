@@ -44,12 +44,14 @@
             Name        = 'TaskbarX'
             # TaskbarX is NOT in the winget community repo. It ships through the
             # Microsoft Store, so we route to the msstore source. The pinned zip
-            # below is a fallback; fill in a real release URL + SHA256 to enable.
-            Id          = '9PF3RHHHRN95'      # Microsoft Store product id for TaskbarX
+            # below is a fallback; set a real SHA256 to enable it (the installer
+            # refuses to run an unverified binary).
+            Id          = '9PCMZ6BXK8GH'      # Microsoft Store product id for TaskbarX
             Source      = 'msstore'
             Optional    = $true
-            DownloadUrl = 'https://github.com/ChrisAnd1998/TaskbarX/releases/download/v1.7.8.0/TaskbarX.zip'
-            Sha256      = 'REPLACE_WITH_SHA256'  # set this to enable the zip fallback
+            # v1.7.8.0 is the final stable release (repo archived June 2025).
+            DownloadUrl = 'https://github.com/ChrisAnd1998/TaskbarX/releases/download/1.7.8.0/TaskbarX_1.7.8.0_x64.zip'
+            Sha256      = 'REPLACE_WITH_SHA256'  # pin by hashing the zip on a trusted machine
             ExtractTo   = '%LOCALAPPDATA%\TaskbarX'
             Notes       = 'Optional. Centers taskbar icons. Persists via Task Scheduler/CLI, not a JSON config.'
         }
@@ -89,9 +91,11 @@
         @{
             Name        = 'Open-Shell settings'
             Source      = 'config-bundle\shell\openshell.xml'
-            Destination = '%PROGRAMDATA%\VibeForge\OpenShellSettings.xml'
+            # Destination MUST be space-free: StartMenu.exe -xml tokenizes the
+            # path at the first space, so C:\Program Files\... would be truncated.
+            Destination = '%PROGRAMDATA%\VibeForge\openshell.xml'
             Method      = 'copy'
-            AppliedBy   = 'apply-shell.ps1 (ClassicStartMenu.exe -xml)'
+            AppliedBy   = 'apply-shell.ps1 (StartMenu.exe -xml)'
         }
     )
 }

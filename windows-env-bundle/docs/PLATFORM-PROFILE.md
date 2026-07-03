@@ -48,7 +48,7 @@ Sourced from [`bundle.psd1`](../bundle.psd1). Edit the manifest, not this table.
 | --------------- | ----------------- | ---------------------------- | -------- |
 | ExplorerPatcher | winget            | `valinet.ExplorerPatcher`    | no       |
 | Open-Shell      | winget            | `Open-Shell.Open-Shell-Menu` | no       |
-| TaskbarX        | msstore + zip fb. | `9PF3RHHHRN95`               | **yes**  |
+| TaskbarX        | msstore + zip fb. | `9PCMZ6BXK8GH`               | **yes**  |
 
 ### Baseline apps (`BaselineApps`)
 

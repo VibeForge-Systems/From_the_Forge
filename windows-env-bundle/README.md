@@ -98,7 +98,7 @@ that is idempotent, dry-run aware, and source-routed:
 | Component           | Source          | Why (on Windows 11)                                                            |
 | ------------------- | --------------- | ----------------------------------------------------------------------------- |
 | **ExplorerPatcher** | `winget` (`valinet.ExplorerPatcher`) | Restores the Win10 taskbar, Start behavior, Alt+Tab, and classic flyouts. |
-| **Open-Shell**      | `winget` (`Open-Shell.Open-Shell-Menu`) | Brings back a real Start menu. Settings are imported **explicitly** via `ClassicStartMenu.exe -xml`. |
+| **Open-Shell**      | `winget` (`Open-Shell.Open-Shell-Menu`) | Brings back a real Start menu. Settings are imported **explicitly** via `StartMenu.exe -xml`. |
 | **TaskbarX** *(optional)* | Microsoft Store (`msstore`) + zip fallback | Centers taskbar icons. Persists via Task Scheduler / CLI — **not** a JSON config. |
 
 > **Honest note on TaskbarX:** earlier guides (and the draft this bundle grew
