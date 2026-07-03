@@ -150,6 +150,17 @@ from the **Actions** tab (`workflow_dispatch`).
 
 ---
 
+## 📚 Docs
+
+- [**Architecture**](./docs/ARCHITECTURE.md) — layered component view, runtime
+  flow, the install-decision primitive, release pipeline, and the trust boundary
+  (Mermaid diagrams, render natively on GitHub).
+- [**Platform Profile**](./docs/PLATFORM-PROFILE.md) — the internal spec: what a
+  VibeForge workstation guarantees, profile contents, versioning conventions, and
+  change management.
+
+---
+
 ## 📄 License
 
 Part of the VibeForge **From the Forge** collection. Licensed under the
