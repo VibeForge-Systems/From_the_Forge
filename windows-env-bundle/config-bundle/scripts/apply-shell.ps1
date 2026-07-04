@@ -72,11 +72,24 @@ function Import-OpenShellSettings {
     Write-Forge "Importing Open-Shell settings..." -Level Step
     if ($script:ForgeDryRun) { Write-Forge "[dry-run] would import $XmlPath via StartMenu.exe -xml" -Level Skip; return }
     # Path is space-free (guarded above), so pass it unquoted; -xml imports silently.
-    Start-Process -FilePath $exe -ArgumentList "-xml $XmlPath" -ErrorAction SilentlyContinue
-    Write-Forge "Open-Shell settings imported." -Level Ok
+    # StartMenu.exe applies the XML and then stays resident as the Start menu, so
+    # there is no meaningful exit code to wait on. Confirm the launch via -PassThru
+    # and report honestly rather than unconditionally claiming success.
+    $proc = Start-Process -FilePath $exe -ArgumentList "-xml $XmlPath" -PassThru -ErrorAction SilentlyContinue
+    if ($proc) {
+        Write-Forge "Open-Shell settings import requested (StartMenu.exe -xml)." -Level Ok
+    }
+    else {
+        Write-Forge "Could not launch StartMenu.exe to import Open-Shell settings." -Level Warn
+    }
 }
 
 # --- TaskbarX (optional) -----------------------------------------------------
+# This launches the ZIP-FALLBACK install only (a portable TaskbarX.exe under
+# %LOCALAPPDATA% or %ProgramFiles%). A Microsoft Store (MSIX) install does NOT
+# drop a runnable exe at those paths — its own Configurator registers a Task
+# Scheduler logon task for persistence, so the Store version self-starts and we
+# intentionally do not try to launch it here.
 function Start-TaskbarX {
     $candidates = @(
         (Join-Path $env:LOCALAPPDATA 'TaskbarX\TaskbarX.exe'),
@@ -84,10 +97,10 @@ function Start-TaskbarX {
     )
     $exe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
     if (-not $exe) {
-        Write-Forge "TaskbarX not found (optional); skipping." -Level Skip
+        Write-Forge "No portable TaskbarX.exe found; skipping launch (a Store/MSIX install self-starts via its own logon task)." -Level Skip
         return
     }
-    Write-Forge "Starting TaskbarX..." -Level Step
+    Write-Forge "Starting TaskbarX (zip fallback)..." -Level Step
     if ($script:ForgeDryRun) { Write-Forge "[dry-run] would start $exe" -Level Skip; return }
     Start-Process -FilePath $exe -ErrorAction SilentlyContinue
     Write-Forge "TaskbarX started." -Level Ok

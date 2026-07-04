@@ -111,7 +111,9 @@ try {
     if ($DryRun) {
         Write-Forge "[dry-run] would restart explorer.exe" -Level Skip
     }
-    else {
+    elseif ($PSCmdlet.ShouldProcess('explorer.exe', 'restart')) {
+        # Honor -WhatIf/-Confirm: this is the one inline mutation in setup.ps1
+        # (the install/reg primitives in common.ps1 already gate on ShouldProcess).
         Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 2
         if (-not (Get-Process -Name explorer -ErrorAction SilentlyContinue)) {

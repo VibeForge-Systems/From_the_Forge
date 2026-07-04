@@ -21,8 +21,10 @@
 Set-StrictMode -Version Latest
 
 # ---------------------------------------------------------------------------
-# Global toggles. setup.ps1 sets $script:ForgeDryRun before calling anything;
-# default to a safe "do nothing" stance if the library is loaded standalone.
+# Global toggles. setup.ps1 and the helper scripts set $script:ForgeDryRun from
+# their -DryRun switch before invoking any primitive. If the library is
+# dot-sourced standalone without setting it, default to live (non-dry-run)
+# execution — a caller that wants a preview must pass -DryRun explicitly.
 # ---------------------------------------------------------------------------
 if (-not (Get-Variable -Name 'ForgeDryRun' -Scope Script -ErrorAction SilentlyContinue)) {
     $script:ForgeDryRun = $false
@@ -127,7 +129,10 @@ function Test-PackageInstalled {
     )
 
     try {
-        $listArgs = @('list', '--id', $Id, '--exact', '--accept-source-agreements')
+        # 'winget list' does NOT accept --accept-source-agreements (it errors with
+        # an unrecognized-argument message), which would make this check always
+        # fail and re-trigger installs every run. Keep the list invocation minimal.
+        $listArgs = @('list', '--id', $Id, '--exact')
         if ($Source -eq 'msstore') { $listArgs += @('--source', 'msstore') }
         $output = & winget @listArgs 2>$null
         # winget prints the id in the results table only when it is installed.
@@ -188,6 +193,12 @@ function Install-Package {
                 Write-Forge "$Name installed via $Source." -Level Ok
                 return
             }
+            else {
+                # ShouldProcess returned false (-WhatIf / -Confirm declined):
+                # report a clear skipped outcome rather than falling through silently.
+                Write-Forge "$Name install skipped (WhatIf/declined)." -Level Skip
+                return
+            }
         }
         elseif ($DownloadUrl) {
             Install-FromZip -Name $Name -DownloadUrl $DownloadUrl -Sha256 $Sha256 -ExtractTo $ExtractTo
@@ -246,6 +257,10 @@ function Install-FromZip {
 
     # TLS 1.2 for older hosts; harmless on current ones.
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    # -UseBasicParsing is intentional and cross-version safe: on Windows PowerShell
+    # 5.1 it avoids the IE DOM engine (which throws when IE first-run isn't set up);
+    # on PowerShell 6/7+ it is a deprecated no-op that is retained, NOT removed, so
+    # it does not error. Keep it.
     Invoke-WebRequest -Uri $DownloadUrl -OutFile $tempZip -UseBasicParsing
 
     $actual = (Get-FileHash -Path $tempZip -Algorithm SHA256).Hash
