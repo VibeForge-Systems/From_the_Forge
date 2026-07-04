@@ -68,7 +68,7 @@ Useful switches:
 | `-SkipApps`   | Apply the shell profile only; skip baseline apps.            |
 | `-Force`      | Bypass the Windows 11 guard (advanced; testing on VM images).|
 
-Every run writes a transcript to `%ProgramData%\VibeForge\logs\`.
+Every real run (i.e. not `-DryRun`) writes a transcript to `%ProgramData%\VibeForge\logs\`.
 
 ---
 

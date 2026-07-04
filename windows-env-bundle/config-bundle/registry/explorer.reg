@@ -22,7 +22,8 @@ Windows Registry Editor Version 5.00
 "LaunchTo"=dword:00000001
 ; Show the full path in the title bar / address bar.
 "FullPath"=dword:00000001
-; Keep protected operating-system files hidden (1 = stay hidden) for safety.
+; Keep protected operating-system files hidden: 0 = hidden (default, safer);
+; 1 would reveal them. We deliberately keep the safe default.
 "ShowSuperHidden"=dword:00000000
 
 ; --- Restore the Windows 10 classic right-click context menu -----------------
