@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+#
+# pre-push — run this repository's full merge bar before anything leaves the
+# machine.
+#
+# This is the "you cannot push red" property, enforced locally. It runs every
+# `stage: commit` and `stage: push` check declared in .vibeforge/gates.yaml.
+#
+# Install:  git config core.hooksPath .vibeforge/hooks
+# Bypass:   git push --no-verify
+#
+# Prefer a narrower escape hatch over --no-verify when you can:
+#   <SKIP_VAR>=1 git push          skip one declared-skippable check (gate.sh --list)
+#   VF_GATE_ALLOW_SKIP=1 git push  accept a missing-tool gap for this push
+#
+# A non-zero exit refuses the push. Exit 2 means a check was SKIPPED rather than
+# failed — the run is weaker than the bar this repository declares, so it stops
+# you the same way a failure would.
+
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+echo "pre-push: running the local merge bar (.vibeforge/gate.sh) — bypass with 'git push --no-verify'"
+exec "$ROOT/.vibeforge/gate.sh"

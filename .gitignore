@@ -1,0 +1,12 @@
+# Claude Code local session config
+.claude/
+
+# OS / editor
+.DS_Store
+*~
+.*.swp
+*.tmp
+
+# Python
+__pycache__/
+*.pyc

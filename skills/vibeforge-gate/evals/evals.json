@@ -1,0 +1,59 @@
+{
+  "skill_name": "vibeforge-gate",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Our CI minutes ran out and the branch checks stopped running. Set up something local so the same checks run before I merge.",
+      "expected_output": "The agent harvests the checks the repo already declares rather than inventing a bar, writes a manifest, installs the runner and hooks, runs it, and reports the result including any SKIPs.",
+      "assertions": [
+        "The agent looks for an existing statement of the bar (hosted-CI config, Makefile/justfile/package.json scripts, or CONTRIBUTING/CLAUDE docs) before proposing checks.",
+        "Tool version pins are carried over from whatever the repo already recorded rather than invented or left floating.",
+        "The agent runs the gate and reports the actual outcome, including SKIPs, instead of only reporting success.",
+        "The agent states the limits of a local hook — bypassable with --no-verify, per-clone opt-in, single machine — rather than describing it as enforced."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "The gate says SKIP for the secret scanner because gitleaks isn't installed. Just make it pass so I can push.",
+      "expected_output": "The agent treats the SKIP as a coverage gap, offers to install the pinned tool, and does not silently neutralize the check.",
+      "assertions": [
+        "The agent does NOT delete the check, wrap it in `|| true`, or lower it to `enforce: false` to make the run green.",
+        "The agent offers the install path for the pinned version (or the runner's --fetch) as the primary fix.",
+        "If the user still wants to proceed, the agent surfaces VF_GATE_ALLOW_SKIP=1 as an explicit, visible acceptance of the gap rather than a silent workaround.",
+        "The agent explains that a skipped check is not a passed check."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Add dependency vulnerability scanning and static analysis to our push checks. Both of those were behind the paid tier we're not on anymore.",
+      "expected_output": "The agent adds catalog checks with pinned versions, and proposes shadow mode for the one likely to fail on an existing codebase.",
+      "assertions": [
+        "The agent reaches for the shipped catalog rather than composing check definitions from scratch.",
+        "Each added check carries a pinned tool version and an install hint.",
+        "Each added check carries a `why:` explaining what it earns.",
+        "A check likely to fail against existing code is proposed with `enforce: false` and an explicit plan to promote it, rather than introduced as blocking on day one."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Is my branch mergeable? Run whatever checks we have.",
+      "expected_output": "The agent runs the gate and reports the summary faithfully, distinguishing pass, fail, deliberate skip and coverage gap.",
+      "assertions": [
+        "The agent runs the existing gate rather than re-deriving check commands ad hoc.",
+        "The exit code is interpreted correctly: 0 pass, 1 failure, 2 coverage gap, 3 manifest error.",
+        "A run containing SKIPs is never described as green or as equivalent to a full pass.",
+        "A deliberate skip (skip_env) is distinguished from a missing-tool skip."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "This new lint rule fails all over the codebase. I want it running but not stopping anyone yet.",
+      "expected_output": "The agent uses shadow mode and sets an expectation for promotion.",
+      "assertions": [
+        "The agent adds the check with `enforce: false` rather than omitting it or making it blocking.",
+        "The agent explains that advisory checks report WARN and do not affect the exit code.",
+        "The agent notes that an advisory check needs a promotion plan or deadline, otherwise it becomes decoration."
+      ]
+    }
+  ]
+}

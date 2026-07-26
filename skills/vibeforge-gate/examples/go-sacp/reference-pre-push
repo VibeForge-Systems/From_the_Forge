@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+#
+# pre-push hook — run the local CI gate before anything leaves this machine.
+#
+# With GitHub Actions unfunded, the server-side gates never run. This restores the
+# "you cannot push red" property locally: a push is refused unless scripts/ci-local.sh
+# passes, which reproduces every CI workflow (build/vet/test, ADR-006 archcheck,
+# ADR-015 + gitleaks, DCO sign-off, artifact validation) plus gofmt and -race.
+#
+# Enable it once with:   make hooks     (sets core.hooksPath to scripts/hooks)
+# Bypass for a trivial push with:  git push --no-verify
+#
+# The full gate (with -race) takes a couple of minutes. Export SACP_CI_SKIP_RACE=1
+# to skip the race pass on push (it is not part of the CI-faithful set anyway).
+
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+echo "pre-push: running the local CI gate (scripts/ci-local.sh) — bypass with 'git push --no-verify'"
+exec "$ROOT/scripts/ci-local.sh"
