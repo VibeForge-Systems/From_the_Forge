@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+#
+# pre-commit — run the fast subset of this repository's merge bar.
+#
+# Only `stage: commit` checks run here: format, lint, structural invariants,
+# fast unit tests. The full bar runs at pre-push. A pre-commit hook that takes
+# half a minute is a hook people uninstall, and an uninstalled hook checks
+# nothing at all.
+#
+# Install:  git config core.hooksPath .vibeforge/hooks
+# Bypass:   git commit --no-verify
+#
+# A non-zero exit refuses the commit — including exit 2, which means a check
+# was SKIPPED because its tool is missing. That is a coverage gap, and it stops
+# you until you install the tool or accept the gap with VF_GATE_ALLOW_SKIP=1.
+
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+exec "$ROOT/.vibeforge/gate.sh" --stage commit

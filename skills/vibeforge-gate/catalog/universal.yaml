@@ -1,0 +1,158 @@
+# =============================================================================
+# Catalog — stack-independent checks
+# =============================================================================
+# These work in any repository because they check git and the tree itself
+# rather than a language toolchain. Several replace a hosted gate that read the
+# forge's API — done locally they need no account, no token, and no network.
+# =============================================================================
+
+checks:
+
+  # --- commit metadata -------------------------------------------------------
+
+  - id: dco
+    desc: every non-merge, non-bot commit ahead of the base is signed off
+    stage: push
+    why: |
+      A project that may need to relicense, donate, or accept an external
+      contribution needs inbound=outbound terms over every commit. That right is
+      permanently lost the moment one contribution merges without it —
+      recovering it needs unanimous consent from every past contributor.
+      Sign-off is the contributor certifying those terms.
+      The hosted version of this check read PR commit metadata through the forge
+      API. The local analogue is the commits on this branch that are not yet on
+      the base, which is the same set in normal use.
+    run: |
+      base_ref=main
+      git rev-parse --verify --quiet origin/main >/dev/null 2>&1 && base_ref=origin/main || true
+      base="$(git merge-base HEAD "$base_ref" 2>/dev/null || true)"
+      if [ -z "$base" ] || [ "$base" = "$(git rev-parse HEAD)" ]; then
+        echo "dco: no commits ahead of $base_ref to check"
+        exit 0
+      fi
+      bad=0
+      while read -r sha; do
+        [ -z "$sha" ] && continue
+        author="$(git show -s --format='%an' "$sha")"
+        case "$author" in *'[bot]') continue ;; esac
+        if ! git show -s --format='%B' "$sha" | grep -qiE '^Signed-off-by: .+ <.+@.+>'; then
+          printf '   missing Signed-off-by: %s  %s\n' "${sha:0:8}" "$(git show -s --format='%s' "$sha")"
+          bad=1
+        fi
+      done < <(git rev-list --no-merges "$base..HEAD")
+      if [ "$bad" -ne 0 ]; then
+        echo "fix with 'git commit -s' or 'git rebase --signoff $base_ref'"
+        exit 1
+      fi
+      echo "dco: every commit in $base_ref..HEAD is signed off"
+
+  - id: commit-subjects
+    desc: commit subjects are well-formed
+    stage: push
+    enforce: false
+    why: |
+      Readable history is worth something, but this is style — it ships
+      advisory. Promote it to blocking only if the team agrees the convention
+      is a rule.
+    run: |
+      base_ref=main
+      git rev-parse --verify --quiet origin/main >/dev/null 2>&1 && base_ref=origin/main || true
+      base="$(git merge-base HEAD "$base_ref" 2>/dev/null || true)"
+      [ -n "$base" ] || exit 0
+      bad=0
+      while read -r line; do
+        [ -z "$line" ] && continue
+        sha="${line%% *}"; subject="${line#* }"
+        if [ "${#subject}" -gt 72 ]; then
+          printf '   subject over 72 chars: %s  %s\n' "${sha:0:8}" "$subject"; bad=1
+        fi
+        case "$subject" in
+          *.) printf '   subject ends with a period: %s\n' "${sha:0:8}"; bad=1 ;;
+        esac
+      done < <(git log --no-merges --format='%H %s' "$base..HEAD")
+      [ "$bad" -eq 0 ] || exit 1
+      echo "commit subjects: ok"
+
+  # --- tree hygiene ----------------------------------------------------------
+
+  - id: no-merge-markers
+    desc: no unresolved conflict markers
+    stage: commit
+    why: |
+      A committed conflict marker usually still compiles in a config file or a
+      document, so nothing else catches it. One grep, effectively free.
+    run: |
+      if git grep -nE '^(<<<<<<<|>>>>>>>) ' -- . ; then
+        echo "unresolved merge conflict markers above"
+        exit 1
+      fi
+      echo "no conflict markers"
+
+  - id: no-large-files
+    desc: no oversized files added to git
+    stage: push
+    why: |
+      A large binary in history is effectively permanent — every clone pays for
+      it forever, and removing it means rewriting history. The moment it is
+      added is the only cheap moment to catch it.
+    run: |
+      limit=$((5 * 1024 * 1024))
+      bad=0
+      while read -r f; do
+        [ -f "$f" ] || continue
+        size=$(wc -c < "$f")
+        if [ "$size" -gt "$limit" ]; then
+          printf '   %s is %s bytes (limit %s)\n' "$f" "$size" "$limit"; bad=1
+        fi
+      done < <(git ls-files)
+      [ "$bad" -eq 0 ] || { echo "use git-lfs or keep these out of the repo"; exit 1; }
+      echo "no oversized tracked files"
+
+  - id: no-trailing-whitespace
+    desc: no trailing whitespace in tracked text files
+    stage: commit
+    enforce: false
+    run: |
+      if git grep -nI ' $' -- . ; then
+        echo "trailing whitespace above"
+        exit 1
+      fi
+      echo "no trailing whitespace"
+
+  # --- the gate's own integrity ----------------------------------------------
+
+  - id: gate-manifest-parses
+    desc: the manifest itself is valid
+    stage: commit
+    why: |
+      A manifest that stops parsing takes the whole gate with it — and the
+      failure would otherwise surface at the least convenient moment, mid-push.
+      `--list` parses and validates without running anything.
+    run: |
+      "$VF_ROOT/.vibeforge/gate.sh" --list > /dev/null
+      echo "manifest parses"
+
+  - id: shell-syntax
+    desc: shell scripts parse
+    stage: commit
+    why: |
+      `bash -n` is a syntax check with no dependency to install — worth having
+      even in a repo that also runs shellcheck.
+    run: |
+      bad=0
+      while read -r f; do
+        [ -f "$f" ] || continue
+        bash -n "$f" || bad=1
+      done < <(git ls-files '*.sh' '*/hooks/*')
+      [ "$bad" -eq 0 ] || exit 1
+      echo "shell scripts parse"
+
+  - id: shellcheck
+    desc: shellcheck is clean
+    stage: push
+    needs: shellcheck
+    install: "apt install shellcheck  /  brew install shellcheck"
+    run: |
+      mapfile -t files < <(git ls-files '*.sh')
+      [ "${#files[@]}" -eq 0 ] && { echo "no shell scripts"; exit 0; }
+      shellcheck -S warning "${files[@]}"

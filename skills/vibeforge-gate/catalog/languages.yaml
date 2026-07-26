@@ -1,0 +1,157 @@
+# =============================================================================
+# Catalog — per-language checks
+# =============================================================================
+# Copy the blocks for your stack into .vibeforge/gates.yaml and adjust paths.
+# A repo with several stacks takes several sets — give each a `dir:` and an
+# id prefix (api-test, web-lint, sidecar-test) so the summary stays readable.
+#
+# Tools installed by the project's own package manager (eslint in
+# node_modules, ruff in .venv) need no `tool_version:` — the lockfile already
+# pins them. Declare `meta.path_prepend` and call them directly. Reserve
+# `tool:` + `tool_version:` for binaries outside the dependency graph.
+# =============================================================================
+
+checks:
+
+  # ===========================================================================
+  # Go            meta.path_prepend: ~/go/bin
+  # ===========================================================================
+
+  - id: go-format
+    desc: sources are gofmt-clean
+    stage: commit
+    why: |
+      gofmt -l prints unformatted files and exits 0 either way, so the check
+      has to assert the output is empty rather than trust the exit code.
+    run: |
+      out="$(gofmt -l .)"
+      if [ -n "$out" ]; then echo "gofmt needed on:"; echo "$out"; exit 1; fi
+      echo "gofmt: clean"
+
+  - id: go-build
+    desc: modules verified, builds, vets, tests
+    stage: push
+    why: |
+      go.sum pins every dependency and -mod=readonly fails the build if a
+      change would need an unrecorded module, so dependency drift shows up here
+      rather than as a mystery later.
+    run: |
+      go mod verify
+      go build -mod=readonly ./...
+      go vet ./...
+      go test -mod=readonly ./...
+
+  - id: go-race
+    desc: tests under the race detector
+    stage: push
+    skip_env: SKIP_RACE
+    why: |
+      Finds the class of bug that is hardest to reproduce and most expensive in
+      production. Slow, so it is declared skippable rather than dropped —
+      skipping is then a choice you see reported, not a gap you forget.
+    run: go test -race ./...
+
+  - id: go-lint
+    desc: staticcheck is clean
+    stage: commit
+    tool: staticcheck
+    install: "go install honnef.co/go/tools/cmd/staticcheck@latest"
+    run: '"$VF_TOOL" ./...'
+
+  # ===========================================================================
+  # Node / TypeScript        meta.path_prepend: ./node_modules/.bin
+  # ===========================================================================
+
+  - id: node-lockfile
+    desc: the lockfile matches package.json
+    stage: commit
+    why: |
+      A lockfile that has drifted from its manifest means everyone downstream
+      resolves something different from what you tested. Cheap to catch here,
+      confusing to debug anywhere else.
+    run: npm ci --dry-run
+
+  - id: node-types
+    desc: TypeScript type check
+    stage: commit
+    run: tsc --noEmit
+
+  - id: node-lint
+    desc: eslint is clean
+    stage: commit
+    run: eslint . --max-warnings=0
+
+  - id: node-format
+    desc: prettier formatting
+    stage: commit
+    run: prettier --check .
+
+  - id: node-test
+    desc: the test suite
+    stage: push
+    run: npm test
+
+  # ===========================================================================
+  # Python        meta.path_prepend: ./.venv/bin
+  # ===========================================================================
+
+  - id: py-format
+    desc: ruff formatting
+    stage: commit
+    run: ruff format --check .
+
+  - id: py-lint
+    desc: ruff lint
+    stage: commit
+    run: ruff check .
+
+  - id: py-types
+    desc: mypy type check
+    stage: commit
+    run: mypy .
+
+  - id: py-test
+    desc: pytest
+    stage: push
+    why: |
+      pytest exits 5 when it collects no tests at all. That is a real failure to
+      surface — a test suite that silently stopped being discovered looks
+      identical to a passing one otherwise.
+    run: |
+      pytest -q
+      rc=$?
+      if [ "$rc" -eq 5 ]; then echo "pytest collected no tests"; exit 1; fi
+      exit "$rc"
+
+  # ===========================================================================
+  # Rust          meta.path_prepend: ~/.cargo/bin
+  # ===========================================================================
+
+  - id: rust-format
+    desc: cargo fmt
+    stage: commit
+    run: cargo fmt --all -- --check
+
+  - id: rust-lint
+    desc: clippy with warnings denied
+    stage: commit
+    run: cargo clippy --all-targets --all-features -- -D warnings
+
+  - id: rust-test
+    desc: cargo test
+    stage: push
+    run: cargo test --all-features
+
+  # ===========================================================================
+  # Containers
+  # ===========================================================================
+
+  - id: container-build
+    desc: the image builds
+    stage: manual
+    probe: docker info
+    install: "start Docker/Podman, or run this check on a machine that has one"
+    why: |
+      Declared `manual` and probe-guarded: on a machine with no daemon this
+      reports SKIP rather than pretending the image is fine.
+    run: docker build -t "$(basename "$VF_ROOT"):gate" .
