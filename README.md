@@ -179,6 +179,12 @@ skills/vibeforge-gate/
   pinned by the selftest; the *mapping* from an existing CI config to a manifest
   is a reading task, not a mechanical one.
 
+## Contributing
+
+Sign off every commit (`git commit -s`) and run `.vibeforge/gate.sh` before
+opening a PR. Contributions are inbound = outbound under Apache-2.0. See
+[CONTRIBUTING.md](CONTRIBUTING.md) and [DCO](DCO).
+
 ## License
 
 Apache 2.0. See [LICENSE](LICENSE).

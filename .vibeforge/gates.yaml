@@ -151,10 +151,14 @@ checks:
     desc: every non-merge, non-bot commit ahead of main is signed off
     stage: push
     why: |
-      Open source with an inbound=outbound expectation. Sign-off is the
-      contributor certifying it, and that right is lost permanently the moment
-      one contribution merges without it — recovering it afterward needs
-      unanimous consent from every past contributor.
+      Apache-2.0 with explicit inbound=outbound terms, stated in the root DCO
+      file and CONTRIBUTING.md. Sign-off is the contributor certifying them, and
+      that right is lost permanently the moment one contribution merges without
+      it — recovering it afterward needs unanimous consent from every past
+      contributor.
+      This check runs at pre-push, which is bypassable and opt-in, so it is not
+      the real enforcement — a maintainer verifying sign-off at review is. The
+      DCO file says so rather than implying the hook is a boundary it is not.
     run: |
       base_ref=main
       git rev-parse --verify --quiet origin/main >/dev/null 2>&1 && base_ref=origin/main || true
