@@ -8,7 +8,7 @@
   },
   "homepage": "https://github.com/VibeForge-Systems/vibeforge-gate",
   "repository": "https://github.com/VibeForge-Systems/vibeforge-gate",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": [
     "ci",
     "pre-commit",
