@@ -11,12 +11,18 @@ You can do (2) entirely by hand. (1) just makes it a conversation.
 
 ## 1. The skill
 
-### As a Claude Code plugin (gets you `/gate`)
+### As a Claude Code plugin (gets you `/vibeforge-gate:gate`)
 
 ```sh
 git clone https://github.com/VibeForge-Systems/vibeforge-gate.git ~/src/vibeforge-gate
 claude --plugin-dir ~/src/vibeforge-gate
 ```
+
+Plugin commands and skills are namespaced by the plugin, so the command is
+`/vibeforge-gate:gate` (there is no bare `/gate`) and the bundled skill is
+`/vibeforge-gate:vibeforge-gate`. `--plugin-dir` loads it for one session; to
+install it persistently, add a marketplace and `/plugin install` it (see the
+`.claude-plugin/marketplace.json` in this repo).
 
 ### As a plain skill
 
@@ -37,7 +43,7 @@ somewhere tracked.
 ### With the skill
 
 ```
-/gate setup
+/vibeforge-gate:gate setup
 ```
 
 It detects the stack, reads whatever bar the repo already states (hosted-CI

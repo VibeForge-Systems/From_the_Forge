@@ -85,7 +85,7 @@ cp -r vibeforge-gate/skills/vibeforge-gate .claude/skills/        # one repo
 Then, in a repo that needs a gate:
 
 ```
-/gate setup
+/vibeforge-gate:gate setup
 ```
 
 The skill detects the stack, harvests the checks the repo already states, writes
@@ -136,7 +136,7 @@ Adding a check is editing one block. Full field reference:
 
 ```
 .claude-plugin/plugin.json
-commands/gate.md                     ->  /gate
+commands/gate.md                     ->  /vibeforge-gate:gate
 selftest.sh                          19 cases pinning the runtime contract
 skills/vibeforge-gate/
   SKILL.md                           doctrine + when to use it
