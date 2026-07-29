@@ -134,6 +134,28 @@ checks:
       fi
       echo "no CRLF line endings"
 
+  - id: exec-bits
+    desc: every tracked script and hook is committed executable
+    stage: commit
+    why: |
+      What runs on your machine is the working-tree mode; what everyone else
+      gets is the INDEX mode, and on some filesystems (exec-forcing mounts,
+      core.filemode off) the two silently disagree. A script committed 100644
+      fails with "Permission denied" on a normal clone — and git ignores a
+      non-executable hook without a word. Adjust the patterns to where your
+      repo keeps its scripts.
+    run: |
+      bad=0
+      while read -r mode _rest; do
+        f="${_rest##*$'\t'}"
+        if [ "$mode" != "100755" ]; then
+          echo "  $f is committed $mode (fix: git update-index --chmod=+x $f)"
+          bad=1
+        fi
+      done < <(git ls-files -s '*.sh' '*/hooks/pre-commit' '*/hooks/pre-push' '*/hooks/pre-receive')
+      [ "$bad" -eq 0 ] || exit 1
+      echo "all scripts and hooks are committed 100755"
+
   - id: config-parses
     desc: every tracked JSON and TOML file parses
     stage: commit
