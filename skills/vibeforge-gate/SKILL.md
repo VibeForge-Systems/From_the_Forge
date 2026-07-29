@@ -70,11 +70,11 @@ Then tell the user, in plain terms, what the gate does and does not cover.
       "$VF_TOOL" detect --source "$VF_ROOT" --no-git --redact
 ```
 
-Also available: `needs:` (comma-separated binaries that must exist), `probe:` (any command whose success means "ready" — use it for a library, e.g. `python3 -c 'import jsonschema'`), `env:` (`KEY=VALUE` per line), `skip_env:` (name of an env var that deliberately skips this check), `enforce: false` (advisory — runs, reports WARN on failure, never blocks), `mirrors:` (provenance).
+Also available: `needs:` (comma-separated binaries that must exist), `probe:` (any command whose success means "ready" — use it for a library, e.g. `python3 -c 'import jsonschema'`), `env:` (`KEY=VALUE` per line), `skip_env:` (name of an env var that deliberately skips this check), `enforce: false` (advisory — runs, reports WARN on failure, never blocks), `enforce_after:` (the shadow-mode deadline — advisory until the date, blocking after), `timeout:` (seconds before a hung `run:` is killed and reported FAIL), `fetch_sha256:` (the bytes the fetched tool must hash to), `mirrors:` (provenance).
 
 `run:` is bash, executed with `-euo pipefail` in `dir:`. `$VF_TOOL` is the resolved pinned binary, `$VF_ROOT` the repo root. Full field reference: `references/manifest.md`.
 
-**Shadow mode.** A new check that would fail today goes in with `enforce: false`, gets tuned against real runs, and is promoted by deleting that line. Introducing a check in blocking mode on day one is how gates get disabled wholesale.
+**Shadow mode.** A new check that would fail today goes in with `enforce: false`, gets tuned against real runs, and is promoted by deleting that line. Introducing a check in blocking mode on day one is how gates get disabled wholesale. Give it `enforce_after: YYYY-MM-DD` — the runner keeps it advisory until that date and blocks after it, so the promotion cannot be forgotten indefinitely.
 
 ## Resources
 

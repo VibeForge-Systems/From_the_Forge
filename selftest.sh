@@ -271,6 +271,83 @@ checks:
     run: true' \
 "needs a value" --only
 
+# --- fetched tools are verified against a pinned hash ------------------------
+sha_ok="$(printf 'fetched-tool\n' | sha256sum -)"; sha_ok="${sha_ok%% *}"
+ok "fetch with a matching fetch_sha256 -> exit 0" 0 \
+"meta:
+  name: t
+checks:
+  - id: fetched
+    tool: not-on-path-fetch-xyz
+    tool_version: \"1.0\"
+    fetch: |
+      printf 'fetched-tool\n' > \"\$VF_TOOL_DEST\"
+    fetch_sha256: \"$sha_ok\"
+    run: grep -q fetched-tool \"\$VF_TOOL\"" \
+"GATE PASSED"
+
+ok "fetch_sha256 mismatch is a blocking SKIP -> exit 2" 2 \
+"meta:
+  name: t
+checks:
+  - id: fetched
+    tool: not-on-path-fetch-xyz
+    tool_version: \"1.0\"
+    fetch: |
+      printf 'fetched-tool\n' > \"\$VF_TOOL_DEST\"
+    fetch_sha256: \"0000000000000000000000000000000000000000000000000000000000000000\"
+    run: true" \
+"sha256"
+
+# --- a hung check gets a verdict, not an eternity -----------------------------
+ok "timeout kills a hung check -> exit 1" 1 \
+'meta:
+  name: t
+checks:
+  - id: hung
+    timeout: 1
+    run: sleep 30' \
+"timed out after 1s"
+
+ok "non-integer timeout -> exit 3" 3 \
+'meta:
+  name: t
+checks:
+  - id: bad
+    timeout: 5m
+    run: true' \
+"timeout must be an integer"
+
+# --- shadow mode with a deadline ----------------------------------------------
+ok "enforce_after in the future stays advisory -> exit 0" 0 \
+'meta:
+  name: t
+checks:
+  - id: tuning
+    enforce: false
+    enforce_after: 2999-01-01
+    run: exit 1' \
+"advisory until 2999-01-01"
+
+ok "enforce_after in the past blocks -> exit 1" 1 \
+'meta:
+  name: t
+checks:
+  - id: overdue
+    enforce: false
+    enforce_after: 2020-01-01
+    run: exit 1' \
+"shadow deadline 2020-01-01 has passed"
+
+ok "enforce_after without enforce:false -> exit 3" 3 \
+'meta:
+  name: t
+checks:
+  - id: bad
+    enforce_after: 2999-01-01
+    run: true' \
+"needs 'enforce: false'"
+
 # --- working directory --------------------------------------------------------
 ok "dir: scopes the check to a subdirectory" 0 \
 'meta:
@@ -289,6 +366,30 @@ checks:
     dir: no/such/place
     run: true' \
 "does not exist"
+
+# --- --pristine checks HEAD, not the working tree -----------------------------
+# Needs a committed manifest, so it cannot go through ok(): the check passes
+# only in a clean worktree of HEAD, and the stray untracked file would fail it
+# in the working tree.
+prepo="$WORK/pristine"
+mkdir -p "$prepo/.vibeforge"
+( cd "$prepo" && git init -q . && git config user.email t@t && git config user.name t )
+printf '%s\n' 'meta:
+  name: t
+checks:
+  - id: clean-tree
+    run: test ! -e stray.txt && echo no-stray-file' > "$prepo/.vibeforge/gates.yaml"
+( cd "$prepo" && git add -A && git commit -qm init )
+: > "$prepo/stray.txt"
+out="$( cd "$prepo" && env VF_GATE_NO_COLOR=1 VF_GATE_CACHE="$prepo/.cache" \
+          bash "$RUNNER" --pristine 2>&1 )"; rc=$?
+if [ "$rc" = 0 ] && grep -qF "no-stray-file" <<<"$out"; then
+  printf '%s  ok  %s%s\n' "$grn" "$rst" "--pristine checks HEAD, not the working tree"; PASS=$((PASS + 1))
+else
+  printf '%s  FAIL%s %s %s(exit %s)%s\n' "$red" "$rst" "--pristine checks HEAD, not the working tree" "$dim" "$rc" "$rst"
+  FAIL=$((FAIL + 1)); VERBOSE=1
+fi
+if [ "$VERBOSE" = 1 ]; then sed 's/^/      /' <<<"$out"; fi
 
 # --- summary ------------------------------------------------------------------
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"

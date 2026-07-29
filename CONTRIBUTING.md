@@ -9,7 +9,7 @@ small and honest are the most welcome kind.
 1. **Sign off every commit** — `git commit -s`. See [§1](#1-sign-off-and-licensing).
 2. Contributions are **inbound = outbound under Apache-2.0** ([`LICENSE`](LICENSE)).
 3. **Run the gate before opening a PR** — `.vibeforge/gate.sh`. It must be green,
-   including the 21-case runner selftest.
+   including the 29-case runner selftest.
 4. If you change the runner, **change its template**, not just the copy this repo
    dogfoods. A check enforces this; see [§3](#3-the-two-copies-of-the-runner).
 

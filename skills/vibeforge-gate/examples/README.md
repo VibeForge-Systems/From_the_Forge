@@ -58,7 +58,7 @@ SACP_CI_SKIP_RACE=1 VF_GATE_MANIFEST=<here>/gates.yaml \
 
 The other worked example is `.vibeforge/gates.yaml` at the root of this package.
 It gates the package with the package: shell syntax, shellcheck against a pinned
-fetched build, the 21-case runner selftest, skill frontmatter validity, and a
+fetched build, the 29-case runner selftest, skill frontmatter validity, and a
 check that every catalog and example manifest parses with the real parser — so a
 broken example cannot ship.
 

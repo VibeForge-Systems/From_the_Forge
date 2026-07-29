@@ -27,8 +27,9 @@ not PowerShell.
 .vibeforge/gate.sh --list            # inventory: ids, stages, skip switches
 .vibeforge/gate.sh --explain dco     # a check's rationale, provenance, exact command
 .vibeforge/gate.sh --fetch           # pre-download pinned tools into the cache
+.vibeforge/gate.sh --pristine        # run in a clean worktree of HEAD
 
-./selftest.sh                        # 21 cases pinning the runner's contract
+./selftest.sh                        # 29 cases pinning the runner's contract
 ./selftest.sh -v                     # ...with the runner output for each case
 ```
 

@@ -42,6 +42,9 @@ set -uo pipefail
 VF_VERSION="1.0.0"
 
 # --- locate repo + manifest ---------------------------------------------------
+# SELF is resolved before any cd so --pristine can re-run this same script from
+# inside a temporary worktree.
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 if [ -z "$ROOT" ]; then
   ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -192,13 +195,25 @@ parse_manifest() {
   [ "$N" -gt 0 ] || die "manifest declares no checks"
 
   # validate required fields + unique ids
-  local i id seen=""
+  local i id seen="" ea
   for ((i = 0; i < N; i++)); do
     id="${F[$i.id]:-}"
     [ -n "$id" ] || die "check #$((i + 1)) has no 'id'"
     [ -n "${F[$i.run]:-}" ] || die "check '$id' has no 'run'"
     case " $seen " in *" $id "*) die "duplicate check id: $id" ;; esac
     seen="$seen $id"
+    case "${F[$i.timeout]:-0}" in
+      ''|*[!0-9]*) die "check '$id': timeout must be an integer number of seconds" ;;
+    esac
+    ea="${F[$i.enforce_after]:-}"
+    if [ -n "$ea" ]; then
+      case "$ea" in
+        [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+        *) die "check '$id': enforce_after must be a date, YYYY-MM-DD" ;;
+      esac
+      [ "${F[$i.enforce]:-true}" = "false" ] \
+        || die "check '$id': enforce_after needs 'enforce: false' (it is the shadow-mode deadline)"
+    fi
   done
 }
 
@@ -211,8 +226,8 @@ FAILED=0 BLOCKING_SKIP=0
 record() { R_ID+=("$1"); R_VERDICT+=("$2"); R_NOTE+=("${3:-}"); }
 
 verdict_pass()  { printf '%s   PASS%s  %s\n'  "$grn" "$rst" "$1"; record "$1" PASS; }
-verdict_fail()  { printf '%s   FAIL%s  %s\n'  "$red" "$rst" "$1"; record "$1" FAIL "${2:-}"; FAILED=1; }
-verdict_warn()  { printf '%s   WARN%s  %s — advisory (enforce: false), not blocking\n' "$ylw" "$rst" "$1"; record "$1" WARN "advisory"; }
+verdict_fail()  { printf '%s   FAIL%s  %s%s\n'  "$red" "$rst" "$1" "${2:+ — $2}"; record "$1" FAIL "${2:-}"; FAILED=1; }
+verdict_warn()  { printf '%s   WARN%s  %s — %s\n' "$ylw" "$rst" "$1" "${2:-advisory (enforce: false), not blocking}"; record "$1" WARN "${2:-advisory}"; }
 
 # A coverage gap against the declared bar. Blocks.
 verdict_skip()  {
@@ -239,11 +254,18 @@ resolve_tool() {
   [ -n "$tool" ] || return 0
 
   local ver="${F[$i.tool_version]:-}"
+  local want="${F[$i.fetch_sha256]:-}" got=""
   local cached=""
   [ -n "$ver" ] && cached="$CACHE_DIR/$tool-$ver"
 
-  # 1. the pinned binary we cached earlier
-  if [ -n "$cached" ] && [ -x "$cached" ]; then VF_TOOL="$cached"; return 0; fi
+  # 1. the pinned binary we cached earlier — content-verified when a hash is
+  #    pinned, so a corrupt or tampered cache entry is refetched, not run
+  if [ -n "$cached" ] && [ -x "$cached" ]; then
+    if [ -z "$want" ]; then VF_TOOL="$cached"; return 0; fi
+    got="$(sha256sum "$cached")"; got="${got%% *}"
+    if [ "$got" = "$want" ]; then VF_TOOL="$cached"; return 0; fi
+    rm -f "$cached"
+  fi
 
   # 2. a copy on PATH — accepted only if it reports the pinned version
   if command -v "$tool" >/dev/null 2>&1; then
@@ -263,6 +285,14 @@ resolve_tool() {
     local tmp="$cached.tmp.$$"
     if VF_TOOL_VERSION="$ver" VF_TOOL_DEST="$tmp" VF_CACHE_DIR="$CACHE_DIR" \
          bash -euo pipefail -c "$fetch" >/dev/null 2>&1 && [ -s "$tmp" ]; then
+      if [ -n "$want" ]; then
+        got="$(sha256sum "$tmp")"; got="${got%% *}"
+        if [ "$got" != "$want" ]; then
+          rm -f "$tmp"
+          RESOLVE_ERR="fetched $tool v$ver, but its sha256 is not the pinned one (got ${got:0:12}, pinned ${want:0:12})"
+          return 1
+        fi
+      fi
       chmod +x "$tmp" && mv "$tmp" "$cached" && { VF_TOOL="$cached"; return 0; }
     fi
     rm -f "$tmp"
@@ -334,15 +364,37 @@ run_check() {
     done <<< "$envblock"
   fi
 
+  # enforce_after: the shadow-mode deadline. Advisory until the date, blocking
+  # on and after it — so an enforce:false check cannot quietly stay decorative.
+  local deadline="${F[$i.enforce_after]:-}"
+  local advisory_note="advisory (enforce: false), not blocking"
+  if [ "$enforce" = "false" ] && [ -n "$deadline" ]; then
+    if [ "$(date +%F)" \< "$deadline" ]; then
+      advisory_note="advisory until $deadline (enforce_after), not blocking"
+    else
+      enforce=expired
+    fi
+  fi
+
+  local tmo="${F[$i.timeout]:-}"
+  local -a cmd=(bash -euo pipefail -c "${F[$i.run]}")
+  [ -n "$tmo" ] && cmd=(timeout "$tmo" "${cmd[@]}")
+
   local rc=0
-  ( cd "$dir" && env "${envs[@]}" bash -euo pipefail -c "${F[$i.run]}" ) || rc=$?
+  ( cd "$dir" && env "${envs[@]}" "${cmd[@]}" ) || rc=$?
+
+  # a hung check has no verdict at all without this; 124 is timeout(1)'s own code
+  local note=""
+  [ -n "$tmo" ] && [ "$rc" -eq 124 ] && note="timed out after ${tmo}s"
 
   if [ "$rc" -eq 0 ]; then
     verdict_pass "$id"
   elif [ "$enforce" = "false" ]; then
-    verdict_warn "$id"
+    verdict_warn "$id" "${note:+$note — }$advisory_note"
+  elif [ "$enforce" = "expired" ]; then
+    verdict_fail "$id" "${note:+$note — }shadow deadline $deadline has passed, now blocking"
   else
-    verdict_fail "$id"
+    verdict_fail "$id" "$note"
   fi
 }
 
@@ -360,6 +412,8 @@ ${bold}vibeforge-gate${rst} v$VF_VERSION — the merge bar, owned by this repo
   gate.sh --list             list declared checks and their stages
   gate.sh --explain [id]     print why each check exists, and its provenance
   gate.sh --fetch            pre-download every pinned tool into the cache
+  gate.sh --pristine         run against a clean worktree of HEAD — checks what
+                             is committed, not what happens to be in your tree
 
 Environment:
   VF_GATE_ALLOW_SKIP=1       accept a coverage gap (exit 0 despite a SKIP)
@@ -372,7 +426,8 @@ Manifest: $MANIFEST
 EOF
 }
 
-STAGE=push; ONLY=""; MODE=run
+STAGE=push; ONLY=""; MODE=run; PRISTINE=0
+declare -a ARGV=("$@")
 while [ $# -gt 0 ]; do
   case "$1" in
     # `shift 2` when the flag is the last argument shifts NOTHING (bash leaves
@@ -388,11 +443,30 @@ while [ $# -gt 0 ]; do
       MODE=explain; shift
       case "${1:-}" in ""|-*) ;; *) ONLY="$1"; shift ;; esac ;;
     --fetch) MODE=fetch; shift ;;
+    --pristine) PRISTINE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'unknown argument: %s\n\n' "$1" >&2; usage >&2; exit 3 ;;
   esac
 done
 case "$STAGE" in commit|push|manual) ;; *) die "unknown stage '$STAGE' (commit|push|manual)" ;; esac
+
+# --pristine: re-run this same invocation inside a throwaway worktree of HEAD.
+# A working-tree run can pass for reasons that exist only on this machine —
+# untracked files, uncommitted edits, local config. A pristine run checks
+# exactly what is committed, which is what everyone else will get.
+if [ "$PRISTINE" -eq 1 ]; then
+  git rev-parse --verify --quiet HEAD >/dev/null || die "--pristine needs at least one commit"
+  _wt_parent="$(mktemp -d)"; _wt="$_wt_parent/head"
+  git worktree add --detach --quiet "$_wt" HEAD 2>/dev/null \
+    || { rm -rf "$_wt_parent"; die "--pristine: could not create a worktree of HEAD"; }
+  _pass=(); for _a in "${ARGV[@]}"; do [ "$_a" = "--pristine" ] || _pass+=("$_a"); done
+  _rc=0
+  ( cd "$_wt" && VF_GATE_MANIFEST="$_wt/.vibeforge/gates.yaml" VF_GATE_CACHE="$CACHE_DIR" \
+      bash "$SELF" ${_pass[@]+"${_pass[@]}"} ) || _rc=$?
+  git worktree remove --force "$_wt" >/dev/null 2>&1 || true
+  rm -rf "$_wt_parent"
+  exit "$_rc"
+fi
 
 parse_manifest "$MANIFEST"
 
