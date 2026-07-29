@@ -119,6 +119,76 @@ checks:
       fi
       echo "no trailing whitespace"
 
+  - id: line-endings
+    desc: no CRLF line endings in tracked text files
+    stage: commit
+    why: |
+      The gate's own honest limit is that it runs on one OS — structural
+      checks that catch other-OS breakage are the cheap fraction of the matrix
+      you do not have. CRLF is the classic case: a shell script with CRLF
+      fails with an error naming the wrong problem entirely.
+    run: |
+      if git grep -Il $'\r' -- . ; then
+        echo "CRLF line endings in the files above (add '* text=auto' to .gitattributes)"
+        exit 1
+      fi
+      echo "no CRLF line endings"
+
+  - id: config-parses
+    desc: every tracked JSON and TOML file parses
+    stage: commit
+    probe: python3 -c "import json, tomllib"
+    install: "python3 >= 3.11 (tomllib joined the stdlib at 3.11)"
+    why: |
+      A config file with a syntax error fails at the moment something reads
+      it, which is usually deploy time. Parsing is free and the stdlib does
+      it — nothing to install. YAML needs a third-party module; if the repo
+      leans on YAML, add `import yaml` to the probe and a loader to the loop.
+    run: |
+      python3 - <<'EOF'
+      import json, subprocess, sys, tomllib
+      files = subprocess.run(["git", "ls-files", "*.json", "*.toml"],
+                             capture_output=True, text=True).stdout.split()
+      bad = 0
+      for f in files:
+          try:
+              raw = open(f, "rb").read()
+              json.loads(raw) if f.endswith(".json") else tomllib.loads(raw.decode())
+          except Exception as e:
+              print(f"  {f}: {e}")
+              bad = 1
+      if bad:
+          sys.exit(1)
+      print(f"{len(files)} config files parse")
+      EOF
+
+  - id: typos
+    desc: no misspellings in sources and docs
+    stage: commit
+    enforce: false
+    enforce_after: 2026-11-01
+    tool: typos
+    tool_version: "1.28.4"
+    install: "cargo install typos-cli --locked --version 1.28.4"
+    fetch_sha256: "d4a156680059614551bb56db862b5ce102873368b7a4a8c6140bbc51b382be3e"
+    fetch: |
+      d="$(mktemp -d)"
+      curl -fsSL --max-time 90 \
+        "https://github.com/crate-ci/typos/releases/download/v${VF_TOOL_VERSION}/typos-v${VF_TOOL_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+        -o "$d/typos.tgz"
+      tar xzf "$d/typos.tgz" -C "$d" ./typos
+      mv "$d/typos" "$VF_TOOL_DEST"
+      rm -rf "$d"
+    why: |
+      Milliseconds fast, and misspellings in identifiers become API surface.
+      Every codebase carries a private dictionary of intentional oddities,
+      so this is the worked example of shadow mode with a deadline: it ships
+      advisory, you tune _typos.toml against real runs, and enforce_after
+      promotes it on the date instead of relying on anyone remembering.
+      Set the date when you copy the block.
+    run: |
+      "$VF_TOOL" .
+
   # --- the gate's own integrity ----------------------------------------------
 
   - id: gate-manifest-parses
@@ -156,3 +226,31 @@ checks:
       mapfile -t files < <(git ls-files '*.sh')
       [ "${#files[@]}" -eq 0 ] && { echo "no shell scripts"; exit 0; }
       shellcheck -S warning "${files[@]}"
+
+  # --- coexisting with hosted CI ---------------------------------------------
+
+  - id: workflow-lint
+    desc: hosted-CI workflow files are valid
+    stage: commit
+    tool: actionlint
+    tool_version: "1.7.4"
+    install: "go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.4"
+    fetch_sha256: "39cae525cdb54af5d91dcf27f55e040d37ecea01dd4153490c4dc84f5d251d46"
+    fetch: |
+      d="$(mktemp -d)"
+      curl -fsSL --max-time 90 \
+        "https://github.com/rhysd/actionlint/releases/download/v${VF_TOOL_VERSION}/actionlint_${VF_TOOL_VERSION}_linux_amd64.tar.gz" \
+        -o "$d/al.tgz"
+      tar xzf "$d/al.tgz" -C "$d" actionlint
+      mv "$d/actionlint" "$VF_TOOL_DEST"
+      rm -rf "$d"
+    why: |
+      For the transition period when the local gate and a hosted config
+      coexist: a broken workflow file otherwise fails only inside the
+      vendor's runner, the one place you cannot debug it. This is for keeping
+      hosted config that exists honest — not for authoring new hosted config.
+      Drop the check when the last workflow file goes.
+    run: |
+      ls .github/workflows/*.yml .github/workflows/*.yaml >/dev/null 2>&1 \
+        || { echo "no workflow files"; exit 0; }
+      "$VF_TOOL"

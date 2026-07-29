@@ -198,7 +198,9 @@ checks:
       correctly reported SKIP and exited 2 rather than going green without it.
       The `fetch:` below is the fix that keeps the check honest: the pinned
       static build is downloaded once and cached, so the gate does not depend on
-      whatever the host distribution happens to package.
+      whatever the host distribution happens to package. The sha256 pins the
+      bytes, not just the version, and re-verifies the cache on every run.
+    fetch_sha256: "f35ae15a4677945428bdfe61ccc297490d89dd1e544cc06317102637638c6deb"
     fetch: |
       d="$(mktemp -d)"
       curl -fsSL --max-time 120 \

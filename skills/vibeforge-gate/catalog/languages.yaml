@@ -58,6 +58,33 @@ checks:
     install: "go install honnef.co/go/tools/cmd/staticcheck@latest"
     run: '"$VF_TOOL" ./...'
 
+  - id: go-tidy
+    desc: go.mod and go.sum carry exactly what the code needs
+    stage: push
+    why: |
+      An untidy module file means the recorded dependency graph and the real
+      one have drifted — someone reproducing the build resolves something you
+      did not test. `go mod tidy -diff` (go 1.23+) reports without rewriting,
+      so the check never dirties the tree.
+    run: go mod tidy -diff
+
+  - id: go-generate
+    desc: committed generated code matches its sources
+    stage: push
+    why: |
+      Generated files drift silently: the source changes, the artifact does
+      not, and review reads only the source. Regenerate and diff — the same
+      shape as any freshness check. NOTE: this rewrites generated files in the
+      working tree, so run it on a clean tree (or under --pristine); on a
+      dirty tree the diff blames your own edits.
+    run: |
+      go generate ./...
+      if ! git diff --exit-code; then
+        echo "generated files above have drifted from their sources"
+        exit 1
+      fi
+      echo "generated code is in sync"
+
   # ===========================================================================
   # Node / TypeScript        meta.path_prepend: ./node_modules/.bin
   # ===========================================================================
@@ -145,6 +172,28 @@ checks:
   # ===========================================================================
   # Containers
   # ===========================================================================
+
+  - id: dockerfile-lint
+    desc: hadolint is clean on every Dockerfile
+    stage: commit
+    tool: hadolint
+    tool_version: "2.12.0"
+    install: "brew install hadolint  /  static binary from hadolint releases"
+    fetch_sha256: "56de6d5e5ec427e17b74fa48d51271c7fc0d61244bf5c90e828aab8362d55010"
+    fetch: |
+      curl -fsSL --max-time 90 \
+        "https://github.com/hadolint/hadolint/releases/download/v${VF_TOOL_VERSION}/hadolint-Linux-x86_64" \
+        -o "$VF_TOOL_DEST"
+    why: |
+      The container-scanning tier, minus the account: catches the Dockerfile
+      mistakes that produce bloated or unpinned images — unpinned base tags,
+      package caches left in layers, root by default — at lint speed, before
+      the slow build check ever runs. Single static binary; the fetch URL is
+      x86_64 Linux, adjust for your machine.
+    run: |
+      mapfile -t files < <(git ls-files 'Dockerfile' '*/Dockerfile' '*.dockerfile')
+      [ "${#files[@]}" -eq 0 ] && { echo "no Dockerfiles"; exit 0; }
+      "$VF_TOOL" "${files[@]}"
 
   - id: container-build
     desc: the image builds
