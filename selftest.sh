@@ -252,6 +252,25 @@ checks:
     desc: nothing to run' \
 "has no 'run'"
 
+# --- a flag missing its value must error, never hang -------------------------
+# (`shift 2` past the end of $@ shifts nothing, so without the guard the CLI
+# loop respins on the same flag forever)
+ok "--stage with no value -> exit 3" 3 \
+'meta:
+  name: t
+checks:
+  - id: ok
+    run: true' \
+"needs a value" --stage
+
+ok "--only with no value -> exit 3" 3 \
+'meta:
+  name: t
+checks:
+  - id: ok
+    run: true' \
+"needs a value" --only
+
 # --- working directory --------------------------------------------------------
 ok "dir: scopes the check to a subdirectory" 0 \
 'meta:
