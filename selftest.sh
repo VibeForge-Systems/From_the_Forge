@@ -46,8 +46,12 @@ ok() {
   ( cd "$repo" && git init -q . && git config user.email t@t && git config user.name t )
   printf '%s\n' "$body" > "$repo/.vibeforge/gates.yaml"
 
+  # Inherited VF_GATE_* would poison every case (a VF_GATE_MANIFEST from an
+  # enclosing gate run — e.g. under --pristine — would override each fixture's
+  # manifest), so the runner starts from a scrubbed environment.
   local out rc=0
-  out="$( cd "$repo" && env VF_GATE_NO_COLOR=1 VF_GATE_CACHE="$repo/.cache" \
+  out="$( cd "$repo" && env -u VF_GATE_MANIFEST -u VF_GATE_ALLOW_SKIP \
+            VF_GATE_NO_COLOR=1 VF_GATE_CACHE="$repo/.cache" \
             ${envs[@]+"${envs[@]}"} bash "$RUNNER" ${args[@]+"${args[@]}"} 2>&1 )" || rc=$?
 
   local bad=""
@@ -381,7 +385,8 @@ checks:
     run: test ! -e stray.txt && echo no-stray-file' > "$prepo/.vibeforge/gates.yaml"
 ( cd "$prepo" && git add -A && git commit -qm init )
 : > "$prepo/stray.txt"
-out="$( cd "$prepo" && env VF_GATE_NO_COLOR=1 VF_GATE_CACHE="$prepo/.cache" \
+out="$( cd "$prepo" && env -u VF_GATE_MANIFEST -u VF_GATE_ALLOW_SKIP \
+          VF_GATE_NO_COLOR=1 VF_GATE_CACHE="$prepo/.cache" \
           bash "$RUNNER" --pristine 2>&1 )"; rc=$?
 if [ "$rc" = 0 ] && grep -qF "no-stray-file" <<<"$out"; then
   printf '%s  ok  %s%s\n' "$grn" "$rst" "--pristine checks HEAD, not the working tree"; PASS=$((PASS + 1))
