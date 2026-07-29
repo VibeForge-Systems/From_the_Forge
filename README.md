@@ -155,7 +155,7 @@ skills/vibeforge-gate/
   templates/
     gate.sh                          the runner
     gates.yaml                       annotated starter manifest
-    hooks/{pre-commit,pre-push}
+    hooks/{pre-commit,pre-push,pre-receive}
   examples/go-sacp/                  a real migration, with its equivalence audit
 ```
 

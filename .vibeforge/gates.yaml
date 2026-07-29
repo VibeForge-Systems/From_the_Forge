@@ -35,7 +35,7 @@ checks:
       while read -r f; do
         [ -f "$f" ] || continue
         bash -n "$f" || { echo "syntax error: $f"; bad=1; }
-      done < <(git ls-files '*.sh' '*/hooks/pre-commit' '*/hooks/pre-push')
+      done < <(git ls-files '*.sh' '*/hooks/pre-commit' '*/hooks/pre-push' '*/hooks/pre-receive')
       [ "$bad" -eq 0 ] || exit 1
       echo "shell scripts parse"
 
@@ -212,7 +212,7 @@ checks:
       # preserved as evidence for the equivalence audit. Linting them would
       # invite edits, and an edited copy is no longer evidence of anything.
       mapfile -t files < <(
-        git ls-files '*.sh' '*/hooks/pre-commit' '*/hooks/pre-push' \
+        git ls-files '*.sh' '*/hooks/pre-commit' '*/hooks/pre-push' '*/hooks/pre-receive' \
           | grep -v '/reference-'
       )
       [ "${#files[@]}" -eq 0 ] && { echo "no shell scripts"; exit 0; }
