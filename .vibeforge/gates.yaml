@@ -35,7 +35,7 @@ checks:
       while read -r f; do
         [ -f "$f" ] || continue
         bash -n "$f" || { echo "syntax error: $f"; bad=1; }
-      done < <(git ls-files '*.sh' '*/hooks/pre-commit' '*/hooks/pre-push')
+      done < <(git ls-files '*.sh' '*/hooks/pre-commit' '*/hooks/pre-push' '*/hooks/pre-receive')
       [ "$bad" -eq 0 ] || exit 1
       echo "shell scripts parse"
 
@@ -103,9 +103,10 @@ checks:
     why: |
       The whole value of this package is that green means every declared check
       actually ran. That property lives in the exit-code and SKIP semantics, so
-      those are tested rather than documented and hoped for: 21 cases covering
-      exit 0/1/2/3, SKIP-blocks vs deliberate-skip-does-not, version pin
-      enforcement, advisory mode, stage selection and parser strictness.
+      those are tested rather than documented and hoped for: 29 cases covering
+      exit 0/1/2/3, SKIP-blocks vs deliberate-skip-does-not, version pin and
+      sha256 enforcement, timeouts, shadow-mode deadlines, advisory mode,
+      stage selection and parser strictness.
     run: ./selftest.sh
 
   - id: skill-frontmatter
@@ -136,6 +137,30 @@ checks:
               print(f"plugin.json missing {k}"); sys.exit(1)
       print("plugin.json ok:", d["name"], d["version"])
       EOF
+
+  - id: exec-bits
+    desc: every tracked script and hook is committed executable
+    stage: commit
+    why: |
+      On this filesystem the executable bit is forced on and core.filemode is
+      off, so a script committed 100644 runs fine HERE — and fails with
+      "Permission denied" on every normal clone, where git materializes the
+      index mode. The hooks are worse: git silently ignores a non-executable
+      hook. Found by the first real --pristine run, which is exactly the class
+      of local-only accident that flag exists to catch. The index mode is the
+      only mode consumers ever see, so that is what this checks.
+    run: |
+      bad=0
+      while read -r mode _rest; do
+        f="${_rest##*$'\t'}"
+        case "$f" in */reference-*) continue ;; esac
+        if [ "$mode" != "100755" ]; then
+          echo "  $f is committed $mode (fix: git update-index --chmod=+x $f)"
+          bad=1
+        fi
+      done < <(git ls-files -s '*.sh' '*/hooks/pre-commit' '*/hooks/pre-push' '*/hooks/pre-receive')
+      [ "$bad" -eq 0 ] || exit 1
+      echo "all scripts and hooks are committed 100755"
 
   - id: no-merge-markers
     desc: no unresolved conflict markers
@@ -197,7 +222,9 @@ checks:
       correctly reported SKIP and exited 2 rather than going green without it.
       The `fetch:` below is the fix that keeps the check honest: the pinned
       static build is downloaded once and cached, so the gate does not depend on
-      whatever the host distribution happens to package.
+      whatever the host distribution happens to package. The sha256 pins the
+      bytes, not just the version, and re-verifies the cache on every run.
+    fetch_sha256: "f35ae15a4677945428bdfe61ccc297490d89dd1e544cc06317102637638c6deb"
     fetch: |
       d="$(mktemp -d)"
       curl -fsSL --max-time 120 \
@@ -211,7 +238,7 @@ checks:
       # preserved as evidence for the equivalence audit. Linting them would
       # invite edits, and an edited copy is no longer evidence of anything.
       mapfile -t files < <(
-        git ls-files '*.sh' '*/hooks/pre-commit' '*/hooks/pre-push' \
+        git ls-files '*.sh' '*/hooks/pre-commit' '*/hooks/pre-push' '*/hooks/pre-receive' \
           | grep -v '/reference-'
       )
       [ "${#files[@]}" -eq 0 ] && { echo "no shell scripts"; exit 0; }

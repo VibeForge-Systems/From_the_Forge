@@ -62,9 +62,10 @@ Four rules keep that true:
    visible is not the same as never-ran and unknown.
 4. **Claim only what you check.** See *Honest limits*.
 
-The runner's own [`selftest.sh`](selftest.sh) asserts all of this — 21 cases
-covering the exit codes, the SKIP semantics, version-pin enforcement, stage
-selection, and parser strictness.
+The runner's own [`selftest.sh`](selftest.sh) asserts all of this — 29 cases
+covering the exit codes, the SKIP semantics, version-pin and sha256
+enforcement, timeouts, shadow-mode deadlines, stage selection, and parser
+strictness.
 
 ## Install
 
@@ -101,6 +102,7 @@ a manifest, and installs the runner. Or do it by hand — see
 .vibeforge/gate.sh --list             # what is declared
 .vibeforge/gate.sh --explain dco      # why a check exists, and where it came from
 .vibeforge/gate.sh --fetch            # pre-download pinned tools
+.vibeforge/gate.sh --pristine         # run in a clean worktree of HEAD
 
 git config core.hooksPath .vibeforge/hooks   # enforce it
 ```
@@ -137,7 +139,7 @@ Adding a check is editing one block. Full field reference:
 ```
 .claude-plugin/plugin.json
 commands/gate.md                     ->  /vibeforge-gate:gate
-selftest.sh                          21 cases pinning the runtime contract
+selftest.sh                          29 cases pinning the runtime contract
 skills/vibeforge-gate/
   SKILL.md                           doctrine + when to use it
   references/
@@ -153,7 +155,7 @@ skills/vibeforge-gate/
   templates/
     gate.sh                          the runner
     gates.yaml                       annotated starter manifest
-    hooks/{pre-commit,pre-push}
+    hooks/{pre-commit,pre-push,pre-receive}
   examples/go-sacp/                  a real migration, with its equivalence audit
 ```
 

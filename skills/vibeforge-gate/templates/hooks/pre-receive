@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+#
+# pre-receive — the merge bar, enforced on the receiving end.
+#
+# A local hook is a seatbelt: anyone can `--no-verify`, and a contributor who
+# never installs it is never gated. This hook is the lock. It runs on the
+# repository being pushed TO, where no bypass flag exists.
+#
+# Install on the receiving repository (a bare repo, or a self-hosted forge
+# that honors hooks/):
+#
+#   cp pre-receive /path/to/repo.git/hooks/pre-receive
+#   chmod +x /path/to/repo.git/hooks/pre-receive
+#
+# For every pushed branch tip, the hook checks that tip out into a throwaway
+# repository and runs the .vibeforge/gate.sh COMMITTED AT THAT TIP — the same
+# manifest and runner the pusher ran locally, so the two bars cannot disagree.
+#
+# Properties worth knowing before you install it:
+#   * The bar travels with the tree: a push that weakens the manifest is gated
+#     against the weakened bar. Review manifest diffs; no hook reviews intent.
+#   * A tip with no .vibeforge/gates.yaml is refused, not waved through.
+#   * The server needs the pinned tools. A missing tool is a SKIP and a SKIP
+#     refuses the push — the same contract as everywhere else. Pre-warm the
+#     cache with `gate.sh --fetch` on this machine, or export
+#     VF_GATE_ALLOW_SKIP=1 below to accept the gap out loud.
+#
+# HOW THE CHECKOUT WORKS. During pre-receive the pushed objects sit in a
+# quarantine directory, and git forbids ref updates in the receiving repo —
+# which rules out `git worktree add` (it must write the worktree's HEAD).
+# So the hook builds a throwaway repository instead: object lookup is wired
+# through .git/objects/info/alternates to the receiving store AND the
+# quarantine, and the tip is checked out there. Every ref written lands in the
+# throwaway repo, which is deleted on every path out — the receiving
+# repository's refs are never touched, which is exactly what the quarantine
+# rule exists to protect. The quarantine env vars are then unset for the
+# throwaway's own git calls: it reads those directories via alternates.
+
+set -uo pipefail
+
+zero="0000000000000000000000000000000000000000"
+objdir="$(git rev-parse --absolute-git-dir)/objects"
+rc=0
+
+while read -r _old new ref; do
+  [ "$new" = "$zero" ] && continue                       # deletion — nothing to gate
+  case "$ref" in refs/heads/*) ;; *) continue ;; esac    # gate branches only
+
+  parent="$(mktemp -d)"; wt="$parent/tip"
+  # The full env scrub matters even here: GIT_DIR would hijack the init into
+  # the receiving repo, and GIT_QUARANTINE_PATH forbids writing the new repo's
+  # initial HEAD.
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_QUARANTINE_PATH \
+    -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+    git init -q "$wt" 2>/dev/null
+  {
+    [ -n "${GIT_OBJECT_DIRECTORY:-}" ] && printf '%s\n' "$GIT_OBJECT_DIRECTORY"
+    [ -n "${GIT_ALTERNATE_OBJECT_DIRECTORIES:-}" ] \
+      && printf '%s\n' "${GIT_ALTERNATE_OBJECT_DIRECTORIES//:/$'\n'}"
+    printf '%s\n' "$objdir"
+  } > "$wt/.git/objects/info/alternates"
+
+  if ! env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_QUARANTINE_PATH \
+         -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+         git -C "$wt" checkout -q --detach "$new" 2>/dev/null; then
+    echo "vibeforge-gate: cannot check out ${new:0:8} for $ref" >&2
+    rm -rf "$parent"; rc=1; continue
+  fi
+
+  if [ ! -f "$wt/.vibeforge/gates.yaml" ]; then
+    echo "vibeforge-gate: $ref@${new:0:8} carries no .vibeforge/gates.yaml — refusing" >&2
+    rc=1
+  else
+    echo "vibeforge-gate: running the merge bar for $ref@${new:0:8}"
+    if ! ( cd "$wt" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
+             -u GIT_QUARANTINE_PATH -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+             bash .vibeforge/gate.sh ); then
+      echo "vibeforge-gate: $ref refused — the bar is red at ${new:0:8}" >&2
+      rc=1
+    fi
+  fi
+
+  rm -rf "$parent"
+done
+
+exit "$rc"

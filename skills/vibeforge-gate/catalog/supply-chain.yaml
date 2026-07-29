@@ -25,6 +25,7 @@ checks:
     tool_version: "8.30.1"
     version_cmd: gitleaks version
     install: "go install github.com/gitleaks/gitleaks/v8@v8.30.1"
+    fetch_sha256: "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509"
     why: |
       Keys on the SHAPE and ENTROPY of credential values, not on identifier
       names — which is what lets it tell a stored secret from a doc comment or
@@ -50,6 +51,7 @@ checks:
     tool_version: "8.30.1"
     version_cmd: gitleaks version
     install: "go install github.com/gitleaks/gitleaks/v8@v8.30.1"
+    fetch_sha256: "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509"
     why: |
       The working-tree scan misses a secret that was committed and later
       deleted — which is still published, still in every clone, and still needs
@@ -128,28 +130,61 @@ checks:
 
   # --- license policy --------------------------------------------------------
 
-  # - id: licenses
-  #   desc: dependency licenses stay inside policy
-  #   stage: push
-  #   needs: go-licenses
-  #   install: "go install github.com/google/go-licenses@latest"
-  #   why: |
-  #     A copyleft dependency arriving transitively is a legal problem found
-  #     late and expensively. Cheap to check at the moment it enters.
-  #   run: |
-  #     go-licenses check ./... --disallowed_types=forbidden,restricted
+  - id: licenses
+    desc: dependency licenses stay inside policy
+    stage: push
+    tool: go-licenses
+    tool_version: "1.6.0"
+    version_cmd: go version -m "$(command -v go-licenses)"
+    install: "go install github.com/google/go-licenses@v1.6.0"
+    why: |
+      A copyleft dependency arriving transitively is a legal problem found late
+      and expensively; the cheap moment to check is when it enters. The
+      paid-tier name for this is "license compliance" — the capability is a
+      tree walk over metadata your package manager already has.
+      Go shown here (the version_cmd reads the pin out of the binary's own
+      build info, since go-licenses has no --version). For other stacks swap
+      the tool: license-checker (npm), pip-licenses (Python), cargo-deny
+      (Rust) — same shape, same policy line.
+    run: |
+      "$VF_TOOL" check ./... --disallowed_types=forbidden,restricted
 
   # --- SBOM ------------------------------------------------------------------
 
-  # - id: sbom
-  #   desc: generate an SBOM and scan it
-  #   stage: manual
-  #   needs: syft,grype
-  #   install: "see anchore/syft and anchore/grype releases"
-  #   why: |
-  #     Increasingly a procurement requirement in regulated sectors. `manual`
-  #     because it is slow and its output is an artifact, not a pass/fail that
-  #     belongs in a push loop.
-  #   run: |
-  #     syft "$VF_ROOT" -o cyclonedx-json > "$VF_ROOT/sbom.json"
-  #     grype sbom:"$VF_ROOT/sbom.json" --fail-on high
+  - id: sbom
+    desc: the committed SBOM still describes the tree
+    stage: push
+    tool: syft
+    tool_version: "1.18.1"
+    version_cmd: syft version
+    install: "curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b ~/.local/bin v1.18.1"
+    fetch_sha256: "3aa0fd1c2479f8976122802422480e45dd6c814a693da4f550b4d39af14f8cae"
+    fetch: |
+      d="$(mktemp -d)"
+      curl -fsSL --max-time 120 \
+        "https://github.com/anchore/syft/releases/download/v${VF_TOOL_VERSION}/syft_${VF_TOOL_VERSION}_linux_amd64.tar.gz" \
+        -o "$d/syft.tgz"
+      tar xzf "$d/syft.tgz" -C "$d" syft
+      mv "$d/syft" "$VF_TOOL_DEST"
+      rm -rf "$d"
+    why: |
+      Increasingly a procurement requirement, and a paid-tier feature at every
+      hosted forge. A committed-but-stale SBOM is worse than none — it
+      documents a dependency set you no longer ship. So the check regenerates
+      with the pinned syft and diffs against the committed copy, volatile
+      lines (timestamp, document UUID) stripped; the version pin is what makes
+      that diff meaningful.
+      First run: no sbom.spdx exists yet — the check writes one and fails
+      once, telling you to review and commit it.
+    run: |
+      out="$(mktemp)"
+      "$VF_TOOL" scan "dir:$VF_ROOT" -q -o spdx-tag-value \
+        | grep -vE '^(Created|DocumentNamespace|LicenseListVersion):' > "$out"
+      if [ ! -f "$VF_ROOT/sbom.spdx" ]; then
+        cp "$out" "$VF_ROOT/sbom.spdx"
+        echo "no sbom.spdx was committed — wrote one; review it and commit"
+        exit 1
+      fi
+      diff -u "$VF_ROOT/sbom.spdx" "$out" \
+        || { echo "sbom.spdx is stale — review the diff, regenerate, commit"; exit 1; }
+      echo "sbom.spdx matches the tree"
