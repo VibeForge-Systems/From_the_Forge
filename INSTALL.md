@@ -100,7 +100,7 @@ Your `gates.yaml` is untouched.
 cd ~/src/vibeforge-gate && ./selftest.sh
 ```
 
-19 cases covering exit codes, SKIP-blocks-but-deliberate-skip-does-not, version
+21 cases covering exit codes, SKIP-blocks-but-deliberate-skip-does-not, version
 pin enforcement, stage selection, advisory mode, and parser strictness. Run it
 after changing `gate.sh`.
 

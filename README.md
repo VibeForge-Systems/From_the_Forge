@@ -62,7 +62,7 @@ Four rules keep that true:
    visible is not the same as never-ran and unknown.
 4. **Claim only what you check.** See *Honest limits*.
 
-The runner's own [`selftest.sh`](selftest.sh) asserts all of this — 19 cases
+The runner's own [`selftest.sh`](selftest.sh) asserts all of this — 21 cases
 covering the exit codes, the SKIP semantics, version-pin enforcement, stage
 selection, and parser strictness.
 
@@ -137,7 +137,7 @@ Adding a check is editing one block. Full field reference:
 ```
 .claude-plugin/plugin.json
 commands/gate.md                     ->  /vibeforge-gate:gate
-selftest.sh                          19 cases pinning the runtime contract
+selftest.sh                          21 cases pinning the runtime contract
 skills/vibeforge-gate/
   SKILL.md                           doctrine + when to use it
   references/

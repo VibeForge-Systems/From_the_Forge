@@ -375,10 +375,13 @@ EOF
 STAGE=push; ONLY=""; MODE=run
 while [ $# -gt 0 ]; do
   case "$1" in
-    --stage) STAGE="${2:-}"; shift 2 || true ;;
+    # `shift 2` when the flag is the last argument shifts NOTHING (bash leaves
+    # $@ untouched when n > $#), which would respin the loop on the same flag
+    # forever — so a flag missing its value must die, not fall through.
+    --stage) [ "$#" -ge 2 ] || die "--stage needs a value (commit|push|manual)"; STAGE="$2"; shift 2 ;;
     --stage=*) STAGE="${1#*=}"; shift ;;
     --all) STAGE=manual; shift ;;
-    --only) ONLY="${2:-}"; shift 2 || true ;;
+    --only) [ "$#" -ge 2 ] || die "--only needs a value (comma-separated check ids)"; ONLY="$2"; shift 2 ;;
     --only=*) ONLY="${1#*=}"; shift ;;
     --list) MODE=list; shift ;;
     --explain)
