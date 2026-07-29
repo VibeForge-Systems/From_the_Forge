@@ -50,6 +50,12 @@ in shell history and CI logs. What is not available is skipping *by accident*.
 `|| true`, or lowering it to `enforce: false`. Those turn a visible gap into an
 invisible one, which is strictly worse than the SKIP you started with.
 
+**The one gap no rule closes:** the manifest itself. Deleting a check produces
+a green run by construction, and no check can police edits to the file that
+declares the checks. That control is human: a diff touching `gates.yaml` —
+especially a removal, a new `enforce: false`, or a pin change — is the diff
+that deserves the most review scrutiny in the repository.
+
 ### 2. Pin tool versions, and enforce the pin
 
 An unpinned scanner is a build that can fail with no diff — someone else's
@@ -64,6 +70,11 @@ you reviewed is not the gate you reviewed.
 
 Where the pin comes from, per ecosystem, is in `adapting-stacks.md`. Bumping a
 pin should be a deliberate one-line commit that a reviewer can see.
+
+A version pin names the release you meant; `fetch_sha256:` names the bytes.
+For a check with a `fetch:` block, pin both — the hash is verified when the
+tool is downloaded and re-verified against the cache on every run, so neither
+a compromised release URL nor a corrupted cache entry runs as your scanner.
 
 ### 3. A deliberate skip is not a coverage gap
 
@@ -105,7 +116,10 @@ only change is whether it can stop a push.
 
 Shadow mode is honest exactly as long as everyone knows a check is in it. `--list`
 marks advisory checks; leaving one there for a year is how a gate quietly
-becomes decorative. Give it a deadline.
+becomes decorative. Give it a deadline — and make the runner hold you to it:
+`enforce_after: YYYY-MM-DD` keeps the check advisory until that date and
+blocking on and after it, so promotion happens on the date rather than when
+someone remembers.
 
 ## Staging
 
@@ -140,16 +154,18 @@ State these when you install a gate:
 
 - **Enforcement.** A local hook is a convenience. `--no-verify` bypasses it, and
   a contributor who never runs `core.hooksPath` is never gated at all. Only a
-  check that runs on the receiving end — a self-hosted forge, a shared runner, a
-  `post-receive` hook — is unbypassable. If you have one, put the same manifest
-  behind it; that is the whole point of the manifest being the source of truth.
+  check that runs on the receiving end is unbypassable. If you have one — a
+  self-hosted forge, a bare repo you push through — install the shipped
+  `pre-receive` hook there (see `hooks.md`); it runs the same manifest, which
+  is the whole point of the manifest being the source of truth.
 - **Environment coverage.** One machine, one OS, one architecture, whatever
   toolchain you happen to have. Cross-platform matrices are the one thing hosted
   CI genuinely gives you that a laptop cannot.
 - **Independence.** CI runs on a clean checkout. Your working tree has untracked
   files, local config, and a warm cache. A check can pass locally for reasons
   that will not exist elsewhere — scope scans to tracked files where it matters,
-  and know that this gap exists.
+  and run `gate.sh --pristine` when it counts: it re-runs the bar in a throwaway
+  worktree of `HEAD`, which reproduces the clean-checkout property locally.
 
 None of these is a reason not to run the gate. They are the reasons not to
 oversell it.
