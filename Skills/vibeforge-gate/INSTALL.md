@@ -11,27 +11,41 @@ You can do (2) entirely by hand. (1) just makes it a conversation.
 
 ## 1. The skill
 
+This package lives at `Skills/vibeforge-gate/` inside the
+[From_the_Forge](https://github.com/VibeForge-Systems/From_the_Forge) collection
+repository, which doubles as a plugin marketplace.
+
 ### As a Claude Code plugin (gets you `/vibeforge-gate:gate`)
 
+Persistently, straight from the marketplace:
+
+```
+/plugin marketplace add VibeForge-Systems/From_the_Forge
+/plugin install vibeforge-gate@from-the-forge
+```
+
+Or for one session, from a local clone — note `--plugin-dir` takes the
+*package* directory, not the repository root:
+
 ```sh
-git clone https://github.com/VibeForge-Systems/vibeforge-gate.git ~/src/vibeforge-gate
-claude --plugin-dir ~/src/vibeforge-gate
+git clone https://github.com/VibeForge-Systems/From_the_Forge.git ~/src/From_the_Forge
+claude --plugin-dir ~/src/From_the_Forge/Skills/vibeforge-gate
 ```
 
 Plugin commands and skills are namespaced by the plugin, so the command is
 `/vibeforge-gate:gate` (there is no bare `/gate`) and the bundled skill is
-`/vibeforge-gate:vibeforge-gate`. `--plugin-dir` loads it for one session; to
-install it persistently, add a marketplace and `/plugin install` it (see the
-`.claude-plugin/marketplace.json` in this repo).
+`/vibeforge-gate:vibeforge-gate`.
 
 ### As a plain skill
 
 ```sh
+P=~/src/From_the_Forge/Skills/vibeforge-gate/skills/vibeforge-gate
+
 # available in every repo
-cp -r vibeforge-gate/skills/vibeforge-gate ~/.claude/skills/
+cp -r "$P" ~/.claude/skills/
 
 # or committed to one repo, for everyone who works on it
-cp -r vibeforge-gate/skills/vibeforge-gate .claude/skills/
+cp -r "$P" .claude/skills/
 ```
 
 Nothing in the skill directory depends on the plugin wrapper. If your repo
@@ -53,7 +67,7 @@ config, then `Makefile`/`justfile`/`package.json` scripts, then
 ### By hand
 
 ```sh
-P=~/src/vibeforge-gate/skills/vibeforge-gate
+P=~/src/From_the_Forge/Skills/vibeforge-gate/skills/vibeforge-gate
 
 mkdir -p .vibeforge/hooks
 cp "$P/templates/gate.sh"        .vibeforge/gate.sh
@@ -88,7 +102,8 @@ Uninstall: `git config --unset core.hooksPath`.
 content, so updating is a copy:
 
 ```sh
-cp ~/src/vibeforge-gate/skills/vibeforge-gate/templates/gate.sh .vibeforge/gate.sh
+cp ~/src/From_the_Forge/Skills/vibeforge-gate/skills/vibeforge-gate/templates/gate.sh \
+   .vibeforge/gate.sh
 .vibeforge/gate.sh --list        # confirm the manifest still parses
 ```
 
@@ -97,7 +112,7 @@ Your `gates.yaml` is untouched.
 ## Verifying the runner
 
 ```sh
-cd ~/src/vibeforge-gate && ./selftest.sh
+cd ~/src/From_the_Forge/Skills/vibeforge-gate && ./selftest.sh
 ```
 
 29 cases covering exit codes, SKIP-blocks-but-deliberate-skip-does-not, version

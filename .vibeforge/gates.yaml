@@ -1,15 +1,26 @@
 # =============================================================================
-# vibeforge-gate — its own merge bar
+# From_the_Forge — the merge bar, owned by the repository
 # =============================================================================
-# This package tells other repositories to gate themselves, so it gates itself.
-# The manifest is also the largest worked example that ships: everything here
-# runs on every push to this repository.
+# Skills/vibeforge-gate/ tells other repositories to gate themselves, so this
+# repository gates itself with it. The manifest is also the largest worked
+# example that ships: everything here runs on every push.
 #
 #   .vibeforge/gate.sh                 the full bar
 #   .vibeforge/gate.sh --stage commit  the fast subset
 #   .vibeforge/gate.sh --list          what is declared
 #
+# WHY THIS LIVES AT THE REPOSITORY ROOT, NOT IN Skills/vibeforge-gate/:
+#   git resolves both `core.hooksPath` and the runner's own ROOT
+#   (`git rev-parse --show-toplevel`) per repository, not per directory. A gate
+#   nested inside Skills/vibeforge-gate/ could never be wired to a hook, and the
+#   runner would resolve its root here anyway. So the gate sits where git can
+#   actually enforce it, and reaches into Skills/vibeforge-gate/ by path.
+#
 # NOT COVERED BY THIS GATE:
+#   - Anything outside Skills/vibeforge-gate/ beyond the repo-wide checks
+#     (conflict markers, shell syntax, exec bits, shellcheck, sign-off).
+#     Tips_and_Tricks/ and windows-env-bundle/ have no checks of their own;
+#     windows-env-bundle/ is PowerShell and nothing here lints PowerShell.
 #   - Behavior on bash 3.x (macOS default). The runner needs bash 4+ for
 #     associative arrays; this repo only ever runs it on the bash it has.
 #   - Behavior on non-Linux. The fetch examples in the catalog use linux_x64
@@ -18,7 +29,7 @@
 # =============================================================================
 
 meta:
-  name: vibeforge-gate
+  name: from-the-forge
   default_stage: push
 
 checks:
@@ -61,9 +72,9 @@ checks:
       read it in anger.
     run: |
       bad=0
-      for m in skills/vibeforge-gate/catalog/*.yaml \
-               skills/vibeforge-gate/templates/gates.yaml \
-               skills/vibeforge-gate/examples/*/gates.yaml; do
+      for m in Skills/vibeforge-gate/skills/vibeforge-gate/catalog/*.yaml \
+               Skills/vibeforge-gate/skills/vibeforge-gate/templates/gates.yaml \
+               Skills/vibeforge-gate/skills/vibeforge-gate/examples/*/gates.yaml; do
         [ -f "$m" ] || continue
         if VF_GATE_MANIFEST="$VF_ROOT/$m" "$VF_ROOT/.vibeforge/gate.sh" --list >/dev/null 2>&1; then
           echo "  ok    $m"
@@ -79,18 +90,19 @@ checks:
     desc: the installed runner matches the shipped template
     stage: commit
     why: |
-      This repo dogfoods its own runner by copying the template into
+      This repo dogfoods the runner it ships by copying the template into
       .vibeforge/. Two copies drift: a fix lands in one and ships from the
       other. This check makes the drift impossible to commit.
     run: |
-      if ! diff -q skills/vibeforge-gate/templates/gate.sh .vibeforge/gate.sh >/dev/null; then
+      T=Skills/vibeforge-gate/skills/vibeforge-gate/templates
+      if ! diff -q "$T/gate.sh" .vibeforge/gate.sh >/dev/null; then
         echo "gate.sh has drifted from its template:"
-        diff -u skills/vibeforge-gate/templates/gate.sh .vibeforge/gate.sh || true
-        echo "sync with: cp skills/vibeforge-gate/templates/gate.sh .vibeforge/gate.sh"
+        diff -u "$T/gate.sh" .vibeforge/gate.sh || true
+        echo "sync with: cp $T/gate.sh .vibeforge/gate.sh"
         exit 1
       fi
       for h in pre-commit pre-push; do
-        if ! diff -q "skills/vibeforge-gate/templates/hooks/$h" ".vibeforge/hooks/$h" >/dev/null; then
+        if ! diff -q "$T/hooks/$h" ".vibeforge/hooks/$h" >/dev/null; then
           echo "hook $h has drifted from its template"
           exit 1
         fi
@@ -107,7 +119,7 @@ checks:
       exit 0/1/2/3, SKIP-blocks vs deliberate-skip-does-not, version pin and
       sha256 enforcement, timeouts, shadow-mode deadlines, advisory mode,
       stage selection and parser strictness.
-    run: ./selftest.sh
+    run: ./Skills/vibeforge-gate/selftest.sh
 
   - id: skill-frontmatter
     desc: SKILL.md has the frontmatter a skill loader needs
@@ -116,7 +128,7 @@ checks:
       A skill with a malformed or missing `name`/`description` silently never
       triggers, which looks exactly like the skill being unhelpful.
     run: |
-      f=skills/vibeforge-gate/SKILL.md
+      f=Skills/vibeforge-gate/skills/vibeforge-gate/SKILL.md
       head -1 "$f" | grep -qx -- '---' || { echo "no opening frontmatter fence"; exit 1; }
       grep -qE '^name: vibeforge-gate$' "$f" || { echo "missing or wrong 'name:'"; exit 1; }
       grep -qE '^description: .{40,}' "$f" || { echo "missing or too-thin 'description:'"; exit 1; }
@@ -124,18 +136,43 @@ checks:
       echo "SKILL.md frontmatter ok"
 
   - id: plugin-json
-    desc: plugin.json is valid JSON with the required fields
+    desc: plugin.json and marketplace.json are valid, and every source path exists
     stage: commit
     probe: python3 -c ''
     install: "python3 (any 3.x)"
+    why: |
+      This repository is a plugin marketplace whose one plugin lives in a
+      subdirectory, so `.claude-plugin/marketplace.json` at the root and
+      `Skills/vibeforge-gate/.claude-plugin/plugin.json` have to agree about a
+      path that neither file can see the other end of. Move the directory and
+      nothing complains until someone runs `/plugin marketplace add` and gets a
+      plugin that is not there. Relative `source` paths resolve against the
+      marketplace root, so this check resolves them the same way and confirms
+      the plugin.json they point at is real.
     run: |
       python3 - <<'EOF'
-      import json, sys
-      d = json.load(open(".claude-plugin/plugin.json"))
-      for k in ("name", "version", "description"):
-          if not d.get(k):
-              print(f"plugin.json missing {k}"); sys.exit(1)
-      print("plugin.json ok:", d["name"], d["version"])
+      import json, os, sys
+      bad = 0
+      m = json.load(open(".claude-plugin/marketplace.json"))
+      if not m.get("name"):
+          print("marketplace.json missing name"); bad = 1
+      for entry in m.get("plugins", []):
+          src = entry.get("source")
+          if not isinstance(src, str):
+              print("  skip (non-path source):", entry.get("name")); continue
+          if src.startswith("../"):
+              print(f"  FAIL {entry['name']}: source escapes the marketplace root"); bad = 1; continue
+          pj = os.path.join(src, ".claude-plugin", "plugin.json")
+          if not os.path.isfile(pj):
+              print(f"  FAIL {entry['name']}: no plugin.json at {pj}"); bad = 1; continue
+          d = json.load(open(pj))
+          missing = [k for k in ("name", "version", "description") if not d.get(k)]
+          if missing:
+              print(f"  FAIL {pj} missing {', '.join(missing)}"); bad = 1; continue
+          if d["name"] != entry["name"]:
+              print(f"  FAIL {pj}: name '{d['name']}' does not match marketplace entry '{entry['name']}'"); bad = 1; continue
+          print(f"  ok    {entry['name']} {d['version']} -> {src}")
+      sys.exit(bad)
       EOF
 
   - id: exec-bits
@@ -176,11 +213,14 @@ checks:
     desc: every non-merge, non-bot commit ahead of main is signed off
     stage: push
     why: |
-      Apache-2.0 with explicit inbound=outbound terms, stated in the root DCO
-      file and CONTRIBUTING.md. Sign-off is the contributor certifying them, and
-      that right is lost permanently the moment one contribution merges without
-      it — recovering it afterward needs unanimous consent from every past
-      contributor.
+      This repository carries two licenses: AGPL-3.0 at the root, and Apache-2.0
+      for Skills/vibeforge-gate/, whose explicit inbound=outbound terms are
+      stated in Skills/vibeforge-gate/DCO and .../CONTRIBUTING.md. Sign-off is
+      the contributor certifying that they may submit the work under whichever
+      of those applies where they touched. That right is lost permanently the
+      moment one contribution merges without it — recovering it afterward needs
+      unanimous consent from every past contributor, so the check is repo-wide
+      rather than scoped to the directory that first needed it.
       This check runs at pre-push, which is bypassable and opt-in, so it is not
       the real enforcement — a maintainer verifying sign-off at review is. The
       DCO file says so rather than implying the hook is a boundary it is not.

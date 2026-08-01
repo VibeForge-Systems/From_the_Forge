@@ -6,8 +6,8 @@
   "author": {
     "name": "VibeForge Systems"
   },
-  "homepage": "https://github.com/VibeForge-Systems/vibeforge-gate",
-  "repository": "https://github.com/VibeForge-Systems/vibeforge-gate",
+  "homepage": "https://github.com/VibeForge-Systems/From_the_Forge/tree/main/Skills/vibeforge-gate",
+  "repository": "https://github.com/VibeForge-Systems/From_the_Forge",
   "license": "Apache-2.0",
   "keywords": [
     "ci",

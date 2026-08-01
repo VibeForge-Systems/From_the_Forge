@@ -69,18 +69,30 @@ strictness.
 
 ## Install
 
+This package lives at `Skills/vibeforge-gate/` in the
+[From_the_Forge](https://github.com/VibeForge-Systems/From_the_Forge) collection
+repository, which is also a plugin marketplace.
+
 As a Claude Code plugin, available in every repo you open:
 
+```
+/plugin marketplace add VibeForge-Systems/From_the_Forge
+/plugin install vibeforge-gate@from-the-forge
+```
+
+Or from a local clone:
+
 ```sh
-git clone https://github.com/VibeForge-Systems/vibeforge-gate.git
-claude --plugin-dir ./vibeforge-gate
+git clone https://github.com/VibeForge-Systems/From_the_Forge.git
+claude --plugin-dir ./From_the_Forge/Skills/vibeforge-gate
 ```
 
 Or as a plain skill, no plugin machinery:
 
 ```sh
-cp -r vibeforge-gate/skills/vibeforge-gate ~/.claude/skills/      # everywhere
-cp -r vibeforge-gate/skills/vibeforge-gate .claude/skills/        # one repo
+P=From_the_Forge/Skills/vibeforge-gate/skills/vibeforge-gate
+cp -r "$P" ~/.claude/skills/      # everywhere
+cp -r "$P" .claude/skills/        # one repo
 ```
 
 Then, in a repo that needs a gate:
@@ -136,6 +148,11 @@ Adding a check is editing one block. Full field reference:
 
 ## What's in the box
 
+Everything below is relative to `Skills/vibeforge-gate/`. Two files sit outside
+it, at the collection repo's root, because git and the plugin loader both
+resolve them per repository: `.claude-plugin/marketplace.json` (points here) and
+`.vibeforge/` (the gate this repo runs on itself).
+
 ```
 .claude-plugin/plugin.json
 commands/gate.md                     ->  /vibeforge-gate:gate
@@ -183,10 +200,17 @@ skills/vibeforge-gate/
 
 ## Contributing
 
-Sign off every commit (`git commit -s`) and run `.vibeforge/gate.sh` before
-opening a PR. Contributions are inbound = outbound under Apache-2.0. See
-[CONTRIBUTING.md](CONTRIBUTING.md) and [DCO](DCO).
+Sign off every commit (`git commit -s`) and run `.vibeforge/gate.sh` from the
+collection repo's root before opening a PR. Contributions to this directory are
+inbound = outbound under Apache-2.0. See [CONTRIBUTING.md](CONTRIBUTING.md) and
+[DCO](DCO).
 
 ## License
 
-Apache 2.0. See [LICENSE](LICENSE).
+**Apache 2.0** — see [LICENSE](LICENSE). That is this directory's license, and
+it governs everything under `Skills/vibeforge-gate/`.
+
+The surrounding From_the_Forge repository is AGPL-3.0. Apache-2.0 is compatible
+in that direction, so the collection as a whole may be distributed under AGPL —
+but this package on its own remains Apache-2.0, which is what makes it safe to
+vendor into repositories that could not accept a copyleft dependency.

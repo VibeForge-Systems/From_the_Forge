@@ -1,13 +1,13 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "vibeforge-local",
+  "name": "from-the-forge",
   "owner": {
     "name": "VibeForge Systems"
   },
   "plugins": [
     {
       "name": "vibeforge-gate",
-      "source": "./",
+      "source": "./Skills/vibeforge-gate",
       "description": "Repository-owned merge bar: a local pre-commit/pre-push gate that runs the checks a hosted CI service would have, without needing one."
     }
   ]

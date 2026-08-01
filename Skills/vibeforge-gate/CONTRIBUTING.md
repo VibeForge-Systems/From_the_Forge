@@ -4,13 +4,24 @@ Thanks for your interest. This is a small project with a narrow job: it helps a
 repository own its merge bar instead of renting one. Contributions that keep it
 small and honest are the most welcome kind.
 
+It lives at `Skills/vibeforge-gate/` inside the
+[From_the_Forge](https://github.com/VibeForge-Systems/From_the_Forge) collection
+repository. Clone that repo; everything below assumes you are at its root unless
+a path says otherwise.
+
+> **Licensing note.** This directory is **Apache-2.0** ([`LICENSE`](LICENSE)).
+> The repository around it is AGPL-3.0. The two are compatible in that
+> direction, but a contribution *to this directory* is Apache-2.0 — so keep
+> AGPL-licensed code out of this tree, and read §1 before assuming otherwise.
+
 ## TL;DR
 
 1. **Sign off every commit** — `git commit -s`. See [§1](#1-sign-off-and-licensing).
-2. Contributions are **inbound = outbound under Apache-2.0** ([`LICENSE`](LICENSE)).
-3. **Run the gate before opening a PR** — `.vibeforge/gate.sh`. It must be green,
-   including the 29-case runner selftest.
-4. If you change the runner, **change its template**, not just the copy this repo
+2. Contributions to this directory are **inbound = outbound under Apache-2.0**
+   ([`LICENSE`](LICENSE)).
+3. **Run the gate before opening a PR** — `.vibeforge/gate.sh` *from the
+   repository root*. It must be green, including the 29-case runner selftest.
+4. If you change the runner, **change its template**, not just the copy the repo
    dogfoods. A check enforces this; see [§3](#3-the-two-copies-of-the-runner).
 
 ---
@@ -36,7 +47,9 @@ attest to authorship.
 Please don't submit code under a copyleft (GPL/AGPL/SSPL) or source-available
 (BSL) license, and raise an issue before adding a dependency under one. This
 package gets vendored into other people's repositories — a licence surprise
-propagates to every one of them.
+propagates to every one of them. That the surrounding repository is AGPL-3.0
+does not change this: `Skills/vibeforge-gate/LICENSE` is what governs here, and
+it stays Apache-2.0 precisely so the package can keep being vendored.
 
 **How it's enforced:** by the repository's own gate at pre-push, and by a
 maintainer at review. The local hook is bypassable (`--no-verify`) and opt-in,
@@ -44,6 +57,8 @@ so review is the real gate. [`DCO`](DCO) spells this out rather than implying
 the hook is a boundary it isn't.
 
 ## 2. Before you open a pull request
+
+From the repository root:
 
 ```sh
 git config core.hooksPath .vibeforge/hooks   # once, per clone
@@ -70,21 +85,28 @@ needs installing by hand for a normal contribution.
 
 ## 3. The two copies of the runner
 
-This repository dogfoods its own runner, so `gate.sh` exists twice:
+The collection repository dogfoods the runner this directory ships, so `gate.sh`
+exists twice — and the two copies are in different directories:
 
-| Path | Role |
+| Path (from repo root) | Role |
 |---|---|
-| `skills/vibeforge-gate/templates/gate.sh` | **the source of truth** — what ships to users |
-| `.vibeforge/gate.sh` | the copy this repo runs on itself |
+| `Skills/vibeforge-gate/skills/vibeforge-gate/templates/gate.sh` | **the source of truth** — what ships to users |
+| `.vibeforge/gate.sh` | the copy the repo runs on itself |
 
-Edit the template, then sync:
+The dogfooded copy lives at the repository root rather than in this directory
+because git resolves `core.hooksPath` and the runner's own root per repository,
+not per directory — a gate nested here could never be wired to a hook.
+
+Edit the template, then sync from the repository root:
 
 ```sh
-cp skills/vibeforge-gate/templates/gate.sh .vibeforge/gate.sh
+T=Skills/vibeforge-gate/skills/vibeforge-gate/templates
+cp "$T/gate.sh" .vibeforge/gate.sh
+cp "$T/hooks/pre-commit" "$T/hooks/pre-push" .vibeforge/hooks/
 ```
 
-Same for the hooks. The `templates-in-sync` check fails if they diverge, because
-two copies drift and a fix that lands in the wrong one ships nothing.
+The `templates-in-sync` check fails if they diverge, because two copies drift and
+a fix that lands in the wrong one ships nothing.
 
 ## 4. What good contributions look like
 

@@ -1,8 +1,23 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working inside
+`Skills/vibeforge-gate/`.
 
-## What this repository is
+## Where this lives
+
+This package is a directory in the **From_the_Forge** collection repository, at
+`Skills/vibeforge-gate/`. Two things sit *outside* it, at the repository root,
+because git resolves them per repository and not per directory:
+
+| Path (from repo root) | Why it is not in this directory |
+|---|---|
+| `.vibeforge/` | `core.hooksPath` and the runner's `git rev-parse --show-toplevel` are repo-wide. A gate nested here could never be wired to a hook. |
+| `.claude-plugin/marketplace.json` | A marketplace file must sit at the marketplace root; it points here with `"source": "./Skills/vibeforge-gate"`. |
+
+Every path in the rest of this file is relative to **this directory** unless it
+starts with `Skills/`, in which case it is relative to the repository root.
+
+## What this package is
 
 `vibeforge-gate` ships a **repository-owned merge bar**: `.vibeforge/gates.yaml`
 declares checks, `.vibeforge/gate.sh` runs them, git hooks refuse work that does
@@ -18,7 +33,7 @@ them — so "the docs" are product, not commentary.
 ## Commands
 
 Everything runs under bash (4+), coreutils and git. On Windows use the Bash tool,
-not PowerShell.
+not PowerShell. **Run the gate from the repository root**, two levels up:
 
 ```sh
 .vibeforge/gate.sh                   # the full bar (stage: push) — run before any PR
@@ -28,12 +43,21 @@ not PowerShell.
 .vibeforge/gate.sh --explain dco     # a check's rationale, provenance, exact command
 .vibeforge/gate.sh --fetch           # pre-download pinned tools into the cache
 .vibeforge/gate.sh --pristine        # run in a clean worktree of HEAD
+```
 
+The gate covers the whole collection repo, so it runs on changes to
+`Tips_and_Tricks/` and `windows-env-bundle/` too — but only the repo-wide checks
+(conflict markers, shell syntax, exec bits, shellcheck, sign-off) have anything
+to say about them.
+
+The selftest runs from this directory and works from anywhere:
+
+```sh
 ./selftest.sh                        # 29 cases pinning the runner's contract
 ./selftest.sh -v                     # ...with the runner output for each case
 ```
 
-The selftest runs `skills/vibeforge-gate/templates/gate.sh` (the template, not the
+It runs `skills/vibeforge-gate/templates/gate.sh` (the template, not the
 dogfooded copy) against throwaway repos in `$TMPDIR`. There is no per-case filter;
 run the whole file.
 
@@ -90,15 +114,23 @@ parser lacks, the logic probably belongs in a script the manifest calls.
 default bar. There is exactly one full bar, so the pre-commit subset cannot drift
 away from it.
 
-**This repo gates itself,** so `gate.sh` and the hooks exist twice:
+**This repo gates itself with what this directory ships,** so `gate.sh` and the
+hooks exist twice — and the two copies are now in different directories:
 
-| Path | Role |
+| Path (from repo root) | Role |
 |---|---|
-| `skills/vibeforge-gate/templates/gate.sh`, `templates/hooks/*` | source of truth — what ships |
-| `.vibeforge/gate.sh`, `.vibeforge/hooks/*` | the copy this repo runs on itself |
+| `Skills/vibeforge-gate/skills/vibeforge-gate/templates/gate.sh`, `templates/hooks/*` | source of truth — what ships |
+| `.vibeforge/gate.sh`, `.vibeforge/hooks/*` | the copy the collection repo runs on itself |
 
-Edit the template, then `cp skills/vibeforge-gate/templates/gate.sh .vibeforge/gate.sh`
-(and the same for each hook). The `templates-in-sync` check fails on drift.
+Edit the template, then sync from the repository root:
+
+```sh
+T=Skills/vibeforge-gate/skills/vibeforge-gate/templates
+cp "$T/gate.sh" .vibeforge/gate.sh
+cp "$T/hooks/pre-commit" "$T/hooks/pre-push" .vibeforge/hooks/
+```
+
+The `templates-in-sync` check fails on drift.
 
 **Catalog and example manifests are parsed by the real parser** in the
 `catalog-parses` check, so a block that the runner would reject cannot merge.
@@ -112,6 +144,10 @@ does *not* cover, and every check carries a `why:` surfaced by `--explain`.
   non-merge, non-`*[bot]` commit ahead of `main`. Retrofit with
   `git rebase --signoff <base>`.
 - Topic branch off `main`; never commit to `main` directly.
+- **This directory is Apache-2.0; the repository around it is AGPL-3.0.** The
+  `LICENSE` and `DCO` files here are the ones that govern this directory, and
+  they stay here for that reason. Do not delete them in favour of the root
+  `LICENSE`, and do not copy AGPL text into this tree.
 - **Changing runner behavior requires a `selftest.sh` case** for the behavior
   changed. The exit-code/SKIP/pin/parser semantics are the product, so they are
   tested rather than documented and hoped for.
