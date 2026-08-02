@@ -1,0 +1,97 @@
+Developer Certificate of Origin
+Version 1.1
+
+Copyright (C) 2004, 2006 The Linux Foundation and its contributors.
+
+Everyone is permitted to copy and distribute verbatim copies of this
+license document, but changing it is not allowed.
+
+
+Developer's Certificate of Origin 1.1
+
+By making a contribution to this project, I certify that:
+
+(a) The contribution was created in whole or in part by me and I
+    have the right to submit it under the open source license
+    indicated in the file; or
+
+(b) The contribution is based upon previous work that, to the best
+    of my knowledge, is covered under an appropriate open source
+    license and I have the right under that license to submit that
+    work with modifications, whether created in whole or in part
+    by me, under the same open source license (unless I am
+    permitted to submit under a different license), as indicated
+    in the file; or
+
+(c) The contribution was provided directly to me by some other
+    person who certified (a), (b) or (c) and I have not modified
+    it.
+
+(d) I understand and agree that this project and the contribution
+    are public and that a record of the contribution (including all
+    personal information I submit with it, including my sign-off) is
+    maintained indefinitely and may be redistributed consistent with
+    this project or the open source license(s) involved.
+
+---
+
+## How the DCO applies to this project
+
+vibeforge-gate is **Apache-2.0** (see `LICENSE`). The DCO is this project's
+contribution instrument, used **with explicit inbound = outbound terms**.
+
+By adding a `Signed-off-by` line to a commit you certify the DCO above AND you
+agree that your contribution is licensed **inbound = outbound under the Apache
+License 2.0** — the project's `LICENSE`, which is Apache-2.0 §5's default in any
+case. That includes the maintainer's right to license the contribution and, if
+and when it happens, to **relicense or donate it to a foundation under
+Apache-2.0**. You retain copyright to your work.
+
+Why this is written down rather than assumed: that right is lost the moment one
+contribution merges without it, and recovering it afterward needs unanimous
+consent from every past contributor. A bare DCO without these explicit terms
+would not secure it.
+
+This mirrors the instrument used by the Sovereign Agent Control Plane, so
+contributions can move between the two projects without a licensing mismatch.
+**Note the scope difference:** SACP is deliberately on a C→A path toward CNCF
+donation. This repository is not — it is Apache-2.0 with sign-off because that
+is the right default for a package meant to be vendored into other people's
+repositories, not because a foundation donation is planned for it.
+
+## How to sign off
+
+Add a `Signed-off-by` trailer to every commit, using your real name and an
+email you can be reached at, matching your commit author identity:
+
+    Signed-off-by: Jane Developer <jane@example.com>
+
+Git adds this automatically with the `-s` flag:
+
+    git commit -s -m "your message"
+
+To sign off a branch of existing commits, rebase with `--signoff`, then
+force-push:
+
+    git rebase --signoff <base>
+    git push --force-with-lease
+
+## How it is enforced, honestly
+
+This repository has no hosted CI. Sign-off is checked by the repository's own
+merge bar — the `dco` check in `.vibeforge/gates.yaml` — which runs at pre-push
+if you have installed the hooks:
+
+    git config core.hooksPath .vibeforge/hooks
+
+That is a **local hook, and local hooks are bypassable**: `git push --no-verify`
+skips it, and a contributor who never sets `core.hooksPath` is never gated at
+all. This project does not pretend otherwise — saying so plainly is the same
+discipline the package itself preaches about SKIPped checks.
+
+The actual enforcement is therefore **at review**: a maintainer verifies every
+commit in a pull request carries a matching `Signed-off-by` before merging, and
+a pull request that does not is fixed by signing off, never by waiving the
+requirement. Run the check yourself before opening one:
+
+    .vibeforge/gate.sh --only dco
