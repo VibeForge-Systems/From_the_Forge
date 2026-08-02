@@ -1,0 +1,25 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "vibeforge-gate",
+  "version": "1.0.0",
+  "description": "Stand up a repository-owned merge bar: a local pre-commit/pre-push gate that runs the checks a hosted CI service would have, without needing one. Declarative manifest, pinned tool versions, and a missing tool is reported SKIP and blocks rather than passing silently.",
+  "author": {
+    "name": "VibeForge Systems"
+  },
+  "homepage": "https://github.com/VibeForge-Systems/vibeforge-gate",
+  "repository": "https://github.com/VibeForge-Systems/vibeforge-gate",
+  "license": "Apache-2.0",
+  "keywords": [
+    "ci",
+    "pre-commit",
+    "pre-push",
+    "git-hooks",
+    "merge-gate",
+    "quality-gate",
+    "secret-scanning",
+    "sast",
+    "supply-chain",
+    "self-hosted",
+    "offline"
+  ]
+}

@@ -1,0 +1,193 @@
+# =============================================================================
+# vibeforge-gate manifest — Sovereign Agent Control Plane (Go)
+# =============================================================================
+# This is a WORKED EXAMPLE. It declares the same merge bar that repository's
+# hand-written scripts/ci-local.sh enforces, so the two can be run side by side
+# and compared. See EQUIVALENCE.md in this directory for the line-by-line
+# mapping and the four deliberate differences.
+#
+# Provenance: seven of these nine checks were imported from the five workflow
+# files that repo's hosted CI used to run; two were never in hosted CI at all
+# (they are pre-commit rules its CLAUDE.md mandates). The `mirrors:` field on
+# each check records where it came from — after the import, that field is
+# history, not a dependency. Nothing here reads those files at runtime.
+# =============================================================================
+
+meta:
+  name: sovereign-agent-control-plane
+  default_stage: push
+  # cedar is installed by cargo and lives in ~/.cargo/bin, which a non-login
+  # shell does not have on PATH. Without this the cedar check would report
+  # "missing" on a machine where it is installed — a false coverage gap.
+  path_prepend: ~/.cargo/bin
+
+checks:
+
+  # --- fast local invariants: run at every commit ---------------------------
+
+  - id: gofmt
+    desc: gateway sources are gofmt-clean
+    stage: commit
+    dir: gateway
+    mirrors: CLAUDE.md pre-commit rule — no hosted workflow ever ran this
+    why: |
+      Formatting drift shows up as noise in every later diff. This is cheap
+      enough to run on every commit, so it does.
+    run: |
+      out="$(gofmt -l internal/ cmd/)"
+      if [ -n "$out" ]; then echo "gofmt needed on:"; echo "$out"; exit 1; fi
+      echo "gofmt: clean"
+
+  - id: federation-boundary
+    desc: ADR-006 §2 reverse-import + §5 decision-point
+    stage: commit
+    dir: gateway
+    mirrors: .github/workflows/federation-boundary.yml (both jobs)
+    why: |
+      Federation is a SINK, never a SOURCE: the decision and audit modules must
+      not import the federation module, and the policy decision point must have
+      zero network-writable inputs. Together these make "authority-in requires a
+      conspicuous, build-failing change" a structural claim rather than a
+      convention. Non-silenceable — a red result is fixed in the code, never by
+      weakening the check.
+    run: |
+      bash tools/archcheck.sh reverse-import
+      bash tools/archcheck.sh decision-point
+
+  - id: no-static-credentials
+    desc: ADR-015 static credentials stay structurally unrepresentable
+    stage: commit
+    dir: gateway
+    mirrors: .github/workflows/no-static-credentials.yml (no-static-credential-fields job)
+    why: |
+      A security product that could physically store a long-lived agent secret
+      contradicts its own pitch. This is the type-reflection test asserting no
+      persisted principal/credential type has a field capable of holding one.
+      The workflow also carried a grep fallback for refs predating the Go types;
+      those types exist now, so only the real structural test is declared here.
+    run: |
+      go test -tags=architecture ./internal/identity/... -run 'NoStaticCredential|Unrepresentable'
+
+  # --- the full bar: everything above, plus these, before a push ------------
+
+  - id: gateway-build
+    desc: modules verified, builds, vets, tests
+    stage: push
+    dir: gateway
+    mirrors: .github/workflows/gateway-ci.yml
+    why: |
+      go.sum pins every dependency and -mod=readonly fails the build if a change
+      would need an unrecorded module, so silent dependency drift cannot slip
+      through.
+    run: |
+      go mod verify
+      go build -mod=readonly ./...
+      go vet ./...
+      go test -mod=readonly ./...
+
+  - id: secret-scan
+    desc: no hardcoded credential values anywhere in the tree
+    stage: push
+    tool: gitleaks
+    tool_version: "8.30.1"
+    version_cmd: gitleaks version
+    install: "go install github.com/gitleaks/gitleaks/v8@v8.30.1  (or let this runner fetch it)"
+    mirrors: .github/workflows/no-static-credentials.yml (secret-scan job)
+    why: |
+      gitleaks keys on the SHAPE and ENTROPY of credential VALUES, not on
+      identifier names — which is why it replaced a grep heuristic that could
+      not tell a stored credential from a doc comment naming one. The version is
+      pinned because a scanner that silently updated its ruleset could fail a
+      build with no diff. .gitleaks.toml allowlists only synthetic test vectors,
+      and that allowlist is reviewable.
+      This is the equivalent of the hosted "secret scanning" tier that is a paid
+      add-on on private repositories. Locally it is a 12 MB binary.
+    fetch: |
+      d="$(mktemp -d)"
+      curl -fsSL --max-time 90 \
+        "https://github.com/gitleaks/gitleaks/releases/download/v${VF_TOOL_VERSION}/gitleaks_${VF_TOOL_VERSION}_linux_x64.tar.gz" \
+        -o "$d/gl.tgz"
+      tar xzf "$d/gl.tgz" -C "$d" gitleaks
+      mv "$d/gitleaks" "$VF_TOOL_DEST"
+      rm -rf "$d"
+    run: |
+      "$VF_TOOL" detect --source "$VF_ROOT" --no-git --config "$VF_ROOT/.gitleaks.toml" --redact --no-banner
+
+  - id: dco
+    desc: every non-merge, non-bot commit ahead of main is signed off
+    stage: push
+    mirrors: .github/workflows/dco-check.yml
+    why: |
+      The right to relicense and donate this project is permanently lost the
+      moment one external contribution merges without inbound=outbound terms
+      over it — recovering it needs unanimous consent from every past
+      contributor. Sign-off is the contributor certifying those terms.
+      The hosted gate read PR commit metadata through the forge API. The local
+      analogue is the commits on this branch that are not yet on main, which is
+      the same set and needs no API, no token, and no network.
+    run: |
+      ref=main
+      git rev-parse --verify --quiet origin/main >/dev/null 2>&1 && ref=origin/main || true
+      base="$(git merge-base HEAD "$ref" 2>/dev/null || true)"
+      if [ -z "$base" ] || [ "$base" = "$(git rev-parse HEAD)" ]; then
+        echo "dco: no commits ahead of $ref to check"
+        exit 0
+      fi
+      bad=0
+      while read -r sha; do
+        [ -z "$sha" ] && continue
+        author="$(git show -s --format='%an' "$sha")"
+        case "$author" in *'[bot]') continue ;; esac
+        if ! git show -s --format='%B' "$sha" | grep -qiE '^Signed-off-by: .+ <.+@.+>'; then
+          printf '   missing Signed-off-by: %s  %s\n' "${sha:0:8}" "$(git show -s --format='%s' "$sha")"
+          bad=1
+        fi
+      done < <(git rev-list --no-merges "$base..HEAD")
+      if [ "$bad" -ne 0 ]; then
+        echo "fix with 'git commit -s' or 'git rebase --signoff $ref'"
+        exit 1
+      fi
+      echo "dco: every commit in $ref..HEAD is signed off"
+
+  - id: artifact-schemas
+    desc: JSON Schemas meta-validate + the audit chain reproduces
+    stage: push
+    probe: python3 -c 'import jsonschema'
+    install: "pip install 'jsonschema>=4,<5'"
+    mirrors: .github/workflows/artifact-validation.yml (schemas-and-chain job)
+    why: |
+      These spec artifacts were authored without the tooling to machine-check
+      them, and Cedar, the audit chain, and the federation boundary all key on
+      them. "Reasoned correct" is not a durable state — any later edit can
+      silently break schema validity, canonicalization, or hash reproducibility.
+    run: |
+      python3 scripts/validate_schemas.py
+      python3 scripts/verify_hash_chain.py
+
+  - id: cedar-policy
+    desc: cedar validate + every fixture authorizes to its expected decision
+    stage: push
+    tool: cedar
+    tool_version: "4.11.2"
+    version_cmd: cedar --version
+    install: "cargo install cedar-policy-cli --version 4.11.2 --locked"
+    mirrors: .github/workflows/artifact-validation.yml (cedar job)
+    why: |
+      The CLI version is pinned on the same discipline as everything else here:
+      a silent upgrade that changed validation behavior must show up as a
+      conscious diff in this manifest, not as a mystery failure.
+    run: |
+      python3 scripts/check_cedar.py
+
+  - id: test-race
+    desc: the test suite under the race detector
+    stage: push
+    dir: gateway
+    skip_env: SACP_CI_SKIP_RACE
+    mirrors: CLAUDE.md pre-commit rule — no hosted workflow ever ran this
+    why: |
+      Slow, and the only check here that no hosted workflow ever ran. Declared
+      skippable rather than dropped: skipping it is a choice you make on the
+      command line and see reported, not a gap you forget about.
+    run: |
+      SACP_POLICY_DIR="$VF_ROOT/policy/cedar" go test -race ./...

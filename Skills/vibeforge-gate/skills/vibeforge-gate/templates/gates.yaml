@@ -1,0 +1,110 @@
+# =============================================================================
+# <REPO NAME> — merge bar
+# =============================================================================
+# This file declares the checks that must pass before work leaves this
+# repository. It is the source of truth: `.vibeforge/gate.sh` runs it, the git
+# hooks in `.vibeforge/hooks/` enforce it, and if this repo ever gets a hosted
+# runner again, that runner should invoke this rather than restate it.
+#
+#   .vibeforge/gate.sh                 the full bar
+#   .vibeforge/gate.sh --stage commit  the fast subset
+#   .vibeforge/gate.sh --list          what is declared
+#   .vibeforge/gate.sh --explain <id>  why a check exists
+#
+# THE CONTRACT: green means every declared check actually ran and passed. A
+# check whose tool is missing is reported SKIP and the run exits non-zero —
+# never counted as a pass. Keep it that way.
+#
+# NOT COVERED BY THIS GATE  <-- fill this in and keep it current:
+#   - <e.g. cross-platform matrix: this runs on one machine, one OS>
+#   - <e.g. integration tests needing credentials this repo does not hold>
+#   - <e.g. container image build>
+# =============================================================================
+
+meta:
+  name: <repo-name>
+  default_stage: push
+  # Directories to prepend to PATH so installed tools are found rather than
+  # reported missing. Delete if not needed.
+  # path_prepend: ~/.cargo/bin:./node_modules/.bin:./.venv/bin:~/go/bin
+
+checks:
+
+  # --- stage: commit — fast, runs on every commit ---------------------------
+
+  - id: format
+    desc: sources are formatted
+    stage: commit
+    why: |
+      Formatting drift shows up as noise in every later diff. Cheap enough to
+      run on every commit, so it does.
+    run: |
+      # e.g. gofmt -l . | (! grep .)   /   cargo fmt --check
+      #      npx prettier --check .    /   ruff format --check .
+      echo "TODO: replace with this repo's format check"; exit 1
+
+  - id: lint
+    desc: linter is clean
+    stage: commit
+    run: |
+      echo "TODO: replace with this repo's linter"; exit 1
+
+  # --- stage: push — the full bar -------------------------------------------
+
+  - id: test
+    desc: the test suite
+    stage: push
+    why: |
+      <what breaks if this stops running>
+    run: |
+      echo "TODO: replace with this repo's test command"; exit 1
+
+  # --- a pinned external tool -----------------------------------------------
+  # Pattern for any binary outside the project's own dependency graph. The pin
+  # is enforced: a copy on PATH is used only if it reports this version, else
+  # the runner fetches the pinned build or reports SKIP.
+  #
+  # - id: secret-scan
+  #   desc: no credential values committed anywhere in the tree
+  #   stage: push
+  #   tool: gitleaks
+  #   tool_version: "8.30.1"
+  #   version_cmd: gitleaks version
+  #   install: "go install github.com/gitleaks/gitleaks/v8@v8.30.1"
+  #   why: |
+  #     Keys on the shape and entropy of credential values rather than on
+  #     identifier names, so it can tell a stored secret from a doc comment
+  #     that names one.
+  #   fetch: |
+  #     d="$(mktemp -d)"
+  #     curl -fsSL --max-time 90 \
+  #       "https://github.com/gitleaks/gitleaks/releases/download/v${VF_TOOL_VERSION}/gitleaks_${VF_TOOL_VERSION}_linux_x64.tar.gz" \
+  #       -o "$d/gl.tgz"
+  #     tar xzf "$d/gl.tgz" -C "$d" gitleaks
+  #     mv "$d/gitleaks" "$VF_TOOL_DEST"
+  #     rm -rf "$d"
+  #   run: |
+  #     "$VF_TOOL" detect --source "$VF_ROOT" --no-git --redact --no-banner
+
+  # --- a slow check the operator may skip ------------------------------------
+  # Reported on screen when skipped, and does NOT block — a gap you chose and
+  # can see is not the same as one you never knew about.
+  #
+  # - id: integration
+  #   desc: integration suite
+  #   stage: push
+  #   skip_env: SKIP_INTEGRATION
+  #   run: |
+  #     ...
+
+  # --- a check still being tuned (shadow mode) -------------------------------
+  # Runs, reports WARN on failure, never blocks. Promote by deleting the
+  # `enforce: false` line. Give it a deadline — a check that lives here forever
+  # is decoration.
+  #
+  # - id: new-lint-rule
+  #   desc: <what it checks>
+  #   stage: push
+  #   enforce: false
+  #   run: |
+  #     ...

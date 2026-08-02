@@ -1,0 +1,246 @@
+# =============================================================================
+# vibeforge-gate — its own merge bar
+# =============================================================================
+# This package tells other repositories to gate themselves, so it gates itself.
+# The manifest is also the largest worked example that ships: everything here
+# runs on every push to this repository.
+#
+#   .vibeforge/gate.sh                 the full bar
+#   .vibeforge/gate.sh --stage commit  the fast subset
+#   .vibeforge/gate.sh --list          what is declared
+#
+# NOT COVERED BY THIS GATE:
+#   - Behavior on bash 3.x (macOS default). The runner needs bash 4+ for
+#     associative arrays; this repo only ever runs it on the bash it has.
+#   - Behavior on non-Linux. The fetch examples in the catalog use linux_x64
+#     release URLs and have not been exercised elsewhere.
+#   - Whether the doctrine is any good. That is a review question, not a check.
+# =============================================================================
+
+meta:
+  name: vibeforge-gate
+  default_stage: push
+
+checks:
+
+  - id: shell-syntax
+    desc: every shell script parses
+    stage: commit
+    why: |
+      The runner and the hooks are the product. A syntax error in any of them
+      breaks every repository that has copied it. `bash -n` needs nothing
+      installed, so this can be unconditional.
+    run: |
+      bad=0
+      while read -r f; do
+        [ -f "$f" ] || continue
+        bash -n "$f" || { echo "syntax error: $f"; bad=1; }
+      done < <(git ls-files '*.sh' '*/hooks/pre-commit' '*/hooks/pre-push' '*/hooks/pre-receive')
+      [ "$bad" -eq 0 ] || exit 1
+      echo "shell scripts parse"
+
+  - id: manifest-parses
+    desc: this manifest is valid
+    stage: commit
+    why: |
+      A manifest that stops parsing takes the whole gate with it, and would
+      otherwise surface mid-push at the least convenient moment. --list parses
+      and validates without running anything.
+    run: |
+      "$VF_ROOT/.vibeforge/gate.sh" --list > /dev/null
+      echo "manifest parses"
+
+  - id: catalog-parses
+    desc: every catalog and example manifest parses
+    stage: commit
+    why: |
+      The catalog files are what people copy. A block that the runner's own
+      parser rejects is a broken example that fails in someone else's repo, on
+      their first run, with them assuming they made the mistake.
+      Each is checked by pointing the runner at it — the same parser that will
+      read it in anger.
+    run: |
+      bad=0
+      for m in skills/vibeforge-gate/catalog/*.yaml \
+               skills/vibeforge-gate/templates/gates.yaml \
+               skills/vibeforge-gate/examples/*/gates.yaml; do
+        [ -f "$m" ] || continue
+        if VF_GATE_MANIFEST="$VF_ROOT/$m" "$VF_ROOT/.vibeforge/gate.sh" --list >/dev/null 2>&1; then
+          echo "  ok    $m"
+        else
+          echo "  FAIL  $m"
+          VF_GATE_MANIFEST="$VF_ROOT/$m" "$VF_ROOT/.vibeforge/gate.sh" --list 2>&1 | sed 's/^/        /' || true
+          bad=1
+        fi
+      done
+      [ "$bad" -eq 0 ] || exit 1
+
+  - id: templates-in-sync
+    desc: the installed runner matches the shipped template
+    stage: commit
+    why: |
+      This repo dogfoods its own runner by copying the template into
+      .vibeforge/. Two copies drift: a fix lands in one and ships from the
+      other. This check makes the drift impossible to commit.
+    run: |
+      if ! diff -q skills/vibeforge-gate/templates/gate.sh .vibeforge/gate.sh >/dev/null; then
+        echo "gate.sh has drifted from its template:"
+        diff -u skills/vibeforge-gate/templates/gate.sh .vibeforge/gate.sh || true
+        echo "sync with: cp skills/vibeforge-gate/templates/gate.sh .vibeforge/gate.sh"
+        exit 1
+      fi
+      for h in pre-commit pre-push; do
+        if ! diff -q "skills/vibeforge-gate/templates/hooks/$h" ".vibeforge/hooks/$h" >/dev/null; then
+          echo "hook $h has drifted from its template"
+          exit 1
+        fi
+      done
+      echo "runner and hooks match their templates"
+
+  - id: selftest
+    desc: the runner's contract holds
+    stage: push
+    why: |
+      The whole value of this package is that green means every declared check
+      actually ran. That property lives in the exit-code and SKIP semantics, so
+      those are tested rather than documented and hoped for: 29 cases covering
+      exit 0/1/2/3, SKIP-blocks vs deliberate-skip-does-not, version pin and
+      sha256 enforcement, timeouts, shadow-mode deadlines, advisory mode,
+      stage selection and parser strictness.
+    run: ./selftest.sh
+
+  - id: skill-frontmatter
+    desc: SKILL.md has the frontmatter a skill loader needs
+    stage: commit
+    why: |
+      A skill with a malformed or missing `name`/`description` silently never
+      triggers, which looks exactly like the skill being unhelpful.
+    run: |
+      f=skills/vibeforge-gate/SKILL.md
+      head -1 "$f" | grep -qx -- '---' || { echo "no opening frontmatter fence"; exit 1; }
+      grep -qE '^name: vibeforge-gate$' "$f" || { echo "missing or wrong 'name:'"; exit 1; }
+      grep -qE '^description: .{40,}' "$f" || { echo "missing or too-thin 'description:'"; exit 1; }
+      grep -qE '^---$' <(tail -n +2 "$f") || { echo "no closing frontmatter fence"; exit 1; }
+      echo "SKILL.md frontmatter ok"
+
+  - id: plugin-json
+    desc: plugin.json is valid JSON with the required fields
+    stage: commit
+    probe: python3 -c ''
+    install: "python3 (any 3.x)"
+    run: |
+      python3 - <<'EOF'
+      import json, sys
+      d = json.load(open(".claude-plugin/plugin.json"))
+      for k in ("name", "version", "description"):
+          if not d.get(k):
+              print(f"plugin.json missing {k}"); sys.exit(1)
+      print("plugin.json ok:", d["name"], d["version"])
+      EOF
+
+  - id: exec-bits
+    desc: every tracked script and hook is committed executable
+    stage: commit
+    why: |
+      On this filesystem the executable bit is forced on and core.filemode is
+      off, so a script committed 100644 runs fine HERE — and fails with
+      "Permission denied" on every normal clone, where git materializes the
+      index mode. The hooks are worse: git silently ignores a non-executable
+      hook. Found by the first real --pristine run, which is exactly the class
+      of local-only accident that flag exists to catch. The index mode is the
+      only mode consumers ever see, so that is what this checks.
+    run: |
+      bad=0
+      while read -r mode _rest; do
+        f="${_rest##*$'\t'}"
+        case "$f" in */reference-*) continue ;; esac
+        if [ "$mode" != "100755" ]; then
+          echo "  $f is committed $mode (fix: git update-index --chmod=+x $f)"
+          bad=1
+        fi
+      done < <(git ls-files -s '*.sh' '*/hooks/pre-commit' '*/hooks/pre-push' '*/hooks/pre-receive')
+      [ "$bad" -eq 0 ] || exit 1
+      echo "all scripts and hooks are committed 100755"
+
+  - id: no-merge-markers
+    desc: no unresolved conflict markers
+    stage: commit
+    run: |
+      if git grep -nE '^(<<<<<<<|>>>>>>>) ' -- . ; then
+        echo "unresolved merge conflict markers above"
+        exit 1
+      fi
+      echo "no conflict markers"
+
+  - id: dco
+    desc: every non-merge, non-bot commit ahead of main is signed off
+    stage: push
+    why: |
+      Apache-2.0 with explicit inbound=outbound terms, stated in the root DCO
+      file and CONTRIBUTING.md. Sign-off is the contributor certifying them, and
+      that right is lost permanently the moment one contribution merges without
+      it — recovering it afterward needs unanimous consent from every past
+      contributor.
+      This check runs at pre-push, which is bypassable and opt-in, so it is not
+      the real enforcement — a maintainer verifying sign-off at review is. The
+      DCO file says so rather than implying the hook is a boundary it is not.
+    run: |
+      base_ref=main
+      git rev-parse --verify --quiet origin/main >/dev/null 2>&1 && base_ref=origin/main || true
+      base="$(git merge-base HEAD "$base_ref" 2>/dev/null || true)"
+      if [ -z "$base" ] || [ "$base" = "$(git rev-parse HEAD)" ]; then
+        echo "dco: no commits ahead of $base_ref to check"
+        exit 0
+      fi
+      bad=0
+      while read -r sha; do
+        [ -z "$sha" ] && continue
+        author="$(git show -s --format='%an' "$sha")"
+        case "$author" in *'[bot]') continue ;; esac
+        if ! git show -s --format='%B' "$sha" | grep -qiE '^Signed-off-by: .+ <.+@.+>'; then
+          printf '   missing Signed-off-by: %s  %s\n' "${sha:0:8}" "$(git show -s --format='%s' "$sha")"
+          bad=1
+        fi
+      done < <(git rev-list --no-merges "$base..HEAD")
+      if [ "$bad" -ne 0 ]; then
+        echo "fix with 'git commit -s' or 'git rebase --signoff $base_ref'"
+        exit 1
+      fi
+      echo "dco: every commit in $base_ref..HEAD is signed off"
+
+  - id: shellcheck
+    desc: shellcheck is clean
+    stage: push
+    tool: shellcheck
+    tool_version: "0.10.0"
+    version_cmd: shellcheck --version
+    install: "apt install shellcheck  /  brew install shellcheck  /  dnf install ShellCheck"
+    why: |
+      The runner and the hooks are the product, and they are pure bash — so the
+      bash linter is the closest thing this package has to a compiler.
+      It was not installed on the machine this was written on, and the first run
+      correctly reported SKIP and exited 2 rather than going green without it.
+      The `fetch:` below is the fix that keeps the check honest: the pinned
+      static build is downloaded once and cached, so the gate does not depend on
+      whatever the host distribution happens to package. The sha256 pins the
+      bytes, not just the version, and re-verifies the cache on every run.
+    fetch_sha256: "f35ae15a4677945428bdfe61ccc297490d89dd1e544cc06317102637638c6deb"
+    fetch: |
+      d="$(mktemp -d)"
+      curl -fsSL --max-time 120 \
+        "https://github.com/koalaman/shellcheck/releases/download/v${VF_TOOL_VERSION}/shellcheck-v${VF_TOOL_VERSION}.linux.x86_64.tar.xz" \
+        -o "$d/sc.tar.xz"
+      tar xJf "$d/sc.tar.xz" -C "$d"
+      mv "$d/shellcheck-v${VF_TOOL_VERSION}/shellcheck" "$VF_TOOL_DEST"
+      rm -rf "$d"
+    run: |
+      # examples/*/reference-* are VERBATIM copies of a predecessor gate,
+      # preserved as evidence for the equivalence audit. Linting them would
+      # invite edits, and an edited copy is no longer evidence of anything.
+      mapfile -t files < <(
+        git ls-files '*.sh' '*/hooks/pre-commit' '*/hooks/pre-push' '*/hooks/pre-receive' \
+          | grep -v '/reference-'
+      )
+      [ "${#files[@]}" -eq 0 ] && { echo "no shell scripts"; exit 0; }
+      "$VF_TOOL" -S warning "${files[@]}"
+      echo "shellcheck: clean (${#files[@]} scripts)"

@@ -1,0 +1,62 @@
+[
+  {
+    "query": "We've burned through our CI minutes and the branch checks stopped running. I still want those checks before I merge.",
+    "should_trigger": true
+  },
+  {
+    "query": "Can you set up a pre-commit hook that runs our linter and tests before anything gets committed?",
+    "should_trigger": true
+  },
+  {
+    "query": "Add a secret scanner to the checks that run before I push.",
+    "should_trigger": true
+  },
+  {
+    "query": "I want the dependency vulnerability scanning that's behind the paid tier, but running locally for free.",
+    "should_trigger": true
+  },
+  {
+    "query": "Our gate went green but I'm fairly sure the scanner isn't even installed on this machine. Can you check?",
+    "should_trigger": true
+  },
+  {
+    "query": "We're moving off GitHub Actions to a self-hosted forge. Get the workflow checks running locally first so we don't lose coverage in the gap.",
+    "should_trigger": true
+  },
+  {
+    "query": "This new lint rule fails on half the codebase. I want it reporting but not blocking anyone yet.",
+    "should_trigger": true
+  },
+  {
+    "query": "Is this branch ready to merge?",
+    "should_trigger": true
+  },
+  {
+    "query": "gitleaks is pinned to 8.30.1 in our gate but my machine has 8.18 — what does the gate do about that?",
+    "should_trigger": true
+  },
+  {
+    "query": "Make the pre-push hook skip the race detector pass, it takes four minutes.",
+    "should_trigger": true
+  },
+  {
+    "query": "Audit our local gate — I want to know if anything in it can pass without actually running.",
+    "should_trigger": true
+  },
+  {
+    "query": "Write me a GitHub Actions workflow that builds and tests this Go service on push.",
+    "should_trigger": false
+  },
+  {
+    "query": "Run the tests in internal/audit and tell me why TestMerkleRoot is failing.",
+    "should_trigger": false
+  },
+  {
+    "query": "What does this Cedar policy evaluate to for a CREDENTIAL_ACCESS action?",
+    "should_trigger": false
+  },
+  {
+    "query": "Refactor this bash script so it's easier to read.",
+    "should_trigger": false
+  }
+]

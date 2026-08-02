@@ -1,0 +1,190 @@
+# =============================================================================
+# Catalog — supply chain and security
+# =============================================================================
+# These are the checks most often sold as a paid add-on: secret scanning, static
+# analysis, dependency review, license policy, SBOM. Every one of them is an
+# open-source tool that runs on a laptop. What the add-on sells is the
+# integration, not the capability.
+#
+# Copy a block into .vibeforge/gates.yaml and adjust. Version pins below are
+# starting points — check for a newer release, pin deliberately, and treat a
+# bump as a reviewable one-line commit.
+#
+# Read the `why:` before adopting one. A check nobody can justify is a check
+# that gets disabled the first time it is inconvenient.
+# =============================================================================
+
+checks:
+
+  # --- secret scanning ------------------------------------------------------
+
+  - id: secret-scan
+    desc: no credential values committed anywhere in the tree
+    stage: push
+    tool: gitleaks
+    tool_version: "8.30.1"
+    version_cmd: gitleaks version
+    install: "go install github.com/gitleaks/gitleaks/v8@v8.30.1"
+    fetch_sha256: "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509"
+    why: |
+      Keys on the SHAPE and ENTROPY of credential values, not on identifier
+      names — which is what lets it tell a stored secret from a doc comment or
+      a variable called `password`. Pin it: a scanner that silently updates its
+      ruleset can fail a build with no diff, or quietly stop catching something.
+      Allowlist synthetic test vectors in .gitleaks.toml rather than weakening
+      the rules; an allowlist is reviewable, a loosened rule is not.
+    fetch: |
+      d="$(mktemp -d)"
+      curl -fsSL --max-time 90 \
+        "https://github.com/gitleaks/gitleaks/releases/download/v${VF_TOOL_VERSION}/gitleaks_${VF_TOOL_VERSION}_linux_x64.tar.gz" \
+        -o "$d/gl.tgz"
+      tar xzf "$d/gl.tgz" -C "$d" gitleaks
+      mv "$d/gitleaks" "$VF_TOOL_DEST"
+      rm -rf "$d"
+    run: |
+      "$VF_TOOL" detect --source "$VF_ROOT" --no-git --config "$VF_ROOT/.gitleaks.toml" --redact --no-banner
+
+  - id: secret-scan-history
+    desc: no credential values anywhere in git history
+    stage: manual
+    tool: gitleaks
+    tool_version: "8.30.1"
+    version_cmd: gitleaks version
+    install: "go install github.com/gitleaks/gitleaks/v8@v8.30.1"
+    fetch_sha256: "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509"
+    why: |
+      The working-tree scan misses a secret that was committed and later
+      deleted — which is still published, still in every clone, and still needs
+      rotating. Slow on a large history, hence `manual`: run it when onboarding
+      a repo and after any incident, not on every push.
+    run: |
+      "$VF_TOOL" detect --source "$VF_ROOT" --redact --no-banner
+
+  # --- static analysis (SAST) ------------------------------------------------
+
+  - id: sast
+    desc: static analysis for security-relevant patterns
+    stage: push
+    tool: semgrep
+    install: "pipx install semgrep  (or: pip install semgrep)"
+    why: |
+      The code-scanning equivalent. The `p/ci` ruleset is the maintained OSS
+      baseline and runs offline once the rules are cached. Start with
+      `enforce: false` on an existing codebase — a SAST tool introduced in
+      blocking mode on day one is a tool that gets removed by Friday.
+    run: |
+      "$VF_TOOL" --config p/ci --error --quiet --metrics=off .
+
+  # --- dependency vulnerabilities -------------------------------------------
+
+  - id: vuln-scan
+    desc: no known-vulnerable dependencies
+    stage: push
+    tool: osv-scanner
+    tool_version: "1.9.2"
+    install: "go install github.com/google/osv-scanner/cmd/osv-scanner@v1.9.2"
+    why: |
+      The dependency-review equivalent, and the broadest single win for a mixed
+      repo: it reads lockfiles across most ecosystems, so one check covers Go,
+      npm, PyPI, Cargo and more. Runs against the lockfile, so it sees the
+      transitive versions actually resolved rather than declared ranges.
+    run: |
+      "$VF_TOOL" --recursive --skip-git "$VF_ROOT"
+
+  # Language-native alternatives — narrower, but no extra tool to install.
+  #
+  # - id: vuln-go
+  #   desc: no known-vulnerable Go dependencies
+  #   stage: push
+  #   dir: .
+  #   tool: govulncheck
+  #   install: "go install golang.org/x/vuln/cmd/govulncheck@latest"
+  #   why: |
+  #     Narrower than a lockfile scanner in a useful way — it reports only
+  #     vulnerabilities in code paths your binary actually reaches, so its
+  #     findings are almost all actionable.
+  #   run: '"$VF_TOOL" ./...'
+  #
+  # - id: vuln-python
+  #   desc: no known-vulnerable Python dependencies
+  #   stage: push
+  #   needs: pip-audit
+  #   install: "pipx install pip-audit"
+  #   run: pip-audit --strict
+  #
+  # - id: vuln-rust
+  #   desc: no known-vulnerable crates
+  #   stage: push
+  #   needs: cargo-audit
+  #   install: "cargo install cargo-audit --locked"
+  #   run: cargo audit
+  #
+  # - id: vuln-node
+  #   desc: no known-vulnerable npm dependencies
+  #   stage: push
+  #   why: |
+  #     `npm audit` exits non-zero for advisories at or above the threshold.
+  #     Pick a threshold you will actually hold to; `--audit-level=high` that
+  #     everyone overrides is worse than `critical` that stops people.
+  #   run: npm audit --audit-level=high
+
+  # --- license policy --------------------------------------------------------
+
+  - id: licenses
+    desc: dependency licenses stay inside policy
+    stage: push
+    tool: go-licenses
+    tool_version: "1.6.0"
+    version_cmd: go version -m "$(command -v go-licenses)"
+    install: "go install github.com/google/go-licenses@v1.6.0"
+    why: |
+      A copyleft dependency arriving transitively is a legal problem found late
+      and expensively; the cheap moment to check is when it enters. The
+      paid-tier name for this is "license compliance" — the capability is a
+      tree walk over metadata your package manager already has.
+      Go shown here (the version_cmd reads the pin out of the binary's own
+      build info, since go-licenses has no --version). For other stacks swap
+      the tool: license-checker (npm), pip-licenses (Python), cargo-deny
+      (Rust) — same shape, same policy line.
+    run: |
+      "$VF_TOOL" check ./... --disallowed_types=forbidden,restricted
+
+  # --- SBOM ------------------------------------------------------------------
+
+  - id: sbom
+    desc: the committed SBOM still describes the tree
+    stage: push
+    tool: syft
+    tool_version: "1.18.1"
+    version_cmd: syft version
+    install: "curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b ~/.local/bin v1.18.1"
+    fetch_sha256: "3aa0fd1c2479f8976122802422480e45dd6c814a693da4f550b4d39af14f8cae"
+    fetch: |
+      d="$(mktemp -d)"
+      curl -fsSL --max-time 120 \
+        "https://github.com/anchore/syft/releases/download/v${VF_TOOL_VERSION}/syft_${VF_TOOL_VERSION}_linux_amd64.tar.gz" \
+        -o "$d/syft.tgz"
+      tar xzf "$d/syft.tgz" -C "$d" syft
+      mv "$d/syft" "$VF_TOOL_DEST"
+      rm -rf "$d"
+    why: |
+      Increasingly a procurement requirement, and a paid-tier feature at every
+      hosted forge. A committed-but-stale SBOM is worse than none — it
+      documents a dependency set you no longer ship. So the check regenerates
+      with the pinned syft and diffs against the committed copy, volatile
+      lines (timestamp, document UUID) stripped; the version pin is what makes
+      that diff meaningful.
+      First run: no sbom.spdx exists yet — the check writes one and fails
+      once, telling you to review and commit it.
+    run: |
+      out="$(mktemp)"
+      "$VF_TOOL" scan "dir:$VF_ROOT" -q -o spdx-tag-value \
+        | grep -vE '^(Created|DocumentNamespace|LicenseListVersion):' > "$out"
+      if [ ! -f "$VF_ROOT/sbom.spdx" ]; then
+        cp "$out" "$VF_ROOT/sbom.spdx"
+        echo "no sbom.spdx was committed — wrote one; review it and commit"
+        exit 1
+      fi
+      diff -u "$VF_ROOT/sbom.spdx" "$out" \
+        || { echo "sbom.spdx is stale — review the diff, regenerate, commit"; exit 1; }
+      echo "sbom.spdx matches the tree"
