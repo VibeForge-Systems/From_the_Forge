@@ -22,6 +22,16 @@ checks:
       The hosted version of this check read PR commit metadata through the forge
       API. The local analogue is the commits on this branch that are not yet on
       the base, which is the same set in normal use.
+      Sign-off is matched with git's own trailer parser rather than a regex over
+      the message body. A regex accepts text that merely looks like a trailer:
+      a Signed-off-by line pasted directly under the subject with no blank line
+      before it, or one followed by more prose, is not a trailer and `git
+      interpret-trailers` does not see it — but `grep '^Signed-off-by:'` does.
+      That gap is not hypothetical; it is how a malformed sign-off passed this
+      check while `git show --format='%(trailers)'` reported the commit as
+      having none. Needs git 2.22+ for `%(trailers:key=)`; on older git the
+      format yields nothing, so every commit reads as unsigned and the check
+      fails loudly rather than passing silently.
     run: |
       base_ref=main
       git rev-parse --verify --quiet origin/main >/dev/null 2>&1 && base_ref=origin/main || true
@@ -35,7 +45,7 @@ checks:
         [ -z "$sha" ] && continue
         author="$(git show -s --format='%an' "$sha")"
         case "$author" in *'[bot]') continue ;; esac
-        if ! git show -s --format='%B' "$sha" | grep -qiE '^Signed-off-by: .+ <.+@.+>'; then
+        if ! git show -s --format='%(trailers:key=Signed-off-by)' "$sha" | grep -qE '<.+@.+>'; then
           printf '   missing Signed-off-by: %s  %s\n' "${sha:0:8}" "$(git show -s --format='%s' "$sha")"
           bad=1
         fi
