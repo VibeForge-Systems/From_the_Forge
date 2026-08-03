@@ -32,12 +32,26 @@ command executed, and every pinned version, is identical.
 | `federation-boundary (ADR-006)` | `federation-boundary` | `archcheck.sh reverse-import`, `archcheck.sh decision-point` | identical |
 | `no-static-credentials (structural)` | `no-static-credentials` | `go test -tags=architecture ./internal/identity/... -run 'NoStaticCredential\|Unrepresentable'` | identical |
 | `gitleaks` | `secret-scan` | `gitleaks detect --source <root> --no-git --config .gitleaks.toml --redact --no-banner`, pinned 8.30.1 | identical command + pin (see difference 2) |
-| `dco-check` | `dco` | merge-base against `origin/main`, `git rev-list --no-merges`, `[bot]` authors exempt, `Signed-off-by` regex | identical logic, transcribed |
+| `dco-check` | `dco` | merge-base against `origin/main`, `git rev-list --no-merges`, `[bot]` authors exempt, `Signed-off-by` regex | identical logic, transcribed (see note below) |
 | `artifact-validation` | `artifact-schemas` + `cedar-policy` | `validate_schemas.py`, `verify_hash_chain.py`, `check_cedar.py` | same three commands, split into two checks (difference 1) |
 | `test-race (CLAUDE.md)` | `test-race` | `SACP_POLICY_DIR=<root>/policy/cedar go test -race ./...`, skippable via `SACP_CI_SKIP_RACE=1` | identical, same env-var name |
 
 The `-race` env var kept its original name deliberately: the point of the
 extraction is that the people already using this gate do not have to relearn it.
+
+> **Note on `dco`, added after this audit.** The `Signed-off-by` regex
+> transcribed here — `grep -qiE '^Signed-off-by: .+ <.+@.+>'` — accepts text that
+> merely looks like a trailer. A sign-off line sitting directly under the subject
+> with no blank line before it, or one followed by further prose, is not a git
+> trailer, and `git interpret-trailers` does not see it; the regex does. The
+> catalog version in `catalog/universal.yaml` has since been changed to match
+> with `%(trailers:key=Signed-off-by)` instead.
+>
+> **This file's manifest deliberately still carries the regex.** It is the record
+> of what that migration actually transcribed, and the verdict above says
+> "identical logic" — changing the manifest now would make that sentence false
+> and destroy the evidence the audit rests on. Copy the catalog block, not this
+> one, when building a new gate.
 
 ## The four differences, and why each one exists
 

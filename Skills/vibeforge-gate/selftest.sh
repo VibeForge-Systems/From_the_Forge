@@ -396,6 +396,60 @@ else
 fi
 if [ "$VERBOSE" = 1 ]; then sed 's/^/      /' <<<"$out"; fi
 
+# --- sign-off is matched as a git trailer, not as a line of text --------------
+# Cannot go through ok(): needs a `main` branch with commits ahead of it, and the
+# distinction under test is between two commit MESSAGES rather than two
+# manifests. A Signed-off-by line sitting directly under the subject with no
+# blank line before it is not a git trailer — `git interpret-trailers` does not
+# see it — but `grep '^Signed-off-by:'` does. Matching with the regex therefore
+# accepts a sign-off that git itself reports as absent, which is how one slipped
+# through. This pins the distinction so the matcher cannot be "simplified" back.
+drepo="$WORK/dco-trailer"
+mkdir -p "$drepo/.vibeforge"
+( cd "$drepo" && git init -q . && git symbolic-ref HEAD refs/heads/main \
+    && git config user.email t@t && git config user.name t )
+printf '%s\n' 'meta:
+  name: t
+checks:
+  - id: dco
+    run: |
+      base="$(git merge-base HEAD main)"
+      bad=0
+      while read -r sha; do
+        [ -z "$sha" ] && continue
+        if ! git show -s --format="%(trailers:key=Signed-off-by)" "$sha" | grep -qE "<.+@.+>"; then
+          echo "missing Signed-off-by: ${sha:0:8}"
+          bad=1
+        fi
+      done < <(git rev-list --no-merges "$base..HEAD")
+      [ "$bad" -eq 0 ] || exit 1
+      echo "every commit is signed off"' > "$drepo/.vibeforge/gates.yaml"
+( cd "$drepo" && git add -A && git commit -qm "base" && git checkout -q -b topic )
+
+dco_case() {  # NAME COMMIT_MESSAGE EXPECTED_RC EXPECT_TEXT
+  ( cd "$drepo" && git commit -q --allow-empty -m "$2" )
+  local out rc=0
+  out="$( cd "$drepo" && env -u VF_GATE_MANIFEST -u VF_GATE_ALLOW_SKIP \
+            VF_GATE_NO_COLOR=1 VF_GATE_CACHE="$drepo/.cache" \
+            bash "$RUNNER" 2>&1 )" || rc=$?
+  if [ "$rc" = "$3" ] && grep -qF -- "$4" <<<"$out"; then
+    printf '%s  ok  %s%s\n' "$grn" "$rst" "$1"; PASS=$((PASS + 1))
+  else
+    printf '%s  FAIL%s %s %s(exit %s, wanted %s)%s\n' "$red" "$rst" "$1" "$dim" "$rc" "$3" "$rst"
+    FAIL=$((FAIL + 1)); VERBOSE=1
+  fi
+  [ "$VERBOSE" = 1 ] && sed 's/^/      /' <<<"$out"
+  ( cd "$drepo" && git reset -q --hard HEAD~1 )
+  return 0
+}
+
+dco_case "a real Signed-off-by trailer passes" \
+  "$(printf 'feat: thing\n\nSigned-off-by: A B <a@b.com>')" 0 "every commit is signed off"
+dco_case "Signed-off-by under the subject with no blank line is not a trailer" \
+  "$(printf 'feat: thing\nSigned-off-by: A B <a@b.com>')" 1 "missing Signed-off-by"
+dco_case "a trailer followed by more prose is not a trailer block" \
+  "$(printf 'feat: thing\n\nSigned-off-by: A B <a@b.com>\n\nmore prose here')" 1 "missing Signed-off-by"
+
 # --- summary ------------------------------------------------------------------
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

@@ -221,6 +221,14 @@ checks:
       moment one contribution merges without it — recovering it afterward needs
       unanimous consent from every past contributor, so the check is repo-wide
       rather than scoped to the directory that first needed it.
+      Sign-off is matched with git's own trailer parser, not a regex over the
+      message body. A regex accepts text that merely looks like a trailer — a
+      Signed-off-by line pasted under the subject with no blank line, or one
+      followed by more prose — which git does not count as a trailer at all.
+      That is how the migration's retroactive sign-off passed this check while
+      `git show --format='%(trailers)'` reported the commit as having none.
+      Needs git 2.22+; on older git the format yields nothing, so the check
+      fails loudly rather than passing silently.
       This check runs at pre-push, which is bypassable and opt-in, so it is not
       the real enforcement — a maintainer verifying sign-off at review is. The
       DCO file says so rather than implying the hook is a boundary it is not.
@@ -237,7 +245,7 @@ checks:
         [ -z "$sha" ] && continue
         author="$(git show -s --format='%an' "$sha")"
         case "$author" in *'[bot]') continue ;; esac
-        if ! git show -s --format='%B' "$sha" | grep -qiE '^Signed-off-by: .+ <.+@.+>'; then
+        if ! git show -s --format='%(trailers:key=Signed-off-by)' "$sha" | grep -qE '<.+@.+>'; then
           printf '   missing Signed-off-by: %s  %s\n' "${sha:0:8}" "$(git show -s --format='%s' "$sha")"
           bad=1
         fi
