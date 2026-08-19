@@ -9,6 +9,11 @@
       "name": "vibeforge-gate",
       "source": "./Skills/vibeforge-gate",
       "description": "Repository-owned merge bar: a local pre-commit/pre-push gate that runs the checks a hosted CI service would have, without needing one."
+    },
+    {
+      "name": "coroner",
+      "source": "./Skills/coroner",
+      "description": "The VibeForge Systems AI Code Coroner: adversarial architecture review as a read-only subagent — severity-ranked, file-cited findings, pre-mortem exhibits, and a strangler refactor plan. It cannot edit — diagnosis is the deliverable."
     }
   ]
 }
