@@ -40,7 +40,13 @@ cp Skills/coroner/commands/coroner-review.md ~/.claude/commands/
 ## Verifying it registered
 
 Ask Claude Code what subagents it sees, or check that `coroner` appears in the agent list
-with tools `Read, Grep, Glob`.
+with a read-only tool set.
+
+The shipped frontmatter grants `Read`, `Grep`, `Glob` and Context7's two documentation-lookup
+tools. **Adjust that list to your host.** The Context7 entries are named for a specific MCP
+server — if you do not run it, or yours is registered under a different name, edit or remove
+them. They are worth keeping where available: they are what lets a finding about library
+behaviour carry High confidence rather than Medium.
 
 **The most common failure is missing or malformed frontmatter.** An agent file without a
 leading `---` block containing `name:` and `description:` is not registered as an

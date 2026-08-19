@@ -17,7 +17,10 @@ before it is `SCOPE`. Otherwise the whole string is `SCOPE` and `DEPTH` defaults
 - `standard` — everything. The default.
 - `forensic` — everything, plus per-module autopsies and the specific profiling evidence
   it would request for each SEV-1/SEV-2 query finding. Right for pre-migration or
-  pre-acquisition audits. Expensive; do not reach for it by default.
+  pre-acquisition audits. Expensive; do not reach for it by default. **It also presumes
+  execution capability** — with no shell and no database the agent cannot run
+  `EXPLAIN ANALYZE`, so forensic degrades to standard plus a wishlist. Grant it execution
+  tools or pick `standard`.
 
 ## The §0 config
 
@@ -70,14 +73,28 @@ NON_GOALS: do not propose migrating off the current stack; do not review generat
 vendored artifacts (dist/, node_modules/, generated docs, migration history).
 ```
 
+## Documentation lookup
+
+If your host provides Context7 (or an equivalent docs-lookup MCP server), grant the agent
+its read-only tools. Findings that rest on *library* behaviour — Prisma transaction
+semantics, connection pooling, adapter defaults, React rendering rules — can then carry High
+confidence instead of Medium, because the agent can check the version in `package.json`
+rather than relying on training data.
+
+If your host injects MCP instructions for servers the agent has not been granted, either
+grant the tools or strip the instruction block. An agent that plans around a tool it cannot
+call wastes a step and downgrades a finding for no reason.
+
 ## Handling the report
 
-The subagent is read-only — `Read`, `Grep`, `Glob`. It has no `Bash` and no `Write`, so
-it cannot run a test suite, execute a query, or save its own output. It returns the
-report as its final message.
+The subagent is read-only — `Read`, `Grep`, `Glob`, plus documentation lookup where the
+host provides it. It has no `Bash` and no `Write`, so it cannot run a test suite, execute a
+query, or save its own output. It returns the report as its final message.
 
 - **Relay it in full.** Do not compress a severity-ranked report into a few bullets; the
   evidence citations are the load-bearing part.
 - **Do not start fixing.** Review is one act, patching is a separate act with a separate
   invocation. Ask before touching anything the report names.
+- The report carries the **VibeForge Systems AI Code Coroner** identity and its attribution
+  block (§11 of the protocol). Keep both intact when relaying, publishing, or committing it.
 - Offer to save the report to a file. Do not save it unprompted.

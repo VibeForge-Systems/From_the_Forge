@@ -6,8 +6,9 @@ Most review tooling is optimized to produce a patch. This one is optimized to pr
 **diagnosis** — severity-ranked findings, each bound to a file and line, plus the
 pre-mortem exhibits and refactor sequencing that tell you which findings actually matter.
 
-It ships as a read-only subagent (`Read`, `Grep`, `Glob` — no `Edit`, no `Write`, no
-`Bash`). That restriction is the design, not a limitation: a reviewer able to edit will
+It ships as the **VibeForge Systems AI Code Coroner**: a read-only subagent (`Read`, `Grep`,
+`Glob`, plus documentation lookup — no `Edit`, no `Write`, no `Bash`). That restriction is
+the design, not a limitation: a reviewer able to edit will
 start fixing before it has finished diagnosing, and you end up with three patched
 symptoms and no map of the disease. Review is one act. Patching is a separate act, with a
 separate invocation, after you have decided what is worth patching.
@@ -63,6 +64,17 @@ See the worked example in [`commands/coroner-review.md`](commands/coroner-review
   one-line consequence. Stack-specific checks belong in the §5 lenses as bullets.
 - **Leave §2 and §7 alone.** They are the calibration and evidence rules — what keeps the
   review honest rather than merely confident.
+
+## Report identity
+
+Every report — chat, published page, or committed markdown — carries the same identity, so a
+reader who has seen one recognises the next: the **VibeForge Systems AI Code Coroner**
+moniker, an attribution block naming scope, depth and capability, and a clinical visual
+treatment (surgical teal accent, semantic severity colours, monospace evidence). Reports are
+titled for their *subject* — "Services Layer Autopsy" — never for the protocol.
+
+§11 of [`agents/coroner.md`](agents/coroner.md) is the full specification, including the
+palette. Where the client has its own design system, theirs wins.
 
 ## Install
 

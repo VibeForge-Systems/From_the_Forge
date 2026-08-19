@@ -13,7 +13,7 @@
     {
       "name": "coroner",
       "source": "./Skills/coroner",
-      "description": "Adversarial architecture review as a read-only subagent: severity-ranked, file-cited findings, pre-mortem exhibits, and a strangler refactor plan. It cannot edit — diagnosis is the deliverable."
+      "description": "The VibeForge Systems AI Code Coroner: adversarial architecture review as a read-only subagent — severity-ranked, file-cited findings, pre-mortem exhibits, and a strangler refactor plan. It cannot edit — diagnosis is the deliverable."
     }
   ]
 }
