@@ -7,6 +7,7 @@ Collection of Interesting Tips, Tricks and Reference Cards, Quick Code Snipits a
 | Directory | What it is |
 |---|---|
 | [`Skills/vibeforge-gate/`](Skills/vibeforge-gate/) | A repository-owned merge bar — a local pre-commit/pre-push gate that runs the checks a hosted CI service would have, without needing one. Also a Claude Code plugin and skill. |
+| [`Skills/coroner/`](Skills/coroner/) | The Coroner Protocol — adversarial architecture review as a read-only subagent. Severity-ranked, file-cited findings; it diagnoses and never edits. Also a Claude Code plugin. |
 | [`Skills/`](Skills/) | Packaged Claude skills (`.skill` / `.zip`) |
 | [`Tips_and_Tricks/`](Tips_and_Tricks/) | MCP quick-reference cards |
 | [`windows-env-bundle/`](windows-env-bundle/) | PowerShell bundle for setting up a Windows environment |
@@ -18,6 +19,7 @@ This repository is a Claude Code plugin marketplace:
 ```
 /plugin marketplace add VibeForge-Systems/From_the_Forge
 /plugin install vibeforge-gate@from-the-forge
+/plugin install coroner@from-the-forge
 ```
 
 ## This repository gates itself
@@ -40,7 +42,7 @@ opt-in per clone, so they are a convenience rather than an enforced boundary.
 
 ## Licensing
 
-This repository is **AGPL-3.0** ([`LICENSE`](LICENSE)), with one exception:
+This repository is **AGPL-3.0** ([`LICENSE`](LICENSE)), with two exceptions:
 
 - **[`Skills/vibeforge-gate/`](Skills/vibeforge-gate/) is Apache-2.0** — see
   [`Skills/vibeforge-gate/LICENSE`](Skills/vibeforge-gate/LICENSE). It is kept
@@ -48,5 +50,11 @@ This repository is **AGPL-3.0** ([`LICENSE`](LICENSE)), with one exception:
   not accept a copyleft dependency, and contributions to that directory are
   inbound = outbound under Apache-2.0 per
   [`Skills/vibeforge-gate/DCO`](Skills/vibeforge-gate/DCO).
+- **[`Skills/coroner/`](Skills/coroner/) is Apache-2.0** — see
+  [`Skills/coroner/LICENSE`](Skills/coroner/LICENSE). Permissive for the same
+  reason: it is meant to be vendored into the repositories it reviews, including
+  ones that could not accept copyleft. Contributions to that directory are
+  inbound = outbound under Apache-2.0 per
+  [`Skills/coroner/DCO`](Skills/coroner/DCO).
 
 Sign off every commit (`git commit -s`); the `dco` check verifies it.

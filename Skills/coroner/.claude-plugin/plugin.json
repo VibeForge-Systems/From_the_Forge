@@ -1,0 +1,25 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "coroner",
+  "version": "1.0.0",
+  "description": "Adversarial architecture review as a read-only subagent. Runs a staged protocol — inventory, data-layer autopsy, boundary and security audit, React and design-system audit, synthesis — and returns severity-ranked findings with file-cited evidence, pre-mortem exhibits, and a strangler refactor plan. It cannot edit: diagnosis is the deliverable, patching is a separate act.",
+  "author": {
+    "name": "VibeForge Systems"
+  },
+  "homepage": "https://github.com/VibeForge-Systems/From_the_Forge/tree/main/Skills/coroner",
+  "repository": "https://github.com/VibeForge-Systems/From_the_Forge",
+  "license": "Apache-2.0",
+  "keywords": [
+    "code-review",
+    "architecture-review",
+    "audit",
+    "subagent",
+    "read-only",
+    "refactoring",
+    "technical-debt",
+    "prisma",
+    "postgres",
+    "pgvector",
+    "react"
+  ]
+}
