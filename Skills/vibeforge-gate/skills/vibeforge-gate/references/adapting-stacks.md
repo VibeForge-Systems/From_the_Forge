@@ -77,7 +77,10 @@ slow — `stage: push` with a `skip_env`, or `manual`. Add `staticcheck` or
 The lockfile is the pin, so use `npm ci` (not `install`) and call binaries from
 `node_modules/.bin`. `tsc --noEmit` for types, `eslint`, `prettier --check`,
 then the test runner. Keep the install step out of the gate if it is slow —
-gate on a stale-lockfile check instead (`npm ci --dry-run`).
+gate on a stale-lockfile check instead: the catalog's read-only `node-lockfile`,
+which compares each `package.json` with what `package-lock.json` recorded for it.
+**Not** `npm ci --dry-run`: under npm 9 it deletes `node_modules` instead of
+doing a dry run, and a gate check must never mutate the tree it is checking.
 
 ### Python
 Everything runs inside the project environment, so `path_prepend: ./.venv/bin`
