@@ -90,13 +90,62 @@ checks:
   # ===========================================================================
 
   - id: node-lockfile
-    desc: the lockfile matches package.json
+    desc: package-lock.json matches every package.json it records
     stage: commit
     why: |
       A lockfile that has drifted from its manifest means everyone downstream
-      resolves something different from what you tested. Cheap to catch here,
-      confusing to debug anywhere else.
-    run: npm ci --dry-run
+      resolves something different from what you tested, and the next `npm ci`
+      anywhere refuses to install. Cheap to catch here, confusing to debug
+      anywhere else.
+      Read-only on purpose. Do NOT use `npm ci --dry-run` for this: under npm 9
+      it is not a dry run — it deletes node_modules and then fails (observed on
+      npm 9.2.0), and a gate check must never mutate the tree it checks. This
+      compares the dependency specs each package.json declares with the copy
+      npm recorded in package-lock.json, for the root and every workspace the
+      lockfile knows about. npm lockfiles only (lockfileVersion 2+); for yarn
+      or pnpm, run that tool's frozen-lockfile install in a throwaway worktree.
+    run: |
+      node - <<'EOF'
+      const fs = require("fs");
+      const path = require("path");
+      const lock = JSON.parse(fs.readFileSync("package-lock.json", "utf8"));
+      if (!lock.packages) {
+        console.log("package-lock.json has no `packages` map (lockfileVersion 1) — regenerate it with npm >= 7");
+        process.exit(1);
+      }
+      const fields = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"];
+      const bad = [];
+      let checked = 0;
+      // The root ("") and each workspace are recorded under their own path;
+      // entries under node_modules/ are installed packages, not our manifests.
+      for (const [key, entry] of Object.entries(lock.packages)) {
+        if (key.split("/").includes("node_modules")) continue;
+        const manifest = path.join(key || ".", "package.json");
+        if (!fs.existsSync(manifest)) {
+          bad.push(`${manifest}: recorded in the lockfile but missing on disk`);
+          continue;
+        }
+        const pkg = JSON.parse(fs.readFileSync(manifest, "utf8"));
+        checked++;
+        for (const field of fields) {
+          const want = pkg[field] || {}, got = entry[field] || {};
+          for (const name of new Set([...Object.keys(want), ...Object.keys(got)])) {
+            if (want[name] !== got[name]) {
+              bad.push(`${manifest} ${field}.${name}: package.json=${want[name] ?? "(absent)"} lockfile=${got[name] ?? "(absent)"}`);
+            }
+          }
+        }
+        if (key === "" && JSON.stringify(pkg.workspaces || []) !== JSON.stringify(entry.workspaces || [])) {
+          bad.push("root workspaces differ between package.json and the lockfile");
+        }
+      }
+      if (bad.length) {
+        bad.forEach((b) => console.log("  " + b));
+        console.log("lockfile is out of sync — run `npm install` and commit package-lock.json");
+        process.exit(1);
+      }
+      console.log(`package-lock.json matches ${checked} package.json file(s)`);
+      EOF
 
   - id: node-types
     desc: TypeScript type check
