@@ -115,9 +115,10 @@ Your `gates.yaml` is untouched.
 cd ~/src/From_the_Forge/Skills/vibeforge-gate && ./selftest.sh
 ```
 
-29 cases covering exit codes, SKIP-blocks-but-deliberate-skip-does-not, version
+32 cases covering exit codes, SKIP-blocks-but-deliberate-skip-does-not, version
 pin and sha256 enforcement, timeouts, shadow-mode deadlines, stage selection,
-advisory mode, and parser strictness. Run it after changing `gate.sh`.
+advisory mode, parser strictness, and sign-off trailer parsing. Run it after
+changing `gate.sh`.
 
 ## Requirements
 

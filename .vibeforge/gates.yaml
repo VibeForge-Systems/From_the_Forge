@@ -115,10 +115,10 @@ checks:
     why: |
       The whole value of this package is that green means every declared check
       actually ran. That property lives in the exit-code and SKIP semantics, so
-      those are tested rather than documented and hoped for: 29 cases covering
+      those are tested rather than documented and hoped for: 32 cases covering
       exit 0/1/2/3, SKIP-blocks vs deliberate-skip-does-not, version pin and
       sha256 enforcement, timeouts, shadow-mode deadlines, advisory mode,
-      stage selection and parser strictness.
+      stage selection, parser strictness, and sign-off trailer parsing.
     run: ./Skills/vibeforge-gate/selftest.sh
 
   - id: skill-frontmatter

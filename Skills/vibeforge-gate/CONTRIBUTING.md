@@ -20,7 +20,7 @@ a path says otherwise.
 2. Contributions to this directory are **inbound = outbound under Apache-2.0**
    ([`LICENSE`](LICENSE)).
 3. **Run the gate before opening a PR** — `.vibeforge/gate.sh` *from the
-   repository root*. It must be green, including the 29-case runner selftest.
+   repository root*. It must be green, including the 32-case runner selftest.
 4. If you change the runner, **change its template**, not just the copy the repo
    dogfoods. A check enforces this; see [§3](#3-the-two-copies-of-the-runner).
 
