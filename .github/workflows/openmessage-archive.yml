@@ -2,7 +2,7 @@
 # OpenMessage Archive — CI
 #
 # Lives at the repository root because GitHub only runs workflows from
-# .github/workflows/; it is scoped to openmessage-archive/ by path filters.
+# .github/workflows/; it is scoped to Apps/openmessage-archive/ by path filters.
 #
 #   checks   Linux: npm license audit, typecheck, unit tests, rustfmt,
 #            clippy, Rust tests, IPC bindings drift, cargo-deny.
@@ -10,7 +10,7 @@
 #            unsigned installers uploaded as workflow artifacts.
 #
 # Actions are pinned to commit SHAs (tag in the trailing comment). The Rust
-# toolchain comes from openmessage-archive/rust-toolchain.toml via rustup.
+# toolchain comes from Apps/openmessage-archive/rust-toolchain.toml via rustup.
 # ============================================================================
 name: OpenMessage Archive
 
@@ -18,11 +18,11 @@ on:
   push:
     branches: [main]
     paths:
-      - "openmessage-archive/**"
+      - "Apps/openmessage-archive/**"
       - ".github/workflows/openmessage-archive.yml"
   pull_request:
     paths:
-      - "openmessage-archive/**"
+      - "Apps/openmessage-archive/**"
       - ".github/workflows/openmessage-archive.yml"
   workflow_dispatch:
 
@@ -35,7 +35,7 @@ concurrency:
 
 defaults:
   run:
-    working-directory: openmessage-archive
+    working-directory: Apps/openmessage-archive
     shell: bash
 
 env:
@@ -57,7 +57,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: openmessage-archive/package-lock.json
+          cache-dependency-path: Apps/openmessage-archive/package-lock.json
 
       - name: Install system libraries
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $LINUX_DEPS
@@ -67,7 +67,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: openmessage-archive
+          workspaces: Apps/openmessage-archive
 
       - run: npm ci
       - name: JavaScript license audit
@@ -124,7 +124,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: openmessage-archive/package-lock.json
+          cache-dependency-path: Apps/openmessage-archive/package-lock.json
 
       - name: Install system libraries
         if: runner.os == 'Linux'
@@ -135,7 +135,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: openmessage-archive
+          workspaces: Apps/openmessage-archive
 
       - run: npm ci
       - name: Frontend tests
@@ -154,8 +154,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: |
-            openmessage-archive/target/release/bundle/deb/*.deb
-            openmessage-archive/target/release/bundle/rpm/*.rpm
-            openmessage-archive/target/release/bundle/appimage/*.AppImage
-            openmessage-archive/target/release/bundle/nsis/*.exe
-            openmessage-archive/target/release/bundle/msi/*.msi
+            Apps/openmessage-archive/target/release/bundle/deb/*.deb
+            Apps/openmessage-archive/target/release/bundle/rpm/*.rpm
+            Apps/openmessage-archive/target/release/bundle/appimage/*.AppImage
+            Apps/openmessage-archive/target/release/bundle/nsis/*.exe
+            Apps/openmessage-archive/target/release/bundle/msi/*.msi

@@ -43,7 +43,7 @@ The commands below work the same in PowerShell, `cmd`, and bash.
 
 ## Everyday commands
 
-Run them from `openmessage-archive/`.
+Run them from `Apps/openmessage-archive/`.
 
 | Task | Command |
 |---|---|

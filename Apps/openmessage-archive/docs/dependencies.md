@@ -8,8 +8,9 @@ of this file.
 Two automated audits enforce the license policy:
 
 - **Rust:** [`deny.toml`](../deny.toml), via `cargo deny check`. It allows
-  only permissive licenses, rejects unknown registries and git sources, and
-  fails on yanked crates. It runs in CI.
+  permissive licenses, plus MPL-2.0 for five named crates (see below). It
+  rejects unknown registries and git sources, and fails on yanked crates
+  and vulnerabilities. It runs in CI.
 - **JavaScript:** [`scripts/check-licenses.mjs`](../scripts/check-licenses.mjs),
   via `npm run licenses`. It reads each package's license from
   `package-lock.json`. It fails if a runtime package is outside the
@@ -31,6 +32,25 @@ Two automated audits enforce the license policy:
 | tempfile (dev only) | 3.27.0 | MIT OR Apache-2.0 | Test directories |
 
 Transitive crates are listed by `cargo tree` and audited by `cargo deny`.
+
+### MPL-2.0 crates (reviewed exception)
+
+Five transitive crates are **MPL-2.0**, and all of them arrive through
+Tauri:
+
+- `cssparser`, `cssparser-macros`, `selectors` and `dtoa-short`, through
+  `tauri-utils` → `dom_query`.
+- `option-ext`, through `dirs` → `dirs-sys`.
+
+MPL-2.0 is *file-level* copyleft. Section 3.3 lets the covered files be
+combined into a larger work under another license, here Apache-2.0. The
+obligation is that the MPL-covered files themselves stay under MPL-2.0 and
+their source remains available. They are used unmodified, and their source
+is published on crates.io. The NOTICE file says so.
+
+They are allowed by name in `deny.toml`, not by adding MPL-2.0 to the
+global allowlist. Any new MPL dependency still fails CI. Avoiding them would
+mean leaving Tauri.
 The release binary contains no HTTP client crate (`reqwest`, `hyper`,
 `ureq`). Re-check with
 `cargo tree -e normal | grep -iE 'reqwest|hyper|ureq'`.
@@ -95,3 +115,5 @@ them locally, is fine. See [supported-formats.md](supported-formats.md).
 | Date | Change | Reason |
 |---|---|---|
 | 2026-10-17 | Initial set (Milestone 1) | — |
+| 2026-10-17 | MPL-2.0 exception for five Tauri transitive crates | Found by the first `cargo deny` run; see above |
+| 2026-10-17 | Project moved to `Apps/openmessage-archive/` | Repository layout; no dependency change |

@@ -1,0 +1,17 @@
+OpenMessage Archive
+Copyright 2026 VibeForge Systems, Inc. and OpenMessage Archive contributors
+
+This product is licensed under the Apache License, Version 2.0 (LICENSE).
+
+It bundles third-party software, mostly under permissive licenses (MIT,
+Apache-2.0, BSD-3-Clause, and similar). The complete, audited list is in
+docs/dependencies.md; the Rust audit policy is deny.toml and the JavaScript
+audit is scripts/check-licenses.mjs.
+
+The following Rust crates are included unmodified under the Mozilla Public
+License 2.0 (https://mozilla.org/MPL/2.0/): cssparser, cssparser-macros,
+selectors, dtoa-short, and option-ext. Their source code is available from
+https://crates.io at the versions recorded in Cargo.lock.
+
+"iPhone", "iMessage", and "iOS" are trademarks of Apple Inc. OpenMessage
+Archive is not affiliated with or endorsed by Apple Inc.

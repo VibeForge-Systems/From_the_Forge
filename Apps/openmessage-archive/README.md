@@ -41,7 +41,7 @@ Install the prerequisites listed in [docs/development.md](docs/development.md).
 **Linux (bash)**
 
 ```sh
-cd openmessage-archive
+cd Apps/openmessage-archive
 npm ci
 npm run tauri dev          # run with hot reload
 npm run tauri build        # .deb, .rpm and AppImage in target/release/bundle/
@@ -50,7 +50,7 @@ npm run tauri build        # .deb, .rpm and AppImage in target/release/bundle/
 **Windows 11 (PowerShell)**
 
 ```powershell
-cd openmessage-archive
+cd Apps\openmessage-archive
 npm ci
 npm run tauri dev
 npm run tauri build        # NSIS .exe and .msi in target\release\bundle\

@@ -81,10 +81,10 @@ onMounted(async () => {
     <section class="card" aria-labelledby="about-thirdparty">
       <div class="card-header"><h2 id="about-thirdparty" class="h6 mb-0">Third-party software</h2></div>
       <div class="card-body small">
-        OpenMessage Archive is built on Tauri, Vue, Bootstrap, Bootstrap Icons, and Rust crates
-        under permissive licenses (MIT, Apache-2.0, BSD, ISC, and similar). The complete audited
-        list is in <span class="font-monospace">docs/dependencies.md</span> in the source
-        repository.
+        OpenMessage Archive is built on Tauri, Vue, Bootstrap, Bootstrap Icons, and Rust crates,
+        almost all under permissive licenses (MIT, Apache-2.0, BSD). Five unmodified Rust crates
+        included through Tauri are under the Mozilla Public License 2.0. The complete audited list
+        is in <span class="font-monospace">docs/dependencies.md</span> in the source repository.
       </div>
     </section>
   </div>
