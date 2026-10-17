@@ -95,11 +95,11 @@ These apply to Milestone 1.
 - **No import yet.** Nothing in this build reads an iPhone backup.
 - **Not yet hand-tested on Windows 11.** CI builds and unit-tests it on
   `windows-2022`; nobody has driven the UI by hand there yet.
-- **The folder picker is not fully hand-tested on Linux.** Under the
-  headless test environment, the native picker opened and accepted input,
-  but a selection could not be completed. The validation behind it is
-  covered by unit tests. A manual test on a real Linux desktop is still
-  needed.
+- **Manual testing is partial.** On Ubuntu 26.04.1 the app launched and an
+  ordinary folder was chosen through the native picker. Two checks have
+  not been run by hand yet: that a folder inside a backup is refused, and
+  that the choice survives a restart. Unit tests cover the logic behind
+  both. See [compatibility.md](docs/compatibility.md).
 - **Archives are not encrypted yet.** Archive encryption is planned for M8.
   Until then, rely on full-disk encryption. See
   [privacy.md](docs/privacy.md).
