@@ -1,0 +1,185 @@
+# AGENTS.md — OpenMessage Archive
+
+Guidance for AI coding agents working in `Apps/openmessage-archive/`.
+Repository-wide rules — licensing, sign-off, branches, the root gate — are in the
+root [`AGENTS.md`](../../AGENTS.md). Paths below are relative to this directory.
+
+## What this is and where it stands
+
+A local-first desktop app that imports local iPhone backups. It extracts the
+Messages database and attachments into a searchable SQLite archive.
+
+- **Stack:** Tauri 2, Rust, Vue 3 with TypeScript, Bootstrap 5 (CSS only),
+  and SQLite with FTS5.
+- **Targets:** Windows 11 and Linux.
+- **License:** Apache-2.0.
+
+Work proceeds in milestones; the table and current state are in
+[`README.md`](README.md#roadmap). **Milestone 1 (the shell, settings and
+archive location) is done.** Milestone 2 (backup discovery and import) is
+next.
+
+Read these before designing anything:
+
+| Doc | Read it for |
+|---|---|
+| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the planned crates, the IPC boundary, and key decisions |
+| [`docs/supported-formats.md`](docs/supported-formats.md) | Sourced research on the backup format, encryption, the sms.db schema through iOS 27, and device tooling. Items marked **UNVERIFIED** are hypotheses, not facts. |
+| [`docs/compatibility.md`](docs/compatibility.md) | What has actually been tested |
+| [`docs/development.md`](docs/development.md) | Setup and every command |
+
+## Commands
+
+Run all commands from this directory.
+
+```sh
+npm ci                                                  # JS dependencies
+npm run tauri dev                                       # run with hot reload
+npm test                                                # Vitest (frontend)
+npm run typecheck                                       # vue-tsc
+npm run licenses                                        # JS license audit
+cargo test --workspace                                  # Rust tests; also regenerates IPC types
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all
+cargo deny check                                        # Rust licenses and advisories
+npx tauri build --no-bundle                             # release binary
+```
+
+Linux system packages are listed in `docs/development.md`, starting with
+`libwebkit2gtk-4.1-dev`.
+
+### Before opening a PR
+
+CI (`.github/workflows/openmessage-archive.yml`) runs each of these, so run
+them first:
+
+1. `npm run licenses`
+2. `npm run typecheck`
+3. `npm test`
+4. `cargo fmt --all --check`
+5. `cargo clippy --workspace --all-targets -- -D warnings`
+6. `cargo test --workspace`
+7. Confirm `src/types/generated/` has no uncommitted changes.
+8. `cargo deny check`
+
+Then run the root gate. Note that the root gate does **not** build this app.
+
+## Invariants: never violate these
+
+Each one is enforced in code. Keep it that way.
+
+1. **Source backups are read-only.**
+   - Never write inside a backup or inside `MobileSync/Backup`.
+   - Open source databases read-only, from copies.
+   - `crates/oma-fs` guards location choice.
+2. **Paths from the outside go through `oma-fs`.** Any path built from
+   backup data uses `oma_fs::resolve_within`. Any name written to disk uses
+   `oma_fs::sanitize_filename`. Never `Path::join` an untrusted string
+   directly.
+3. **No network.**
+   - Do not add HTTP client crates or CDN-hosted assets, and no telemetry.
+   - The CSP in `src-tauri/tauri.conf.json` allows `connect-src` to IPC
+     only, with no `unsafe-inline` in production. Do not loosen it.
+4. **The webview never supplies filesystem paths.** Paths come from native
+   dialogs that Rust opens, or from settings Rust has already validated.
+   Input types use `#[serde(deny_unknown_fields)]`.
+5. **Do not fabricate.**
+   - A value missing from the source stays `None`.
+   - A message status the source does not record is never shown.
+   - An unknown schema or iOS version is reported as unsupported, never
+     approximated.
+6. **Never log message bodies, contact data, attachment contents, or
+   passwords.** Log kinds, states and counts. Never log a backup password,
+   and never pass one on a command line.
+7. **Render untrusted text as text.** No `v-html` with message content.
+   Exports must escape their output.
+
+## Where code goes
+
+- **Domain logic belongs in `crates/`.** `src-tauri/` stays a thin layer of
+  IPC commands and state. The planned crates are `oma-backup` (M2),
+  `oma-messages` (M3), `oma-archive` (M4), `oma-export` (M6) and
+  `oma-device` (M7). Each must build and test without Tauri.
+- **Frontend:**
+  - Views live in `src/views/`, components in `src/components/`, and Pinia
+    stores in `src/stores/`.
+  - The only path to the backend is `src/services/ipc.ts`.
+  - Do not import Bootstrap's JavaScript. Use Vue components with Bootstrap
+    classes, and native `<dialog>` for modals.
+
+### Adding an IPC command
+
+A command missing from any of these steps is denied at runtime:
+
+1. Write the handler in `src-tauri/src/commands/`.
+2. Register it in `generate_handler!` in `src-tauri/src/lib.rs`.
+3. Add its name to `COMMANDS` in `src-tauri/build.rs`.
+4. Grant `allow-<kebab-name>` in `src-tauri/capabilities/default.json`.
+5. Add a typed wrapper in `src/services/ipc.ts`.
+
+IPC types are Rust structs with `#[derive(TS)] #[ts(export)]`. Run
+`cargo test` to regenerate `src/types/generated/`, then commit the result.
+Never hand-edit generated files.
+
+### UI rules
+
+- **No control may look functional when it is not.** An unfinished capability
+  renders disabled, with `<PlannedBadge capability="...">`, sourced from
+  `src/services/roadmap.ts`. When a capability ships, flip its `status` there.
+  `tests/frontend/roadmap.spec.ts` asserts which capabilities are available,
+  so update that test in the same change.
+- **Shortcuts are declared only in `src/services/shortcuts.ts`.** The help
+  dialog renders from it.
+
+## Dependencies and licensing
+
+- **Pin exact versions.** That means `=x.y.z` in `Cargo.toml` and exact
+  versions in `package.json`, where `.npmrc` sets `save-exact`. Record every
+  addition or upgrade in the `docs/dependencies.md` upgrade log.
+- **Use permissive licenses only**, per `deny.toml`. Five MPL-2.0 crates that
+  come in through Tauri are allowed **by name**. Never add MPL, or any other
+  copyleft license, to the global allowlist.
+- **Never copy code from the GPL or CC BY-SA references:** imessage-exporter,
+  imessage-database, crabstep, crabapple, pymobiledevice3, and StackOverflow
+  answer 13793043. They are behavioural references only. MIT
+  `iphone_backup_decrypt` may be ported with attribution.
+
+## Testing
+
+- **Rust tests live beside the code.** Filesystem tests use `tempfile`.
+- **Frontend tests live in `tests/frontend/*.spec.ts`.**
+  `tests/frontend/helpers.ts` provides snapshot and status builders, plus a
+  `matchMedia` stub, because jsdom has none.
+- **Fixtures in `tests/fixtures/` must be synthetic.** Never commit a real
+  backup, real messages, or real contacts, even "anonymized" ones.
+
+## Gotchas found the hard way
+
+- **Fake Tauri `invoke` by hand, not with `vi.fn()`.** Vitest 4 reports a
+  plain-object rejection returned from `vi.fn()` as unhandled, even when it is
+  caught. See `tests/frontend/ipc.spec.ts`.
+- **A release binary must be built through the Tauri CLI**, with
+  `npx tauri build`. Plain `cargo build --release` omits the
+  `custom-protocol` feature, and the resulting binary tries to load the dev
+  server.
+- **`legacy-peer-deps=true` in `.npmrc` is deliberate.** npm 10 crashes
+  resolving vitest 4's peer graph. Do not remove it without re-testing
+  `npm install`.
+- **`npm ci` fails with `EPERM` or symlink errors on VM shared folders**
+  (vboxsf, 9p). Build from a local disk.
+- **Headless smoke testing works**, using `xvfb-run` with
+  `WEBKIT_DISABLE_DMABUF_RENDERER=1` and `XDG_CONFIG_HOME` pointed at a
+  scratch directory. However, the GTK folder picker cannot list directories
+  without D-Bus, so a full folder pick still needs a real desktop.
+
+## Finishing a milestone
+
+The project's working agreement requires all of the following:
+
+1. Explain the design decisions and platform limits.
+2. Ship complete files, not snippets or pseudocode.
+3. Build and tests pass on CI for Linux and Windows.
+4. Give exact commands for Windows 11 and Linux.
+5. Update `docs/compatibility.md`, recording **only tested claims**, and the
+   README roadmap and known limitations.
+6. List the known limitations and name the next milestone.
