@@ -13,6 +13,10 @@ Collection of Interesting Tips, Tricks and Reference Cards, Quick Code Snipits a
 | [`Tips_and_Tricks/`](Tips_and_Tricks/) | MCP quick-reference cards |
 | [`windows-env-bundle/`](windows-env-bundle/) | PowerShell bundle for setting up a Windows environment |
 
+AI coding agents: start with [`AGENTS.md`](AGENTS.md) (Claude Code reads it via
+[`CLAUDE.md`](CLAUDE.md)). Subdirectories with their own conventions carry their
+own guide.
+
 ## Plugin marketplace
 
 This repository is a Claude Code plugin marketplace:
