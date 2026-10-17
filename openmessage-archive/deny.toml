@@ -1,0 +1,55 @@
+# cargo-deny policy: licenses, advisories, and sources for every Rust crate
+# that ends up in the binary. Run with `cargo deny check`.
+# https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# Audit what ships on the supported platforms, not every target a crate
+# happens to support.
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-pc-windows-msvc",
+  "aarch64-pc-windows-msvc",
+]
+all-features = false
+
+[licenses]
+# Permissive licenses only. Copyleft (GPL, LGPL, AGPL, MPL) is not on the
+# list: the project is Apache-2.0 and must remain redistributable as such.
+# Adding a license here is a reviewed decision recorded in docs/dependencies.md.
+allow = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "MIT",
+  "MIT-0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "CC0-1.0",
+  "Unicode-3.0",
+  "Unlicense",
+  "BSL-1.0",
+  "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.9
+
+[licenses.private]
+ignore = true
+
+[advisories]
+# Unmaintained-crate notices for GTK3 bindings come from Tauri's Linux
+# backend and cannot be fixed downstream; they are reviewed, not ignored
+# wholesale. See docs/dependencies.md.
+unmaintained = "workspace"
+yanked = "deny"
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

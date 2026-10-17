@@ -1,0 +1,51 @@
+# OpenMessage Archive — Cargo workspace.
+#
+# Every Rust component is a workspace member so that the backup, extraction,
+# storage and export libraries can be built and tested without the desktop
+# shell. The Tauri application in src-tauri/ is a thin integration layer over
+# these crates; business logic does not live there.
+[workspace]
+resolver = "2"
+members = ["src-tauri", "crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90"
+license = "Apache-2.0"
+repository = "https://github.com/VibeForge-Systems/From_the_Forge"
+authors = ["VibeForge Systems, Inc. and OpenMessage Archive contributors"]
+
+# Versions are pinned exactly (`=`) so a fresh lockfile cannot silently move a
+# dependency. Upgrades are deliberate edits, recorded in docs/dependencies.md.
+[workspace.dependencies]
+dunce = "=1.0.5"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+tempfile = "=3.27.0"
+thiserror = "=2.0.21"
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["fmt", "env-filter", "ansi"] }
+ts-rs = "=12.0.1"
+
+tauri = "=2.12.4"
+tauri-build = "=2.7.3"
+tauri-plugin-dialog = "=2.8.3"
+tauri-plugin-opener = "=2.7.2"
+
+oma-fs = { path = "crates/oma-fs" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unwrap_used = "warn"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

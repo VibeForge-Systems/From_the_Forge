@@ -1,0 +1,20 @@
+[package]
+name = "oma-fs"
+description = "Filesystem safety primitives for OpenMessage Archive: filename sanitization, contained path resolution, and iPhone backup location guards."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+dunce.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

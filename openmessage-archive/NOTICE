@@ -1,0 +1,12 @@
+OpenMessage Archive
+Copyright 2026 VibeForge Systems, Inc. and OpenMessage Archive contributors
+
+This product is licensed under the Apache License, Version 2.0 (LICENSE).
+
+It bundles third-party software under permissive licenses. The complete,
+audited list of dependencies and their licenses is in docs/dependencies.md;
+the Rust audit policy is deny.toml and the JavaScript audit is
+scripts/check-licenses.mjs.
+
+"iPhone", "iMessage", and "iOS" are trademarks of Apple Inc. OpenMessage
+Archive is not affiliated with or endorsed by Apple Inc.

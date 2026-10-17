@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-choose-archive-directory"
+description = "Enables the choose_archive_directory command without any pre-configured scope."
+commands.allow = ["choose_archive_directory"]
+
+[[permission]]
+identifier = "deny-choose-archive-directory"
+description = "Denies the choose_archive_directory command without any pre-configured scope."
+commands.deny = ["choose_archive_directory"]

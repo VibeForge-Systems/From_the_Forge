@@ -1,0 +1,126 @@
+# OpenMessage Archive
+
+A local-first, open-source desktop application for archiving iPhone
+Messages (iMessage, SMS and RCS) from local iPhone backups. You can browse,
+search and export your history on your own computer. There are no cloud
+services, accounts, subscriptions or telemetry.
+
+Targets **Windows 11** and **Linux**. Built with Tauri 2, Rust, Vue 3,
+TypeScript, Bootstrap 5 and SQLite. Licensed **Apache-2.0**.
+
+> **Status: Milestone 1 (foundation).** The desktop shell, settings and
+> archive location are working. **It cannot import backups yet.** Every
+> unfinished capability appears in the app disabled and marked
+> "Planned · M*n*". See [the roadmap](#roadmap).
+
+## What works today
+
+- Three-panel desktop layout. Side panels collapse, and on narrow windows
+  they become overlays.
+- Light, dark and system themes, keyboard shortcuts (<kbd>F1</kbd> lists
+  them), and an accessible native dialog.
+- Choosing the archive location through the native folder picker, with
+  validation checks:
+  - The folder must exist and be writable (tested with a real probe file).
+  - It cannot be a drive root.
+  - It is **refused if it is inside an iPhone backup** or the MobileSync
+    store.
+  - You get a **warning if it is in a cloud-synced folder** such as OneDrive
+    or Dropbox.
+- Settings are saved atomically. A damaged settings file is set aside, not
+  overwritten. A settings file from a newer version is never modified.
+- Strict security posture:
+  - The webview can call only the app's own allow-listed commands.
+  - The Content Security Policy allows no network connections.
+  - The webview cannot choose filesystem paths.
+
+## Quick start
+
+Install the prerequisites listed in [docs/development.md](docs/development.md).
+
+**Linux (bash)**
+
+```sh
+cd openmessage-archive
+npm ci
+npm run tauri dev          # run with hot reload
+npm run tauri build        # .deb, .rpm and AppImage in target/release/bundle/
+```
+
+**Windows 11 (PowerShell)**
+
+```powershell
+cd openmessage-archive
+npm ci
+npm run tauri dev
+npm run tauri build        # NSIS .exe and .msi in target\release\bundle\
+```
+
+**Tests and checks** (the same commands on both platforms)
+
+```sh
+npm test && npm run typecheck && npm run licenses
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [architecture.md](docs/architecture.md) | Invariants, components, IPC boundary, key decisions |
+| [supported-formats.md](docs/supported-formats.md) | Research on backup formats, encryption, the sms.db schema and device tooling, with sources |
+| [compatibility.md](docs/compatibility.md) | What has actually been tested, by OS, iOS version and backup type |
+| [privacy.md](docs/privacy.md) | What is stored and where, network posture, the difference between backup and archive encryption, deletion limits |
+| [development.md](docs/development.md) | Setup, commands, adding IPC commands, testing |
+| [dependencies.md](docs/dependencies.md) | Every dependency and its license, the audit policy, the upgrade log |
+
+## Roadmap
+
+| Milestone | Scope | State |
+|---|---|---|
+| 1 Foundation | Shell, settings, archive location, CI for Windows and Linux | **Done** |
+| 2 Backup discovery and import | Select a backup, parse the manifest, detect encryption, validate | Next |
+| 3 Extraction | Locate sms.db, probe the schema, extract messages, conversations, participants and attachments | Planned |
+| 4 Archive database | Versioned SQLite schema, transactional and resumable imports, FTS5 | Planned |
+| 5 Rich viewer | Conversation list, threads, inline media, search, date navigation | Planned |
+| 6 Exports | TXT, CSV, JSON, HTML, PDF, XLSX, and attachments | Planned |
+| 7 Direct device backup | USB device detection and local backup creation | Planned |
+| 8 Hardening and release | Archive verification, recovery tests, accessibility, signed packages | Planned |
+
+## Known limitations
+
+These apply to Milestone 1.
+
+- **No import yet.** Nothing in this build reads an iPhone backup.
+- **Not yet hand-tested on Windows 11.** CI builds and unit-tests it on
+  `windows-2022`; nobody has driven the UI by hand there yet.
+- **The folder picker is not fully hand-tested on Linux.** Under the
+  headless test environment, the native picker opened and accepted input,
+  but a selection could not be completed. The validation behind it is
+  covered by unit tests. A manual test on a real Linux desktop is still
+  needed.
+- **Archives are not encrypted yet.** Archive encryption is planned for M8.
+  Until then, rely on full-disk encryption. See
+  [privacy.md](docs/privacy.md).
+- **Windows relies on Microsoft WebView2,** a proprietary OS component, to
+  render the UI. Direct device backup on Windows (M7) will also need
+  Apple's Mobile Device Service. Importing an existing backup never will.
+- **Installers are unsigned.** Windows SmartScreen will warn until code
+  signing is set up in M8.
+- **Only one instance should run at a time.** This is not enforced yet.
+  Settings writes are atomic, so a second instance is harmless now, but
+  M4 will add per-archive locking.
+
+## Contributing
+
+Sign off your commits (`git commit -s`). The contribution terms
+(inbound = outbound, Apache-2.0) are in [DCO](DCO). Do not copy code from
+GPL, LGPL, AGPL or CC BY-SA projects. Never commit real messages or
+backups. Use synthetic fixtures instead.
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). iPhone, iMessage
+and iOS are trademarks of Apple Inc. This project is not affiliated with
+Apple.

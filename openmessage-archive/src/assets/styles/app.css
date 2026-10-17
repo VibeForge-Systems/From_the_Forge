@@ -1,0 +1,324 @@
+/*
+ * OpenMessage Archive design tokens and layout.
+ *
+ * Bootstrap 5.3 supplies components and the light/dark color modes through
+ * <html data-bs-theme>. This file adds the application's own spacing and
+ * type scale, plus the three-panel layout. Colors come from Bootstrap's
+ * CSS variables, so both themes work without separate rules.
+ */
+:root {
+  --oma-space-1: 0.25rem;
+  --oma-space-2: 0.5rem;
+  --oma-space-3: 0.75rem;
+  --oma-space-4: 1rem;
+  --oma-space-5: 1.5rem;
+  --oma-space-6: 2rem;
+
+  --oma-text-xs: 0.75rem;
+  --oma-text-sm: 0.8125rem;
+
+  --oma-left-width: 320px;
+  --oma-right-width: 300px;
+  --oma-navbar-height: 2.75rem;
+  --oma-page-max: 56rem;
+
+  /* Desktop-app density: slightly smaller than Bootstrap's web default. */
+  --bs-body-font-size: 0.9375rem;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+.oma-skip-link {
+  position: absolute;
+  z-index: 2000;
+  inset-inline-start: var(--oma-space-2);
+  inset-block-start: var(--oma-space-2);
+  padding: var(--oma-space-2) var(--oma-space-3);
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+}
+
+.oma-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.oma-navbar {
+  min-height: var(--oma-navbar-height);
+  flex: none;
+}
+
+.oma-navbar .nav-link {
+  padding-block: var(--oma-space-1);
+}
+
+.oma-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+}
+
+.oma-page {
+  max-width: var(--oma-page-max);
+  margin-inline: auto;
+  padding: var(--oma-space-5) var(--oma-space-4);
+}
+
+/* ---- Three-panel layout ------------------------------------------------ */
+
+.oma-panels {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
+.oma-panels.has-left {
+  grid-template-columns: var(--oma-left-width) minmax(0, 1fr);
+}
+
+.oma-panels.has-right {
+  grid-template-columns: minmax(0, 1fr) var(--oma-right-width);
+}
+
+.oma-panels.has-left.has-right {
+  grid-template-columns: var(--oma-left-width) minmax(0, 1fr) var(--oma-right-width);
+}
+
+.oma-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bs-tertiary-bg);
+}
+
+.oma-panel-left {
+  border-inline-end: 1px solid var(--bs-border-color);
+}
+
+.oma-panel-right {
+  border-inline-start: 1px solid var(--bs-border-color);
+}
+
+.oma-panel.oma-overlay {
+  position: absolute;
+  z-index: 1040;
+  inset-block: 0;
+  width: min(85vw, var(--oma-left-width));
+  box-shadow: var(--bs-box-shadow-lg);
+}
+
+.oma-panel-left.oma-overlay {
+  inset-inline-start: 0;
+}
+
+.oma-panel-right.oma-overlay {
+  inset-inline-end: 0;
+  width: min(85vw, var(--oma-right-width));
+}
+
+.oma-backdrop {
+  position: absolute;
+  z-index: 1030;
+  inset: 0;
+  background: rgb(0 0 0 / 0.35);
+}
+
+.oma-panel-header {
+  display: flex;
+  align-items: center;
+  gap: var(--oma-space-2);
+  padding: var(--oma-space-3) var(--oma-space-3) var(--oma-space-2);
+}
+
+.oma-panel-title {
+  margin: 0;
+  margin-inline-end: auto;
+  font-size: var(--oma-text-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--bs-secondary-color);
+}
+
+.oma-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.oma-panel-center {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.oma-thread-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--oma-space-1);
+  padding: var(--oma-space-1) var(--oma-space-2);
+  border-bottom: 1px solid var(--bs-border-color-translucent);
+}
+
+.oma-thread-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.oma-detail-section {
+  padding-block: var(--oma-space-3);
+  border-bottom: 1px solid var(--bs-border-color-translucent);
+}
+
+.oma-detail-section:last-child {
+  border-bottom: 0;
+}
+
+.oma-detail-heading {
+  font-size: var(--oma-text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--bs-secondary-color);
+  margin-bottom: var(--oma-space-2);
+}
+
+.oma-privacy-list li {
+  display: flex;
+  gap: var(--oma-space-2);
+  padding-block: 0.125rem;
+}
+
+/* ---- Empty states -------------------------------------------------------- */
+
+.oma-empty {
+  max-width: 34rem;
+  margin: var(--oma-space-6) auto;
+  padding: var(--oma-space-4);
+  text-align: center;
+}
+
+.oma-empty-compact {
+  margin-block: var(--oma-space-4);
+  font-size: var(--oma-text-sm);
+}
+
+.oma-empty-icon {
+  display: block;
+  font-size: 2.75rem;
+  line-height: 1;
+  color: var(--bs-secondary-color);
+  margin-bottom: var(--oma-space-3);
+}
+
+.oma-empty-compact .oma-empty-icon {
+  font-size: 1.75rem;
+}
+
+.oma-empty-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: var(--oma-space-2);
+}
+
+.oma-empty-compact .oma-empty-title {
+  font-size: 1rem;
+}
+
+.oma-empty-body {
+  color: var(--bs-secondary-color);
+}
+
+.oma-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--oma-space-2);
+  margin-top: var(--oma-space-4);
+}
+
+.oma-steps {
+  display: inline-block;
+  padding-inline-start: 1.25rem;
+  margin: var(--oma-space-3) 0 0;
+  color: var(--bs-body-color);
+}
+
+.oma-steps li {
+  margin-bottom: var(--oma-space-2);
+}
+
+.oma-steps li:not(.oma-step-current) {
+  color: var(--bs-secondary-color);
+}
+
+.oma-planned {
+  font-weight: 500;
+  vertical-align: middle;
+}
+
+.oma-checks li + li {
+  margin-top: var(--oma-space-1);
+}
+
+/* ---- Dialogs and toasts ------------------------------------------------ */
+
+/*
+ * Bootstrap's .modal-* parts read variables that Bootstrap defines on
+ * .modal, which a native <dialog> does not carry. Define them here.
+ */
+.oma-dialog {
+  --bs-modal-color: var(--bs-body-color);
+  --bs-modal-bg: var(--bs-body-bg);
+  --bs-modal-padding: 1rem;
+  --bs-modal-border-color: var(--bs-border-color-translucent);
+  --bs-modal-border-width: var(--bs-border-width);
+  --bs-modal-border-radius: var(--bs-border-radius-lg);
+  --bs-modal-box-shadow: var(--bs-box-shadow-lg);
+  --bs-modal-inner-border-radius: calc(var(--bs-border-radius-lg) - var(--bs-border-width));
+  --bs-modal-header-padding: 1rem;
+  --bs-modal-header-border-color: var(--bs-border-color);
+  --bs-modal-header-border-width: var(--bs-border-width);
+  --bs-modal-title-line-height: 1.5;
+  --bs-modal-footer-gap: 0.5rem;
+  --bs-modal-footer-border-color: var(--bs-border-color);
+  --bs-modal-footer-border-width: var(--bs-border-width);
+  width: min(36rem, calc(100vw - 2rem));
+  border: 0;
+  border-radius: var(--bs-border-radius-lg);
+  background: transparent;
+  color: var(--bs-body-color);
+}
+
+.oma-dialog::backdrop {
+  background: rgb(0 0 0 / 0.45);
+}
+
+.oma-toasts {
+  z-index: 1090;
+}

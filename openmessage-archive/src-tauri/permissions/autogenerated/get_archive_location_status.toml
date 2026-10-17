@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-archive-location-status"
+description = "Enables the get_archive_location_status command without any pre-configured scope."
+commands.allow = ["get_archive_location_status"]
+
+[[permission]]
+identifier = "deny-get-archive-location-status"
+description = "Denies the get_archive_location_status command without any pre-configured scope."
+commands.deny = ["get_archive_location_status"]

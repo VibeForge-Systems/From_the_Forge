@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-clear-archive-directory"
+description = "Enables the clear_archive_directory command without any pre-configured scope."
+commands.allow = ["clear_archive_directory"]
+
+[[permission]]
+identifier = "deny-clear-archive-directory"
+description = "Denies the clear_archive_directory command without any pre-configured scope."
+commands.deny = ["clear_archive_directory"]
