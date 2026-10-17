@@ -1,0 +1,5 @@
+# ts-rs writes TypeScript bindings for IPC types here when `cargo test` runs.
+# CI regenerates them and fails if the committed copies differ, so the Rust and
+# TypeScript sides of the IPC contract cannot drift apart.
+[env]
+TS_RS_EXPORT_DIR = { value = "src/types/generated", relative = true }

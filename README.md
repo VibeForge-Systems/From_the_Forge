@@ -8,6 +8,7 @@ Collection of Interesting Tips, Tricks and Reference Cards, Quick Code Snipits a
 |---|---|
 | [`Skills/vibeforge-gate/`](Skills/vibeforge-gate/) | A repository-owned merge bar — a local pre-commit/pre-push gate that runs the checks a hosted CI service would have, without needing one. Also a Claude Code plugin and skill. |
 | [`Skills/coroner/`](Skills/coroner/) | The Coroner Protocol — adversarial architecture review as a read-only subagent. Severity-ranked, file-cited findings; it diagnoses and never edits. Also a Claude Code plugin. |
+| [`Apps/openmessage-archive/`](Apps/openmessage-archive/) | OpenMessage Archive — a local-first Tauri 2 / Rust / Vue 3 desktop app for archiving iPhone Messages from local backups (Windows 11 and Linux). Milestone 1. |
 | [`Skills/`](Skills/) | Packaged Claude skills (`.skill` / `.zip`) |
 | [`Tips_and_Tricks/`](Tips_and_Tricks/) | MCP quick-reference cards |
 | [`windows-env-bundle/`](windows-env-bundle/) | PowerShell bundle for setting up a Windows environment |
@@ -42,7 +43,7 @@ opt-in per clone, so they are a convenience rather than an enforced boundary.
 
 ## Licensing
 
-This repository is **AGPL-3.0** ([`LICENSE`](LICENSE)), with two exceptions:
+This repository is **AGPL-3.0** ([`LICENSE`](LICENSE)), with three exceptions:
 
 - **[`Skills/vibeforge-gate/`](Skills/vibeforge-gate/) is Apache-2.0** — see
   [`Skills/vibeforge-gate/LICENSE`](Skills/vibeforge-gate/LICENSE). It is kept
@@ -56,5 +57,11 @@ This repository is **AGPL-3.0** ([`LICENSE`](LICENSE)), with two exceptions:
   ones that could not accept copyleft. Contributions to that directory are
   inbound = outbound under Apache-2.0 per
   [`Skills/coroner/DCO`](Skills/coroner/DCO).
+
+- **[`Apps/openmessage-archive/`](Apps/openmessage-archive/) is Apache-2.0** — see
+  [`Apps/openmessage-archive/LICENSE`](Apps/openmessage-archive/LICENSE). It is a
+  standalone application meant to be distributed as permissively licensed
+  open source; contributions to that directory are inbound = outbound under
+  Apache-2.0 per [`Apps/openmessage-archive/DCO`](Apps/openmessage-archive/DCO).
 
 Sign off every commit (`git commit -s`); the `dco` check verifies it.

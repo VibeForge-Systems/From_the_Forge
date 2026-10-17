@@ -1,0 +1,6 @@
+# Pinned so local builds and CI compile with the same compiler.
+# Upgrade deliberately; the MSRV in Cargo.toml (1.90, from Tauri 2.12) is the floor.
+[toolchain]
+channel = "1.97.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

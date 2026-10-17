@@ -1,0 +1,11 @@
+node_modules/
+dist/
+target/
+*.tsbuildinfo
+# Never commit real backups, archives, or exported data. Test fixtures are
+# synthetic and live under tests/fixtures/ with an explicit allowlist.
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+!tests/fixtures/**
