@@ -52,7 +52,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "rpm", "appimage", "nsis", "msi"],
+    "targets": "all",
     "category": "Utility",
     "shortDescription": "Local-first archive for iPhone Messages backups",
     "longDescription": "OpenMessage Archive imports local iPhone backups and lets you browse, search, and export your Messages history without cloud services, accounts, or telemetry.",
