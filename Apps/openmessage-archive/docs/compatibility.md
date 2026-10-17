@@ -21,12 +21,23 @@ Last updated: Milestone 1.
 | Windows 11 ARM64 | Untested | Planned | Planned | Not built in CI yet |
 | Ubuntu 22.04 x64 | CI | Planned | Planned | CI build baseline, which sets the glibc floor. Needs `libwebkit2gtk-4.1-0`. |
 | Ubuntu 24.04 x64 | Supported (built and unit-tested during M1 development) | Planned | Planned | Ships libimobiledevice 1.3.0, which is old. M7 will not depend on it. |
+| Ubuntu 26.04.1 LTS x64 | Launches (built from source with `npm run tauri dev` and opened on a real desktop, a QEMU VM; reported 2026-10-17) | Planned | Planned | First run on a real desktop. The folder picker and persistence across restarts have not been reported yet. Ships libimobiledevice 1.4.0. |
 | Debian 12, Fedora 40+ | Untested | Planned | Planned | Need WebKitGTK 4.1 |
 | macOS | Unsupported for now | — | — | The architecture keeps platform code behind interfaces so it can be added later |
 
 "Supported (built and unit-tested)" on Ubuntu 24.04 means the release build,
-all unit tests, and the `.deb` bundle succeeded. The interactive UI has not
-had a recorded manual test on any platform yet. That is part of M1 sign-off.
+all unit tests, and the `.deb` bundle succeeded.
+
+"Launches" on Ubuntu 26.04.1 means a development build opened on a real
+desktop. That is the first manual run anywhere. It is not yet a full
+interactive test, which still needs:
+
+- choosing a folder through the native picker;
+- confirming that a folder inside a backup is refused;
+- confirming the choice survives a restart.
+
+Those three steps are part of M1 sign-off. Windows 11 still has no manual
+run at all.
 
 ## iOS versions and backup types
 
