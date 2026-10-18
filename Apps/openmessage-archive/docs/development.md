@@ -259,8 +259,18 @@ No GPL or LGPL tool or wrapper is committed.
 | The check on a backup outside the repository (oracle run 4) | `OMA_EXTERNAL_BACKUP=<backup dir> cargo test -p oma-messages --test external_sample -- --ignored --nocapture` |
 
 Record performance results in `docs/compatibility.md` as **synthetic**,
-with the profile, OS and CPU count. Never point `OMA_EXTERNAL_BACKUP` at a
-real backup and commit anything from it.
+with the profile, OS and CPU count.
+
+`external_sample` is for **third-party sample databases wrapped in a
+synthetic backup** (oracle run 4), not for a backup of a real phone: it
+copies the whole backup into the system temp folder and stages the
+plaintext sms.db there, outside the archive folder that `docs/privacy.md`
+describes. Check a real backup in the app instead (the manual checklist in
+`docs/compatibility.md`), and never commit anything from one. If a sample
+needs `OMA_EXTERNAL_PASSWORD`, never type the password on the command line:
+read it without echo (`read -rs OMA_EXTERNAL_PASSWORD && export
+OMA_EXTERNAL_PASSWORD` in bash; `$env:OMA_EXTERNAL_PASSWORD = Read-Host
+-MaskInput` in PowerShell 7) and unset it afterwards.
 
 **Wall-time targets on CI.** With the bundled SQLite and `oma-messages` at
 `opt-level = 3` in dev and test builds, each test file in

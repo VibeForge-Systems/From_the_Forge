@@ -59,6 +59,8 @@ export interface StoredError {
    * load clears it. Job errors stay until the next check starts.
    */
   source?: 'details';
+  /** The job that failed, so Retry repeats that job. */
+  kind?: JobKind;
 }
 
 /**
@@ -77,6 +79,8 @@ export const useBackups = defineStore('backups', () => {
   /** Extraction summaries and reports, keyed by job id (§17.1). */
   const extractionSummaries = ref<Record<string, ExtractionSummary>>({});
   const extractionReports = ref<Record<string, ExtractionReportDto>>({});
+  /** The job id of each backup's latest extraction summary. */
+  const latestExtractionJob = ref<Record<string, string>>({});
   const polling = new Map<string, ReturnType<typeof setTimeout>>();
 
   const selectedSummary = computed<BackupSummary | null>(() => {
@@ -327,9 +331,16 @@ export const useBackups = defineStore('backups', () => {
         }
         break;
       }
-      case 'extractionFinished':
+      case 'extractionFinished': {
         // A summary only (D47): the reports arrive with the details fetch
         // below, which is an invoke response rather than a channel message.
+        // The previous report is dropped now, so it is never shown as this
+        // job's result if that fetch fails.
+        const d = details.value[backupId];
+        if (d) {
+          details.value = { ...details.value, [backupId]: { ...d, lastExtractionReport: null } };
+        }
+        latestExtractionJob.value = { ...latestExtractionJob.value, [backupId]: event.jobId };
         extractionSummaries.value = {
           ...extractionSummaries.value,
           [event.jobId]: {
@@ -341,13 +352,14 @@ export const useBackups = defineStore('backups', () => {
           },
         };
         break;
+      }
       case 'failed':
         if (event.error.code === 'wrongPassword') {
           passwordPrompt.value = { backupId, error: event.error.message, resume: current.kind };
         } else {
           lastError.value = {
             ...lastError.value,
-            [backupId]: { code: event.error.code, message: event.error.message },
+            [backupId]: { code: event.error.code, message: event.error.message, kind: current.kind },
           };
         }
         break;
@@ -408,7 +420,7 @@ export const useBackups = defineStore('backups', () => {
           toast('warning', e.message);
           break;
         default:
-          lastError.value = { ...lastError.value, [backupId]: e };
+          lastError.value = { ...lastError.value, [backupId]: { ...e, kind } };
       }
     }
   }
@@ -465,6 +477,7 @@ export const useBackups = defineStore('backups', () => {
     lastError,
     extractionSummaries,
     extractionReports,
+    latestExtractionJob,
     selectedSummary,
     selectedDetails,
     selectedExtraction,

@@ -19,7 +19,7 @@ vi.mock('@/services/ipc', async (importOriginal) => {
     },
   };
 });
-import { ipc } from '@/services/ipc';
+import { IpcError, ipc } from '@/services/ipc';
 import BackupsView from '@/views/BackupsView.vue';
 import { useBackups } from '@/stores/backups';
 import { useSettings } from '@/stores/settings';
@@ -240,6 +240,75 @@ describe('BackupsView', () => {
     useBackups().lastError = { b1: { code: 'io', message: 'The backup could not be read (permission denied).' } };
     await flushPromises();
     expect(w.find('.alert-danger').text()).toContain('permission denied');
+  });
+
+  it('retries a failed extraction check as an extraction check, not a validation', async () => {
+    api.checkExtraction.mockResolvedValue({ jobId: 'job-9' });
+    const w = await mountWith(backupList(), details());
+    useBackups().lastError = {
+      b1: {
+        code: 'malformedBackup',
+        message: 'The Messages database copy could not be opened (SQLite error 11).',
+        kind: 'extractionCheck',
+      },
+    };
+    await flushPromises();
+    const retry = w.find('.alert-danger').find('button');
+    expect(retry.text()).toBe('Retry extraction check');
+    await retry.trigger('click');
+    expect(api.checkExtraction).toHaveBeenCalledWith('b1', null, expect.any(Function));
+    expect(api.openBackup).not.toHaveBeenCalled();
+  });
+
+  it('retries a failed validation as a validation', async () => {
+    api.openBackup.mockResolvedValue({ jobId: 'job-10' });
+    const w = await mountWith(backupList(), details());
+    useBackups().lastError = { b1: { code: 'io', message: 'Manifest.db could not be read.', kind: 'validate' } };
+    await flushPromises();
+    const retry = w.find('.alert-danger').find('button');
+    expect(retry.text()).toBe('Retry');
+    await retry.trigger('click');
+    expect(api.openBackup).toHaveBeenCalledWith('b1', null, expect.any(Function));
+    expect(api.checkExtraction).not.toHaveBeenCalled();
+  });
+
+  it('names the resumed job on the password dialog button', async () => {
+    const s = summary({ state: 'needsPassword', encrypted: true });
+    const w = await mountWith(backupList([s]), details(s));
+    const store = useBackups();
+    store.passwordPrompt = { backupId: 'b1', error: null, resume: 'extractionCheck' };
+    await flushPromises();
+    const submit = () => w.find('button[form="backup-password-form"]');
+    expect(submit().text()).toBe('Unlock and run extraction check');
+    store.passwordPrompt = { backupId: 'b1', error: null, resume: 'validate' };
+    await flushPromises();
+    expect(submit().text()).toBe('Unlock and validate');
+  });
+
+  it('says when the latest extraction report could not be loaded, and hides the older one', async () => {
+    const w = await mountWith(
+      backupList(),
+      details(summary(), { lastExtractionReport: extractionReport({ jobId: 'job-old' }) }),
+    );
+    expect(w.find('.oma-extraction-outcome').exists()).toBe(true);
+    const store = useBackups();
+    api.checkExtraction.mockResolvedValue({ jobId: 'job-new' });
+    await store.checkExtraction('b1');
+    api.getBackupDetails.mockRejectedValueOnce(new IpcError('get_backup_details', 'io', 'The details could not be read.'));
+    const call = api.checkExtraction.mock.calls.at(-1);
+    call?.[2]({
+      kind: 'extractionFinished',
+      jobId: 'job-new',
+      outcome: 'damaged',
+      sourceChanged: false,
+      stagingRemoved: true,
+      plaintextRemovedAfterRowPass: true,
+    });
+    await flushPromises();
+    expect(w.find('.oma-extraction-outcome').exists()).toBe(false);
+    expect(w.find('.oma-extraction-unloaded').text()).toContain(
+      'The report of the latest extraction check could not be loaded. Its outcome: the Messages database is damaged.',
+    );
   });
 
   it('never renders an enabled Import messages button in any state', async () => {

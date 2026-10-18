@@ -757,7 +757,13 @@ pub struct MessageCounts {
     pub rows: u64,
     /// Rows with an association (first in the partition).
     pub with_association: Option<u64>,
-    /// Group-action rows (`item_type ≠ 0`), not already counted above.
+    /// Rows with `item_type ≠ 0`, not already counted above. Despite the
+    /// field's name (M3 §13.2), this is every non-message item kind, not only
+    /// group actions: `item_type` 4 to 6 (shared location, kept audio,
+    /// SharePlay) and unknown values are counted here too; [`ItemKind`]
+    /// separates them. The UI labels it "Non-message rows".
+    ///
+    /// [`ItemKind`]: crate::ItemKind
     pub group_actions: Option<u64>,
     /// Rows a Recently Deleted link names, not already counted above.
     pub recently_deleted: Option<u64>,
@@ -878,6 +884,10 @@ pub struct ProbeCounts {
     pub class_key_unavailable: u64,
     /// Encrypted: the key did not unwrap (never called "damaged").
     pub key_does_not_unwrap: u64,
+    /// A regular file whose length differs from the Manifest's `Size`
+    /// (padded to a block when encrypted): truncated or replaced, so not
+    /// counted as present.
+    pub size_mismatch: u64,
     /// Any outcome this version does not name.
     pub other: u64,
     /// Found, but probing was turned off.
@@ -903,6 +913,12 @@ pub struct LookupCounts {
 }
 
 /// `attachment` rows and where their files are.
+///
+/// When the database has no `attachment` table, `rows` is `None` and
+/// nothing was looked up or probed: the plain counters (`by_class`,
+/// `lookup`, `probes`, `present_blob_bytes`) are then zeros that mean "not
+/// recorded", and consumers treat the whole section as not recorded (the
+/// shell sends no attachments section at all).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct AttachmentCounts {
@@ -1081,6 +1097,9 @@ pub struct FailureCounts {
     /// Found attachments of an encrypted backup whose key is missing or
     /// does not unwrap.
     pub attachment_key_problem: u64,
+    /// Found attachments whose blob's length differs from the Manifest's
+    /// `Size`.
+    pub attachment_blob_size_mismatch: u64,
     /// Aggregate statements over their budget.
     pub aggregate_over_budget: u32,
 }
@@ -1109,6 +1128,7 @@ impl Default for FailureCounts {
             attachment_blob_missing: 0,
             attachment_blob_unreadable: 0,
             attachment_key_problem: 0,
+            attachment_blob_size_mismatch: 0,
             aggregate_over_budget: 0,
         }
     }

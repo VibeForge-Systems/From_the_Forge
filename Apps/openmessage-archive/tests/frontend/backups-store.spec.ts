@@ -303,7 +303,11 @@ describe('backups store: jobs', () => {
       error: { code: 'malformedBackup', message: 'Manifest.db could not be read.' },
       stagingRemoved: true,
     });
-    expect(store.lastError.b1).toEqual({ code: 'malformedBackup', message: 'Manifest.db could not be read.' });
+    expect(store.lastError.b1).toEqual({
+      code: 'malformedBackup',
+      message: 'Manifest.db could not be read.',
+      kind: 'validate',
+    });
   });
 
   it('polls a job it cannot hear until it ends', async () => {
@@ -487,6 +491,61 @@ describe('backups store: extraction check (M3)', () => {
     lastHandler()({ kind: 'finished', jobId: 'job-22', report: report(), stagingRemoved: true });
     expect(store.selectedDetails?.lastExtractionReport).toBeNull();
     expect(store.selectedExtraction).toBeNull();
+  });
+
+  it('never shows the previous report as the result when the new one cannot be loaded', async () => {
+    api.getBackupDetails.mockResolvedValueOnce(
+      details(summary(), { lastExtractionReport: extractionReport({ jobId: 'job-old' }) }),
+    );
+    api.checkExtraction.mockResolvedValue({ jobId: 'job-new' });
+    const store = useBackups();
+    await store.refresh();
+    await store.select('b1');
+    expect(store.selectedExtraction?.jobId).toBe('job-old');
+    await store.checkExtraction('b1');
+    api.getBackupDetails.mockRejectedValueOnce(new IpcError('get_backup_details', 'io', 'The details could not be read.'));
+    lastExtractionHandler()({
+      kind: 'extractionFinished',
+      jobId: 'job-new',
+      outcome: 'damaged',
+      sourceChanged: false,
+      stagingRemoved: true,
+      plaintextRemovedAfterRowPass: true,
+    });
+    await flushMicrotasks();
+    expect(store.selectedExtraction).toBeNull();
+    expect(store.latestExtractionJob.b1).toBe('job-new');
+    expect(store.extractionSummaries['job-new']?.outcome).toBe('damaged');
+    expect(store.lastError.b1?.source).toBe('details');
+  });
+
+  it('records which job failed, so Retry can repeat it', async () => {
+    api.checkExtraction.mockResolvedValue({ jobId: 'job-24' });
+    const store = useBackups();
+    await store.refresh();
+    await store.checkExtraction('b1');
+    lastExtractionHandler()({
+      kind: 'failed',
+      jobId: 'job-24',
+      error: { code: 'malformedBackup', message: 'The Messages database copy could not be opened (SQLite error 11).' },
+      stagingRemoved: true,
+    });
+    expect(store.lastError.b1).toEqual({
+      code: 'malformedBackup',
+      message: 'The Messages database copy could not be opened (SQLite error 11).',
+      kind: 'extractionCheck',
+    });
+    // A rejected command is recorded with its kind too.
+    api.checkExtraction.mockRejectedValueOnce(new IpcError('check_extraction', 'io', 'The archive folder is not writable.'));
+    await store.checkExtraction('b1');
+    expect(store.lastError.b1).toEqual({
+      code: 'io',
+      message: 'The archive folder is not writable.',
+      kind: 'extractionCheck',
+    });
+    api.openBackup.mockRejectedValueOnce(new IpcError('open_backup', 'io', 'The archive folder is not writable.'));
+    await store.check('b1');
+    expect(store.lastError.b1?.kind).toBe('validate');
   });
 
   it('warns about leftover files after an extraction check that could not clean up', async () => {

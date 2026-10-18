@@ -420,6 +420,7 @@ pub enum FailureKindDto {
     AttachmentBlobMissing,
     AttachmentBlobUnreadable,
     AttachmentKeyProblem,
+    AttachmentBlobSizeMismatch,
     AggregateOverBudget,
 }
 
@@ -552,6 +553,8 @@ pub struct DbFactsDto {
 pub struct CountsDto {
     pub message_rows: u64,
     pub association_rows: Option<u64>,
+    /// Rows with `item_type ≠ 0` and no association: group events and every
+    /// other non-message item kind (shown as "Non-message rows").
     pub group_action_rows: Option<u64>,
     pub recently_deleted_rows: Option<u64>,
     pub other_rows: Option<u64>,
@@ -596,6 +599,8 @@ pub struct AttachmentOutcomesDto {
     pub invalid_entry: u64,
     pub file_present: u64,
     pub file_missing: u64,
+    /// A regular file whose length differs from the backup's record of it.
+    pub file_size_mismatch: u64,
     /// A link, directory or device, or metadata that could not be read.
     pub file_not_readable: u64,
     /// No `EncryptionKey` or no `ProtectionClass`.
@@ -834,8 +839,11 @@ fn dates(r: &ExtractionReport, c: &mut Counter) -> Option<DatesDto> {
     })
 }
 
+/// `null` when the database has no `attachment` table: then nothing was
+/// looked up or probed, and the lookup and probe counters (plain zeros in
+/// the report) are "not recorded", never 0 (I5).
 fn attachments(r: &ExtractionReport, c: &mut Counter) -> Option<AttachmentOutcomesDto> {
-    let a = r.attachments.as_ref()?;
+    let a = r.attachments.as_ref().filter(|a| a.rows.is_some())?;
     let l = &a.lookup;
     let p = &a.probes;
     let not_looked_up = l
@@ -852,6 +860,7 @@ fn attachments(r: &ExtractionReport, c: &mut Counter) -> Option<AttachmentOutcom
         invalid_entry: c.n(l.invalid_entry),
         file_present: c.n(p.present),
         file_missing: c.n(p.missing),
+        file_size_mismatch: c.n(p.size_mismatch),
         file_not_readable: c.n(p.not_regular.saturating_add(p.unreadable)),
         no_key: c.n(p.no_key.saturating_add(p.no_protection_class)),
         key_does_not_unwrap: c.n(p.key_does_not_unwrap),
@@ -904,6 +913,10 @@ pub fn problem_counts(f: &FailureCounts) -> Vec<(FailureKindDto, u64)> {
         (K::AttachmentBlobMissing, f.attachment_blob_missing),
         (K::AttachmentBlobUnreadable, f.attachment_blob_unreadable),
         (K::AttachmentKeyProblem, f.attachment_key_problem),
+        (
+            K::AttachmentBlobSizeMismatch,
+            f.attachment_blob_size_mismatch,
+        ),
         (K::AggregateOverBudget, u64::from(f.aggregate_over_budget)),
     ]);
     out

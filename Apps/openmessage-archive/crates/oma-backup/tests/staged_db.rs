@@ -392,7 +392,10 @@ fn wal_rows_only_in_the_wal_are_staged() {
     assert_eq!(staged.main_bytes, sms.main.len() as u64);
     assert!(staged.wal.as_ref().is_some_and(|w| w.is_file()));
     assert!(staged.header_facts().expect("header").says_wal());
-    let facts = staged.wal_facts().expect("wal facts").expect("staged");
+    let facts = staged
+        .wal_facts(&CancelToken::new())
+        .expect("wal facts")
+        .expect("staged");
     assert!(facts.magic_valid && facts.header_valid && facts.page_size_matches);
     assert!(facts.valid_committed_frames >= 1);
     assert_eq!(facts.frames_after_first_invalid, 0);
@@ -425,7 +428,10 @@ fn a_listed_wal_that_is_missing_is_skipped_only_when_best_effort() {
         WalOutcome::Skipped(FileUnavailable::BlobMissing)
     );
     assert!(staged.wal.is_none());
-    assert!(staged.wal_facts().expect("facts").is_none());
+    assert!(staged
+        .wal_facts(&CancelToken::new())
+        .expect("facts")
+        .is_none());
     assert!(staged.header_facts().expect("header").says_wal());
     let dir = staged.path.parent().expect("dir").to_path_buf();
     let names: Vec<_> = fs::read_dir(&dir)
@@ -458,7 +464,10 @@ fn corrupted_later_wal_frames_are_counted() {
     let fx = fixture_with(&sms, true);
     let ob = fx.open(None).expect("open");
     let staged = stage(&ob, WalPolicy::BestEffort).expect("stage");
-    let facts = staged.wal_facts().expect("facts").expect("staged");
+    let facts = staged
+        .wal_facts(&CancelToken::new())
+        .expect("facts")
+        .expect("staged");
     assert!(facts.header_valid);
     assert!(facts.frames_after_first_invalid >= 1);
     assert!(facts.valid_committed_frames >= 1);
@@ -685,6 +694,42 @@ fn attachment_keys_and_the_file_prober() {
         drop(prober);
         assert!(ob.close().removed);
         assert!(fx.staged_files().is_empty());
+    }
+
+    // A blob truncated in place is not "present": its length no longer
+    // matches the Manifest's Size (padded to a block when encrypted).
+    let attachment_id: String = {
+        use sha1::Digest as _;
+        sha1::Sha1::digest(format!("{ATTACHMENT_DOMAIN}-{ATTACHMENT_PATH}").as_bytes())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    };
+    for (name, password, keep) in [
+        ("plain", None, 0u64),
+        ("plain", None, 50),
+        ("enc", Some(PASSWORD), 0),
+        ("enc", Some(PASSWORD), 80),
+    ] {
+        let fx = Fixture::new(name);
+        let path = blob(&fx.dir, &attachment_id);
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .expect("blob");
+        file.set_len(keep).expect("truncate");
+        drop(file);
+        let ob = fx.open(password).expect("open");
+        let key = ob
+            .find_attachment(ATTACHMENT_DOMAIN, ATTACHMENT_PATH)
+            .expect("lookup")
+            .expect("listed");
+        assert_eq!(
+            ob.file_prober().probe(&key),
+            BlobProbe::SizeMismatch { len: keep },
+            "{name} {keep}"
+        );
+        assert!(ob.close().removed);
     }
 
     let fx = Fixture::read_only("missing-sms-blob");

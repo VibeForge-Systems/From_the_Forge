@@ -70,26 +70,17 @@ const BASES: [(&[u8], Kind); 5] = [
     (b"NSAttributedString", Kind::Attributed),
 ];
 
-/// The class kind of an object slot.
+/// The kind a class name gives by itself, when it is one of the bases.
+pub(crate) fn base_kind(name: &[u8]) -> Option<Kind> {
+    BASES.iter().find(|(n, _)| *n == name).map(|(_, k)| *k)
+}
+
+/// The class kind of an object slot: the first known name on its class's
+/// superclass chain, most derived first. The walk resolved it once per
+/// class when the chain was read, so this is O(1) however long the chain.
 pub(crate) fn kind(doc: &Doc<'_>, obj: SlotId) -> Kind {
-    let mut class = doc.object_class(obj);
-    // A chain is acyclic (references only reach completed slots), and no
-    // longer than the table; the bound is a second guard.
-    let mut steps = doc.slot_count();
-    while let Some(c) = class {
-        let Some((name, superclass)) = doc.class(c) else {
-            return Kind::Other;
-        };
-        if let Some((_, k)) = BASES.iter().find(|(n, _)| *n == name) {
-            return *k;
-        }
-        let Some(left) = steps.checked_sub(1) else {
-            return Kind::Other;
-        };
-        steps = left;
-        class = superclass;
-    }
-    Kind::Other
+    doc.object_class(obj)
+        .map_or(Kind::Other, |c| doc.class_kind(c))
 }
 
 /// An `NSString`'s bytes (not yet checked as UTF-8).

@@ -232,6 +232,11 @@ impl Meter {
         }
     }
 
+    /// Nodes that may still be charged.
+    pub(crate) fn nodes_left(&self) -> u32 {
+        self.budget.max_nodes.saturating_sub(self.stats.nodes)
+    }
+
     pub(crate) fn slot(&mut self, at: usize) -> Result<(), TsError> {
         if self.stats.slots >= self.budget.max_objects {
             return Err(fail(TsErrorKind::Budget, at));

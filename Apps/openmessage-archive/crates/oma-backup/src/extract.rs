@@ -276,16 +276,17 @@ impl<'a> StagedDatabase<'a> {
     }
 
     /// Facts about the staged `-wal`: header, salts and cumulative frame
-    /// checksums. `None` when no `-wal` was staged.
-    pub fn wal_facts(&self) -> Result<Option<WalFacts>, BackupError> {
+    /// checksums. `None` when no `-wal` was staged. The scan reads the whole
+    /// `-wal` (up to the staging limit), so it checks `cancel` before every
+    /// frame and returns [`BackupError::Cancelled`] once it is set.
+    pub fn wal_facts(&self, cancel: &CancelToken) -> Result<Option<WalFacts>, BackupError> {
         let Some(wal) = &self.wal else {
             return Ok(None);
         };
+        cancel.check()?;
         let page_size = self.header_facts()?.page_size;
         let f = fs::File::open(wal).map_err(|e| BackupError::staging_io(IoOp::Open, &e))?;
-        crate::wal::wal_facts(io::BufReader::new(f), page_size)
-            .map(Some)
-            .map_err(|e| BackupError::staging_io(IoOp::Read, &e))
+        crate::wal::wal_facts(io::BufReader::new(f), page_size, cancel).map(Some)
     }
 
     /// Delete the staged main file, its `-wal`, and any `-shm` SQLite

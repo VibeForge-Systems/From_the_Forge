@@ -164,10 +164,17 @@ fn check_cancels_at_every_phase_within_the_latency_budget() {
     }
 }
 
-/// The interrupt path (§7.2): a long aggregate on an index-free 200,000-row
-/// database is stopped by a cancel from another thread, inside the
-/// statement (the progress handler and the interrupt watcher), within the
-/// latency budget.
+/// The interrupt path (§7.2): a cancel from another thread stops a long
+/// aggregate *inside* the statement (the progress handler and the interrupt
+/// watcher), not only at the next check between statements.
+///
+/// The first aggregate statement on this index-free 400,000-row database
+/// takes on the order of 100 ms. Its uncancelled duration `d` is measured
+/// first (the faster of two runs); then the cancel arrives `d / 8` into the
+/// statement. Stopped inside the statement, the job ends within a few
+/// milliseconds. If only the checks between statements worked, the
+/// statement would run to its end, about `7d / 8` later, so the latency
+/// bound of `d / 4` tells the two paths apart.
 #[test]
 fn a_long_aggregate_is_interrupted_from_another_thread() {
     use std::sync::{Arc, Mutex};
@@ -175,27 +182,55 @@ fn a_long_aggregate_is_interrupted_from_another_thread() {
 
     let mut sql = full_schema();
     sql.push_str(
-        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 200000)
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 400000)
          INSERT INTO message (ROWID, guid, date, is_from_me, handle_id, other_handle)
              SELECT i, 'SYNTH-MSG-GUID-' || i, 0, 0, i, i FROM n;
-         WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 200000)
+         WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 400000)
          INSERT INTO chat_message_join (chat_id, message_id) SELECT i % 7, i + 3 FROM n;
          INSERT INTO chat (guid) VALUES ('SYNTH-CHAT-GUID-1');",
     );
     let fx = Fixture::with_sms(&build(&sql));
+
+    // The first statement's duration, uncancelled: from the report before
+    // it (done = 0) to the report after it (done = 1).
+    let mut first = Duration::MAX;
+    for _ in 0..2 {
+        let ob = fx.open(None);
+        let token = CancelToken::new();
+        let mut marks: Vec<(u64, Instant)> = Vec::new();
+        let mut sink = |p: MessagesProgress| {
+            if p.phase == MessagesPhase::Summarising && p.done <= 1 {
+                marks.push((p.done, Instant::now()));
+            }
+        };
+        let mut ctx = MessagesCtx::new(&token, &mut sink);
+        oma_messages::check(&ob, &oma_messages::CheckOptions::default(), &mut ctx)
+            .expect("uncancelled check");
+        assert_clean(&fx, ob);
+        let [(0, a), (1, b)] = marks[..] else {
+            panic!("{marks:?}");
+        };
+        first = first.min(b - a);
+    }
+    assert!(
+        first >= Duration::from_millis(20),
+        "the first aggregate is too short to tell the paths apart: {first:?}"
+    );
+
     let ob = fx.open(None);
     let token = CancelToken::new();
     let trigger = token.clone();
     let at: Arc<Mutex<Option<Instant>>> = Arc::default();
     let at_thread = Arc::clone(&at);
     let mut started = false;
+    let delay = first / 8;
     let mut sink = move |p: MessagesProgress| {
         if p.phase == MessagesPhase::Summarising && !started {
             started = true;
             let trigger = trigger.clone();
             let at = Arc::clone(&at_thread);
             std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_millis(5));
+                std::thread::sleep(delay);
                 *at.lock().expect("lock") = Some(Instant::now());
                 trigger.cancel();
             });
@@ -209,5 +244,9 @@ fn a_long_aggregate_is_interrupted_from_another_thread() {
         "{result:?}"
     );
     assert!(latency < Duration::from_secs(2), "{latency:?}");
+    assert!(
+        latency < first / 4,
+        "the statement ran on after the cancel: {latency:?} (statement {first:?})"
+    );
     assert_clean(&fx, ob);
 }

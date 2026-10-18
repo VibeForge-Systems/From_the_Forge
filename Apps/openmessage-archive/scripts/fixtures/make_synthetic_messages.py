@@ -636,7 +636,11 @@ def wal_facts(wal, db_page_size):
     for i, (pgno, commit, pos) in enumerate(frames):
         fs1, fs2, fc1, fc2 = struct.unpack(">IIII", wal[pos + 8:pos + 24])
         n0, n1 = mb.wal_checksum(wal[pos:pos + 8] + wal[pos + 24:pos + 24 + page_size], s0, s1, big)
-        if not header_valid or (fs1, fs2) != (salt1, salt2) or pgno == 0 or (n0, n1) != (fc1, fc2):
+        if header_valid and (fs1, fs2) != (salt1, salt2):
+            # Other salts end the log: frames of an earlier generation left
+            # after a checkpoint reset, not damage (not counted as invalid).
+            break
+        if not header_valid or pgno == 0 or (n0, n1) != (fc1, fc2):
             invalid_at = i
             break
         s0, s1 = n0, n1

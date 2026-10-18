@@ -2,8 +2,12 @@
 
 This file records, for each clean-room file added in Milestone 3, the
 sources consulted, what was written from them, and who wrote it (M3 spec
-section 20.5). Source IDs refer to the M3 design spec's Appendix A,
-repeated below for the IDs used here.
+section 20.5). The T-IDs are repeated below. Every S-ID (S1–S21) is listed,
+with its licence and use, in the source table of
+[`docs/supported-formats.md`](../../docs/supported-formats.md#sources); the
+design spec itself is not committed, so section references ("M3 §…") point
+to it for the record only, and the decisions they implement are in
+[`docs/architecture.md`](../../docs/architecture.md) (D1–D50).
 
 **Status: the independent clean-room review is pending.** Until a reviewer
 records it here, this file is the author's statement only.
@@ -65,6 +69,45 @@ Oracle runs 3 and 4 drive the imessage-exporter 4.3.0 binary (GPL-3.0) as
 a black box, from scratch scripts that are not committed; its source was not
 opened. The two third-party sample databases used by oracle 4 stay in
 scratch and are never committed.
+
+## Files added in PRs 3a, 3b, 3d and 3f, and in the review fixes
+
+Author: the OpenMessage Archive contributors (AI assisted, directed by the
+maintainer). "Written from" names the sources each file cites in its own
+comments; the facts themselves are recorded, with sources, in
+`docs/supported-formats.md`. Files whose only basis is SQLite's public
+documentation (S18–S21) or our own design carry no format facts from any
+copyleft source. As for every file above: no GPL or LGPL source was opened
+while writing these files (S2 was read for facts during research only, and
+`docs/supported-formats.md` records that), and no DDL text, row or value was
+copied from any sample database (S3, S12). Like the rest of this record,
+this is the authors' statement until the clean-room review is recorded.
+
+| File | PR | Written from | What it contains |
+|---|---|---|---|
+| `crates/oma-backup/src/db_limits.rs` | 3a | S18 | `sqlite3_limit` values for staged databases |
+| `crates/oma-backup/src/staged_conn.rs` | 3a | S18, S20, S21 | The hardened staged connection: authorizer, op budgets, encoding |
+| `crates/oma-backup/src/wal.rs` | 3a | S19 | Database-header and `-wal` frame facts (salts, checksums) |
+| `crates/oma-backup/src/prober.rs` | 3a | The M2 extraction code (D30) | Metadata-only probes of attachment blobs |
+| `crates/oma-backup/src/schema_sql.rs` | review fix | S19, sqlite.org/lang_comment.html | Tokenising `sqlite_schema.sql` to find virtual tables |
+| `crates/oma-backup/tests/staged_db.rs` | 3a | S19, S21 | Tests of the above on synthetic databases |
+| `crates/oma-messages/src/schema/known.rs` | 3b | S1, S2, S3, S5, S8, S12, S13 (names only) | The known tables and columns, our own declared kinds |
+| `crates/oma-messages/src/schema/scan.rs`, `probe.rs`, `integrity.rs`, `mod.rs` | 3b | S18, S20 | The `sqlite_schema` scan, the capability probe, `quick_check` |
+| `crates/oma-messages/src/codes.rs` | 3b, 3d | S2, S8 (codes as facts) | `associated_message_type`, `item_type` and `group_action_type` tables, service classes |
+| `crates/oma-messages/src/time.rs` | 3b, 3d | S15, S3, S4, S8 | Apple-epoch timestamps and unit classification |
+| `crates/oma-messages/src/col.rs`, `value.rs`, `caps.rs`, `redact.rs`, `error.rs`, `progress.rs`, `db.rs`, `lib.rs` | 3b | Our own design (D41–D50) | Column values, size caps, redaction, errors, progress, paged passes |
+| `crates/oma-messages/src/records/handle.rs`, `chat.rs`, `joins.rs`, `recoverable.rs`, `mod.rs` | 3b | S3 (observed shapes, nothing copied); `known.rs` | Typed record passes |
+| `crates/oma-messages/src/records/message.rs` | 3d | S2, S3, S4, S6, S8 | The message record |
+| `crates/oma-messages/src/assoc.rs` | 3d | S2, S8 | Association targets (`p:`/`bp:` forms) |
+| `crates/oma-messages/src/summary.rs` | 3d | S2, S4, S8 (key names) | `message_summary_info` keys, read through the M2 plist reader |
+| `crates/oma-messages/src/guidset.rs` | 3d | Our own design (D46) | GUID sets counted in Rust |
+| `crates/oma-messages/src/records/attachment.rs`, `attachments.rs` | 3e | S2, S3, S8 | Attachment rows; path classes and Manifest lookups |
+| `crates/oma-messages/src/aggregates.rs`, `check.rs`, `report.rs` | 3e | S6 (one date fact); our own design (D43–D50) | Aggregate SQL, the check, the report |
+| `crates/oma-messages/tests/common/bplist.rs` | 3d | The public description of the binary plist layout | A test-only bplist writer |
+| `crates/oma-messages/tests/common/mutate.rs` | 3c | xorshift64* (Vigna), public domain | A seeded mutation harness |
+| `crates/oma-messages/tests/common/mod.rs`, `expected.rs`, and the other `crates/oma-messages/tests/*.rs` | 3b–3e, review fixes | The crate's own known lists | Synthetic databases built in the tests; the projection compared with `report.json` |
+| `src-tauri/src/backups/extraction.rs`, `src-tauri/src/panic_hook.rs` | 3f | Our own design (§16, D47) | The IPC report DTOs and the panic hook |
+| `src/components/ExtractionReport.vue`, `src/services/extractionText.ts` | 3f | Our own wording | The report on the Backups page |
 
 ## Trust anchors and their limits
 

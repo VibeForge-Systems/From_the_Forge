@@ -1,11 +1,20 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import ModalDialog from '@/components/ModalDialog.vue';
+import type { JobKind } from '@/types';
 
 // The password lives only in this component's ref, and only while the
 // dialog is open. It is handed to the parent once, on submit, and the ref is
 // cleared at once. No store field is bound to it.
-const props = defineProps<{ open: boolean; deviceName: string | null; error: string | null }>();
+// `resume` is the job the password starts, so the button says what the
+// click does: the extraction check also copies and decrypts sms.db.
+const props = withDefaults(
+  defineProps<{ open: boolean; deviceName: string | null; error: string | null; resume?: JobKind }>(),
+  { resume: 'validate' },
+);
+const submitLabel = computed(() =>
+  props.resume === 'extractionCheck' ? 'Unlock and run extraction check' : 'Unlock and validate',
+);
 const emit = defineEmits<{ submit: [password: string]; close: [] }>();
 
 const password = ref('');
@@ -93,7 +102,7 @@ onBeforeUnmount(clear);
         class="btn btn-primary"
         :disabled="password === ''"
       >
-        Unlock and validate
+        {{ submitLabel }}
       </button>
     </template>
   </ModalDialog>

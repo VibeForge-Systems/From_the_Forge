@@ -417,11 +417,21 @@ repository; the synthetic fixtures are hand-written from column-name facts.
   `36ce215df2239f14660f11541cb64a3f790c95cd` (computed); it is never
   copied, and whether it ever appears is **UNVERIFIED**.
 - The staged `-wal` header and frames are validated (magic, page size,
-  salts and checksums, S19). A `-wal` with bytes but an invalid header or
-  frames is the qualifier `WalFramesInvalid`; a zero-length `-wal` is a
-  normal state. A `-wal` that is not listed while the main file's header
-  says WAL mode is the qualifier `WalStateUnknown`. The report says the
-  `-wal` was *staged*, never *applied*.
+  salts and checksums, S19). A `-wal` with bytes but an invalid header, or
+  a frame that carries the header's salts but has a zero page number or a
+  broken checksum chain, is the qualifier `WalFramesInvalid`; a
+  zero-length `-wal` is a normal state. After a checkpoint SQLite rewrites
+  the `-wal` from the start with new salts and does not truncate it, so
+  frames of an earlier generation (already in the main file) can follow
+  the current ones. Their salts differ from the header's, which is how
+  SQLite finds the end of the log (S19), so the check counts them as
+  stale (`stale_generation_frames`), not as invalid. This narrows the
+  M3 design rule, which counted every frame from the first salt mismatch
+  as invalid. A `-wal` that is not listed while the main file's header
+  says WAL mode is the qualifier `WalStateUnknown`: the header shows WAL
+  mode, not that changes were pending, because SQLite deletes the `-wal`
+  when the last connection closes cleanly. The report says the `-wal` was
+  *staged*, never *applied*.
 - Whether Apple checkpoints the WAL before a backup, and whether a main file
   and `-wal` captured at different moments can be detected, are
   **UNVERIFIED** (question 25).

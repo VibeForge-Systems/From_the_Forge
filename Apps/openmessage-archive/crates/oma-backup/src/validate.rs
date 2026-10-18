@@ -317,7 +317,7 @@ fn sms_key_failure(e: BackupError) -> Result<(Finding, bool), BackupError> {
 
 /// The ciphertext length for a plaintext of `size` bytes with PKCS#7:
 /// `(size / 16 + 1) × 16`. `None` on overflow.
-fn padded_len(size: u64) -> Option<u64> {
+pub(crate) fn padded_len(size: u64) -> Option<u64> {
     size.checked_div(16)?.checked_add(1)?.checked_mul(16)
 }
 

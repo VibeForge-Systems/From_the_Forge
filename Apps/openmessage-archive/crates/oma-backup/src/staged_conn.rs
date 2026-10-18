@@ -351,6 +351,7 @@ mod tests {
     use super::*;
     use crate::db_limits::StagedDbLimits;
     use crate::manifest_db::{harden, INTERRUPT_POLL};
+    use rusqlite::config::DbConfig;
     use rusqlite::OpenFlags;
 
     /// What SQLite asks the authorizer for a table-valued pragma function
@@ -435,6 +436,41 @@ mod tests {
     /// The read-write `query_only` fallback (`OpenMode::ReadWriteQueryOnly`)
     /// gets the same guards. Built directly, because which mode a staged
     /// copy needs depends on the platform.
+    #[test]
+    fn closing_a_read_write_connection_leaves_the_staged_pair_unchanged() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("sms.db");
+        let wal = tmp.path().join("sms.db-wal");
+        let c = Connection::open(&path).expect("create");
+        c.set_db_config(DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, true)
+            .expect("no checkpoint");
+        c.pragma_update(None, "journal_mode", "WAL").expect("wal");
+        c.execute_batch(
+            "CREATE TABLE message (ROWID INTEGER PRIMARY KEY, guid TEXT);
+             INSERT INTO message (guid) VALUES ('g');",
+        )
+        .expect("schema");
+        drop(c);
+        let main_before = std::fs::read(&path).expect("main");
+        let wal_before = std::fs::read(&wal).expect("-wal");
+        assert!(!wal_before.is_empty());
+
+        let conn =
+            Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_WRITE).expect("open");
+        harden(&conn, &StagedDbLimits::ceiling()).expect("harden");
+        assert!(conn
+            .db_config(DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE)
+            .expect("db_config"));
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM message", [], |r| r.get(0))
+            .expect("read");
+        assert_eq!(n, 1);
+        conn.close().map_err(|(_, e)| e).expect("close");
+
+        assert_eq!(std::fs::read(&path).expect("main"), main_before);
+        assert_eq!(std::fs::read(&wal).expect("-wal survives"), wal_before);
+    }
+
     #[test]
     fn guards_hold_on_a_read_write_connection() {
         let tmp = tempfile::tempdir().expect("tempdir");

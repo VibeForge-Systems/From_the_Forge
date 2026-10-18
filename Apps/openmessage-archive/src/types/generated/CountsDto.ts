@@ -4,7 +4,12 @@
  * The counts section: rows by table, the message partition and messages
  * in no chat. `null` counters are "not recorded by this database".
  */
-export type CountsDto = { messageRows: number, associationRows: number | null, groupActionRows: number | null, recentlyDeletedRows: number | null, otherRows: number | null, chatRows: number, 
+export type CountsDto = { messageRows: number, associationRows: number | null, 
+/**
+ * Rows with `item_type ≠ 0` and no association: group events and every
+ * other non-message item kind (shown as "Non-message rows").
+ */
+groupActionRows: number | null, recentlyDeletedRows: number | null, otherRows: number | null, chatRows: number, 
 /**
  * `handle` rows: address and service pairs.
  */

@@ -17,6 +17,7 @@ import { LEFTOVER_FILES_MESSAGE, useBackups } from '@/stores/backups';
 import { useLayout } from '@/stores/layout';
 import { SHORTCUTS, formatShortcut } from '@/services/shortcuts';
 import { isDefaultLocation } from '@/services/backupText';
+import { OUTCOME_LABEL } from '@/services/extractionText';
 
 const backups = useBackups();
 const layout = useLayout();
@@ -88,6 +89,25 @@ const promptOpen = computed(() => backups.passwordPrompt !== null);
 function validate(): void {
   if (summary.value) void backups.check(summary.value.id);
 }
+
+// Retry repeats the job that failed: an extraction check is retried as one.
+const retryLabel = computed(() =>
+  error.value?.kind === 'extractionCheck' ? 'Retry extraction check' : 'Retry',
+);
+function retry(): void {
+  if (summary.value) void backups.check(summary.value.id, error.value?.kind ?? 'validate');
+}
+
+// The latest extraction check ended, but its report could not be loaded:
+// say so rather than show an older report or nothing.
+const unloadedExtraction = computed(() => {
+  const id = summary.value?.id;
+  if (!id || backups.lastError[id]?.source !== 'details') return null;
+  const jobId = backups.latestExtractionJob[id];
+  const s = jobId ? backups.extractionSummaries[jobId] : undefined;
+  if (!s || extraction.value?.jobId === jobId) return null;
+  return s;
+});
 
 function runExtractionCheck(): void {
   if (summary.value) void backups.checkExtraction(summary.value.id);
@@ -273,13 +293,18 @@ function onPasswordSubmit(password: string): void {
 
         <div v-if="error" class="alert alert-danger d-flex align-items-start gap-2" role="alert">
           <span class="me-auto">{{ error.message }}</span>
-          <button v-if="canValidate" type="button" class="btn btn-sm btn-outline-danger" @click="validate()">
-            Retry
+          <button v-if="canValidate" type="button" class="btn btn-sm btn-outline-danger" @click="retry()">
+            {{ retryLabel }}
           </button>
         </div>
 
         <div v-if="leftovers" class="alert alert-warning small" role="status">
           {{ LEFTOVER_FILES_MESSAGE }}
+        </div>
+
+        <div v-if="unloadedExtraction" class="alert alert-warning small oma-extraction-unloaded" role="status">
+          The report of the latest extraction check could not be loaded. Its outcome:
+          {{ OUTCOME_LABEL[unloadedExtraction.outcome] }}
         </div>
 
         <ExtractionReport v-if="extraction" :report="extraction" />
@@ -297,6 +322,7 @@ function onPasswordSubmit(password: string): void {
     :open="promptOpen"
     :device-name="deviceName"
     :error="backups.passwordPrompt?.error ?? null"
+    :resume="backups.passwordPrompt?.resume ?? 'validate'"
     @submit="onPasswordSubmit"
     @close="backups.closePrompt()"
   />

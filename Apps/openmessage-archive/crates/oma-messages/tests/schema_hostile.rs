@@ -289,6 +289,79 @@ fn virtual_tables_are_refused_before_anything_runs() {
     );
 }
 
+/// A virtual table disguised in `sqlite_schema` (D44): the stored SQL hides
+/// `VIRTUAL` behind a comment or padding, the rootpage is non-zero, the name
+/// is a known join table or a reserved `sqlite_` name. SQLite's loader
+/// tokenises the SQL and ignores the rootpage, so each is a working virtual
+/// table. Each must be refused before `quick_check` and before any read of
+/// the table; the module does not exist, so any `xConnect` would fail with
+/// "no such module" instead of this refusal.
+#[test]
+fn disguised_virtual_tables_are_refused_before_anything_runs() {
+    let padded = format!(
+        "CREATE{}VIRTUAL TABLE {{name}} USING synthetic_nosuchmodule(a)",
+        " ".repeat(40)
+    );
+    let cases: [(&str, String); 5] = [
+        (
+            "message_search",
+            "CREATE/**/VIRTUAL TABLE {name} USING synthetic_nosuchmodule(a)".to_owned(),
+        ),
+        ("message_search", padded),
+        (
+            "message_search",
+            "CREATE -- synthetic\nVIRTUAL TABLE {name} USING synthetic_nosuchmodule(a)".to_owned(),
+        ),
+        (
+            "chat_message_join",
+            "CREATE/**/VIRTUAL TABLE {name} USING synthetic_nosuchmodule(chat_id, message_id)"
+                .to_owned(),
+        ),
+        (
+            "sqlite_synthetic",
+            "CREATE VIRTUAL TABLE {name} USING synthetic_nosuchmodule(a)".to_owned(),
+        ),
+    ];
+    for (name, template) in cases {
+        let disguised = template.replace("{name}", name);
+        let main = build_with(|c: &Connection| {
+            let schema: String = full_schema()
+                .split_inclusive(';')
+                .filter(|stmt| {
+                    name != "chat_message_join" || !stmt.contains("\"chat_message_join\" (")
+                })
+                .collect();
+            c.execute_batch(&schema).expect("schema");
+            let placeholder = if name.starts_with("sqlite_") {
+                "synthetic_placeholder"
+            } else {
+                name
+            };
+            c.execute_batch(&format!(
+                "CREATE VIRTUAL TABLE {placeholder} USING fts5(a);"
+            ))
+            .expect("vtab");
+            c.execute_batch("PRAGMA writable_schema = ON;")
+                .expect("writable");
+            c.execute(
+                "UPDATE sqlite_schema SET name = ?1, tbl_name = ?1, sql = ?2, rootpage = 2 \
+                 WHERE name = ?3",
+                rusqlite::params![name, disguised, placeholder],
+            )
+            .expect("rewrite");
+            c.execute_batch("PRAGMA writable_schema = OFF;")
+                .expect("not writable");
+        });
+        let (kind, caps) = probe_db(&main);
+        assert_eq!(
+            kind,
+            Kind::Unsupported(vec![UnsupportedReason::VirtualTablePresent]),
+            "{name}: {disguised:?}"
+        );
+        assert!(caps.expect("caps").tables.is_empty(), "{name}");
+    }
+}
+
 #[test]
 fn generated_and_wrong_case_columns_are_absent() {
     let ddl = minimal_with(

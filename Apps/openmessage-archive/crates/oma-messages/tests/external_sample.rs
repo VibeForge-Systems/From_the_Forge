@@ -1,16 +1,23 @@
 //! A manual run of `check()` on a backup outside the repository (M3 §20.4
-//! oracle 4, and the manual checklist in `docs/compatibility.md`).
+//! oracle 4): a third-party sample database wrapped in a synthetic backup.
+//!
+//! **Not for a backup of a real phone.** It copies the whole backup into the
+//! system temp folder and stages the plaintext sms.db there, not in an
+//! archive folder; check a real backup in the app instead (the manual
+//! checklist in `docs/compatibility.md`).
 //!
 //! Ignored by default. Set `OMA_EXTERNAL_BACKUP` to a backup directory
-//! (the folder holding `Manifest.db`) and, for an encrypted backup,
-//! `OMA_EXTERNAL_PASSWORD`; then run
+//! (the folder holding `Manifest.db`) and, for an encrypted one,
+//! `OMA_EXTERNAL_PASSWORD`, read without echo and never typed on the
+//! command line (see `docs/development.md`); then run
 //!
 //! ```sh
 //! cargo test -p oma-messages --release --test external_sample -- --ignored --nocapture
 //! ```
 //!
-//! The backup is copied to a temporary directory first, and an archive
-//! library is created there, so the original is never opened for writing.
+//! The backup is copied to a temporary directory first (mode 0700 on Unix),
+//! and an archive library is created there, so the original is never opened
+//! for writing. The copy is removed when the test ends.
 //! It prints aggregate counts and kinds only: the report holds no string
 //! from the database, and the date range is left out (D31).
 #![allow(clippy::disallowed_types, clippy::disallowed_methods)]

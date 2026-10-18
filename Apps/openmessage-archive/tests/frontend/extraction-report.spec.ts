@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import ExtractionReport from '@/components/ExtractionReport.vue';
-import { FAILURE_LABEL, NOT_RECORDED, qualifierSentence } from '@/services/extractionText';
+import {
+  FAILURE_LABEL,
+  NOT_RECORDED,
+  SOURCE_CHANGED_CAVEAT,
+  qualifierSentence,
+} from '@/services/extractionText';
 import type { ExtractionReportDto, FailureKindDto, QualifierDto } from '@/types';
 import { extractionReport } from './helpers';
 
@@ -45,7 +50,8 @@ describe('ExtractionReport', () => {
     expect(w.find('.oma-extraction-problems').exists()).toBe(true);
     expect(cell(w, 'Message rows')).toBe('40');
     expect(cell(w, 'Reactions, stickers and votes (associations)')).toBe('5');
-    expect(cell(w, 'Group actions')).toBe('2');
+    expect(cell(w, 'Non-message rows (item_type ≠ 0)')).toBe('2');
+    expect(w.text()).not.toContain('Group actions');
     expect(cell(w, 'In Recently Deleted')).toBe('1');
     expect(cell(w, 'Other rows')).toBe('32');
     expect(cell(w, 'Chat rows')).toBe('4');
@@ -133,6 +139,88 @@ describe('ExtractionReport', () => {
     expect(cell(w, 'The backup has no key for this file')).toBe('0');
   });
 
+  it('breaks "Found" down into every probe outcome, so the rows add up', () => {
+    const base = extractionReport();
+    const a = {
+      ...base.attachments!,
+      found: 36,
+      filePresent: 1,
+      fileMissing: 2,
+      fileSizeMismatch: 3,
+      fileNotReadable: 4,
+      noKey: 5,
+      keyDoesNotUnwrap: 6,
+      classKeyUnavailable: 7,
+      probeOther: 8,
+      notProbed: 0,
+      ambiguous: 9,
+      invalidEntry: 10,
+    };
+    const w = render({ attachments: a });
+    const rows = w.findAll('.oma-extraction-attachments tr');
+    const found = rows.findIndex((tr) => tr.find('th').text() === 'Found in the file index');
+    const sub: number[] = [];
+    for (const tr of rows.slice(found + 1)) {
+      if (!tr.find('th').classes().includes('ps-3')) break;
+      sub.push(Number(tr.find('td').text()));
+    }
+    expect(sub).toHaveLength(9);
+    expect(sub.reduce((x, y) => x + y, 0)).toBe(a.found);
+    expect(cell(w, "File size differs from the backup's record")).toBe('3');
+    expect(cell(w, 'The key class this file needs is unavailable')).toBe('7');
+    expect(cell(w, 'Listed more than once in the file index')).toBe('9');
+    expect(cell(w, 'Invalid file-index entry')).toBe('10');
+  });
+
+  it('says the WAL header shows WAL mode, not that a -wal was expected', () => {
+    const s = qualifierSentence({ kind: 'walStateUnknown' });
+    expect(s).not.toContain('expects');
+    expect(s).toContain('WAL mode');
+    expect(s).toContain('whether changes were pending is unknown');
+  });
+
+  it('warns that the backup changed under every outcome that ran', () => {
+    const notRead = { counts: null, dates: null, attachments: null, problems: null, qualifiers: [] };
+    for (const outcome of ['damaged', 'unsupported', 'incomplete'] as const) {
+      const w = render({
+        ...notRead,
+        outcome,
+        damageReason: outcome === 'damaged' ? { kind: 'integrityProblems' } : null,
+        sourceChanged: true,
+      });
+      expect(w.find('.oma-source-changed').text()).toBe(SOURCE_CHANGED_CAVEAT);
+      expect(render({ ...notRead, outcome, sourceChanged: false }).find('.oma-source-changed').exists()).toBe(
+        false,
+      );
+    }
+    // A readable result says it once, as its qualifier.
+    const w = render({ sourceChanged: true, qualifiers: [{ kind: 'sourceChanged' }] });
+    expect(w.find('.oma-source-changed').exists()).toBe(false);
+    expect(w.find('.oma-qualifiers').text()).toContain('The backup changed during the check');
+    // A skipped check read nothing and changed nothing.
+    expect(
+      render({ ...notRead, outcome: 'skippedNotImportable', sourceChanged: true, schema: null, database: null })
+        .find('.oma-source-changed')
+        .exists(),
+    ).toBe(false);
+  });
+
+  it('shows a copy whose size differs from the backup record, for any outcome', () => {
+    const database = { ...extractionReport().database!, sizeMatches: false };
+    const w = render({
+      outcome: 'damaged',
+      damageReason: { kind: 'integrityProblems' },
+      qualifiers: [],
+      counts: null,
+      dates: null,
+      attachments: null,
+      problems: null,
+      database,
+    });
+    expect(cell(w, 'Size of the copy')).toBe('Differs from the size the backup records');
+    expect(cell(render(), 'Size of the copy')).toBeUndefined();
+  });
+
   it('never calls a key that does not unwrap "damaged"', () => {
     const w = render();
     const attachments = w.find('.oma-extraction-attachments').text();
@@ -144,7 +232,7 @@ describe('ExtractionReport', () => {
   it('has a distinct label for every failure kind, and renders each', () => {
     const kinds = Object.keys(FAILURE_LABEL) as FailureKindDto[];
     const labels = Object.values(FAILURE_LABEL);
-    expect(kinds.length).toBe(45);
+    expect(kinds.length).toBe(46);
     for (const l of labels) expect(l.length).toBeGreaterThan(0);
     expect(new Set(labels).size).toBe(labels.length);
     const w = render({ problems: kinds.map((kind, i) => ({ kind, count: i + 1 })) });

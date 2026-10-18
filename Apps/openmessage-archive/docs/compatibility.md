@@ -30,8 +30,10 @@ against the synthetic messages catalogue in `tests/fixtures/messages/`,
 which is generated from our own reading of the sms.db format, and against
 two third-party sample databases (oracle run 4), both of which are macOS
 `chat.db` files, not iOS sms.db. No backup made from a real iPhone has been
-checked, so every real backup is reported with "This iOS version has not
-been tested". No column profile in the catalogue is an iOS version.
+checked, so every readable result from a real backup carries the
+qualifier "This iOS version has not been tested" (a damaged, unsupported or
+incomplete result does not repeat it). No column profile in the catalogue
+is an iOS version.
 
 Last updated: Milestone 3 (2026-10-18).
 
@@ -346,7 +348,11 @@ open as well.
 - The release build: `npm run tauri build`, install the NSIS package, and
   run one check.
 
-**Real backups** (one unencrypted, one encrypted; from a current iOS):
+**Real backups** (one unencrypted, one encrypted; from a current iOS),
+**run in the app**, which stages the decrypted copy only inside the archive
+folder. Do not use the `external_sample` test harness for a real backup: it
+copies the whole backup into the system temp folder and stages there.
+Record:
 record the iOS version, the model, the outcome, each qualifier, the counts
 of unknown tables and columns, the missing expected columns (by name, from
 the closed list), whether a `-wal` was listed, the check's duration, and

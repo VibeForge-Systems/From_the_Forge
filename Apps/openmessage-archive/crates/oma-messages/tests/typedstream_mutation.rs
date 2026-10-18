@@ -135,3 +135,75 @@ fn mutated_inputs_fail_closed_within_budget() {
         assert!(ok > 0 && failed > 0, "ok {ok}, failed {failed}");
     }
 }
+
+/// One object whose class sits at the bottom of a long superclass chain,
+/// referenced by every key and value of a wide dictionary: the class kind is
+/// resolved once per class, so the decode is linear in the input, not chain
+/// length × entries (about 8 × 10^10 chain steps before the fix).
+#[test]
+fn a_deep_class_chain_in_a_wide_dictionary_decodes_in_linear_time() {
+    use std::time::{Duration, Instant};
+    const CHAIN: usize = 200_000;
+    const PAIRS: usize = 200_000;
+    let mut w = tw::W::new();
+    w.begin_attributed(b"a");
+    w.run(1, 1);
+    w.types(b"@");
+    w.begin_obj(tw::NSDICT);
+    w.types(b"i");
+    w.int(PAIRS as i64);
+    // The first key: a new string object whose class chain is CHAIN
+    // synthetic classes deep, ending in a reference to NSString.
+    w.types(b"@");
+    w.b.push(tw::NEW);
+    let v = w.objs;
+    w.objs += 1;
+    for _ in 0..CHAIN {
+        w.b.push(tw::NEW);
+        w.objs += 1;
+        w.shared(b"SYNTHDeepClass");
+        w.int(0);
+    }
+    w.cls(tw::NSSTRING);
+    w.plus(b"k");
+    w.end_obj();
+    // Its value, and every later key and value, refer to that object.
+    w.types(b"@");
+    w.reference(v);
+    for _ in 1..PAIRS {
+        for _ in 0..2 {
+            w.types(b"@");
+            w.reference(v);
+        }
+    }
+    w.end_obj();
+    w.end_obj();
+    assert!(w.b.len() < 2 << 20, "{}", w.b.len());
+
+    let started = Instant::now();
+    let (result, stats) = decode_attributed_body_with_stats(&w.b, &TsBudget::default());
+    let elapsed = started.elapsed();
+    let body = result.expect("decodes");
+    assert_eq!(body.text.expose().as_str(), "a");
+    assert_eq!(body.unknown_attribute_keys as usize, PAIRS);
+    assert!(stats.slots as usize > CHAIN);
+    assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
+}
+
+/// A type string longer than the nodes left in the budget is refused while
+/// it is parsed (`Budget`), before its elements fill the arena; without the
+/// cap the parse would succeed and the decode fail later, at the first value,
+/// as `Truncated`.
+#[test]
+fn a_type_string_is_parsed_only_within_the_node_budget() {
+    let mut w = tw::W::new();
+    w.types(&vec![b'i'; 5_000]);
+    let budget = TsBudget::default().with_max_nodes(1_000);
+    let (result, stats) = decode_attributed_body_with_stats(&w.b, &budget);
+    assert_eq!(
+        result.map(|_| ()).map_err(|e| e.kind()),
+        Err(oma_messages::TsErrorKind::Budget)
+    );
+    assert_eq!(stats.nodes, 0);
+    assert_eq!(stats.type_parses, 0);
+}

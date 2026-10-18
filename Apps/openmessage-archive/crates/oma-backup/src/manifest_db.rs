@@ -189,6 +189,8 @@ const REQUIRED_COLUMNS: [&str; 5] = ["fileID", "domain", "relativePath", "flags"
 ///   either, so a hostile schema's triggers never fire and its views cannot
 ///   be queried.
 /// - `query_only`, `cell_size_check`, in-memory temp storage, no mmap.
+/// - No checkpoint on close, so closing a read-write (fallback) connection
+///   never folds the staged `-wal` into the main file or deletes it.
 /// - The numeric limits, no `ATTACH`, a trigger depth of 1.
 ///
 /// Then the schema is touched, so a database that cannot be loaded fails
@@ -200,6 +202,11 @@ pub(crate) fn harden(conn: &Connection, limits: &StagedDbLimits) -> rusqlite::Re
     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_DQS_DDL, false)?;
     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_TRIGGER, false)?;
     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_VIEW, false)?;
+    // `query_only` stops statements from writing, but closing the last
+    // connection to a WAL database still checkpoints and deletes the `-wal`
+    // when the connection is read-write (the fallback mode). The staged
+    // pair must stay exactly as staged, so no checkpoint on close.
+    conn.set_db_config(DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, true)?;
     conn.pragma_update(None, "query_only", true)?;
     conn.pragma_update(None, "cell_size_check", true)?;
     // Never spill decrypted pages to the OS temp directory.
@@ -328,10 +335,11 @@ impl ManifestDb {
             let kind = text(row.get_ref(0));
             let name = text(row.get_ref(1));
             let sql = text(row.get_ref(2));
+            // Tokenised like SQLite's schema loader reads it, so comments or
+            // padding between the keywords cannot hide a virtual table.
             let is_virtual = sql
                 .as_deref()
-                .map(|s| s.trim_start().to_ascii_uppercase())
-                .is_some_and(|s| s.starts_with("CREATE VIRTUAL TABLE"));
+                .is_some_and(|s| crate::schema_sql::sql_declares_virtual_table(s.as_bytes()));
             match kind.as_deref() {
                 Some("view") => facts.views = facts.views.saturating_add(1),
                 Some("trigger") => facts.triggers = facts.triggers.saturating_add(1),
@@ -694,6 +702,37 @@ mod tests {
             ))
         );
         assert_eq!(problem(SCHEMA), Some(MalformedDetail::Empty));
+    }
+
+    /// A virtual table whose stored SQL hides `VIRTUAL` behind a comment or
+    /// padding, with a non-zero rootpage, is still found (SQLite's loader
+    /// tokenises the text and ignores the rootpage).
+    #[test]
+    fn disguised_virtual_tables_are_found() {
+        for disguised in [
+            "CREATE/**/VIRTUAL TABLE v USING fts5(a)".to_owned(),
+            format!("CREATE{}VIRTUAL TABLE v USING fts5(a)", " ".repeat(40)),
+        ] {
+            let (_t, path) = db(&format!("{SCHEMA} CREATE VIRTUAL TABLE v USING fts5(a);"));
+            insert(&path, "HomeDomain", "a", 1);
+            let c = Connection::open(&path).expect("open");
+            c.execute_batch("PRAGMA writable_schema = ON;")
+                .expect("writable");
+            c.execute(
+                "UPDATE sqlite_schema SET sql = ?1, rootpage = 2 WHERE name = 'v'",
+                [&disguised],
+            )
+            .expect("rewrite");
+            c.execute_batch("PRAGMA writable_schema = OFF;")
+                .expect("not writable");
+            drop(c);
+            let m = open(&path);
+            assert_eq!(
+                m.check_schema(&Limits::default()).expect("schema").problem,
+                Some(MalformedDetail::Schema("a virtual table is present")),
+                "{disguised:?}"
+            );
+        }
     }
 
     #[test]

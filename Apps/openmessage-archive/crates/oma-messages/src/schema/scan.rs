@@ -5,6 +5,16 @@
 //! refuse the database before `quick_check`, which would otherwise run the
 //! module's integrity code on attacker data (D44).
 //!
+//! A `table` row is virtual when its rootpage is 0 or when its whole `sql`
+//! text, tokenised the way SQLite's schema loader reads it, starts `CREATE
+//! VIRTUAL` ([`oma_backup::sql_declares_virtual_table`]). The loader skips
+//! comments and any amount of whitespace and ignores the rootpage, so a
+//! fixed-length prefix or a single-space match could be bypassed. The test
+//! runs before the `sqlite_*` name rules, so a reserved name cannot hide a
+//! virtual table either. (`pragma_table_list` would say "virtual" too, but it
+//! prepares `SELECT * FROM` each virtual table to count its columns, which
+//! runs the module's `xConnect`.)
+//!
 //! Names and SQL are read only to classify each row. They are never stored,
 //! echoed or logged.
 //!
@@ -58,18 +68,6 @@ fn bump(n: &mut u32) {
     *n = n.saturating_add(1);
 }
 
-/// Whether the start of a `CREATE` statement declares a virtual table. SQLite
-/// normalises the first keywords when it stores the SQL; the comparison
-/// still skips leading whitespace and compares words, case-insensitively.
-fn creates_virtual_table(prefix: &[u8]) -> bool {
-    let mut words = prefix
-        .split(|b| b.is_ascii_whitespace())
-        .filter(|w| !w.is_empty());
-    [&b"CREATE"[..], b"VIRTUAL", b"TABLE"]
-        .iter()
-        .all(|want| words.next().is_some_and(|w| w.eq_ignore_ascii_case(want)))
-}
-
 /// Scan `sqlite_schema`. Phase `ScanningSchema` is reported by the caller.
 pub(crate) fn scan(
     conn: &StagedConnection<'_>,
@@ -89,7 +87,7 @@ pub(crate) fn scan(
         known: [KnownEntry::default(); KnownTable::ALL.len()],
     };
     let mut st = conn
-        .prepare_read("SELECT type, name, rootpage, substr(sql, 1, 32) FROM sqlite_schema")
+        .prepare_read("SELECT type, name, rootpage, sql FROM sqlite_schema")
         .map_err(err)?;
     let mut rows = st.query([]).map_err(|e| err(conn.sqlite_error(&e)))?;
     let mut seen: u64 = 0;
@@ -107,7 +105,7 @@ pub(crate) fn scan(
             _ => b"",
         };
         let rootpage_zero = matches!(row.get_ref(2), Ok(ValueRef::Integer(0)));
-        let sql_prefix = match row.get_ref(3) {
+        let sql = match row.get_ref(3) {
             Ok(ValueRef::Text(s)) => s,
             _ => b"",
         };
@@ -124,13 +122,13 @@ pub(crate) fn scan(
         };
         match kind {
             b"table" => {
-                if starts_with_ci(name, b"sqlite_stat") {
+                if rootpage_zero || oma_backup::sql_declares_virtual_table(sql) {
+                    bump(&mut facts.virtual_tables);
+                    count_known(false);
+                } else if starts_with_ci(name, b"sqlite_stat") {
                     bump(&mut facts.stat_tables);
                 } else if starts_with_ci(name, b"sqlite_") {
                     bump(&mut facts.internal_objects);
-                } else if rootpage_zero || creates_virtual_table(sql_prefix) {
-                    bump(&mut facts.virtual_tables);
-                    count_known(false);
                 } else if known.is_some() {
                     count_known(true);
                 } else {
@@ -152,19 +150,4 @@ pub(crate) fn scan(
         }
     }
     Ok(facts)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn virtual_table_prefixes() {
-        assert!(creates_virtual_table(b"CREATE VIRTUAL TABLE x USING fts5"));
-        assert!(creates_virtual_table(b"  create\tvirtual\n table x"));
-        assert!(!creates_virtual_table(b"CREATE TABLE virtual (a)"));
-        assert!(!creates_virtual_table(b"CREATE VIEW x AS SELECT 1"));
-        assert!(!creates_virtual_table(b"CREATE VIRTUALTABLE"));
-        assert!(!creates_virtual_table(b""));
-    }
 }

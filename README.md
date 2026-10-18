@@ -8,7 +8,7 @@ Collection of Interesting Tips, Tricks and Reference Cards, Quick Code Snipits a
 |---|---|
 | [`Skills/vibeforge-gate/`](Skills/vibeforge-gate/) | A repository-owned merge bar — a local pre-commit/pre-push gate that runs the checks a hosted CI service would have, without needing one. Also a Claude Code plugin and skill. |
 | [`Skills/coroner/`](Skills/coroner/) | The Coroner Protocol — adversarial architecture review as a read-only subagent. Severity-ranked, file-cited findings; it diagnoses and never edits. Also a Claude Code plugin. |
-| [`Apps/openmessage-archive/`](Apps/openmessage-archive/) | OpenMessage Archive — a local-first Tauri 2 / Rust / Vue 3 desktop app for archiving iPhone Messages from local backups (Windows 11 and Linux). Milestone 1. |
+| [`Apps/openmessage-archive/`](Apps/openmessage-archive/) | OpenMessage Archive — a local-first Tauri 2 / Rust / Vue 3 desktop app for archiving iPhone Messages from local backups (Windows 11 and Linux). Milestone 3 (the extraction check) implemented; its sign-off is pending. |
 | [`Skills/`](Skills/) | Packaged Claude skills (`.skill` / `.zip`) |
 | [`Tips_and_Tricks/`](Tips_and_Tricks/) | MCP quick-reference cards |
 | [`windows-env-bundle/`](windows-env-bundle/) | PowerShell bundle for setting up a Windows environment |

@@ -12,6 +12,7 @@ import {
   INTEGRITY_LABEL,
   NEWEST_MAY_BE_MISSING,
   OPEN_MODE_LABEL,
+  SOURCE_CHANGED_CAVEAT,
   WAL_LABEL,
   count,
   newestMayBeMissing,
@@ -36,6 +37,10 @@ const alertClass = computed(() => {
   }
 });
 const sat = computed(() => r.value.saturated);
+// A readable result carries the sourceChanged qualifier instead.
+const sourceChangedCaveat = computed(
+  () => r.value.sourceChanged && ran.value && r.value.outcome !== 'readable' && r.value.outcome !== 'readableWithQualifiers',
+);
 
 interface Row {
   label: string;
@@ -50,7 +55,9 @@ const counts = computed<Row[]>(() => {
   return [
     { label: 'Message rows', value: count(c.messageRows, s) },
     { label: 'Reactions, stickers and votes (associations)', value: count(c.associationRows, s), indent: true },
-    { label: 'Group actions', value: count(c.groupActionRows, s), indent: true },
+    // Every row with item_type ≠ 0 and no association: group events, but
+    // also shared locations, SharePlay and kinds this version does not name.
+    { label: 'Non-message rows (item_type ≠ 0)', value: count(c.groupActionRows, s), indent: true },
     { label: 'In Recently Deleted', value: count(c.recentlyDeletedRows, s), indent: true },
     { label: 'Other rows', value: count(c.otherRows, s), indent: true },
     { label: 'Chat rows', value: count(c.chatRows, s) },
@@ -78,12 +85,20 @@ const attachments = computed<Row[]>(() => {
   const a = r.value.attachments;
   if (!a) return [];
   const s = sat.value;
+  // The indented rows are every probe outcome, so they add up to "Found".
   return [
     { label: 'Found in the file index', value: count(a.found, s) },
     { label: 'File present', value: count(a.filePresent, s), indent: true },
     { label: 'File missing', value: count(a.fileMissing, s), indent: true },
+    { label: "File size differs from the backup's record", value: count(a.fileSizeMismatch, s), indent: true },
+    { label: 'File could not be examined', value: count(a.fileNotReadable, s), indent: true },
     { label: 'The backup has no key for this file', value: count(a.noKey, s), indent: true },
     { label: "This file's key could not be unwrapped", value: count(a.keyDoesNotUnwrap, s), indent: true },
+    { label: 'The key class this file needs is unavailable', value: count(a.classKeyUnavailable, s), indent: true },
+    { label: 'Other file outcomes', value: count(a.probeOther, s), indent: true },
+    { label: 'Not examined', value: count(a.notProbed, s), indent: true },
+    { label: 'Listed more than once in the file index', value: count(a.ambiguous, s) },
+    { label: 'Invalid file-index entry', value: count(a.invalidEntry, s) },
     { label: 'Not in this backup', value: count(a.notListedAtSourcedKey, s) },
     { label: 'Not found at an assumed location', value: count(a.notFoundAtAssumedKey, s) },
     { label: 'Not looked up', value: count(a.notLookedUp, s) },
@@ -122,6 +137,9 @@ const database = computed<Row[]>(() => {
     { label: 'Pending changes', value: WAL_LABEL[d.walOutcome] },
     { label: 'Integrity', value: d.integrity ? INTEGRITY_LABEL[d.integrity] : 'Not run' },
   ];
+  if (d.sizeMatches === false) {
+    rows.push({ label: 'Size of the copy', value: 'Differs from the size the backup records' });
+  }
   if (s) {
     rows.push(
       { label: 'Expected columns not present', value: count(s.missingColumns) },
@@ -154,6 +172,7 @@ const problems = computed(() =>
           <li v-for="(u, i) in report.unsupportedReasons" :key="i">{{ unsupportedSentence(u) }}</li>
         </ul>
       </div>
+      <p v-if="sourceChangedCaveat" class="alert alert-warning py-2 small oma-source-changed">{{ SOURCE_CHANGED_CAVEAT }}</p>
       <ul v-if="ran" class="list-unstyled small mb-3 oma-copy-status">
         <li>
           {{

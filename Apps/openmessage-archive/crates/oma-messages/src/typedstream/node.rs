@@ -17,7 +17,14 @@
 //! struct's nesting adds to the depth of the object holding it. Superclass
 //! chains are read iteratively. Every type element read is charged to
 //! `max_nodes`, zero-width ones included, so a stream's work is bounded by
-//! the budget rather than by its length.
+//! the budget rather than by its length. A type string is parsed into at
+//! most the nodes still left in the budget, so the element arena is bounded
+//! by `max_nodes` before it is filled, not after.
+//!
+//! **Class kinds are resolved once.** When a superclass chain is complete,
+//! each new class records the first [`Kind`] on its chain (its own name, or
+//! its superclass's kind), so layer 2's class lookup is O(1) per object,
+//! however long the chain and however often the object is referenced.
 #![deny(
     clippy::arithmetic_side_effects,
     clippy::cast_possible_truncation,
@@ -28,6 +35,7 @@
     clippy::string_slice
 )]
 
+use super::foundation::{self, Kind};
 use super::reader::{ref_index, Reader, Span, END, NEW, NIL};
 use super::stats::Meter;
 use super::types::{self, Elem};
@@ -97,11 +105,24 @@ pub(crate) struct Doc<'a> {
     types: Vec<TypeInfo>,
     elems: Vec<Elem>,
     slots: Vec<Slot>,
+    /// One entry per slot: a class slot's resolved kind, `Other` for every
+    /// other slot.
+    class_kinds: Vec<Kind>,
     groups: Vec<Group>,
     vals: Vec<Val>,
 }
 
 impl<'a> Doc<'a> {
+    /// A class slot's kind: the first known name on its superclass chain,
+    /// most derived first, resolved when the chain was read.
+    pub(crate) fn class_kind(&self, id: SlotId) -> Kind {
+        usize::try_from(id)
+            .ok()
+            .and_then(|i| self.class_kinds.get(i))
+            .copied()
+            .unwrap_or(Kind::Other)
+    }
+
     pub(crate) fn slot_count(&self) -> usize {
         self.slots.len()
     }
@@ -168,14 +189,6 @@ impl<'a> Doc<'a> {
             _ => None,
         }
     }
-
-    /// A class's name and superclass.
-    pub(crate) fn class(&self, id: SlotId) -> Option<(&'a [u8], Option<SlotId>)> {
-        match self.slot(id)? {
-            Slot::Class { name, superclass } => Some((self.shared_bytes(name)?, superclass)),
-            _ => None,
-        }
-    }
 }
 
 fn range(r: (u32, u32)) -> Option<std::ops::Range<usize>> {
@@ -209,6 +222,7 @@ impl<'a, 'm> Walker<'a, 'm> {
                 types: Vec::new(),
                 elems: Vec::new(),
                 slots: Vec::new(),
+                class_kinds: Vec::new(),
                 groups: Vec::new(),
                 vals: Vec::new(),
             },
@@ -273,6 +287,7 @@ impl<'a, 'm> Walker<'a, 'm> {
         self.meter.slot(at)?;
         let id = len_u32(self.doc.slots.len(), at)?;
         self.doc.slots.push(Slot::Pending);
+        self.doc.class_kinds.push(Kind::Other);
         Ok(id)
     }
 
@@ -341,8 +356,21 @@ impl<'a, 'm> Walker<'a, 'm> {
             .shared_bytes(id)
             .ok_or(TsError::new(TsErrorKind::BadReference, at))?;
         let e0 = len_u32(self.doc.elems.len(), at)?;
-        let parsed = types::parse(bytes, self.meter.budget().max_depth(), &mut self.doc.elems)
-            .map_err(|k| TsError::new(k, at))?;
+        // Every element parsed here is charged to the node meter when its
+        // group is read, so a type string longer than the nodes left can only
+        // fail; refuse it before filling the arena.
+        let cap = self
+            .doc
+            .elems
+            .len()
+            .saturating_add(usize::try_from(self.meter.nodes_left()).unwrap_or(usize::MAX));
+        let parsed = types::parse(
+            bytes,
+            self.meter.budget().max_depth(),
+            cap,
+            &mut self.doc.elems,
+        )
+        .map_err(|k| TsError::new(k, at))?;
         self.meter.type_parsed();
         let e1 = len_u32(self.doc.elems.len(), at)?;
         let t = len_u32(self.doc.types.len(), at)?;
@@ -463,11 +491,23 @@ impl<'a, 'm> Walker<'a, 'm> {
             }
         };
         let mut superclass = end;
+        let mut kind = end.map_or(Kind::Other, |c| self.doc.class_kind(c));
         let mut i = self.chain.len();
         while let Some(prev) = i.checked_sub(1) {
             i = prev;
             if let Some(&(id, name)) = self.chain.get(i) {
                 self.set_slot(id, Slot::Class { name, superclass });
+                kind = self
+                    .doc
+                    .shared_bytes(name)
+                    .and_then(foundation::base_kind)
+                    .unwrap_or(kind);
+                if let Some(k) = usize::try_from(id)
+                    .ok()
+                    .and_then(|x| self.doc.class_kinds.get_mut(x))
+                {
+                    *k = kind;
+                }
                 superclass = Some(id);
             }
         }

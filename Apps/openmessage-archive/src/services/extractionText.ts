@@ -4,6 +4,7 @@
 // until it has a label.
 import type {
   DamageReasonDto,
+  ExtractionOutcomeDto,
   ExtractionReportDto,
   FailureKindDto,
   IntegrityDto,
@@ -46,7 +47,9 @@ export function qualifierSentence(q: QualifierDto): string {
     case 'walSkipped':
       return `The backup lists a pending-changes file (-wal) that could not be copied. ${NEWEST_MAY_BE_MISSING}`;
     case 'walStateUnknown':
-      return `The database expects a pending-changes file (-wal), but the backup lists none. ${NEWEST_MAY_BE_MISSING}`;
+      // The header shows WAL mode only. A cleanly closed WAL database has no
+      // -wal, so this does not say that changes were pending.
+      return `The database is in WAL mode and the backup lists no pending-changes file (-wal); whether changes were pending is unknown. ${NEWEST_MAY_BE_MISSING}`;
     case 'walFramesInvalid':
       return `Part of the pending-changes file (-wal) is not valid. ${NEWEST_MAY_BE_MISSING}`;
     case 'sourceChanged':
@@ -109,6 +112,10 @@ export function unsupportedSentence(r: UnsupportedReasonDto): string {
       return 'It has another layout problem this version cannot describe.';
   }
 }
+
+/** Said under every outcome that ran when the backup changed during the check. */
+export const SOURCE_CHANGED_CAVEAT =
+  'The backup changed during the check, so this result may come from an inconsistent copy. Run the check again when no backup is in progress.';
 
 export function damageSentence(d: DamageReasonDto | null): string {
   if (d?.kind === 'rowsNotStreamed') {
@@ -181,8 +188,19 @@ export const FAILURE_LABEL: Record<FailureKindDto, string> = {
   attachmentUnusualName: 'Attachment locations too unusual to look up',
   attachmentBlobMissing: 'Attachments whose file is missing from the backup',
   attachmentBlobUnreadable: 'Attachments whose file could not be examined',
-  attachmentKeyProblem: "Attachments whose key is missing or could not be unwrapped",
+  attachmentKeyProblem: 'Attachments whose file key is missing or unusable',
+  attachmentBlobSizeMismatch: "Attachments whose file size differs from the backup's record",
   aggregateOverBudget: 'Summary counts that ran over their limit',
+};
+
+/** A short phrase per outcome, for when only the summary is known. */
+export const OUTCOME_LABEL: Record<ExtractionOutcomeDto, string> = {
+  readable: 'messages can be read.',
+  readableWithQualifiers: 'messages can be read, with limits.',
+  damaged: 'the Messages database is damaged.',
+  unsupported: 'the Messages database has a layout this version does not support.',
+  incomplete: 'the integrity check did not finish within its limit.',
+  skippedNotImportable: 'not run: validation found errors.',
 };
 
 /** The outcome's headline sentence. */

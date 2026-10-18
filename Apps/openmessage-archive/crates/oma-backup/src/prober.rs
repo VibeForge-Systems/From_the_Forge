@@ -3,6 +3,11 @@
 //! A probe reads metadata only. For an encrypted backup it also unwraps the
 //! file's key in memory, to catch a damaged `EncryptionKey`, and zeroizes
 //! it straight away. It never decrypts or writes file content.
+//!
+//! A blob whose length does not match the Manifest's `Size` (padded to the
+//! next AES block for an encrypted backup, as validation compares it) is
+//! [`BlobProbe::SizeMismatch`], never `Present`: a truncated or empty blob
+//! is not the file the backup recorded.
 
 use std::path::PathBuf;
 
@@ -13,7 +18,7 @@ use crate::keys::unwrap_file_key;
 use crate::manifest_db::EntryKind;
 use crate::open::OpenBackup;
 use crate::plists::BackupFile;
-use crate::validate::{entry_is_consistent, BlobState};
+use crate::validate::{entry_is_consistent, padded_len, BlobState};
 
 /// What a probe found. Faults on the source side are outcomes, never errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +50,14 @@ pub enum BlobProbe {
     ClassKeyUnavailable,
     /// Encrypted backups only: the file's key did not unwrap.
     KeyDoesNotUnwrap,
+    /// The blob is a regular file, but its length differs from the
+    /// Manifest's `Size` (for an encrypted backup, from `Size` padded to the
+    /// next 16-byte block). For an encrypted file, its key unwrapped. The
+    /// declared size stays in the entry's Manifest record.
+    SizeMismatch {
+        /// The blob's length in bytes.
+        len: u64,
+    },
 }
 
 /// Probes blobs for one open backup. It reuses one guard, so each `xx/`
@@ -94,10 +107,13 @@ impl FileProber<'_> {
             Err(BackupError::Io { kind, .. }) => return BlobProbe::Unreadable(kind),
             Err(_) => return BlobProbe::Unreadable(std::io::ErrorKind::Other),
         };
-        let Some(keys) = &self.ob.keys else {
-            return BlobProbe::Present { len };
-        };
         let declared = entry.record.as_ref().and_then(|r| r.size);
+        let Some(keys) = &self.ob.keys else {
+            return match declared {
+                Some(d) if d != len => BlobProbe::SizeMismatch { len },
+                _ => BlobProbe::Present { len },
+            };
+        };
         let Some(record) = entry.record.as_ref() else {
             return BlobProbe::NoKey;
         };
@@ -112,19 +128,27 @@ impl FileProber<'_> {
         let Some(class) = record.protection_class else {
             return BlobProbe::NoProtectionClass;
         };
-        if len == 0 {
+        // An encrypted file with content is at least one AES block; a
+        // declared size of 0 is not compared (as extraction: an empty file
+        // needs nothing).
+        let declared = declared.filter(|d| *d > 0);
+        if len == 0 && declared.is_none() {
             return BlobProbe::Present { len };
         }
         match unwrap_file_key(&keys.class_keys, &keys.keybag, class, wrapped) {
             // The key is Zeroizing and is dropped (wiped) here.
-            Ok(_key) => BlobProbe::Present { len },
+            Ok(_key) => {}
             Err(BackupError::FileUnavailable(FileUnavailable::ClassKeyUnavailable))
             | Err(BackupError::Unsupported(_))
             | Err(BackupError::Malformed {
                 file: BackupFile::Keybag,
                 ..
-            }) => BlobProbe::ClassKeyUnavailable,
-            Err(_) => BlobProbe::KeyDoesNotUnwrap,
+            }) => return BlobProbe::ClassKeyUnavailable,
+            Err(_) => return BlobProbe::KeyDoesNotUnwrap,
+        }
+        match declared {
+            Some(d) if padded_len(d) != Some(len) => BlobProbe::SizeMismatch { len },
+            _ => BlobProbe::Present { len },
         }
     }
 }

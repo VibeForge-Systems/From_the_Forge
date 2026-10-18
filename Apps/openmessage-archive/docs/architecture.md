@@ -371,8 +371,14 @@ authorizer is the guard.
 
 1. **Scan** `sqlite_schema` without touching any table. A virtual table is
    refused before `quick_check`, which would otherwise run FTS or R-tree
-   integrity code on attacker data (D44). Names and SQL text are counted,
-   never stored or logged.
+   integrity code on attacker data (D44). A `table` row is virtual when its
+   rootpage is 0 or when its whole SQL, tokenised the way SQLite's schema
+   loader reads it (comments and any whitespace skipped), starts `CREATE
+   VIRTUAL`; a reserved `sqlite_` name does not exempt it. This replaces the
+   design's 32-byte prefix test, which a commented or padded statement with
+   a non-zero rootpage could bypass. `pragma_table_list` is not used: it
+   connects every virtual table to count its columns. Names and SQL text are
+   classified, never stored or logged.
 2. **`PRAGMA quick_check(1)`**, under an op budget. Only `"ok"` is read;
    anything else is `Damaged(IntegrityProblems)` and no row is read.
 3. **Probe** each known table by capability (`pragma_table_xinfo`, columns
@@ -409,7 +415,13 @@ Provenance is recorded file by file in `scripts/fixtures/PROVENANCE.md`.
 looked up, in `MediaDomain`, after an unusual-name gate built on
 `oma_fs::resolve_within`. A hit is probed (metadata, and the file key
 unwrapped in memory for an encrypted backup) without writing any plaintext.
-Every other class is counted only.
+A blob whose length differs from the Manifest's `Size` (padded to the next
+16-byte block when encrypted, as validation compares it) is a size
+mismatch, never "present"; this adds an outcome to the design's probe
+set, so a truncated or empty blob is not reported as the file. Every other
+class is counted only. Without an `attachment` table nothing is looked up,
+and the shell sends no attachment section, so its counters read "not
+recorded", never 0.
 
 ### Status and qualifiers (D43)
 
@@ -424,7 +436,9 @@ tables or columns, an untested iOS version, or a WAL or source caveat is
 sentence. The UI never says just "can be read" when a qualifier applies.
 The shell adds `iosVersionUntested` unless the backup's iOS version is in
 `TESTED_REAL_IOS_VERSIONS`, which is empty in M3 because no real backup has
-been tested, so every real backup is reported as untested. Without this
+been tested, so every readable result from a real backup carries it.
+(Damaged, unsupported and incomplete results carry no qualifiers; their
+iOS version is untested too.) Without this
 reading, every real backup today would be "unsupported" and the check would
 give no evidence; the qualifiers keep the claim honest.
 

@@ -141,6 +141,125 @@ fn committed_vectors_decode_as_expected() {
     assert!(ok >= 20, "{ok}");
 }
 
+/// The UTF-8 byte offset of a UTF-16 offset in `text`, computed here from
+/// the text alone.
+fn utf8_offset(text: &str, utf16: u32) -> Option<u32> {
+    let mut u16s = 0u32;
+    for (byte, ch) in text.char_indices() {
+        if u16s == utf16 {
+            return u32::try_from(byte).ok();
+        }
+        u16s += ch.len_utf16() as u32;
+    }
+    (u16s == utf16).then(|| u32::try_from(text.len()).ok())?
+}
+
+/// Oracle run 2 checks only `oracle.view` (the text, the raw (index, length)
+/// runs and the dictionaries in stream order) against pytypedstream. This
+/// ties the decoder's result to that oracle-checked view directly, rather
+/// than only to `public`, which comes from the same generator model:
+///
+/// - the decoded text is the view's text;
+/// - the view's run lengths cover the text's UTF-16 length exactly, and
+///   every decoded run starts and ends on one of the view's run boundaries;
+/// - each view run's known keys (the dictionary its index names, in order
+///   of first appearance, T1) are the keys of the decoded run covering it;
+/// - each decoded run's UTF-8 range is recomputed here from the text alone.
+#[test]
+fn the_oracle_checked_view_constrains_the_decoded_result() {
+    let doc: Value =
+        serde_json::from_str(&fs::read_to_string(dir().join("expected.json")).expect("json"))
+            .expect("parse");
+    let budget = TsBudget::default();
+    let mut checked = 0;
+    for v in doc["vectors"].as_array().expect("vectors") {
+        let name = v["name"].as_str().expect("name");
+        let oracle = &v["oracle"];
+        if oracle["check"] != "compare" || oracle["view"]["kind"] != "attributed" {
+            continue;
+        }
+        let view = &oracle["view"];
+        let data = fs::read(dir().join(v["file"].as_str().expect("file"))).expect("read");
+        let Ok(body) = decode_attributed_body(&data, &budget) else {
+            continue;
+        };
+        if body.run_issue.is_some() {
+            continue;
+        }
+        let text = body.text.expose().as_str();
+        assert_eq!(text, view["text"].as_str().expect("text"), "{name}");
+
+        let dicts: Vec<Vec<&'static str>> = view["dicts"]
+            .as_array()
+            .expect("dicts")
+            .iter()
+            .map(|d| {
+                let mut keys: Vec<&'static str> = d
+                    .as_array()
+                    .expect("dict")
+                    .iter()
+                    .filter_map(|e| AttrKey::from_name(e[0].as_str().expect("key").as_bytes()))
+                    .map(AttrKey::name)
+                    .collect();
+                keys.sort_unstable();
+                keys.dedup();
+                keys
+            })
+            .collect();
+        let mut bounds = vec![0u32];
+        let mut run_keys = Vec::new();
+        for r in view["runs"].as_array().expect("runs") {
+            let idx = r[0].as_u64().expect("index") as usize;
+            let len = r[1].as_u64().expect("length") as u32;
+            bounds.push(bounds.last().copied().unwrap_or(0) + len);
+            run_keys.push(
+                dicts
+                    .get(idx - 1)
+                    .expect("index names a dictionary")
+                    .clone(),
+            );
+        }
+        let total = text.encode_utf16().count() as u32;
+        assert_eq!(bounds.last().copied(), Some(total), "{name}");
+
+        let mut at = 0u32;
+        for run in &body.runs {
+            assert_eq!(run.utf16.start, at, "{name}: runs are contiguous");
+            assert!(bounds.contains(&run.utf16.start), "{name}");
+            assert!(bounds.contains(&run.utf16.end), "{name}");
+            assert_eq!(
+                Some(run.utf8.start..run.utf8.end),
+                utf8_offset(text, run.utf16.start)
+                    .zip(utf8_offset(text, run.utf16.end))
+                    .map(|(a, b)| a..b),
+                "{name}"
+            );
+            at = run.utf16.end;
+        }
+        assert_eq!(at, total, "{name}");
+        for (i, keys) in run_keys.iter().enumerate() {
+            let start = bounds[i];
+            if bounds[i + 1] == start {
+                continue;
+            }
+            let run = body
+                .runs
+                .iter()
+                .find(|r| r.utf16.start <= start && start < r.utf16.end)
+                .expect("a decoded run covers each view run");
+            let mut got: Vec<&'static str> = body.attrs[run.attrs as usize]
+                .keys_present
+                .iter()
+                .map(AttrKey::name)
+                .collect();
+            got.sort_unstable();
+            assert_eq!(&got, keys, "{name}: run {i}");
+        }
+        checked += 1;
+    }
+    assert!(checked >= 10, "{checked}");
+}
+
 #[test]
 fn every_vector_file_is_listed() {
     let doc: Value =

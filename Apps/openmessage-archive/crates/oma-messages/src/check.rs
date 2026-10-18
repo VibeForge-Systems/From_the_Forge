@@ -23,7 +23,7 @@ use std::ops::ControlFlow;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use oma_backup::{
-    OpenBackup, StagedConnection, StagedDatabase, TextEncoding, WalOutcome, WalPolicy,
+    CancelToken, OpenBackup, StagedConnection, StagedDatabase, TextEncoding, WalOutcome, WalPolicy,
 };
 
 use crate::aggregates::{self, AggBudget, AggregateId, Aggregates};
@@ -168,7 +168,10 @@ pub fn check(
 
     // a, b
     let staged = stage(ob, opts.wal, ctx)?;
-    let mut db = db_facts(&staged);
+    // The `-wal` scan checks the token per frame. A cancelled scan leaves
+    // `facts` as `None`; `connect` then checks the token first, so the job
+    // ends `Cancelled` with the staged copy removed below.
+    let mut db = db_facts(&staged, ctx.cancel);
 
     // c-h, with the staged copy removed whatever happened.
     let read = read_staged(&staged, ob, opts, checked_at_ns, &mut db, ctx);
@@ -241,9 +244,9 @@ pub fn check(
     Ok(report)
 }
 
-fn db_facts(staged: &StagedDatabase<'_>) -> DbFacts {
+fn db_facts(staged: &StagedDatabase<'_>, cancel: &CancelToken) -> DbFacts {
     let header = staged.header_facts().ok();
-    let facts = staged.wal_facts().ok().flatten();
+    let facts = staged.wal_facts(cancel).ok().flatten();
     let bytes = match staged.wal_outcome {
         WalOutcome::Staged { bytes } => Some(bytes),
         _ => None,
@@ -516,6 +519,7 @@ fn read_all(
     let agg = aggregates::run(db.connection(), &caps, opts.agg, &mut guids, ctx)?;
     apply_aggregates(
         &agg,
+        has(&caps, KnownTable::Message, mc::ASSOCIATED_MESSAGE_GUID),
         &mut chats,
         &mut messages,
         &mut attachments,
@@ -579,6 +583,7 @@ fn read_all(
 
 fn apply_aggregates(
     agg: &Aggregates,
+    association_targets_recorded: bool,
     chats: &mut ChatCounts,
     messages: &mut MessageCounts,
     attachments: &mut AttachmentCounts,
@@ -593,8 +598,12 @@ fn apply_aggregates(
     if messages.replies.is_some() {
         messages.reply_originator_not_found = agg.guids.reply_originator_not_found;
     }
+    // Targets come only from `associated_message_guid`; without that column
+    // none could be collected, so the count is not recorded (I5), not 0.
     if let Some(a) = messages.associations.as_mut() {
-        a.target_not_found = agg.guids.association_target_not_found;
+        a.target_not_found = association_targets_recorded
+            .then_some(agg.guids.association_target_not_found)
+            .flatten();
     }
     attachments.linked = agg.get(A::AttachmentsLinked);
     attachments.not_linked = match (attachments.rows, attachments.linked) {
@@ -708,7 +717,8 @@ impl MessageCounts {
         dates: &mut DateCounts,
         checked_at_ns: i64,
     ) {
-        // The partition: association, group action, Recently Deleted, other.
+        // The partition: association, non-message item (`item_type ≠ 0`,
+        // the `group_actions` field), Recently Deleted, other.
         if m.association.is_some() && self.with_association.is_some() {
             bump_opt(&mut self.with_association);
         } else if self.group_actions.is_some() && m.item_type.value().is_some_and(|t| *t != 0) {
@@ -1059,6 +1069,10 @@ impl ProbeCounts {
             Some(P::KeyDoesNotUnwrap) => {
                 bump(&mut self.key_does_not_unwrap);
                 bump(&mut failures.attachment_key_problem);
+            }
+            Some(P::SizeMismatch { .. }) => {
+                bump(&mut self.size_mismatch);
+                bump(&mut failures.attachment_blob_size_mismatch);
             }
             Some(_) => bump(&mut self.other),
         }

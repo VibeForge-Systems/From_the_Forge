@@ -58,10 +58,12 @@ pub(crate) struct Parsed {
 }
 
 /// Parse `src` (a whole type string), appending its elements to `out`.
-/// Struct nesting deeper than `max_depth` is `TooDeep`.
+/// Struct nesting deeper than `max_depth` is `TooDeep`; growing `out` past
+/// `max_len` elements is `Budget`, checked before each push.
 pub(crate) fn parse(
     src: &[u8],
     max_depth: u16,
+    max_len: usize,
     out: &mut Vec<Elem>,
 ) -> Result<Parsed, TsErrorKind> {
     if src.is_empty() {
@@ -71,6 +73,7 @@ pub(crate) fn parse(
         src,
         pos: 0,
         max_depth,
+        max_len,
         deepest: 0,
     };
     p.seq(0, out)?;
@@ -86,10 +89,19 @@ struct Parser<'a> {
     src: &'a [u8],
     pos: usize,
     max_depth: u16,
+    max_len: usize,
     deepest: u16,
 }
 
 impl Parser<'_> {
+    fn push(&self, out: &mut Vec<Elem>, e: Elem) -> Result<(), TsErrorKind> {
+        if out.len() >= self.max_len {
+            return Err(TsErrorKind::Budget);
+        }
+        out.push(e);
+        Ok(())
+    }
+
     fn peek(&self) -> Option<u8> {
         self.src.get(self.pos).copied()
     }
@@ -127,8 +139,7 @@ impl Parser<'_> {
             b'{' => return self.structure(depth, out),
             _ => return Err(TsErrorKind::UnsupportedType),
         };
-        out.push(e);
-        Ok(())
+        self.push(out, e)
     }
 
     /// After `[`: decimal N, then `c` or `C`, then `]`.
@@ -166,7 +177,7 @@ impl Parser<'_> {
         if depth > self.deepest {
             self.deepest = depth;
         }
-        out.push(Elem::Struct);
+        self.push(out, Elem::Struct)?;
         loop {
             match self.peek() {
                 None | Some(b'{') => return Err(TsErrorKind::UnsupportedType),
@@ -196,7 +207,33 @@ mod tests {
 
     fn p(s: &str) -> Result<(Vec<Elem>, u16), TsErrorKind> {
         let mut out = Vec::new();
-        parse(s.as_bytes(), 64, &mut out).map(|x| (out, x.struct_depth))
+        parse(s.as_bytes(), 64, usize::MAX, &mut out).map(|x| (out, x.struct_depth))
+    }
+
+    #[test]
+    fn the_arena_is_capped_before_it_grows() {
+        let mut out = vec![Elem::Signed; 3];
+        assert_eq!(parse(b"ii", 64, 5, &mut out).map(|_| ()), Ok(()));
+        assert_eq!(out.len(), 5);
+        let mut out = vec![Elem::Signed; 3];
+        assert_eq!(
+            parse(b"iii", 64, 5, &mut out).map(|_| ()),
+            Err(TsErrorKind::Budget)
+        );
+        assert!(out.len() <= 5);
+        let mut out = Vec::new();
+        assert_eq!(
+            parse(b"{a=}", 64, 0, &mut out).map(|_| ()),
+            Err(TsErrorKind::Budget)
+        );
+        assert!(out.is_empty());
+        let long = vec![b'i'; 1 << 20];
+        let mut out = Vec::new();
+        assert_eq!(
+            parse(&long, 64, 1000, &mut out).map(|_| ()),
+            Err(TsErrorKind::Budget)
+        );
+        assert_eq!(out.len(), 1000);
     }
 
     #[test]

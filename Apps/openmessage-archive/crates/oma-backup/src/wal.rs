@@ -9,6 +9,9 @@
 
 use std::io::{self, Read};
 
+use crate::cancel::CancelToken;
+use crate::error::{BackupError, IoOp};
+
 /// The 16-byte magic at the start of every SQLite database file.
 const SQLITE_MAGIC: &[u8; 16] = b"SQLite format 3\0";
 /// WAL magic, checksums little-endian.
@@ -60,10 +63,18 @@ pub struct WalFacts {
     /// Valid frames after the last commit frame of the valid prefix. SQLite
     /// does not use them.
     pub uncommitted_valid_frames: u64,
-    /// The first complete frame that fails validation, and every complete
-    /// frame after it; with an invalid header, every complete frame (when
-    /// the page size is readable).
+    /// The first complete frame that carries the header's salts but fails
+    /// validation (a zero page number or a broken checksum chain), and every
+    /// complete frame after it; with an invalid header, every complete frame
+    /// (when the page size is readable). This is damage.
     pub frames_after_first_invalid: u64,
+    /// With a valid header, the first complete frame whose salts differ from
+    /// the header's, and every complete frame after it. SQLite rewrites a
+    /// `-wal` from the start after a checkpoint, with new salts, without
+    /// truncating it, so frames of an earlier generation (already in the
+    /// main file) can follow the current ones. The salts mark the end of
+    /// the log; these frames are not damage and nothing is missing.
+    pub stale_generation_frames: u64,
     /// Bytes after the last complete frame.
     pub trailing_bytes: u64,
 }
@@ -163,15 +174,45 @@ fn inc(n: &mut u64) {
     *n = n.saturating_add(1);
 }
 
+/// Where the frame scan stands.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Scan {
+    /// Every frame so far is valid.
+    Valid,
+    /// A frame with the header's salts failed validation (or the header is
+    /// invalid): damage.
+    Invalid,
+    /// A frame with other salts ended the log: an earlier generation.
+    Stale,
+}
+
 /// Stream a `-wal` and validate its header and frames. `db_page_size` is
-/// the main database header's page size, when known.
-pub(crate) fn wal_facts(mut r: impl Read, db_page_size: Option<u32>) -> io::Result<WalFacts> {
+/// the main database header's page size, when known. `cancel` is checked
+/// before every frame, so a large `-wal` cannot hold up a cancelled job.
+pub(crate) fn wal_facts(
+    r: impl Read,
+    db_page_size: Option<u32>,
+    cancel: &CancelToken,
+) -> Result<WalFacts, BackupError> {
+    match scan_wal(r, db_page_size, cancel) {
+        Ok(Some(facts)) => Ok(facts),
+        Ok(None) => Err(BackupError::Cancelled),
+        Err(e) => Err(BackupError::staging_io(IoOp::Read, &e)),
+    }
+}
+
+/// The scan; `Ok(None)` once cancelled.
+fn scan_wal(
+    mut r: impl Read,
+    db_page_size: Option<u32>,
+    cancel: &CancelToken,
+) -> io::Result<Option<WalFacts>> {
     let mut facts = WalFacts::default();
     let mut header = [0u8; WAL_HEADER_LEN];
     let got = fill(&mut r, &mut header)?;
     if got < WAL_HEADER_LEN {
         facts.trailing_bytes = u64::try_from(got).unwrap_or(u64::MAX);
-        return Ok(facts);
+        return Ok(Some(facts));
     }
     let magic = be32(&header, 0);
     let big_endian = match magic {
@@ -184,7 +225,7 @@ pub(crate) fn wal_facts(mut r: impl Read, db_page_size: Option<u32>) -> io::Resu
     facts.page_size_matches = page_size.is_some() && page_size == db_page_size;
     let Some(page_size) = page_size else {
         // Without a page size the frames cannot be found; count nothing.
-        return Ok(facts);
+        return Ok(Some(facts));
     };
     let header_sum = big_endian.map(|be| checksum(be, (0, 0), header.get(..24).unwrap_or(&[])));
     facts.header_valid = big_endian.is_some()
@@ -196,28 +237,44 @@ pub(crate) fn wal_facts(mut r: impl Read, db_page_size: Option<u32>) -> io::Resu
     let frame_len = page.saturating_add(FRAME_HEADER_LEN);
     let mut frame = vec![0u8; frame_len];
     let mut sum = header_sum.unwrap_or((0, 0));
-    let mut valid = facts.header_valid;
+    let mut state = if facts.header_valid {
+        Scan::Valid
+    } else {
+        Scan::Invalid
+    };
     let mut valid_frames: u64 = 0;
     loop {
+        if cancel.is_cancelled() {
+            return Ok(None);
+        }
         let got = fill(&mut r, &mut frame)?;
         if got < frame_len {
             facts.trailing_bytes = u64::try_from(got).unwrap_or(u64::MAX);
             break;
         }
-        if !valid {
-            inc(&mut facts.frames_after_first_invalid);
-            continue;
+        match state {
+            Scan::Valid => {}
+            Scan::Invalid => {
+                inc(&mut facts.frames_after_first_invalid);
+                continue;
+            }
+            Scan::Stale => {
+                inc(&mut facts.stale_generation_frames);
+                continue;
+            }
         }
         let be = big_endian.unwrap_or(true);
         let (fh, data) = frame.split_at(FRAME_HEADER_LEN);
         let page_no = be32(fh, 0);
         let commit_size = be32(fh, 4);
         let next = checksum(be, checksum(be, sum, fh.get(..8).unwrap_or(&[])), data);
-        let ok = page_no != 0
-            && fh.get(8..16) == Some(salts.as_slice())
-            && next == (be32(fh, 16), be32(fh, 20));
-        if !ok {
-            valid = false;
+        if fh.get(8..16) != Some(salts.as_slice()) {
+            state = Scan::Stale;
+            inc(&mut facts.stale_generation_frames);
+            continue;
+        }
+        if page_no == 0 || next != (be32(fh, 16), be32(fh, 20)) {
+            state = Scan::Invalid;
             inc(&mut facts.frames_after_first_invalid);
             continue;
         }
@@ -228,7 +285,7 @@ pub(crate) fn wal_facts(mut r: impl Read, db_page_size: Option<u32>) -> io::Resu
         }
     }
     facts.uncommitted_valid_frames = valid_frames.saturating_sub(facts.valid_committed_frames);
-    Ok(facts)
+    Ok(Some(facts))
 }
 
 #[cfg(test)]
@@ -237,8 +294,12 @@ mod tests {
 
     const PAGE: u32 = 512;
 
-    /// A hand-built WAL: `frames` is (page number, commit size, fill byte).
-    fn build(big_endian: bool, frames: &[(u32, u32, u8)]) -> Vec<u8> {
+    fn wal_facts(r: &[u8], db_page_size: Option<u32>) -> Result<WalFacts, BackupError> {
+        super::wal_facts(r, db_page_size, &CancelToken::new())
+    }
+
+    /// A hand-built WAL with the given salts.
+    fn build_salted(big_endian: bool, salts: (u32, u32), frames: &[(u32, u32, u8)]) -> Vec<u8> {
         let mut out = Vec::new();
         let magic = if big_endian {
             WAL_MAGIC_BE
@@ -249,8 +310,8 @@ mod tests {
         out.extend_from_slice(&WAL_VERSION.to_be_bytes());
         out.extend_from_slice(&PAGE.to_be_bytes());
         out.extend_from_slice(&0u32.to_be_bytes()); // checkpoint sequence
-        out.extend_from_slice(&0x1122_3344u32.to_be_bytes()); // salt-1
-        out.extend_from_slice(&0x5566_7788u32.to_be_bytes()); // salt-2
+        out.extend_from_slice(&salts.0.to_be_bytes());
+        out.extend_from_slice(&salts.1.to_be_bytes());
         let mut sum = checksum(big_endian, (0, 0), &out);
         out.extend_from_slice(&sum.0.to_be_bytes());
         out.extend_from_slice(&sum.1.to_be_bytes());
@@ -260,14 +321,19 @@ mod tests {
             fh.extend_from_slice(&commit.to_be_bytes());
             let data = vec![*fill; PAGE as usize];
             sum = checksum(big_endian, checksum(big_endian, sum, &fh), &data);
-            fh.extend_from_slice(&0x1122_3344u32.to_be_bytes());
-            fh.extend_from_slice(&0x5566_7788u32.to_be_bytes());
+            fh.extend_from_slice(&salts.0.to_be_bytes());
+            fh.extend_from_slice(&salts.1.to_be_bytes());
             fh.extend_from_slice(&sum.0.to_be_bytes());
             fh.extend_from_slice(&sum.1.to_be_bytes());
             out.extend_from_slice(&fh);
             out.extend_from_slice(&data);
         }
         out
+    }
+
+    /// A hand-built WAL: `frames` is (page number, commit size, fill byte).
+    fn build(big_endian: bool, frames: &[(u32, u32, u8)]) -> Vec<u8> {
+        build_salted(big_endian, (0x1122_3344, 0x5566_7788), frames)
     }
 
     fn frame_offset(i: usize) -> usize {
@@ -308,13 +374,16 @@ mod tests {
             assert_eq!(f.uncommitted_valid_frames, 0);
             assert_eq!(f.frames_after_first_invalid, 2);
 
-            // A wrong salt in the second frame.
+            // A wrong salt in the second frame ends the log there: it and
+            // every later frame are counted as an earlier generation, not as
+            // damage (SQLite stops at the same frame).
             let mut salt = wal.clone();
             salt[frame_offset(1) + 8] ^= 0x80;
             let f = wal_facts(salt.as_slice(), Some(PAGE)).expect("facts");
             assert_eq!(f.valid_committed_frames, 0);
             assert_eq!(f.uncommitted_valid_frames, 1);
-            assert_eq!(f.frames_after_first_invalid, 3);
+            assert_eq!(f.frames_after_first_invalid, 0);
+            assert_eq!(f.stale_generation_frames, 3);
 
             // A truncated last frame.
             let cut = &wal[..wal.len() - 10];
@@ -331,6 +400,52 @@ mod tests {
             assert!(!f.page_size_matches);
             assert_eq!(f.valid_committed_frames, 3);
         }
+    }
+
+    /// A `-wal` reused after a checkpoint: the current generation's frames
+    /// (new salts) overwrite the start of the file, and older frames (the
+    /// previous salts, already checkpointed) remain after them. Every
+    /// committed frame of the current generation counts; the old frames are
+    /// stale, not invalid.
+    #[test]
+    fn a_reused_wal_with_frames_of_an_earlier_generation() {
+        for be in [true, false] {
+            let old = build_salted(
+                be,
+                (0x1122_3344, 0x5566_7788),
+                &[(1, 0, 1), (2, 2, 2), (3, 0, 3), (4, 4, 4), (5, 5, 5)],
+            );
+            let current = build_salted(be, (0x1122_3345, 0x0bad_cafe), &[(1, 0, 9), (2, 2, 8)]);
+            let mut reused = old.clone();
+            reused[..current.len()].copy_from_slice(&current);
+            let f = wal_facts(reused.as_slice(), Some(PAGE)).expect("facts");
+            assert!(f.header_valid);
+            assert_eq!(f.valid_committed_frames, 2);
+            assert_eq!(f.uncommitted_valid_frames, 0);
+            assert_eq!(f.frames_after_first_invalid, 0);
+            assert_eq!(f.stale_generation_frames, 3);
+            assert_eq!(f.trailing_bytes, 0);
+
+            // A broken checksum inside the current generation is still
+            // damage, and the stale frames after it count with it.
+            let mut bad = reused.clone();
+            bad[frame_offset(1) + FRAME_HEADER_LEN + 3] ^= 1;
+            let f = wal_facts(bad.as_slice(), Some(PAGE)).expect("facts");
+            assert_eq!(f.valid_committed_frames, 0);
+            assert_eq!(f.frames_after_first_invalid, 4);
+            assert_eq!(f.stale_generation_frames, 0);
+        }
+    }
+
+    #[test]
+    fn a_cancelled_scan_stops() {
+        let wal = build(true, &[(1, 1, 1), (2, 2, 2)]);
+        let token = CancelToken::new();
+        token.cancel();
+        assert!(matches!(
+            super::wal_facts(wal.as_slice(), Some(PAGE), &token),
+            Err(BackupError::Cancelled)
+        ));
     }
 
     #[test]

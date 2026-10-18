@@ -132,12 +132,20 @@ These apply to Milestone 3.
   No backup made from a real iPhone has been checked with this build yet.
   The test databases' column sets are hand-written from column-name facts
   taken from macOS `chat.db` snapshots; whether iOS sms.db matches them,
-  including on iOS 27, is unverified. **Every real backup is reported with
-  "This iOS version has not been tested".** See
+  including on iOS 27, is unverified. **Every readable result from a real
+  backup carries the qualifier "This iOS version has not been tested".** A
+  damaged, unsupported or incomplete result does not repeat it, but no iOS
+  version has been tested for those either. See
   [compatibility.md](docs/compatibility.md).
-- **The message-body decoder agrees with two independent decoders on
-  synthetic test data.** It has not been checked against Apple's own
-  encoder. Its independent clean-room review is still pending.
+- **The message-body decoder has been compared with two independent
+  decoders, on synthetic data only and on part of it:** with pytypedstream
+  on the structure of 46 synthetic vectors (10 more were exempted), and
+  with imessage-exporter on the text of the four attributedBody-only rows
+  of `msgs-full-plain` and `msgs-full-enc`. One hostile multipart row was
+  not compared, because imessage-exporter's export does not show its text
+  (see [compatibility.md](docs/compatibility.md), oracle runs 2 and 3). It
+  has not been checked against Apple's own encoder. Its independent
+  clean-room review is still pending.
 - **The extraction check writes a plaintext copy of your Messages
   database into the archive folder**, decrypted for an encrypted backup,
   and deletes it straight after reading. **A crash leaves the copy on disk**

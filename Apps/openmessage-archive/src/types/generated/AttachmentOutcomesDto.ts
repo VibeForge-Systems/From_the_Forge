@@ -6,6 +6,10 @@
  */
 export type AttachmentOutcomesDto = { rows: number | null, found: number, notListedAtSourcedKey: number, notFoundAtAssumedKey: number, notLookedUp: number, ambiguous: number, invalidEntry: number, filePresent: number, fileMissing: number, 
 /**
+ * A regular file whose length differs from the backup's record of it.
+ */
+fileSizeMismatch: number, 
+/**
  * A link, directory or device, or metadata that could not be read.
  */
 fileNotReadable: number, 

@@ -263,6 +263,7 @@ export function extractionReport(overrides: Partial<ExtractionReportDto> = {}): 
       invalidEntry: 0,
       filePresent: 1,
       fileMissing: 0,
+      fileSizeMismatch: 0,
       fileNotReadable: 0,
       noKey: 0,
       keyDoesNotUnwrap: 1,

@@ -829,7 +829,7 @@ mod tests {
                 staging_removed,
                 plaintext_removed_after_row_pass,
             } => {
-                // iosVersionUntested always applies in M3, so a real or
+                // iosVersionUntested applies to every readable result in M3, so a real or
                 // synthetic backup is never plain "readable".
                 assert_eq!(*outcome, ExtractionOutcomeDto::ReadableWithQualifiers);
                 assert!(!*source_changed);
@@ -933,6 +933,37 @@ mod tests {
             }
             assert!(staging_is_empty(&fx.library));
         }
+    }
+
+    /// A truncated sms.db (as an interrupted backup leaves it) passes
+    /// validation's header check but cannot be opened: the job fails with
+    /// the Messages-database sentence, and nothing stays staged.
+    #[test]
+    fn a_truncated_sms_db_fails_with_the_messages_sentence_and_cleans_up() {
+        let fx = messages_fixture("msgs-full-plain");
+        let blob = fx
+            .dir
+            .join(&oma_backup::SMS_DB_FILE_ID[..2])
+            .join(oma_backup::SMS_DB_FILE_ID);
+        let bytes = std::fs::read(&blob).expect("blob");
+        std::fs::write(&blob, &bytes[..4096]).expect("truncate");
+        let (events, _) = run_kind(&fx, JobKind::ExtractionCheck, None);
+        match terminal(&events) {
+            JobEvent::Failed {
+                error,
+                staging_removed,
+                ..
+            } => {
+                assert_eq!(error.code, ErrorCode::MalformedBackup);
+                assert_eq!(
+                    error.message,
+                    "The Messages database copy could not be opened (SQLite error 11)."
+                );
+                assert!(*staging_removed);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        assert!(staging_is_empty(&fx.library));
     }
 
     #[test]
@@ -1045,6 +1076,30 @@ mod tests {
     }
 
     /// §16.4: every u64 is clamped (and sets `saturated`), and every raw
+    /// Without an `attachment` table nothing was looked up, so the
+    /// attachment section is `null` ("not recorded"), never a set of zeros.
+    #[test]
+    fn no_attachment_table_sends_no_attachment_counters() {
+        let r = checked_report("msgs-minimal-plain");
+        assert!(r.attachments.as_ref().is_some_and(|a| a.rows.is_none()));
+        let dto = extraction::report_dto(
+            &ExtractionEnding::Checked(Box::new(r)),
+            "job-1",
+            true,
+            false,
+        );
+        assert!(dto.attachments.is_none());
+        assert_eq!(dto.counts.expect("counts").attachment_rows, None);
+        let full = checked_report("msgs-full-plain");
+        let dto = extraction::report_dto(
+            &ExtractionEnding::Checked(Box::new(full)),
+            "job-2",
+            true,
+            false,
+        );
+        assert!(dto.attachments.is_some());
+    }
+
     /// i64 outside ±(2^53 − 1) is withheld, never sent as a number.
     #[test]
     fn the_extraction_dto_clamps_u64_max_and_unsafe_i64() {

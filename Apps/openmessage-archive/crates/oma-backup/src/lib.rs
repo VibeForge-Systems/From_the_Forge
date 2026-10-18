@@ -29,6 +29,7 @@ mod mbfile;
 mod open;
 mod plists;
 mod prober;
+mod schema_sql;
 mod staged_conn;
 mod staging;
 mod text;
@@ -60,6 +61,7 @@ pub use plists::{
     BackupFile, InfoPlist, ManifestPlist, NoteKind, ParseNote, SnapshotState, Sourced, StatusPlist,
 };
 pub use prober::{BlobProbe, FileProber};
+pub use schema_sql::sql_declares_virtual_table;
 pub use staged_conn::{Budgeted, ReadPolicy, StagedConnection, TextEncoding, OPS_PER_TICK};
 pub use staging::{sweep_stale, CleanupReport, StagingRoot, StagingSession, SweepReport};
 #[cfg(windows)]
