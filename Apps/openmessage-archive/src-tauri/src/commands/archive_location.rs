@@ -189,9 +189,19 @@ mod tests {
         }
         fs::write(stale.join(".lock"), b"").expect("lock file");
         let old = SystemTime::now() - Duration::from_secs(3600);
-        fs::File::open(&stale)
-            .and_then(|f| f.set_modified(old))
-            .expect("age");
+        #[cfg(windows)]
+        let dir = {
+            use std::os::windows::fs::OpenOptionsExt;
+            // FILE_WRITE_ATTRIBUTES, plus FILE_FLAG_BACKUP_SEMANTICS, without
+            // which Windows refuses to open a directory handle.
+            fs::OpenOptions::new()
+                .access_mode(0x0100)
+                .custom_flags(0x0200_0000)
+                .open(&stale)
+        };
+        #[cfg(not(windows))]
+        let dir = fs::File::open(&stale);
+        dir.and_then(|f| f.set_modified(old)).expect("age");
         let state = state_with_library(tmp.path(), &library);
         let (snapshot, sweep) = clear_inner(&state).expect("clear");
         assert!(snapshot.settings.archive_directory.is_none());
