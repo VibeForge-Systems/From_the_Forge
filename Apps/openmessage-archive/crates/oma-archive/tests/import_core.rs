@@ -1,6 +1,13 @@
-//! The import core (slice 4f) on the import catalogue: P1 handles and P2
-//! chats against the generator's content model and counts, every scenario
-//! in every order, the session's facts, and the refusals.
+//! The import core (slices 4f to 4h) on the import catalogue, against the
+//! generator's content model (the content oracle) and counts, for every
+//! entry and every scenario in every order: P1 handles, P2 chats, P3
+//! messages (columns, history, handle reference, body versions and display
+//! text, sort order), P4 and P5 chat links, P6 attachment rows and their
+//! files (the current blob, every blob read, and the store), P7 attachment
+//! links in the §6.5 order, P8 the
+//! Recently Deleted markers, the Recently Deleted exclusion of messages and
+//! attachments, and "not in the latest import" per lineage. Also the
+//! session's facts and the refusals.
 //!
 //! The model is a second statement of the spec's rules, so agreement shows
 //! self-consistency, not correctness against a real device.
@@ -15,7 +22,7 @@ use common::import::*;
 use common::*;
 use oma_archive::hooks::{arm, install, FaultPoint, Faults, TestSchema};
 use oma_archive::{
-    ArchiveCtx, ArchiveError, CancelToken, CoreOutcome, FixedClock, LineageChoice, LineageId,
+    ArchiveCtx, ArchiveError, CancelToken, FixedClock, ImportOutcome, LineageChoice, LineageId,
     NoProgress, Recovery,
 };
 use serde_json::Value;
@@ -26,10 +33,15 @@ fn manifest_of(rel: &str) -> Value {
 
 /// Compare the archive with a manifest; returns how many history values
 /// and unkeyed rows the comparison covered.
-fn assert_view(db: &std::path::Path, m: &Value, what: &str) -> (usize, usize) {
-    let view = manifest_view(db);
+fn assert_view(
+    db: &std::path::Path,
+    m: &Value,
+    labels: &LineageLabels,
+    what: &str,
+) -> (usize, usize) {
+    let view = manifest_view(db, labels);
     let mut covered = (0, 0);
-    for plural in ["handles", "chats"] {
+    for plural in ["handles", "chats", "attachments"] {
         let want = manifest_expected(m, plural);
         for r in &want {
             covered.0 += r["history"].as_object().map_or(0, |h| {
@@ -51,8 +63,88 @@ fn assert_view(db: &std::path::Path, m: &Value, what: &str) -> (usize, usize) {
     covered
 }
 
+/// Compare the archive's messages with a manifest: every message's
+/// columns, history, handle, display text and body versions; their order;
+/// and the Recently Deleted exclusions. Returns (messages, body versions).
+fn assert_messages(
+    db: &std::path::Path,
+    m: &Value,
+    labels: &LineageLabels,
+    what: &str,
+) -> (usize, usize) {
+    let got = message_view(db, labels);
+    let want = message_expected(m);
+    let g: Vec<String> = {
+        let mut v: Vec<String> = got.iter().map(Value::to_string).collect();
+        v.sort();
+        v
+    };
+    let w: Vec<String> = {
+        let mut v: Vec<String> = want.iter().map(Value::to_string).collect();
+        v.sort();
+        v
+    };
+    if g != w {
+        let gs: BTreeSet<&String> = g.iter().collect();
+        let ws: BTreeSet<&String> = w.iter().collect();
+        panic!(
+            "{what}: messages differ ({} in the archive, {} in the model)\n  only in the archive: {:#?}\n  only in the model: {:#?}",
+            g.len(),
+            w.len(),
+            gs.difference(&ws).collect::<Vec<_>>(),
+            ws.difference(&gs).collect::<Vec<_>>()
+        );
+    }
+    // The sort order (spec §6.5): ties are unspecified, so compare the
+    // sequence of sort positions.
+    let sorts = |v: &[Value]| v.iter().map(|x| x["sort"].clone()).collect::<Vec<_>>();
+    assert_eq!(sorts(&got), sorts(&want), "{what}: message order");
+    // Excluded keyed messages are not in the archive.
+    let c = read_only(db);
+    for r in m["content"]["excluded"]["messages"]
+        .as_array()
+        .expect("excluded")
+    {
+        let guid = r
+            .as_str()
+            .and_then(|s| s.strip_prefix("guid:"))
+            .expect("guid ref");
+        let n: i64 = c
+            .query_row(
+                "SELECT count(*) FROM message WHERE guid = ?1",
+                [guid.as_bytes()],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(n, 0, "{what}: an excluded message was imported");
+    }
+    // Excluded keyed attachments have no row (spec §8.8).
+    for r in m["content"]["excluded"]["attachments"]
+        .as_array()
+        .expect("excluded")
+    {
+        let guid = r
+            .as_str()
+            .and_then(|s| s.strip_prefix("guid:"))
+            .expect("guid ref");
+        let n: i64 = c
+            .query_row(
+                "SELECT count(*) FROM attachment WHERE guid = ?1",
+                [guid.as_bytes()],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(n, 0, "{what}: an excluded attachment was imported");
+    }
+    let bodies = want
+        .iter()
+        .map(|x| x["bodies"].as_array().map_or(0, Vec::len))
+        .sum();
+    (want.len(), bodies)
+}
+
 #[test]
-fn every_entry_imports_its_handles_and_chats_as_the_model_says() {
+fn every_entry_imports_as_the_model_says() {
     for entry in ENTRIES {
         let (tmp, lib) = library();
         let id = lib.create(None).expect("create");
@@ -64,12 +156,63 @@ fn every_entry_imports_its_handles_and_chats_as_the_model_says() {
         assert!(src.ob.close().removed, "{entry}: staging not removed");
         let db = db_path(&tmp, &id);
         assert_consistent(&db);
-        let (_, unkeyed) = assert_view(
-            &db,
-            &manifest_of(&format!("{entry}.expected/content.json")),
-            entry,
-        );
+        let labels = single_lineage(&db);
+        let m = manifest_of(&format!("{entry}.expected/content.json"));
+        let (_, unkeyed) = assert_view(&db, &m, &labels, entry);
         assert_eq!(unkeyed > 0, *entry == "imp-keys-hostile-plain", "{entry}");
+        let (messages, _) = assert_messages(&db, &m, &labels, entry);
+        // The store holds exactly the model's blobs, each file whole.
+        assert_eq!(blob_list(&db), m["content"]["blobs"], "{entry}: blobs");
+        assert_store_consistent(&db, true);
+        assert_eq!(partial_files(&db), 0, "{entry}: partial files left");
+        let f = &s.counts.attachment_files;
+        assert_eq!(f.outcomes(), s.counts.attachments.seen, "{entry}: {f:?}");
+        assert_eq!(
+            f.blobs_added,
+            u64::try_from(m["content"]["blobs"].as_array().expect("blobs").len()).expect("n"),
+            "{entry}"
+        );
+        // The Recently Deleted counts against the model's exclusions.
+        let ex = &m["content"]["excluded"];
+        let n = |k: &str| ex[k].as_array().map_or(0, Vec::len) as u64;
+        let u = |k: &str| ex[k].as_u64().expect("count");
+        assert_eq!(
+            s.counts.recently_deleted.excluded,
+            n("messages") + u("unkeyedMessageRows"),
+            "{entry}"
+        );
+        assert_eq!(
+            s.counts.recently_deleted.attachments_excluded,
+            n("attachments") + u("unkeyedAttachmentRows"),
+            "{entry}"
+        );
+        assert_eq!(
+            s.counts.attachments.inserted,
+            u64::try_from(m["content"]["attachments"].as_array().expect("a").len()).expect("n"),
+            "{entry}"
+        );
+        // Every link pass accounts for every source row once.
+        for l in [
+            s.counts.chat_handles,
+            s.counts.chat_messages,
+            s.counts.message_attachments,
+        ] {
+            assert_eq!(
+                l.inserted + l.already_present + l.unresolved + l.skipped_recently_deleted,
+                l.seen,
+                "{entry}: {l:?}"
+            );
+        }
+        assert!(messages > 0, "{entry}");
+        assert_eq!(
+            s.counts.recently_deleted.not_updated, 0,
+            "{entry}: nothing is re-observed in an empty archive"
+        );
+        assert_eq!(
+            s.counts.messages.inserted,
+            u64::try_from(messages).expect("n"),
+            "{entry}"
+        );
         let want = manifest_of(&format!("{entry}.expected/import.json"));
         assert_eq!(want["entry"], *entry);
         assert_eq!(
@@ -82,36 +225,16 @@ fn every_entry_imports_its_handles_and_chats_as_the_model_says() {
             want["counts"]["chats"],
             "{entry}: chat counts"
         );
-        assert_eq!(s.counts.batches, 2, "{entry}: one batch per pass");
+        assert_eq!(s.counts.batches, 8, "{entry}: one batch per pass");
     }
-}
-
-/// Stand in for finalize (slice 4j), which does not exist yet: mark the
-/// running session completed and empty its session-local tables, so the
-/// next import of the same content starts a **fresh** session instead of
-/// continuing this one (spec §8.2 step 1 resumes only unfinished ones).
-fn finish_sessions(db: &std::path::Path) {
-    let c = raw(db);
-    c.execute_batch(
-        "DELETE FROM import_rowid_map WHERE session_id IN \
-             (SELECT id FROM import_session WHERE state = 0); \
-         DELETE FROM import_occurrence WHERE session_id IN \
-             (SELECT id FROM import_session WHERE state = 0); \
-         DELETE FROM import_dup_key WHERE session_id IN \
-             (SELECT id FROM import_session WHERE state = 0); \
-         UPDATE import_session SET state = 1, ended_at_ns = started_at_ns, \
-             full_observation = (qualifiers & 2) = 0 WHERE state = 0;",
-    )
-    .expect("finish");
 }
 
 /// Every scenario's content, in every order it lists; the orders give equal
 /// content snapshots; each step's counts match the model's.
 ///
-/// Each step's session is completed before the next step
-/// ([`finish_sessions`]), so a step whose staged content equals an earlier
-/// step's is a fresh session that re-observes it, as it will be once
-/// finalize exists: unkeyed rows must be idempotent and an equal or
+/// Each step's session is completed by finalize before the next step, so a
+/// step whose staged content equals an earlier step's is a fresh session
+/// that re-observes it: unkeyed rows must be idempotent and an equal or
 /// undated rank must merge as the model says.
 #[test]
 fn every_scenario_holds_in_every_order() {
@@ -124,7 +247,9 @@ fn every_scenario_holds_in_every_order() {
     names.sort();
     assert_eq!(names.len(), 10);
     let mut history_values = 0;
+    let mut not_in_latest = 0;
     let mut repeated_steps = 0;
+    let mut body_versions = 0;
     for name in &names {
         let m = manifest_of(&format!("scenarios/{name}.content.json"));
         let counts = manifest_of(&format!("scenarios/{name}.counts.json"));
@@ -148,7 +273,6 @@ fn every_scenario_holds_in_every_order() {
                 labels.insert(label.to_owned(), s.lineage);
                 drop(a);
                 assert!(src.ob.close().removed);
-                finish_sessions(&db);
                 assert!(!s.resumed, "{name} order {oi} step {si}");
                 let digest = m["sessions"][entry]["contentDigest"]
                     .as_str()
@@ -168,7 +292,17 @@ fn every_scenario_holds_in_every_order() {
                 }
             }
             assert_consistent(&db);
-            history_values += assert_view(&db, &m, &format!("{name} order {oi}")).0;
+            let by_id: LineageLabels = labels.iter().map(|(k, v)| (v.get(), k.clone())).collect();
+            history_values += assert_view(&db, &m, &by_id, &format!("{name} order {oi}")).0;
+            let (_, bodies) = assert_messages(&db, &m, &by_id, &format!("{name} order {oi}"));
+            assert_eq!(
+                blob_list(&db),
+                m["content"]["blobs"],
+                "{name} order {oi}: blobs"
+            );
+            assert_store_consistent(&db, true);
+            not_in_latest += count_not_in_latest(&m);
+            body_versions = body_versions.max(bodies);
             snapshots.push(logical_snapshot(&db, Scope::Content));
         }
         // Order independence (spec §8.7): equal content snapshots.
@@ -181,6 +315,19 @@ fn every_scenario_holds_in_every_order() {
     // keys-hostile-twice, dev1-v1-undated, dev1-v1-baddate and
     // dev1-v2-plain-enc each repeat a digest.
     assert!(repeated_steps >= 4, "{repeated_steps}");
+    assert!(body_versions > 0);
+    // The lineages and dev1-v1-v2 scenarios label rows "not in the latest
+    // import" (rows of v1 that v2 no longer holds).
+    assert!(not_in_latest >= 2, "{not_in_latest}");
+}
+
+/// How many rows a manifest labels "not in the latest import".
+fn count_not_in_latest(m: &Value) -> usize {
+    ["chats", "messages", "attachments"]
+        .iter()
+        .flat_map(|p| m["content"][*p].as_array().expect("list"))
+        .filter(|r| r["notInLatest"].as_array().is_some_and(|l| !l.is_empty()))
+        .count()
 }
 
 /// Unkeyed rows are idempotent across sessions: the hostile entry imported
@@ -195,7 +342,6 @@ fn a_second_session_of_the_same_content_inserts_nothing() {
     let mut a = lib.open(&id).expect("open");
     let first = import(&mut a, &src, &opts(16), LineageChoice::New);
     drop(a);
-    finish_sessions(&db);
     let before = logical_snapshot(&db, Scope::Content);
     let mut a = lib.open(&id).expect("open");
     let second = import(
@@ -288,16 +434,29 @@ fn the_session_records_the_rank_and_qualifiers_the_model_computes() {
             model_q.contains("walSkipped"),
             "{entry}"
         );
-        // Until finalize exists, a session whose passes ran stays running.
-        assert_eq!(state, 0, "{entry}");
-        let dup: i64 = c
+        // Finalize completed the session and emptied its session-local
+        // rows; the key scan's duplicates are in the counts' unkeyed rows.
+        assert_eq!(state, 1, "{entry}");
+        let full: Option<i64> = c
             .query_row(
-                "SELECT count(*) FROM import_dup_key WHERE session_id = ?1",
+                "SELECT full_observation FROM import_session WHERE id = ?1",
                 [s.session],
                 |r| r.get(0),
             )
-            .expect("dups");
-        assert_eq!(dup > 0, *entry == "imp-keys-hostile-plain", "{entry}");
+            .expect("full");
+        assert_eq!(
+            full == Some(1),
+            want["fullObservation"].as_bool().expect("fullObservation"),
+            "{entry}"
+        );
+        assert_eq!(
+            session_local_rows(&db_path(&tmp, &id), s.session),
+            0,
+            "{entry}"
+        );
+        let f = s.finalize.expect("finalize report");
+        assert!(f.fts_merge_complete, "{entry}");
+        assert!(s.staging_removed && s.provenance_written, "{entry}");
     }
 }
 
@@ -307,7 +466,26 @@ fn duplicated_keys_are_unkeyed_in_every_occurrence_and_persisted() {
     let id = lib.create(None).expect("create");
     let mut a = lib.open(&id).expect("open");
     let src = open_entry("imp-keys-hostile-plain");
-    let s = import(&mut a, &src, &opts(16), LineageChoice::New);
+    // Stop after P1, so the session-local rows (which finalize deletes)
+    // can be read.
+    let token = CancelToken::new();
+    let mut sink = CancelAtChats(token.clone());
+    let clock = FixedClock(MODEL_NOW_NS);
+    let out = a
+        .import(
+            &src.ob,
+            &opts(16),
+            &mut oma_archive::ProceedWith(LineageChoice::New),
+            &mut ArchiveCtx {
+                cancel: &token,
+                progress: &mut sink,
+                clock: &clock,
+            },
+        )
+        .expect("import");
+    let ImportOutcome::Cancelled(Some(s)) = out else {
+        panic!("not cancelled: {out:?}");
+    };
     drop(a);
     src.ob.close();
     let c = read_only(&db_path(&tmp, &id));
@@ -369,29 +547,31 @@ fn other_options_supersede_and_the_fresh_session_changes_no_content() {
     src.ob.close();
     let before = logical_snapshot(&db_path(&tmp, &id), Scope::Content);
 
-    // The same content with a different option, then with another lineage,
-    // then with a different batch budget (which is not part of the
-    // binding, so it continues).
+    // Unfinished sessions of the same content: with a different option,
+    // then with another lineage, then with a different batch budget (which
+    // is not part of the binding, so it continues). A completed session is
+    // never continued or superseded.
     let mut o = opts(1000);
     o.include_recently_deleted = true;
     let mut a = lib.open(&id).expect("open");
     let src = open_entry("imp-dev1-v2-plain");
-    let second = import(&mut a, &src, &o, LineageChoice::Existing(first.lineage));
+    let second = cancelled_at_chats(&mut a, &src, &o, LineageChoice::Existing(first.lineage));
     assert!(!second.resumed);
-    assert_eq!(second.superseded, 1);
+    assert_eq!(second.superseded, 0);
     assert_eq!(second.counts.handles.inserted, 0);
     assert_eq!(second.counts.handles.already_present, 4);
     assert_eq!(second.counts.handles.cells_replaced, 0);
-    let third = import(&mut a, &src, &o, LineageChoice::New);
+    let third = cancelled_at_chats(&mut a, &src, &o, LineageChoice::New);
     assert!(!third.resumed);
     assert_eq!(third.superseded, 1);
-    let fourth = import(
+    let fourth = cancelled_at_chats(
         &mut a,
         &src,
         &opts(16),
         LineageChoice::Existing(third.lineage),
     );
     assert!(!fourth.resumed, "the RD option differs again");
+    assert_eq!(fourth.superseded, 1);
     let mut o16 = opts(16);
     o16.include_recently_deleted = false;
     let fifth = import(&mut a, &src, &o16, LineageChoice::Existing(third.lineage));
@@ -409,18 +589,13 @@ fn other_options_supersede_and_the_fresh_session_changes_no_content() {
         .expect("query")
         .collect::<Result<_, _>>()
         .expect("rows");
-    assert_eq!(states, [5, 5, 5, 0]);
-    // A superseded session keeps no map, counter or duplicate rows.
-    let leftovers: i64 = c
-        .query_row(
-            "SELECT (SELECT count(*) FROM import_rowid_map WHERE session_id <> ?1) + \
-                    (SELECT count(*) FROM import_cursor WHERE session_id <> ?1 AND done = 0)",
-            [fourth.session],
-            |r| r.get(0),
-        )
-        .expect("count");
-    assert_eq!(leftovers, 0);
+    assert_eq!(states, [1, 5, 5, 1]);
     drop(c);
+    // No session keeps a map, counter or duplicate rows: superseded ones
+    // lost them when set aside, completed ones at finalize.
+    for s in [first.session, second.session, third.session, fourth.session] {
+        assert_eq!(session_local_rows(&db, s), 0, "session {s}");
+    }
     // Re-observing identical content changes no content, except that a
     // second lineage now saw the chats.
     let after = logical_snapshot(&db, Scope::Content);
@@ -441,7 +616,7 @@ fn a_cancel_before_the_session_starts_writes_nothing() {
     let token = CancelToken::new();
     token.cancel();
     let out = import_with(&mut a, &src, &opts(1000), LineageChoice::New, &token).expect("import");
-    assert_eq!(out, CoreOutcome::Cancelled(None));
+    assert_eq!(out, ImportOutcome::Cancelled(None));
     drop(a);
     assert!(src.ob.close().removed);
     assert_eq!(data_snapshot(&tmp, &id), before);
@@ -534,7 +709,7 @@ fn cancelled_hostile(
     drop(a);
     src.ob.close();
     match out {
-        CoreOutcome::Cancelled(Some(s)) => s,
+        ImportOutcome::Cancelled(Some(s)) => s,
         other => panic!("not cancelled: {other:?}"),
     }
 }

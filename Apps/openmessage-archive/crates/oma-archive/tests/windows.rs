@@ -158,3 +158,56 @@ fn renaming_a_creation_directory_with_a_handle_left_open_is_recorded() {
     }
     assert!(to.join("archive.lock").is_file());
 }
+
+/// The junction variant of `store.rs`'s `links_in_the_store_are_never_followed`
+/// (spec §18.5): a `<hh>` directory replaced by a junction to a directory
+/// outside the archive is never written through; the copy is counted as a
+/// store conflict.
+#[test]
+fn a_junction_in_the_store_is_never_followed() {
+    use common::import::*;
+    use oma_archive::LineageChoice;
+
+    let (tmp, lib) = library();
+    let id = lib.create(None).expect("create");
+    let import_v1 = || {
+        let mut a = lib.open(&id).expect("open");
+        let src = open_entry("imp-dev1-v1-plain");
+        let s = import(&mut a, &src, &opts(1000), LineageChoice::New);
+        drop(a);
+        src.ob.close();
+        s
+    };
+    import_v1();
+    let store = archive_dir(&tmp, &id).join("attachments");
+    let hh = fs::read_dir(&store)
+        .expect("attachments")
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.len() == 2)
+        .min()
+        .expect("a fan-out directory");
+    let files_in_hh = fs::read_dir(store.join(&hh)).expect("hh").count();
+    let outside = tempfile::tempdir().expect("outside");
+    fs::remove_dir_all(store.join(&hh)).expect("rm hh");
+    assert!(
+        make_junction(&store.join(&hh), outside.path()),
+        "mklink /J failed"
+    );
+    let s = import_v1();
+    let f = s.counts.attachment_files;
+    println!(
+        "RECORD import with a junction at <hh>: store conflicts {}, files that were there {files_in_hh}",
+        f.store_conflicts
+    );
+    assert_eq!(
+        f.store_conflicts,
+        u64::try_from(files_in_hh).expect("n"),
+        "{f:?}"
+    );
+    assert_eq!(
+        fs::read_dir(outside.path()).expect("outside").count(),
+        0,
+        "nothing is written through the junction"
+    );
+}

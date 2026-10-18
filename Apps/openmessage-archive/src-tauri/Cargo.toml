@@ -21,6 +21,7 @@ tauri-build = { workspace = true, features = [] }
 
 [dependencies]
 dunce.workspace = true
+oma-archive.workspace = true
 oma-backup.workspace = true
 oma-fs.workspace = true
 oma-messages.workspace = true

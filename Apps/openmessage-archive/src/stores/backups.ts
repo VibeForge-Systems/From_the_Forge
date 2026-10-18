@@ -314,6 +314,12 @@ export const useBackups = defineStore('backups', () => {
         current.done = event.done;
         current.total = event.total;
         return;
+      // Import and verify events belong to the archive jobs (M4), which
+      // the Backups page never starts.
+      case 'importPreflight':
+      case 'importFinished':
+      case 'verifyFinished':
+        return;
       case 'finished': {
         const d = details.value[backupId];
         if (d) {

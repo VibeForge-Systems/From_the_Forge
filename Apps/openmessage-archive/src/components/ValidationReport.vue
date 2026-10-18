@@ -50,7 +50,7 @@ const sms = computed(() => {
       >
         {{
           report.importable
-            ? 'This backup passed the checks for message import, which arrives in milestone 4.'
+            ? 'This backup passed the checks for message import.'
             : 'This backup cannot be imported. See the failed checks below.'
         }}
       </div>

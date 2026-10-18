@@ -31,7 +31,8 @@ pub enum FaultPoint {
     BatchAfterCommit,
     /// The supersede and new-session (or resume) transaction committed.
     SessionCommitted,
-    /// A cancelled, stopped or failed session's terminal state committed.
+    /// A session's terminal state committed: completed (finalize), or
+    /// cancelled, stopped or failed.
     TerminalCommitted,
     /// `begin_write`: partial files and provenance temporaries swept.
     RecoverySwept,
@@ -39,18 +40,54 @@ pub enum FaultPoint {
     RecoveryReconciled,
     /// `begin_write`: running sessions marked interrupted.
     RecoveryMarked,
+    /// P6 phase A: a partial file was created; the copy is next.
+    AttachmentPartialCreated,
+    /// P6 phase A: the first write of a copy into its partial file.
+    AttachmentCopying,
+    /// P6 phase A: a partial file is written and synced (`sync_all`).
+    AttachmentSynced,
+    /// P6 phase B: the batch's blob intents committed.
+    AttachmentIntentCommitted,
+    /// P6 phase C: a file was renamed into the store; its directory's fsync
+    /// is next.
+    AttachmentPlaced,
+    /// P6 phase C: the store directories are flushed; the row batch (phase
+    /// D) is next.
+    AttachmentDirSynced,
     /// Archive creation: the `.oma-new-*` directory is complete and synced;
     /// the rename is next.
     CreateBeforeRename,
     /// Archive creation: renamed into place; the library directory's fsync
     /// is next.
     CreateAfterRename,
+    /// The import is about to ask the gate (spec §8.2 step 7); nothing has
+    /// been written.
+    GateWaiting,
+    /// Finalize: `chat_stats` and `archive_stats` committed.
+    FinalizeStats,
+    /// Finalize: one chunk of the session-local cleanup committed.
+    FinalizeCleanup,
+    /// Finalize: one FTS merge step committed (between steps).
+    FtsMergeStep,
+    /// Finalize: `wal_checkpoint(TRUNCATE)` is next.
+    Checkpoint,
+    /// Provenance: `imports/session-<n>.json.tmp` was created; its content
+    /// is next.
+    ProvenanceTmpCreated,
+    /// Provenance: the `.tmp` file is written and synced; the rename is
+    /// next.
+    ProvenanceBeforeRename,
+    /// A migration step's DDL and data ran inside its transaction; its
+    /// checks are next.
+    MigrationStep,
+    /// A migration step passed its checks; its `COMMIT` is next.
+    MigrationBeforeCommit,
 }
 
 #[cfg_attr(not(feature = "fault-injection"), allow(dead_code))]
 impl FaultPoint {
     /// Every point, in a fixed order.
-    pub const ALL: [FaultPoint; 10] = [
+    pub const ALL: [FaultPoint; 25] = [
         FaultPoint::Record,
         FaultPoint::BatchBeforeCommit,
         FaultPoint::BatchAfterCommit,
@@ -59,8 +96,23 @@ impl FaultPoint {
         FaultPoint::RecoverySwept,
         FaultPoint::RecoveryReconciled,
         FaultPoint::RecoveryMarked,
+        FaultPoint::AttachmentPartialCreated,
+        FaultPoint::AttachmentCopying,
+        FaultPoint::AttachmentSynced,
+        FaultPoint::AttachmentIntentCommitted,
+        FaultPoint::AttachmentPlaced,
+        FaultPoint::AttachmentDirSynced,
         FaultPoint::CreateBeforeRename,
         FaultPoint::CreateAfterRename,
+        FaultPoint::GateWaiting,
+        FaultPoint::FinalizeStats,
+        FaultPoint::FinalizeCleanup,
+        FaultPoint::FtsMergeStep,
+        FaultPoint::Checkpoint,
+        FaultPoint::ProvenanceTmpCreated,
+        FaultPoint::ProvenanceBeforeRename,
+        FaultPoint::MigrationStep,
+        FaultPoint::MigrationBeforeCommit,
     ];
 
     /// The point's name in `OMA_TEST_FAULT` and in `FAULT` lines.
@@ -74,8 +126,23 @@ impl FaultPoint {
             FaultPoint::RecoverySwept => "recovery-swept",
             FaultPoint::RecoveryReconciled => "recovery-reconciled",
             FaultPoint::RecoveryMarked => "recovery-marked",
+            FaultPoint::AttachmentPartialCreated => "attachment-partial-created",
+            FaultPoint::AttachmentCopying => "attachment-copying",
+            FaultPoint::AttachmentSynced => "attachment-synced",
+            FaultPoint::AttachmentIntentCommitted => "attachment-intent-committed",
+            FaultPoint::AttachmentPlaced => "attachment-placed",
+            FaultPoint::AttachmentDirSynced => "attachment-dir-synced",
             FaultPoint::CreateBeforeRename => "create-before-rename",
             FaultPoint::CreateAfterRename => "create-after-rename",
+            FaultPoint::GateWaiting => "gate-waiting",
+            FaultPoint::FinalizeStats => "finalize-stats",
+            FaultPoint::FinalizeCleanup => "finalize-cleanup",
+            FaultPoint::FtsMergeStep => "fts-merge-step",
+            FaultPoint::Checkpoint => "checkpoint",
+            FaultPoint::ProvenanceTmpCreated => "provenance-tmp-created",
+            FaultPoint::ProvenanceBeforeRename => "provenance-before-rename",
+            FaultPoint::MigrationStep => "migration-step",
+            FaultPoint::MigrationBeforeCommit => "migration-before-commit",
         }
     }
 
@@ -143,6 +210,24 @@ pub mod hooks {
         /// Fail every import batch just before its `COMMIT` with this
         /// SQLite primary result code (the batch then rolls back).
         pub batch_error: Option<i32>,
+        /// Fail every attachment intent transaction (spec §9.1 phase B)
+        /// just before its `COMMIT` with this SQLite primary result code.
+        pub intent_error: Option<i32>,
+        /// Fail the verifier's read of the `blob` table with
+        /// `SQLITE_CORRUPT`: `0` its row count, `n` its n-th page.
+        pub verify_blob_error: Option<u32>,
+        /// Fail every attachment copy's first write to its partial file with
+        /// this raw OS error code (for example `EFBIG`).
+        pub copy_write_error: Option<i32>,
+        /// The space guard sets `max_page_count` to the current page count
+        /// plus this many pages (negative: below the current size), whatever
+        /// the space probe says.
+        pub max_page_room: Option<i64>,
+        /// Fail finalize's terminal bookkeeping (the "completed" update)
+        /// with this SQLite primary result code.
+        pub terminal_error: Option<i32>,
+        /// Fail every provenance file write before its `.tmp` is created.
+        pub provenance_fails: bool,
     }
 
     thread_local! {
@@ -173,6 +258,12 @@ pub mod hooks {
     }
 
     pub use super::FaultPoint;
+
+    /// The import's index-dependent statements, by name, exactly as the
+    /// code prepares them (for `tests/query_plans.rs`).
+    pub fn plan_statements() -> Vec<(&'static str, String)> {
+        crate::import::plan_statements()
+    }
 
     /// An action run at the n-th hit of a fault point.
     pub type FaultAction = Box<dyn FnMut(FaultPoint, u32)>;
@@ -229,7 +320,61 @@ pub mod hooks {
         HITS.with(|h| h.borrow().get(&point).copied().unwrap_or(0))
     }
 
+    /// What the ordering test sees, in order (spec §18.4 `ordering.rs`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Observed {
+        /// A fault point was reached.
+        Point(FaultPoint),
+        /// A transaction on the archive's write connection is committing
+        /// (rusqlite's commit hook).
+        Commit,
+    }
+
+    /// Receives every [`Observed`] event on this thread.
+    pub type Observer = Box<dyn FnMut(Observed)>;
+
+    thread_local! {
+        static OBSERVER: RefCell<Option<Observer>> = const { RefCell::new(None) };
+    }
+
+    /// Removes the observer when dropped.
+    pub struct ObserveGuard(());
+
+    impl Drop for ObserveGuard {
+        fn drop(&mut self) {
+            OBSERVER.with(|o| *o.borrow_mut() = None);
+        }
+    }
+
+    /// Send every fault point hit and every write-connection commit on
+    /// this thread to `observer` until the guard is dropped. Write
+    /// connections opened while it is installed get the commit hook.
+    #[must_use]
+    pub fn observe(observer: Observer) -> ObserveGuard {
+        OBSERVER.with(|o| *o.borrow_mut() = Some(observer));
+        ObserveGuard(())
+    }
+
+    pub(crate) fn observing() -> bool {
+        OBSERVER.with(|o| o.borrow().is_some())
+    }
+
+    pub(crate) fn notify(event: Observed) {
+        // Take the observer out while it runs, so it may not re-enter.
+        let taken = OBSERVER.with(|o| o.borrow_mut().take());
+        if let Some(mut f) = taken {
+            f(event);
+            OBSERVER.with(|o| {
+                let mut slot = o.borrow_mut();
+                if slot.is_none() {
+                    *slot = Some(f);
+                }
+            });
+        }
+    }
+
     pub(crate) fn hit(p: FaultPoint) {
+        notify(Observed::Point(p));
         let n = HITS.with(|h| {
             let mut h = h.borrow_mut();
             let n = h.entry(p).or_insert(0);
@@ -383,5 +528,117 @@ pub(crate) fn batch_error() -> Option<rusqlite::Error> {
     #[cfg(not(feature = "fault-injection"))]
     {
         None
+    }
+}
+
+/// The error an attachment intent transaction must fail with, if a test
+/// set one.
+#[inline]
+pub(crate) fn intent_error() -> Option<rusqlite::Error> {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current()
+            .intent_error
+            .map(|code| rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None))
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        None
+    }
+}
+
+/// Whether the verifier's `blob` read must fail at `step` (0: the row
+/// count; n: the n-th page), if a test set it.
+#[inline]
+pub(crate) fn verify_blob_error(step: u32) -> rusqlite::Result<()> {
+    #[cfg(feature = "fault-injection")]
+    {
+        if hooks::current().verify_blob_error == Some(step) {
+            return Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),
+                None,
+            ));
+        }
+        Ok(())
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        let _ = step;
+        Ok(())
+    }
+}
+
+/// The raw OS error an attachment copy's first write must fail with, if a
+/// test set one.
+#[inline]
+pub(crate) fn copy_write_error() -> Option<i32> {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current().copy_write_error
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        None
+    }
+}
+
+/// The page room the space guard must give, if a test set one.
+#[inline]
+pub(crate) fn max_page_room() -> Option<i64> {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current().max_page_room
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        None
+    }
+}
+
+/// The error finalize's terminal bookkeeping must fail with, if a test set
+/// one.
+#[inline]
+pub(crate) fn terminal_error() -> Option<rusqlite::Error> {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current()
+            .terminal_error
+            .map(|code| rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None))
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        None
+    }
+}
+
+/// The provenance write must fail.
+#[inline]
+pub(crate) fn provenance_fails() -> bool {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current().provenance_fails
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        false
+    }
+}
+
+/// Give a new write connection the commit hook when a test observes this
+/// thread (`hooks::observe`); nothing without the feature.
+#[inline]
+pub(crate) fn observe_commits(conn: &rusqlite::Connection) {
+    #[cfg(feature = "fault-injection")]
+    {
+        if hooks::observing() {
+            let _ = conn.commit_hook(Some(|| {
+                hooks::notify(hooks::Observed::Commit);
+                false
+            }));
+        }
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        let _ = conn;
     }
 }

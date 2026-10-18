@@ -5,11 +5,14 @@
 //! extraction, storage, and export live in their own crates so they can be
 //! tested without a window.
 
+pub mod archives;
 pub mod backups;
 pub mod commands;
 pub mod error;
 pub mod panic_hook;
 pub mod settings;
+#[cfg(test)]
+mod ts_guard;
 
 use std::time::Duration;
 
@@ -66,14 +69,22 @@ pub fn run() {
             commands::jobs::open_backup,
             commands::jobs::check_extraction,
             commands::jobs::cancel_job,
+            commands::archives::list_archives,
+            commands::archives::create_archive,
+            commands::archives::get_archive_details,
+            commands::archives::start_import,
+            commands::archives::confirm_import,
+            commands::archives::verify_archive,
         ])
         .build(tauri::generate_context!())
         .expect("the Tauri runtime failed to start")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
-                // Cancel running checks and let them remove their staged
-                // copies. A kill or crash skips this; the startup sweep
-                // covers that case.
+                // Cancel running jobs (an import waiting at its gate wakes
+                // and declines; a batch in flight finishes or rolls back)
+                // and let them remove their staged copies. A kill or crash
+                // skips this; the startup sweep and the next write open of
+                // the archive cover that case.
                 if let Some(state) = app.try_state::<AppState>() {
                     let clean = state.jobs.cancel_all_and_wait(EXIT_WAIT);
                     tracing::info!(clean, "exit");

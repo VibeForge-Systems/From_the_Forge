@@ -6,6 +6,12 @@ import { Channel, invoke } from '@tauri-apps/api/core';
 import type {
   AddBackupFolderResult,
   AppInfo,
+  ArchiveDetailsDto,
+  ArchiveListingDto,
+  ArchiveSummaryDto,
+  ImportOptionsInput,
+  LineageInput,
+  VerifyDepthDto,
   ArchiveLocationChoice,
   ArchiveLocationStatus,
   BackupDetails,
@@ -37,6 +43,23 @@ export const ERROR_CODES = [
   'passwordTooLong',
   'wrongPassword',
   'busy',
+  // Milestone 4: archives.
+  'archiveLocked',
+  'archiveNewer',
+  'archiveNeedsUpgrade',
+  'archiveNewerRules',
+  'archiveDamaged',
+  'notAnArchive',
+  'archiveNotFound',
+  'archivePermissions',
+  'lockUnreliable',
+  'networkVolume',
+  'virtualisedVolume',
+  'insufficientSpace',
+  'sourceChanged',
+  'sourceTooLarge',
+  'jobNotWaiting',
+  'invalidInput',
 ] as const satisfies readonly ErrorCode[];
 
 export class IpcError extends Error {
@@ -140,6 +163,46 @@ export const ipc = {
     });
   },
   cancelJob: (jobId: string) => call<boolean>('cancel_job', { request: { jobId } }),
+
+  // Milestone 4: archives. Counts and states only; the label is the one
+  // free text and must be rendered with interpolation, never v-html.
+  listArchives: () => call<ArchiveListingDto>('list_archives'),
+  /** An empty or null label means none. The archive is stored unencrypted. */
+  createArchive: (label: string | null) =>
+    call<ArchiveSummaryDto>('create_archive', { request: { label } }),
+  getArchiveDetails: (archiveId: string) =>
+    call<ArchiveDetailsDto>('get_archive_details', { request: { archiveId } }),
+  /**
+   * Import a backup into an archive. Carries a secret. The job stops at the
+   * gate (an `importPreflight` event, with the preflight in
+   * getArchiveDetails) until confirmImport, a cancel or two minutes pass.
+   */
+  startImport: (
+    backupId: string,
+    archiveId: string,
+    password: string | null,
+    options: ImportOptionsInput,
+    onEvent: (e: JobEvent) => void,
+  ) => {
+    const channel = new Channel<JobEvent>();
+    channel.onmessage = onEvent;
+    return callRedacted<JobStarted>('start_import', {
+      request: { backupId, archiveId, password, options },
+      onEvent: channel,
+    });
+  },
+  /** Answer the gate. `lineage` is required when `proceed` is true. */
+  confirmImport: (jobId: string, proceed: boolean, lineage: LineageInput | null) =>
+    call<null>('confirm_import', { request: { jobId, proceed, lineage } }),
+  /** Verify an archive (report only); the report comes with getArchiveDetails. */
+  verifyArchive: (archiveId: string, depth: VerifyDepthDto, onEvent: (e: JobEvent) => void) => {
+    const channel = new Channel<JobEvent>();
+    channel.onmessage = onEvent;
+    return call<JobStarted>('verify_archive', {
+      request: { archiveId, depth },
+      onEvent: channel,
+    });
+  },
 };
 
 export type Ipc = typeof ipc;

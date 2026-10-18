@@ -18,7 +18,7 @@
 use std::cmp::Ordering;
 
 use oma_messages::{
-    BlobSize, CocoaTime, Col, IssueKind, RawSql, Redacted, SqlText, TextClass, TimeInterp,
+    BlobSize, CocoaTime, Col, IssueKind, RawBlob, RawSql, Redacted, SqlText, TextClass, TimeInterp,
 };
 use rusqlite::types::{ToSqlOutput, ValueRef};
 use rusqlite::ToSql;
@@ -178,7 +178,83 @@ pub(crate) fn unreadable_kind(k: IssueKind) -> UnreadableKind {
     }
 }
 
+/// The `oma-messages` issue kind of a stored unreadable code (the inverse
+/// of [`unreadable_kind`]; an unrecognised code reads as a type mismatch,
+/// which no derivation distinguishes).
+fn issue_kind(code: i64) -> IssueKind {
+    match UnreadableKind::from_code(code) {
+        Some(UnreadableKind::BoolOutOfRange) => IssueKind::BoolOutOfRange,
+        Some(UnreadableKind::PlistInvalid) => IssueKind::PlistInvalid,
+        Some(UnreadableKind::PlistOverBudget) => IssueKind::PlistOverBudget,
+        Some(UnreadableKind::PlistNotDictionary) => IssueKind::PlistNotDictionary,
+        _ => IssueKind::TypeMismatch,
+    }
+}
+
 impl Cell {
+    /// The cell's state as a `Col` with no value: `None` for a value.
+    fn col_state<T>(&self) -> Option<Col<T>> {
+        match self.st? {
+            ValueState::Null => Some(Col::Null),
+            ValueState::Absent => Some(Col::Absent),
+            ValueState::Oversized => Some(Col::Oversized {
+                bytes: self
+                    .issue(ValueIssueKind::Oversized.code())
+                    .and_then(|i| i.bytes)
+                    .and_then(|b| u64::try_from(b).ok())
+                    .unwrap_or(0),
+            }),
+            ValueState::Unreadable => Some(Col::Unreadable(issue_kind(
+                self.issues
+                    .iter()
+                    .find(|i| i.kind >= crate::schema::codes::ISSUE_KIND_BASE)
+                    .map_or(0, |i| i.kind),
+            ))),
+        }
+    }
+
+    /// An integer cell (stored or observed) as the `Col` the reader would
+    /// give, for re-deriving a column from stored raw values.
+    pub(crate) fn as_col_i64(&self) -> Col<i64> {
+        match (&self.value, self.col_state()) {
+            (Some(Val::Int(i)), _) => Col::Value(*i),
+            (_, Some(c)) => c,
+            // A byte value in an integer column cannot be stored (STRICT).
+            (_, None) => Col::Unreadable(IssueKind::TypeMismatch),
+        }
+    }
+
+    /// A text cell as the `Col` the reader would give, with its storage
+    /// class.
+    pub(crate) fn as_col_text(&self) -> Col<Redacted<SqlText>> {
+        match (&self.value, self.col_state()) {
+            (Some(Val::Bytes(b)), _) => {
+                let class = if self.blob_class() {
+                    TextClass::Blob
+                } else {
+                    TextClass::Text
+                };
+                Col::Value(Redacted::new(SqlText::from_bytes_with_class(b, class)))
+            }
+            (_, Some(c)) => c,
+            (_, None) => Col::Unreadable(IssueKind::TypeMismatch),
+        }
+    }
+
+    /// The instant of a timestamp cell in seconds or nanoseconds,
+    /// re-derived from its raw integer (a stored cell carries no unit).
+    pub(crate) fn time_utc_ns(&self) -> Option<i64> {
+        match self.value {
+            Some(Val::Int(raw)) => match CocoaTime::classify(raw).interp {
+                TimeInterp::Seconds { unix_ns } | TimeInterp::Nanoseconds { unix_ns } => {
+                    Some(unix_ns)
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     fn with_state<T>(c: &Col<T>, value: impl FnOnce(&T) -> (Val, Vec<Issue>)) -> Cell {
         let (value, st, issues) = match c {
             Col::Value(v) => {
@@ -240,6 +316,12 @@ impl Cell {
     /// A boolean column, stored as 0 or 1.
     pub(crate) fn boolean(c: &Col<bool>) -> Cell {
         Cell::with_state(c, |b| (Val::Int(i64::from(*b)), Vec::new()))
+    }
+
+    /// A blob column: the exact bytes. Blob columns take either storage
+    /// class, so no class issue is recorded.
+    pub(crate) fn blob(c: &Col<Redacted<RawBlob>>) -> Cell {
+        Cell::with_state(c, |b| (Val::bytes(b.expose().as_bytes()), Vec::new()))
     }
 
     /// A column read for its size only (`chat.properties`).
@@ -458,6 +540,47 @@ mod tests {
         }
         let n = Cell::time(&Col::Null);
         assert_eq!((n.unit, n.utc_ns, n.st_code()), (None, None, Some(1)));
+    }
+
+    #[test]
+    fn cells_convert_back_to_the_reader_cols() {
+        for c in [
+            Col::Value(7i64),
+            Col::Null,
+            Col::Absent,
+            Col::Oversized { bytes: 12 },
+            Col::Unreadable(IssueKind::BoolOutOfRange),
+        ] {
+            assert_eq!(Cell::int(&c).as_col_i64(), c);
+        }
+        for c in [
+            text(b"SYNTH-T", TextClass::Text),
+            text(b"SYNTH-B", TextClass::Blob),
+            Col::Null,
+            Col::Absent,
+            Col::Oversized { bytes: 99 },
+            Col::Unreadable(IssueKind::TypeMismatch),
+        ] {
+            let back = Cell::text(&c).as_col_text();
+            assert_eq!(back.shape(), c.shape());
+            if let (Col::Value(a), Col::Value(b)) = (&back, &c) {
+                assert_eq!(a.expose().as_bytes(), b.expose().as_bytes());
+                assert_eq!(a.expose().class(), b.expose().class());
+            }
+        }
+        let ns = Cell::time(&Col::Value(CocoaTime::classify(700_000_000)));
+        let stored = Cell {
+            unit: None,
+            utc_ns: None,
+            ..ns.clone()
+        };
+        assert_eq!(stored.time_utc_ns(), ns.utc_ns);
+        assert_eq!(
+            Cell::time(&Col::Value(CocoaTime::classify(0))).time_utc_ns(),
+            None
+        );
+        let b = Cell::blob(&Col::Value(Redacted::new(RawBlob::from_bytes(b"\x00\x01"))));
+        assert!(b.issues.is_empty() && b.value == Some(Val::bytes(b"\x00\x01")));
     }
 
     #[test]

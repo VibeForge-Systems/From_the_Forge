@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window may call exactly the application's own commands. No core webview, window, filesystem, shell, HTTP, or plugin APIs are exposed to the frontend: the dialog and opener plugins are driven from Rust only. Backup-check and extraction-check progress reaches the webview through an IPC channel passed to open_backup or check_extraction; channels need no core:* permission.",
+  "description": "The main window may call exactly the application's own commands. No core webview, window, filesystem, shell, HTTP, or plugin APIs are exposed to the frontend: the dialog and opener plugins are driven from Rust only. Backup-check, extraction-check, import and verify progress reaches the webview through an IPC channel passed to open_backup, check_extraction, start_import or verify_archive; channels need no core:* permission.",
   "windows": ["main"],
   "permissions": [
     "allow-get-settings",
@@ -17,6 +17,12 @@
     "allow-get-backup-details",
     "allow-open-backup",
     "allow-check-extraction",
-    "allow-cancel-job"
+    "allow-cancel-job",
+    "allow-list-archives",
+    "allow-create-archive",
+    "allow-get-archive-details",
+    "allow-start-import",
+    "allow-confirm-import",
+    "allow-verify-archive"
   ]
 }

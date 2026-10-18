@@ -59,6 +59,16 @@ impl std::fmt::Debug for AttachmentKey {
     }
 }
 
+impl AttachmentKey {
+    /// `Size` from the file's Manifest record, when one is recorded. For an
+    /// encrypted backup this is the plaintext length the record declares;
+    /// the stored blob is that length padded to the next 16-byte block. Not
+    /// trusted for anything but a comparison (M4 §9.1).
+    pub fn declared_size(&self) -> Option<u64> {
+        self.0.record.as_ref().and_then(|r| r.size)
+    }
+}
+
 impl sealed::Sealed for AttachmentKey {
     fn manifest_entry(&self) -> &ManifestEntry {
         &self.0

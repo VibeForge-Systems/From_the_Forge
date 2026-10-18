@@ -102,8 +102,25 @@ impl ArchiveDir {
         self.root.join(ATTACHMENTS_DIR).join(INCOMING_DIR)
     }
 
+    /// `attachments/.incoming/<n>.partial`.
+    pub(crate) fn partial(&self, n: u64) -> PathBuf {
+        let mut name = n.to_string();
+        name.push_str(".partial");
+        self.incoming().join(name)
+    }
+
     pub(crate) fn imports(&self) -> PathBuf {
         self.root.join(IMPORTS_DIR)
+    }
+
+    /// `imports/session-<n>.json`, the provenance file of session `n`.
+    pub(crate) fn provenance_file(&self, session: i64) -> PathBuf {
+        self.imports().join(provenance_name(session, false))
+    }
+
+    /// `imports/session-<n>.json.tmp`, its temporary file.
+    pub(crate) fn provenance_tmp(&self, session: i64) -> PathBuf {
+        self.imports().join(provenance_name(session, true))
     }
 
     /// `attachments/<hh>/<storage name>`. `name` must already be a parsed
@@ -162,6 +179,45 @@ impl ArchiveDir {
         check_private(&self.imports(), Expect::Dir)?;
         Ok(())
     }
+}
+
+impl ArchiveDir {
+    /// The full verifier's owner and mode check (spec §11) of the files
+    /// [`ArchiveDir::check_private_all`] covers, counting every failure
+    /// instead of stopping at the first. Absent `-wal` and `-shm` files are
+    /// not counted.
+    pub(crate) fn count_not_private(&self) -> u64 {
+        let mut checks: Vec<(PathBuf, Expect)> = vec![
+            (self.root.clone(), Expect::Dir),
+            (self.root.join(DB_FILE), Expect::File),
+            (self.lock(), Expect::File),
+            (self.attachments(), Expect::Dir),
+            (self.incoming(), Expect::Dir),
+            (self.imports(), Expect::Dir),
+        ];
+        for side in [WAL_FILE, SHM_FILE] {
+            let p = self.root.join(side);
+            if fs::symlink_metadata(&p).is_ok() {
+                checks.push((p, Expect::File));
+            }
+        }
+        let failed = checks
+            .iter()
+            .filter(|(p, kind)| check_private(p, *kind).is_err())
+            .count();
+        u64::try_from(failed).unwrap_or(u64::MAX)
+    }
+}
+
+/// `session-<n>.json`, or with `.tmp` appended. A session id is a
+/// positive integer from the database, never a string from outside. This
+/// is the only spelling the store writes (the provenance reader accepts no
+/// other).
+pub(crate) fn provenance_name(session: i64, tmp: bool) -> String {
+    let mut name = String::from("session-");
+    name.push_str(&session.to_string());
+    name.push_str(if tmp { ".json.tmp" } else { ".json" });
+    name
 }
 
 fn exists(p: &Path) -> Result<bool, ArchiveError> {

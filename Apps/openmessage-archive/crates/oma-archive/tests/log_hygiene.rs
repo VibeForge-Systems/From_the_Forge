@@ -175,13 +175,18 @@ fn logs_errors_and_debug_output_hold_no_label_id_or_path() {
         shown.push(format!("{c:?}"));
         src.ob.close();
     }
-    // The Recently Deleted option, continuing then superseding a session.
+    // The Recently Deleted option, superseding then continuing a session.
     for entry in ["imp-rd-plain", "imp-dev1-v1-plain"] {
         let src = open_entry(entry);
-        let first = import(&mut a, &src, &opts(16), LineageChoice::New);
+        let first = common::import::cancelled_at_chats(&mut a, &src, &opts(16), LineageChoice::New);
         let mut rd = opts(16);
         rd.include_recently_deleted = true;
-        let s = import(&mut a, &src, &rd, LineageChoice::Existing(first.lineage));
+        let s = common::import::cancelled_at_chats(
+            &mut a,
+            &src,
+            &rd,
+            LineageChoice::Existing(first.lineage),
+        );
         assert_eq!(s.superseded, 1, "{entry}");
         shown.push(format!("{first:?} {s:?}"));
         let again = import(&mut a, &src, &rd, LineageChoice::Existing(first.lineage));
@@ -193,8 +198,54 @@ fn logs_errors_and_debug_output_hold_no_label_id_or_path() {
         "{a:?} {:?}",
         a.reader().sessions().expect("sessions")
     ));
+    // `open_blob` (the first blob row's id is 1), both verify depths and
+    // what they recorded.
+    let any_blob = 1;
+    let reader = ilib.open_read(&iid).expect("reader");
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(
+        &mut reader
+            .open_blob(oma_archive::BlobId::new(any_blob))
+            .expect("open_blob"),
+        &mut bytes,
+    )
+    .expect("read");
+    shown.push(format!(
+        "{:?} {:?}",
+        reader.open_blob(oma_archive::BlobId::new(any_blob)),
+        reader.open_blob(oma_archive::BlobId::new(-1))
+    ));
+    drop(reader);
+    for depth in [
+        oma_archive::VerifyDepth::Quick,
+        oma_archive::VerifyDepth::Full,
+    ] {
+        let r = a
+            .verify(
+                depth,
+                &mut ArchiveCtx {
+                    cancel: &CancelToken::new(),
+                    progress: &mut NoProgress,
+                    clock: &FixedClock(1),
+                },
+            )
+            .expect("verify");
+        shown.push(format!("{r:?}"));
+    }
+    shown.push(format!("{:?}", a.reader().last_verify().expect("last")));
     drop(a);
     let iroot = root(&itmp).to_string_lossy().into_owned();
+    // The provenance files every terminal state wrote (spec §18.9:
+    // `imports/*.json`).
+    let mut provenance = 0;
+    for e in std::fs::read_dir(archive_dir(&itmp, &iid).join("imports"))
+        .expect("imports")
+        .flatten()
+    {
+        shown.push(std::fs::read_to_string(e.path()).expect("provenance"));
+        provenance += 1;
+    }
+    assert!(provenance >= ENTRIES.len(), "{provenance} provenance files");
 
     let mut banned = vec![LABEL.to_owned(), id.as_str().to_owned(), root_text, iroot];
     banned.push(iid.as_str().to_owned());
@@ -209,6 +260,10 @@ fn logs_errors_and_debug_output_hold_no_label_id_or_path() {
     assert!(
         logs.iter().any(|l| l.contains("import passes done")),
         "the import logged: {logs:?}"
+    );
+    assert!(
+        logs.iter().any(|l| l.contains("verify finished")),
+        "the verify logged: {logs:?}"
     );
     for line in &logs {
         // oma-backup logs its own hashed backup id (M2's design); every

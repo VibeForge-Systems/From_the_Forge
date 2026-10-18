@@ -91,6 +91,8 @@ pub enum Stage {
     Session,
     /// An import batch.
     Batch,
+    /// The verifier's reads and its result rows.
+    Verify,
 }
 
 /// Which file-system operation an I/O error came from.
@@ -107,6 +109,27 @@ pub enum IoOp {
     Rename,
     Remove,
     Sync,
+}
+
+/// Why an attachment file could not be opened through `open_blob`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum BlobProblem {
+    /// No `blob` row has this id.
+    NotFound,
+    /// The row's `storage_name` does not parse as 64 lowercase hex
+    /// characters, or does not spell its `sha256` (a crafted file).
+    BadName,
+    /// No file at the storage name.
+    Missing,
+    /// A link, a directory or another non-regular file is there, or
+    /// `attachments/` or its `<hh>` directory is not a private real
+    /// directory.
+    NotRegular,
+    /// The file's length differs from the row's `byte_len`.
+    LengthMismatch,
+    /// Opening or inspecting the file failed.
+    Io(io::ErrorKind),
 }
 
 /// An error from the archive library.
@@ -159,6 +182,9 @@ pub enum ArchiveError {
     /// text is never kept.
     #[error("SQLite error")]
     Sqlite { code: Option<i32>, stage: Stage },
+    /// An attachment file could not be opened (`open_blob`).
+    #[error("attachment file unavailable")]
+    Blob(BlobProblem),
     /// A file-system error.
     #[error("I/O")]
     Io {

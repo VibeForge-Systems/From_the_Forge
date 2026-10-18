@@ -7,14 +7,25 @@ import type { JobKind } from '@/types';
 // dialog is open. It is handed to the parent once, on submit, and the ref is
 // cleared at once. No store field is bound to it.
 // `resume` is the job the password starts, so the button says what the
-// click does: the extraction check also copies and decrypts sms.db.
+// click does: the extraction check also copies and decrypts sms.db. A
+// caller can name the action itself with `submitLabel` (the import does).
 const props = withDefaults(
-  defineProps<{ open: boolean; deviceName: string | null; error: string | null; resume?: JobKind }>(),
-  { resume: 'validate' },
+  defineProps<{
+    open: boolean;
+    deviceName: string | null;
+    error: string | null;
+    resume?: JobKind;
+    submitLabel?: string | null;
+  }>(),
+  { resume: 'validate', submitLabel: null },
 );
-const submitLabel = computed(() =>
-  props.resume === 'extractionCheck' ? 'Unlock and run extraction check' : 'Unlock and validate',
-);
+const RESUME_LABEL: Record<JobKind, string> = {
+  validate: 'Unlock and validate',
+  extractionCheck: 'Unlock and run extraction check',
+  import: 'Unlock and prepare import',
+  verify: 'Unlock',
+};
+const buttonLabel = computed(() => props.submitLabel ?? RESUME_LABEL[props.resume]);
 const emit = defineEmits<{ submit: [password: string]; close: [] }>();
 
 const password = ref('');
@@ -102,7 +113,7 @@ onBeforeUnmount(clear);
         class="btn btn-primary"
         :disabled="password === ''"
       >
-        {{ submitLabel }}
+        {{ buttonLabel }}
       </button>
     </template>
   </ModalDialog>

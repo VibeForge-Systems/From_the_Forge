@@ -27,16 +27,24 @@ clean-room typedstream decoder, the aggregate `ExtractionReport`), the
 counts only and persists nothing. CI passes on `ubuntu-22.04`
 and `windows-2022`. Its sign-off is pending the clean-room review of the typedstream
 decoder and the fixture generators (`scripts/fixtures/PROVENANCE.md`), and
-the manual checklist in `docs/compatibility.md`. Milestone 4 (the archive
-database and import) is next.
+the manual checklist in `docs/compatibility.md`. **Milestone 4 (the archive
+database and import) is implemented**: `crates/oma-archive` (schema v1,
+the import with its gate, the content-addressed attachment store, FTS5,
+the report-only verifier), six archive IPC commands with import and verify
+jobs, and the Archive page. Archives are plaintext at rest (encryption is
+M8). All slices pass CI on `ubuntu-22.04` and `windows-2022`. Its sign-off
+is pending the manual checklist in
+`docs/compatibility.md`, and the owner's answers on D69, D70, D71, D79 and
+D82 (D51, D59, D60 and D61 are owner-confirmed). Milestone 5 (the rich
+viewer) is next.
 
 Read these before designing anything:
 
 | Doc | Read it for |
 |---|---|
-| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, and the decision records (D1–D50; D43 is how "do not fabricate" is read for the check) |
+| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, the archive (layout, threat model, import data flow, one section per M4 slice), and the decision records (D1–D88; D43 is how "do not fabricate" is read for the check) |
 | [`docs/supported-formats.md`](docs/supported-formats.md) | Sourced research on the backup format, encryption, the sms.db schema (columns with sources, timestamps, codes, typedstream) and device tooling. Items marked **UNVERIFIED** are hypotheses, not facts. |
-| [`docs/privacy.md`](docs/privacy.md) | What is copied, where and for how long, including the extraction check's plaintext copy of sms.db |
+| [`docs/privacy.md`](docs/privacy.md) | What is copied, where and for how long, including the plaintext copies of sms.db, and what an archive holds (plaintext at rest) |
 | [`docs/compatibility.md`](docs/compatibility.md) | What has actually been tested |
 | [`docs/development.md`](docs/development.md) | Setup and every command |
 
@@ -112,15 +120,22 @@ Each one is enforced in code. Keep it that way.
 ## Where code goes
 
 - **Domain logic belongs in `crates/`.** `src-tauri/` stays a thin layer of
-  IPC commands and state. `oma-fs`, `oma-backup` (M2) and `oma-messages`
-  (M3) are implemented; `oma-archive` (M4) is in progress (its skeleton:
+  IPC commands and state. `oma-fs`, `oma-backup` (M2), `oma-messages`
+  (M3) and `oma-archive` (M4) are implemented (`oma-archive`'s skeleton:
   create, open, lock, schema v1, fingerprint, migrations; and the import
-  core: sessions, the duplicate-key scan, the merge engine and the handle
-  and chat passes, `Archive::import_core`); the planned
+  core: sessions, the Recently Deleted and duplicate-key scans, the merge
+  engine, the handle, chat and message passes with body versions and the
+  FTS index, the link passes, the attachments with their files in the
+  content-addressed store, the Recently Deleted markers, the space
+  estimate and guards, the gate, finalize and the provenance files,
+  `Archive::import`; and the report-only verifier `Archive::verify` with
+  `open_blob`), driven by the shell's six archive commands and its
+  import and verify jobs (slice 4l), and the Archive page (slice 4m); the planned
   crates are `oma-export` (M6) and `oma-device` (M7). Each must build and test without
   Tauri. The shell's `src-tauri/src/backups/` (registry, job table, worker,
-  DTOs, messages) has no Tauri types either, so it is tested without a
-  window.
+  DTOs, messages) and `src-tauri/src/archives/` (listing, details, the
+  gate, the import and verify workers, DTOs, sentences) have no Tauri
+  types either, so they are tested without a window.
 - **Frontend:**
   - Views live in `src/views/`, components in `src/components/`, and Pinia
     stores in `src/stores/`.
@@ -151,6 +166,15 @@ Never hand-edit generated files.
   so update that test in the same change.
 - **Shortcuts are declared only in `src/services/shortcuts.ts`.** The help
   dialog renders from it.
+- **Archive sentences live in `src/services/importText.ts`,** from exhaustive
+  `Record<…>` tables over the DTOs' closed kinds, so a new kind fails the
+  typecheck until it has words. The archive UI shows counts, states and the
+  label only (rendered with interpolation), never message content.
+- **The archive dialogs are mounted once, in `App.vue`**
+  (`components/ArchiveDialogs.vue`), so the import gate shows on any page
+  while an import waits. `stores/archives.ts` owns the job, the gate (live,
+  or re-shown from `get_archive_details` after a reload) and the 2-second
+  details polling; it never stores a password.
 
 ## Dependencies and licensing
 
@@ -263,15 +287,101 @@ Never hand-edit generated files.
   `INSERT OR REPLACE`, never `RETURNING` (`tests/source_rules.rs`). A
   record's `UPDATE` sets only the columns that changed, so the guarded
   triggers fire only on real changes. A batch never commits after a
-  statement error. Until finalize exists (slice 4j) a session whose passes
-  all ran stays **running**: `CoreOutcome::PassesDone` is not "completed".
+  statement error. Derived columns (`item_kind`, `assoc_*`, `sort_key`,
+  a body's `display_text`) are computed in Rust from the stored raw cells;
+  the FTS index is written **only** by the `message_body` triggers. Links
+  resolve both sides through this session's `import_rowid_map` and are
+  never inserted with an unresolved side; the Recently Deleted decisions
+  after P3 (`import/rd.rs`) are re-derived from that map, never carried
+  over from the preflight. The gate (`import/gate.rs`) runs before the
+  first write: nothing may be written before `ImportGate::confirm`
+  returns Proceed (Decline is tested to leave the files byte-identical),
+  and the preflight it shows carries counts, closed kinds and booleans
+  only (device facts are compared inside the crate). Finalize
+  (`import/finalize.rs`) completes the session; its terminal update is
+  best effort and must never run under the armed interrupt.
+- **`v1.sql` is checked by an exact fingerprint, and freezes at the M4
+  release tag.** Every open compares the database's schema objects with
+  `v1.sql` (plus the migrations up to its version), so any edit to
+  `v1.sql` makes every existing archive `Damaged(SchemaMismatch)`. Until
+  the tag, regenerate the golden archive with such an edit; after it, a
+  schema change is a forward-only migration run only by an explicit
+  `Archive::migrate()` (D87), never on open. `archive.lock` is created once
+  and never deleted, not even by the sweep.
+- **Only `conn::armed` arms the archive interrupt,** around a single long
+  statement in its own transaction (the `chat_stats` recompute, an FTS
+  merge step); it is removed before any `COMMIT`. Never wrap a batch, a
+  terminal update or a commit in it.
+- **`imports/session-<n>.json` is content-free** (`provenance.rs`): no
+  device name, GUID, digest, rank, message date, path or label; counts are
+  re-serialised from `ImportCounts`. Writing it is best effort and never
+  changes an outcome.
+- **The golden archive** (`tests/fixtures/archives/golden-v1/`) is made
+  only by `cargo run -p oma-archive --example make_golden` and pinned by
+  its `SHA256SUMS` and `logical_snapshot.json`; tests work on a copy.
+  Regenerate it only until schema v1 freezes at the M4 release tag.
+- **`tests/query_plans.rs` pins the plans** of the import's
+  index-dependent statements, taken from the crate through
+  `hooks::plan_statements`. A new merge read or lookup goes into that list;
+  a changed plan is re-pinned deliberately.
+- **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
+  spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
+  then the `blob_intent` commit, the no-replace placement and one flush
+  per `<hh>`, then the rows in the batch. Keep that order (write →
+  `sync_all` → intent commit → rename → directory flush → row commit);
+  the crash tests kill at each step. Every store path goes through
+  `blobs::store_dir`, every store file is opened with `open_nofollow`, and
+  nothing replaces an existing file. The space guard (`space.rs`) runs
+  before every write transaction; tests get a fake probe with 1 TiB free
+  from `common::library()`, so no test depends on the runner's disk.
+- **The verifier (`verify.rs`) is report-only.** It opens the writer with
+  `begin_write(Recovery::Skip)` and writes only `verify_run` and, in a
+  full verify, `blob.verify_state`/`verified_at_ns`; never make it sweep,
+  reconcile or repair (that is M8). Its reads go through
+  `ReadConn::cancellable` (no op budget, stopped by the cancel token);
+  the FTS rank-1 check runs on the writer under `conn::armed`. A failed
+  schema check stops it before any table read and writes nothing. Its
+  counts are numbers, booleans, closed states and `v1.sql` table names
+  only. Attachment bytes are read back only through `blobs::open_checked`
+  (`open_blob`, the verifier): add no other reader of store files.
 - **Crash points are `fault::point(FaultPoint::…)` calls.** They compile
   to nothing without the feature. `tests/crash.rs` re-runs its own binary
   with `OMA_TEST_FAULT=<point>:<n>` and kills the child there; add a point
-  to `FaultPoint::ALL` and a kill at it in that test together. Its checks
+  to `FaultPoint::ALL` and a kill at it in that test together
+  (`every_fault_point_has_a_kill` fails otherwise). Its checks
   after a kill run on a copy of the database files: a read-write
   connection closing on the original would checkpoint and delete the
   `-wal` the resume must see.
+- **The shell's import gate** (`src-tauri/src/archives/gate.rs`) is a
+  `Mutex` + `Condvar` with a two-minute timeout from an injectable
+  `GateClock`. `ShellGate::confirm` opens the gate *before* it publishes
+  the preflight and sends `importPreflight`, so an answer that arrives
+  first is kept; `Jobs::cancel` and the exit handler wake it, and every
+  ending but Proceed declines (nothing written). The `importPreflight`
+  event carries only the job id: the preflight is fetched with
+  `get_archive_details` (D47). Jobs are reserved by subject (backup,
+  archive or both, D73); keep `MAX_CONCURRENT_JOBS` at 1.
+- **Archive DTOs** (`src-tauri/src/archives/dto.rs`) have one free-text
+  field, `ArchiveSummaryDto.label`; the structural guard there (sharing
+  `src-tauri/src/ts_guard.rs` with the Backups guard) fails on any other
+  `string` field and on keys such as `guid`, `rank` or `path`. Device
+  facts cross as booleans, dates as Unix milliseconds. The shell never
+  logs an archive id or a label; `tests/log_hygiene.rs` checks it.
+- **Windows lessons from M2–M4 CI.** Directory handles need
+  `FILE_FLAG_BACKUP_SEMANTICS` (`custom_flags(0x0200_0000)`); SQLite files
+  under long paths are opened through the `win32-longpath` VFS with a
+  verbatim path (`oma-backup`'s `manifest_db.rs` `open_connection`, and
+  `oma-archive`'s `conn.rs`); tests must not assume `/` separators;
+  `CreateFileW` ignores `FILE_ATTRIBUTE_NOT_CONTENT_INDEXED`; fixture file
+  names must be unique ignoring ASCII case; `unsafe_code` is forbidden
+  workspace-wide, so anything that needs a raw Win32 call (FAT detection,
+  ACLs) is not done. The `RECORD` lines of the `windows.rs` tests are
+  captured by the harness and do not reach the CI log; rerun with
+  `--nocapture` to read them.
+- **The space reserve can refuse a smoke test.** Imports keep 5 % of the
+  volume free, clamped to 1–10 GiB, and refuse before the gate below that.
+  On a nearly full development disk, put the smoke test's library on a
+  tmpfs such as `/dev/shm` (classified as local).
 - **Headless smoke testing works**, using `xvfb-run` with
   `WEBKIT_DISABLE_DMABUF_RENDERER=1` and `XDG_CONFIG_HOME` pointed at a
   scratch directory. However, the GTK folder picker cannot list directories

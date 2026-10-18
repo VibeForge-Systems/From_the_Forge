@@ -11,6 +11,7 @@
 //! opens itself, or from settings it already validated.
 
 pub mod archive_location;
+pub mod archives;
 pub mod backups;
 pub mod jobs;
 pub mod settings;
@@ -19,6 +20,7 @@ pub mod system;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use crate::archives::ArchiveEnv;
 use crate::backups::{BackupRegistry, Jobs};
 use crate::error::{IpcError, IpcResult};
 use crate::settings::SettingsStore;
@@ -34,6 +36,8 @@ pub struct AppState {
     /// Running jobs, and the last report and cleanup per backup (in memory
     /// only). Shared with the worker threads.
     pub jobs: Arc<Jobs>,
+    /// How archive libraries are built (a fake free-space probe in tests).
+    pub archive_env: ArchiveEnv,
 }
 
 impl AppState {
@@ -43,6 +47,7 @@ impl AppState {
             backups: Mutex::new(BackupRegistry::default()),
             listing: AtomicBool::new(false),
             jobs: Arc::new(Jobs::default()),
+            archive_env: ArchiveEnv::default(),
         }
     }
 

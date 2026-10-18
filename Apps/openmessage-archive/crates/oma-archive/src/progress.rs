@@ -38,8 +38,7 @@ impl Clock for FixedClock {
     }
 }
 
-/// A phase of an import (spec §8.12). Slice 4f has the phases up to the
-/// chat pass; the others arrive with their passes.
+/// A phase of an import (spec §8.12).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ImportPhase {
@@ -47,14 +46,58 @@ pub enum ImportPhase {
     StagingMessagesDb,
     /// Scanning the schema, `quick_check` and the probe.
     ReadingSchema,
+    /// P0, the Recently Deleted scan; also the preflight's and P5b's scans
+    /// for attachments linked only to excluded messages.
+    ScanningRecentlyDeleted,
     /// The duplicate-key scan.
     ScanningKeys,
+    /// The attachment estimate: each attachment looked up and its file
+    /// probed (spec §8.2 step 5). `done` and `total` are not reported.
+    EstimatingAttachments,
+    /// Waiting for the gate's decision (spec §8.2 step 7).
+    AwaitingConfirmation,
     /// The session bookkeeping after the archive's first write.
     PreparingArchive,
     /// P1.
     ImportingHandles,
     /// P2.
     ImportingChats,
+    /// P3.
+    ImportingMessages,
+    /// P4 and P5: the chat links.
+    ImportingChatLinks,
+    /// P6: the attachment rows and their files. `done` and `total` are
+    /// rows (not bytes, as spec §8.12 has it; see `docs/architecture.md`).
+    CopyingAttachments,
+    /// P7: the message ↔ attachment links.
+    ImportingAttachmentLinks,
+    /// P8: the Recently Deleted markers.
+    ImportingRecentlyDeleted,
+    /// P9, finalize: the statistics, the session-local cleanup and the
+    /// terminal state (spec §8.9 steps 1–4).
+    Finalizing,
+    /// P9: FTS merge steps (step 5). `done` counts steps; `total` is not
+    /// known.
+    OptimizingIndex,
+    /// P9: `wal_checkpoint(TRUNCATE)` (step 6).
+    Checkpointing,
+}
+
+/// A phase of a verify (spec §8.12, §11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum VerifyPhase {
+    /// The header, fingerprint and meta checks, `quick_check` or
+    /// `integrity_check`, `foreign_key_check` and the bookkeeping counts.
+    /// `done` and `total` are not reported.
+    CheckingDatabase,
+    /// The FTS rank-1 `integrity-check`. `done` and `total` are not
+    /// reported.
+    CheckingIndex,
+    /// The attachment files: `done` of `total` `blob` rows in a quick
+    /// verify, and bytes re-hashed in a full one; then the walk of
+    /// `attachments/` and `imports/`.
+    CheckingFiles,
 }
 
 /// A progress event. Content-free.
@@ -67,6 +110,12 @@ pub enum ArchiveEvent {
     /// (`None` when unknown).
     Import {
         phase: ImportPhase,
+        done: u64,
+        total: Option<u64>,
+    },
+    /// A verify phase started or advanced.
+    Verify {
+        phase: VerifyPhase,
         done: u64,
         total: Option<u64>,
     },

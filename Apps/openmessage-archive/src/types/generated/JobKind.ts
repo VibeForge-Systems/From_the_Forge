@@ -3,4 +3,4 @@
 /**
  * What a job does.
  */
-export type JobKind = "validate" | "extractionCheck";
+export type JobKind = "validate" | "extractionCheck" | "import" | "verify";

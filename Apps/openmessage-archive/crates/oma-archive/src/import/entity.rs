@@ -19,7 +19,8 @@ use super::counts::EntityCounts;
 use super::keys::fingerprint;
 use super::map::MapStmts;
 use super::merge::{
-    attach_issues, insert, merge, read_stored, DeriveUpdate, Ident, MergeStmts, TableDef,
+    attach_issues, insert, merge, read_stored, DeriveUpdate, Ident, MergeStmts, Param, TableDef,
+    KEY_GUID, KEY_NATURAL, KEY_UNKEYED, STORED_ISSUES_SQL,
 };
 use super::preflight::{guid_digest, handle_digest};
 use crate::schema::codes::IssueCode;
@@ -73,7 +74,13 @@ pub(crate) fn text_len(c: &Col<Redacted<SqlText>>) -> u64 {
         .map_or(8, |t| u64::try_from(t.expose().len()).unwrap_or(u64::MAX))
 }
 
-/// Write `records` inside the open batch.
+/// What [`write_records`] runs inside each record's savepoint, once the
+/// record's row exists: the source rowid and the archive row id.
+pub(crate) type AfterRecord<'a> = &'a mut dyn FnMut(i64, i64) -> rusqlite::Result<()>;
+
+/// Write `records` inside the open batch. `after` runs inside each record's
+/// savepoint, after its row and map are written (P6 writes the file
+/// observation there).
 pub(crate) fn write_records(
     tx: &Connection,
     kind: &EntityKind,
@@ -81,18 +88,16 @@ pub(crate) fn write_records(
     records: impl Iterator<Item = EntityRecord>,
     counts: &mut EntityCounts,
     issues: &mut IssueDeltas,
+    after: AfterRecord<'_>,
 ) -> rusqlite::Result<()> {
     let def = &kind.def;
     let key_cond = match kind.key {
-        KeyStyle::Guid(_) => "key_kind = 1 AND guid = ?1",
-        KeyStyle::Natural { .. } => "key_kind = 1 AND natural_key = ?1",
+        KeyStyle::Guid(_) => KEY_GUID,
+        KeyStyle::Natural { .. } => KEY_NATURAL,
     };
     let mut by_key = tx.prepare(&def.select_sql(key_cond))?;
-    let mut by_unkeyed =
-        tx.prepare(&def.select_sql("key_kind = 2 AND unkeyed_fp = ?1 AND unkeyed_occ = ?2"))?;
-    let mut stored_issues = tx.prepare(
-        "SELECT col, kind, bytes, raw FROM value_issue WHERE entity = ?1 AND row_id = ?2",
-    )?;
+    let mut by_unkeyed = tx.prepare(&def.select_sql(KEY_UNKEYED))?;
+    let mut stored_issues = tx.prepare(STORED_ISSUES_SQL)?;
     let mut ins = tx.prepare(&def.insert_sql())?;
     let mut ms = MergeStmts::prepare(tx)?;
     let mut maps = MapStmts::prepare(tx)?;
@@ -152,22 +157,29 @@ pub(crate) fn write_records(
                         kind.derive_update,
                     )?
                 }
-                None => insert(
-                    def,
-                    &mut ins,
-                    &mut ms,
-                    tx,
-                    &ident,
-                    &rec.cells,
-                    &(kind.derive_insert)(&rec.cells),
-                    &run.rank,
-                    run.session,
-                )?,
+                None => {
+                    let derived: Vec<Param<'_>> = (kind.derive_insert)(&rec.cells)
+                        .into_iter()
+                        .map(Param::opt_int)
+                        .collect();
+                    insert(
+                        def,
+                        &mut ins,
+                        &mut ms,
+                        tx,
+                        &ident,
+                        &rec.cells,
+                        &derived,
+                        &run.rank,
+                        run.session,
+                    )?
+                }
             };
             maps.map(run.session, def.entity, rec.rowid, applied.id)?;
             if kind.lineage_seen {
                 maps.seen(def.entity, applied.id, run.lineage, &run.rank, run.session)?;
             }
+            after(rec.rowid, applied.id)?;
             Ok((applied, ident.is_keyed()))
         })?;
         let (a, keyed) = applied;

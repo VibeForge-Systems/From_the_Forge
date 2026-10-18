@@ -14,7 +14,8 @@ by milestone and are commitments the design is built around.
 | Temporary copy of a backup's file index (Manifest.db, decrypted for an encrypted backup) | `<archive folder>/.oma-staging/`, only while a check runs; see below | M2 |
 | Temporary copy of the Messages database (`sms.db` and its `-wal`, decrypted for an encrypted backup) | `<archive folder>/.oma-staging/`, only during an extraction check, and deleted as soon as its rows have been read; see "The extraction check (M3)" | M3 |
 | The last extraction report (counts and a date range) | **Memory only**, until the app closes. It is never written to disk and never logged. | M3 |
-| Archives (messages, contacts metadata, attachments, indexes) | Only inside the archive library folder the user chooses | M4 |
+| Temporary copy of the Messages database during an import (decrypted for an encrypted backup) | `<archive folder>/.oma-staging/`, from staging until after the import's last pass, including the confirmation step (up to two minutes) and the attachment copy; see "The archive (M4)" | M4 |
+| Archives: messages and their raw source bytes, addresses (handles), chat names, attachment metadata and files, the search index, import records and verify results | Only inside the archive library folder the user chooses, one `a<32 hex>/` folder per archive, **stored unencrypted** (see "The archive (M4)") | M4 |
 | Backup passwords | **Never stored, anywhere.** A password is asked for on each check, used once, and zeroized in Rust; see "Backup passwords" below. No OS credential store is used. Storing passwords there was dropped from M2 and no milestone is planned for it. | M2 |
 | Search history | Off by default. It can be cleared, and it is stored inside the archive. | M5 |
 
@@ -173,33 +174,199 @@ antivirus) applies to it as well. In addition:
   text of an internal error (panic). Automated tests check this over every
   synthetic fixture, including the failure paths and a forced panic.
 
-## The archive (M4): decisions already taken
+## The archive (M4)
 
-Milestone 4 is in progress: the import is not reachable from the app yet,
-and this section lists only the decisions the owner has confirmed (on
-2026-10-18). The full write-up of what an archive holds comes with the
-milestone's documentation.
+Milestone 4 imports a backup's messages and attachment files into an
+archive inside your archive folder, from the Archive page (or **Import
+messages…** on the Backups page). Four of its privacy decisions were
+confirmed by the project owner on 2026-10-18: D51 (device identity), D59
+(raw message data), D60 (Recently Deleted) and D61 (text captured before
+an unsend). They are marked **owner-confirmed** below. One related choice,
+D70 (the model and iOS version in the import records), follows the
+design's lean and still awaits the owner's confirmation.
 
-- **Recently Deleted (D60).** Messages that are only in Recently Deleted
-  are **excluded by default**. Including them is an opt-in for each import,
-  with a warning. When you opt in, their attachments are included too. A
-  message that is already in the archive and later appears in Recently
-  Deleted is **marked** as recently deleted, but its archived content is
-  not updated from the deleted copy. The text of Recently Deleted message
-  parts (`recoverable_message_part.part_text`) is never read either way.
-- **Text captured before an unsend (D61).** If the archive already holds a
-  message's text and a later backup shows the sender unsent it, the
-  archive **keeps the earlier text** (it stays searchable) and marks the
-  message as unsent by the sender.
-- **Raw message data (D59).** The archive keeps the raw `attributedBody`,
-  `message_summary_info` and `payload_data` bytes of each message (poll,
-  app and link payloads included), within fixed size caps, so a newer
-  version of the app can decode them again without the backup.
-- **Device identity (D51).** The archive does not identify your phone. It
-  never stores or hashes the UDID; when a backup is imported, the app
-  shows which device facts match earlier imports and you choose whether it
-  is the same phone. The device name, model, iOS version and build are
-  stored exactly as the backup records them.
+### Archives are stored unencrypted
+
+**An archive is plaintext at rest.** That covers `archive.sqlite` and its
+`-wal` and `-shm` files, the full-text search index inside it, every file
+under `attachments/`, and the files under `imports/`. Any future
+pre-migration copy (`archive.pre-v<n>.sqlite`, not written by M4, which
+ships no real migration) will be **another full plaintext copy**.
+
+- **Content from an encrypted backup is stored decrypted.** The backup
+  stays encrypted on disk; the archive does not.
+- Until archive encryption arrives (M8), rely on your OS account's
+  security and on full-disk encryption (BitLocker, LUKS).
+- **The confirmation step says this on every import**: "The archive is
+  stored unencrypted…", with its own sentence for an encrypted backup.
+
+### What an archive holds
+
+- Message rows with every source column the app knows, the decoded text
+  of each message, and the **raw `attributedBody` bytes**.
+- The **raw `message_summary_info` bytes**, which **contain the text of
+  earlier versions of edited messages** (`ec[*].t`). M4 does not decode
+  them, but the bytes are in the archive.
+- The **raw `payload_data` bytes** (polls, app and link payloads), whose
+  contents this project has not characterised.
+- Addresses (handles), chat names and identifiers, attachment metadata
+  (original names, types, sizes, dates) and the attachment files
+  themselves.
+- `destination_caller_id`, which third-party sources describe as the
+  account (number or email) a message was sent to or from, that is,
+  probably **your own address**. That meaning is **UNVERIFIED** in this
+  project.
+- For each import: the device name, model, iOS version and build exactly
+  as the backup records them, the import's start and end times, the
+  backup's dates, and the counts. The archive's label is your own text.
+
+It holds **no** UDID, serial number, IMEI, backup folder path or backup
+password. (An earlier draft said the archive holds "no phone number of the
+device"; that claim is withdrawn, because `destination_caller_id` may be
+exactly that.)
+
+**Raw message data (D59, owner-confirmed).** The raw `attributedBody`,
+`message_summary_info` and `payload_data` bytes are always kept, within
+fixed size caps, so a newer version of the app can decode them again
+without the backup.
+
+### Edited, unsent and deleted messages
+
+- **Nothing is ever removed.** A message deleted on the phone stays in the
+  archive. Later releases will label such messages "not in the latest
+  import from this phone", and only against a complete import (one whose
+  pending-changes file was read).
+- **Text captured before an unsend (D61, owner-confirmed).** If the
+  archive already holds a message's text and a later backup shows the
+  sender unsent it, the archive **keeps the earlier text**, keeps it
+  **searchable**, and marks the message as unsent by the sender.
+- **Edits.** The text before and after an edit is kept as separate
+  versions, and every version stays in the search index.
+- **The search index (D62).** It holds the display text of **every**
+  version of every imported message. Earlier versions stay searchable;
+  nothing is removed from it.
+
+### Recently Deleted (D60, owner-confirmed)
+
+- **Excluded by default.** A message that is only in Recently Deleted when
+  the archive first sees it is not imported, **nor are attachments that
+  belong only to such messages**: the archive gets no record of them and
+  no file. An attachment also used by an imported message is kept.
+- **Including them is an opt-in for each import**, with a warning at the
+  start of the import. When you opt in, their attachments are included
+  too.
+- **A message already in the archive** that later appears in Recently
+  Deleted is never removed. It is **marked** as recently deleted (for each
+  backup that showed it there: the conversation it was deleted from and
+  the deletion time as the backup stores it), but its archived content is
+  not updated from the deleted copy.
+- The text of Recently Deleted message parts
+  (`recoverable_message_part.part_text`) is **never read**, either way.
+
+### During an import
+
+- **The temporary copy of the Messages database (D74).** The decrypted
+  copy of sms.db (and its `-wal`) in `.oma-staging/` exists from staging
+  until after the last database pass. That includes the confirmation step,
+  which waits **at most two minutes**, and the whole attachment copy. It is
+  deleted before the archive is finalized; the import's result says
+  whether that succeeded. Declining, cancelling, quitting the app or letting the
+  confirmation time out writes nothing to the archive and deletes the
+  copy with the rest of the staging folder.
+- **The backup's unwrapped keys are held in memory for the whole import
+  job** (they are needed to decrypt each attachment file) and zeroized when
+  it ends.
+- **A crash leaves the copy** on disk until the staging sweep removes it
+  (at the next start or check, after the 5-minute rule above).
+- **Attachment copies in flight.** Each file is first written to
+  `attachments/.incoming/<n>.partial` (0600 on Unix); for an encrypted
+  backup it holds the decrypted bytes. A failed copy deletes it, and so
+  does an import that stops, fails or is cancelled before the copied file
+  is placed in the store (including a stop for lack of space). A partial
+  file that could not be deleted is counted in the import's counts and
+  removed the next time the archive is opened for writing, as is one left
+  by a crash.
+- **The password** (`start_import`) travels exactly as for the backup
+  checks ("Backup passwords" above): zeroized in Rust, used once, never
+  stored. It is asked for again to continue an import.
+
+### Attachment files
+
+- Each file is stored **as plaintext** in `attachments/<first two>/<64
+  hex>`, named only by the **SHA-256 of its content**, never by its
+  original name (which stays in the database). Identical files are stored
+  once.
+- **A content-hash name is not secret:** someone who can list the folder
+  can confirm that a file they already have is present. M8 plans keyed
+  names.
+- A file that is already in the archive with the same length is not read
+  again, so its bytes are re-checked only by a full verify.
+- Nothing about a file (name, path, hash or content) is logged; only
+  counts are.
+
+### Device identity (D51, owner-confirmed)
+
+The archive is the de-duplication scope; it does not identify your phone.
+It never stores or hashes the UDID (D14 is unchanged). At the confirmation
+step the app shows, for each earlier import set ("lineage"), whether the
+model and the device name **match** or **differ**, never the values, and
+**you choose** whether this backup is from the same phone. The gate cannot
+prove identity: choosing the wrong set mislabels "not in the latest import"
+for that set, and nothing else.
+
+### Import records and verify results
+
+- **`imports/session-<n>.json`** (0600 on Unix) is written when an import
+  completes, is cancelled, stops or fails, so the import history survives
+  damage to the database. It holds the app and schema versions, the
+  session's state, its own start and end times, whether the backup was
+  dated and which file the date came from (not the date), the lineage
+  number, the backup's **model and iOS version** (D70, a lean awaiting the
+  owner) and whether it was encrypted, the WAL and option settings, the
+  qualifiers, and the counts. It holds **no** device name, message,
+  address, GUID, content digest, backup date, path or label.
+- **Verify** reads the database, every attachment file (a full verify reads
+  each one to the end) and every `imports/` file, and changes none of them:
+  it repairs, deletes and moves nothing. It records only numbers, booleans,
+  check states and the names of the archive's own tables (`verify_run`),
+  and after a full verify a check state and time on each stored file's row.
+
+### What crosses into the window
+
+The Archive page and the confirmation step show counts, closed kinds,
+booleans, dates and the archive's label only, never a message, address,
+chat name, file name or device value. The IPC types have one free-text
+field, the label, and a structural test fails on any other. To pre-select
+the backup an unfinished import came from, the app compares, inside Rust,
+the listed backups' device name, model and backup date with the stored
+ones, and returns only backup ids.
+
+### Permissions, sync clients and volumes
+
+- **Linux:** archive folders are 0700 and files 0600, re-checked at every
+  open. An archive whose owner or mode has changed is **refused**.
+- **Windows:** the archive inherits the archive folder's permissions (no
+  private ACL is set), so anyone who can read that folder can read the
+  archive. The confirmation step says so on every import.
+- **Sync and backup clients, antivirus and indexers** may read archive
+  files. When the archive folder is inside a known sync client's folder,
+  the confirmation step repeats the sync warning on **every** import,
+  because unlike staging, the archive is permanent. Exclude the archive
+  folder from sync and indexing if that matters to you.
+- **Network and virtualised volumes are refused** for archives (network
+  shares, UNC paths, FUSE, 9P and VirtualBox shared folders on Linux).
+  On Windows a mapped network drive is refused only if the path reveals it
+  (see compatibility.md).
+
+### Deletion is not erasure
+
+The archive database runs with SQLite's `secure_delete` on and the search
+index with FTS5's `secure-delete` option. These zero freed database pages
+only. Old page images in the `-wal`, file-system blocks released by
+checkpoints or truncation, SSD remapping and snapshots are **not** erased.
+M4 deletes nothing a user can see: there is no way to delete an archive or
+a message from one yet. These settings are hygiene, not protection; see
+"Deleting data" below.
 
 ## Device identifiers (M2)
 
@@ -258,11 +425,11 @@ never logged.
 | What it protects | The backup folder written by Finder, iTunes or Apple Devices | The archive this application creates |
 | Who sets the password | The user, on the iPhone or in Apple's software | The user, in this application (planned) |
 | Effect of importing | The application decrypts what it needs, read-only. The backup stays encrypted on disk. | — |
-| Status | Unlocking and checking: M2. Checking that messages can be read: M3. Importing: M4. | Planned, M8. The likely approach is SQLCipher for the database plus encrypted attachment storage. Until then, **archives are stored unencrypted** and rely on OS account security and full-disk encryption (BitLocker, LUKS). |
+| Status | Unlocking and checking: M2. Checking that messages can be read: M3. Importing into an archive: M4. | Planned, M8. The likely approach is SQLCipher for the database plus encrypted attachment storage. Until then, **archives are stored unencrypted** and rely on OS account security and full-disk encryption (BitLocker, LUKS). |
 
-Importing an encrypted backup produces a readable archive. The UI will say
-so at the point of import, and recommend full-disk encryption or (from M8)
-an encrypted archive.
+Importing an encrypted backup produces a readable archive. The import
+dialog and the confirmation step say so on every import (M4). Until M8,
+full-disk encryption is the protection to rely on.
 
 ## Handling of untrusted input
 
@@ -292,6 +459,12 @@ Backups and their contents are treated as hostile:
   `quick_check`) is not read at all. Every value is read under a byte cap,
   and the typedstream decoder for message bodies runs under fixed budgets
   and fails closed.
+- An archive's own files are treated as untrusted too (M4), since anyone
+  who can write to the archive folder can change them. An archive is opened
+  read-only first; its schema must match the app's own (checked by
+  fingerprint) before any table is read; stored file names are parsed as 64 hex digits
+  before a path is built from them; store files and folders are never
+  followed through links; and nothing is written until those checks pass.
 - Attachments are never executed. Previews will be generated only for
   formats with memory-safe decoders. Anything else is shown as a file to
   open with the user's own application.
@@ -307,15 +480,23 @@ folder names, device names, UDIDs, backup file names or identifiers, or
 SQLite message text; automated tests check this over every synthetic
 fixture. From M3 they also never record any string from the Messages
 database, GUIDs, timestamps, the date range, attachment paths or panic
-messages. Set `OMA_LOG=debug` for more detail. That
+messages. From M4 they also never record natural keys, fingerprints,
+content digests, ranks, attachment hashes or storage names, source rowids
+and cursors, an archive id or label, device names or product types, any
+path (archive folder names included), display text, any value from the
+archive's issue or history tables, or SQLite error text (only the primary
+code). The persistent diagnostic log file is deferred to M8 (D71, a lean
+awaiting the owner). Set `OMA_LOG=debug` for more detail. That
 setting changes how much is recorded, not which kinds of data.
 
 ## Deleting data
 
-Removing an archive from the application (M4) will remove only the
-application's reference to it. Deleting an archive's files will be a
-separate, explicitly confirmed action. Some limits apply to deletion on
-modern storage:
+M4 offers no way to remove an archive, or a message from one. When it
+comes, removing an archive from the application will remove only the
+application's reference to it, and deleting an archive's files will be a
+separate, explicitly confirmed action. Until then you can delete an
+archive's `a<32 hex>` folder yourself while the app is closed. Some limits
+apply to deletion on modern storage:
 
 - **SSDs** remap writes (wear levelling). Overwriting a file does not
   guarantee the old blocks are erased, and the application does not claim
@@ -324,8 +505,9 @@ modern storage:
   journaling, btrfs, ZFS) and **snapshots** (Windows shadow copies,
   Timeshift, btrfs snapshots) can retain old copies.
 - **SQLite** can leave deleted content in free pages and in the WAL until
-  it is vacuumed. The archive will offer a compaction step after
-  deletions.
+  it is vacuumed. Archives run with `secure_delete` (and the search index
+  with FTS5 `secure-delete`), which zero freed pages, but not old page
+  images in the `-wal`. A compaction step will come with deletion.
 
 Full-disk encryption is the effective protection against recovery of
 deleted data. Deleting an archive cannot replace it.

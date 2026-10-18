@@ -17,6 +17,12 @@ const COMMANDS: &[&str] = &[
     "open_backup",
     "check_extraction",
     "cancel_job",
+    "list_archives",
+    "create_archive",
+    "get_archive_details",
+    "start_import",
+    "confirm_import",
+    "verify_archive",
 ];
 
 fn main() {

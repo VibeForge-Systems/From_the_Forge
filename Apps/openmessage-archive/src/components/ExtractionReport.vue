@@ -278,7 +278,7 @@ const problems = computed(() =>
         Messages, chats and attachments were not read.
       </p>
       <p class="small text-body-secondary mt-3 mb-0 oma-extraction-footer">
-        Nothing from this check was saved. Importing into an archive arrives in milestone 4.
+        Nothing from this check was saved. Importing into an archive is a separate step.
       </p>
     </div>
   </section>

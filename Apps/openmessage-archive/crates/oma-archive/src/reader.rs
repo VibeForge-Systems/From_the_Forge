@@ -7,19 +7,24 @@
 //! `archive_meta` (§5.3 steps 5–7). Every statement runs under an op
 //! budget.
 //!
-//! M5 adds thread pages, search and blob reads here.
+//! [`ArchiveReader::open_blob`] is the one way attachment bytes are read
+//! back (spec §4.3, §9.5); M5 adds thread pages and search here.
 
 use rusqlite::types::ValueRef;
 use rusqlite::Connection;
 
+use crate::blobs::{open_checked, BlobReader, StorageName};
 use crate::conn::{ReadConn, READ_OP_BUDGET};
+use crate::error::BlobProblem;
 use crate::error::{ArchiveError, DamageKind, Stage};
 use crate::id::{ArchiveId, Label, LabelState};
+use crate::import::{ImportCounts, LineageId, StopReason};
 use crate::layout::ArchiveDir;
-use crate::schema::codes::SessionState;
+use crate::schema::codes::{IssueCode, SessionState};
 use crate::schema::{
     fingerprint, SchemaPlan, APPLICATION_ID, DECODER_VERSION, DERIVER_VERSION, FORMAT,
 };
+use crate::verify::VerifySummary;
 
 /// Why imports into an archive are blocked although it can be read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,6 +89,10 @@ impl SessionCounts {
 pub struct ResumableSession {
     pub session: i64,
     pub state: SessionState,
+    /// The session's import options. A continue must use the same ones
+    /// (D64), so "Continue importing…" starts from them.
+    pub include_recently_deleted: bool,
+    pub copy_attachments: bool,
 }
 
 /// What listing and details show about an archive. Content-free, except
@@ -117,6 +126,55 @@ pub struct SessionInfo {
     pub resumes: u32,
     /// Set at a terminal state (§8.7); `None` before.
     pub full_observation: Option<bool>,
+}
+
+/// The newest import session, as [`ArchiveReader::last_import`] reads it.
+/// Content-free.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct LastImport {
+    pub session: i64,
+    pub lineage: LineageId,
+    pub state: SessionState,
+    pub started_at_ns: i64,
+    pub ended_at_ns: Option<i64>,
+    pub resumes: u32,
+    /// The counts stored with the session's last batch; `None` before the
+    /// first batch, or when they do not parse.
+    pub counts: Option<ImportCounts>,
+    /// Why a stopped session stopped (state 6), from `import_issue`.
+    pub stop_reason: Option<StopReason>,
+    /// The session's derived values are provisional (D79).
+    pub ios_version_untested: bool,
+}
+
+/// What the shell knows about a listed backup, for pre-selecting the
+/// backup an unfinished session came from
+/// ([`ArchiveReader::resume_matches`]). Compared inside this crate; the
+/// archive's stored device facts never leave it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceFacts<'a> {
+    pub device_name: Option<&'a str>,
+    pub product_type: Option<&'a str>,
+    /// Info.plist "Last Backup Date", in whole seconds since the Unix epoch.
+    pub last_backup_secs: Option<i64>,
+}
+
+/// The id of a `blob` row: one file in the attachment store. Ids are
+/// archive-local numbers, never content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BlobId(i64);
+
+impl BlobId {
+    /// The id with this number (M5 gets ids from the reader's queries).
+    pub fn new(id: i64) -> BlobId {
+        BlobId(id)
+    }
+
+    /// The number.
+    pub fn get(self) -> i64 {
+        self.0
+    }
 }
 
 /// The most sessions [`ArchiveReader::sessions`] returns (newest first).
@@ -193,6 +251,10 @@ fn read_meta(conn: &Connection) -> rusqlite::Result<Option<Result<Meta, ArchiveE
     })))
 }
 
+pub(crate) fn meta_label(conn: &ReadConn) -> Result<LabelState, ArchiveError> {
+    meta(conn).map(|m| m.label)
+}
+
 fn meta(conn: &ReadConn) -> Result<Meta, ArchiveError> {
     conn.budgeted(READ_OP_BUDGET, Stage::Meta, read_meta)?
         .ok_or(ArchiveError::Damaged(DamageKind::MetaMissing))?
@@ -239,6 +301,7 @@ pub(crate) fn inspect(conn: &ReadConn, plan: &SchemaPlan) -> Result<Inspected, A
 /// A lock-free, query-only view of one archive.
 pub struct ArchiveReader {
     conn: ReadConn,
+    dir: ArchiveDir,
     id: ArchiveId,
     inspected: Inspected,
     build_version: u32,
@@ -269,6 +332,7 @@ impl ArchiveReader {
         let inspected = inspect(&conn, plan)?;
         Ok(ArchiveReader {
             conn,
+            dir: dir.clone(),
             id,
             inspected,
             build_version: plan.version,
@@ -277,6 +341,10 @@ impl ArchiveReader {
 
     pub(crate) fn inspected(&self) -> &Inspected {
         &self.inspected
+    }
+
+    pub(crate) fn conn(&self) -> &ReadConn {
+        &self.conn
     }
 
     pub(crate) fn set_version(&mut self, version: u32) {
@@ -359,17 +427,20 @@ impl ArchiveReader {
             };
             *slot = n;
         }
-        let newest: Option<(i64, i64)> = self.conn.budgeted(READ_OP_BUDGET, Stage::Read, |c| {
-            let mut stmt =
-                c.prepare("SELECT id, state FROM import_session ORDER BY id DESC LIMIT 1")?;
+        type Newest = (i64, i64, i64, i64);
+        let newest: Option<Newest> = self.conn.budgeted(READ_OP_BUDGET, Stage::Read, |c| {
+            let mut stmt = c.prepare(
+                "SELECT id, state, include_recently_deleted, copy_attachments \
+                 FROM import_session ORDER BY id DESC LIMIT 1",
+            )?;
             let mut rows = stmt.query([])?;
             match rows.next()? {
-                Some(r) => Ok(Some((r.get(0)?, r.get(1)?))),
+                Some(r) => Ok(Some((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))),
                 None => Ok(None),
             }
         })?;
         let resumable = match newest {
-            Some((session, state)) => {
+            Some((session, state, rd, copy)) => {
                 let state = SessionState::from_code(state).ok_or_else(unreadable)?;
                 matches!(
                     state,
@@ -378,7 +449,12 @@ impl ArchiveReader {
                         | SessionState::Interrupted
                         | SessionState::Stopped
                 )
-                .then_some(ResumableSession { session, state })
+                .then_some(ResumableSession {
+                    session,
+                    state,
+                    include_recently_deleted: rd == 1,
+                    copy_attachments: copy == 1,
+                })
             }
             None => None,
         };
@@ -404,6 +480,205 @@ impl ArchiveReader {
         f: impl FnOnce(&Connection) -> rusqlite::Result<T>,
     ) -> Result<T, ArchiveError> {
         self.conn.budgeted(ops, stage, f)
+    }
+
+    /// Open the attachment file of blob `id` for reading (spec §4.3, §9.5):
+    /// the row's `storage_name` is parsed and must spell its `sha256`;
+    /// `attachments/` and `<hh>/` must be private real directories; the
+    /// file is opened without following a link and must be a regular file
+    /// of `byte_len` bytes. The [`BlobReader`] re-hashes what it yields and
+    /// fails its last read when the content differs from the digest.
+    /// Works while an import holds the archive's lock: placed files are
+    /// never replaced.
+    pub fn open_blob(&self, id: BlobId) -> Result<BlobReader, ArchiveError> {
+        self.require_current()?;
+        let row: Option<(Vec<u8>, i64, Option<String>)> =
+            self.conn.budgeted(READ_OP_BUDGET, Stage::Read, |c| {
+                let mut stmt =
+                    c.prepare("SELECT sha256, byte_len, storage_name FROM blob WHERE id = ?1")?;
+                let mut rows = stmt.query([id.0])?;
+                let Some(r) = rows.next()? else {
+                    return Ok(None);
+                };
+                let sha = match r.get_ref(0)? {
+                    ValueRef::Blob(b) => b.to_vec(),
+                    _ => Vec::new(),
+                };
+                let len = match r.get_ref(1)? {
+                    ValueRef::Integer(n) => n,
+                    _ => -1,
+                };
+                let name = match r.get_ref(2)? {
+                    ValueRef::Text(t) => std::str::from_utf8(t).ok().map(str::to_owned),
+                    _ => None,
+                };
+                Ok(Some((sha, len, name)))
+            })?;
+        let (sha, len, name) = row.ok_or(ArchiveError::Blob(BlobProblem::NotFound))?;
+        let name = name
+            .as_deref()
+            .and_then(StorageName::parse)
+            .filter(|n| n.sha256().is_some_and(|s| s.as_slice() == sha.as_slice()))
+            .ok_or(ArchiveError::Blob(BlobProblem::BadName))?;
+        open_checked(&self.dir, &name, len).map_err(ArchiveError::Blob)
+    }
+
+    /// The newest verify run, if any (spec §4.3). A run a crash
+    /// interrupted has no outcome; counts that do not parse are `None`.
+    pub fn last_verify(&self) -> Result<Option<VerifySummary>, ArchiveError> {
+        self.require_current()?;
+        let row = self.conn.budgeted(READ_OP_BUDGET, Stage::Read, |c| {
+            let mut stmt = c.prepare(
+                "SELECT id, started_at_ns, ended_at_ns, depth, outcome, counts \
+                 FROM verify_run ORDER BY id DESC LIMIT 1",
+            )?;
+            let mut rows = stmt.query([])?;
+            let Some(r) = rows.next()? else {
+                return Ok(None);
+            };
+            Ok(Some((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, Option<i64>>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, Option<i64>>(4)?,
+                r.get::<_, Option<String>>(5)?,
+            )))
+        })?;
+        row.map(|(run, started, ended, depth, outcome, counts)| {
+            VerifySummary::from_row(run, started, ended, depth, outcome, counts.as_deref())
+                .ok_or_else(unreadable)
+        })
+        .transpose()
+    }
+
+    /// The newest import session, if any (spec §15.2: the details' last
+    /// import summary).
+    pub fn last_import(&self) -> Result<Option<LastImport>, ArchiveError> {
+        self.require_current()?;
+        type Row = (i64, i64, i64, i64, Option<i64>, i64, Option<String>, i64);
+        let row: Option<Row> = self.conn.budgeted(READ_OP_BUDGET, Stage::Read, |c| {
+            let mut stmt = c.prepare(
+                "SELECT id, lineage_id, state, started_at_ns, ended_at_ns, resumes, counts, \
+                        ios_version_untested \
+                 FROM import_session ORDER BY id DESC LIMIT 1",
+            )?;
+            let mut rows = stmt.query([])?;
+            let Some(r) = rows.next()? else {
+                return Ok(None);
+            };
+            Ok(Some((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
+                r.get(7)?,
+            )))
+        })?;
+        let Some((session, lineage, state, started, ended, resumes, counts, untested)) = row else {
+            return Ok(None);
+        };
+        let state = SessionState::from_code(state).ok_or_else(unreadable)?;
+        let stop_reason = if state == SessionState::Stopped {
+            let kinds: Vec<i64> = self.conn.budgeted(READ_OP_BUDGET, Stage::Read, |c| {
+                let mut stmt = c.prepare(
+                    "SELECT kind FROM import_issue WHERE session_id = ?1 AND kind IN (?2, ?3) \
+                     ORDER BY pass DESC, kind",
+                )?;
+                let rows = stmt.query_map(
+                    rusqlite::params![
+                        session,
+                        IssueCode::InsufficientSpace.code(),
+                        IssueCode::SourceChanged.code()
+                    ],
+                    |r| r.get(0),
+                )?;
+                rows.collect()
+            })?;
+            kinds.first().and_then(|k| match IssueCode::from_code(*k) {
+                Some(IssueCode::InsufficientSpace) => Some(StopReason::InsufficientSpace),
+                Some(IssueCode::SourceChanged) => Some(StopReason::SourceChanged),
+                _ => None,
+            })
+        } else {
+            None
+        };
+        Ok(Some(LastImport {
+            session,
+            lineage: LineageId::new(lineage),
+            state,
+            started_at_ns: started,
+            ended_at_ns: ended,
+            resumes: u32::try_from(resumes).map_err(|_| unreadable())?,
+            counts: counts.as_deref().and_then(ImportCounts::from_json),
+            stop_reason,
+            ios_version_untested: untested == 1,
+        }))
+    }
+
+    /// For each of `backups`, whether it looks like the source of the
+    /// archive's newest session when that session is unfinished (the one
+    /// [`ArchiveInfo::resumable`] names): the same device name, product
+    /// type and Info.plist backup date (to the second; both absent counts
+    /// as equal). Only a pre-selection for the UI: whether the session can
+    /// actually continue is decided by the import's resume rules (§8.2),
+    /// which compare content digests. All `false` when nothing is
+    /// unfinished.
+    pub fn resume_matches(&self, backups: &[SourceFacts<'_>]) -> Result<Vec<bool>, ArchiveError> {
+        self.require_current()?;
+        type Row = (i64, Option<Vec<u8>>, Option<Vec<u8>>, Option<i64>);
+        let row: Option<Row> = self.conn.budgeted(READ_OP_BUDGET, Stage::Read, |c| {
+            let mut stmt = c.prepare(
+                "SELECT s.state, b.device_name, b.product_type, b.info_last_backup_ns \
+                 FROM import_session s JOIN source_backup b ON b.id = s.source_backup_id \
+                 ORDER BY s.id DESC LIMIT 1",
+            )?;
+            let mut rows = stmt.query([])?;
+            let Some(r) = rows.next()? else {
+                return Ok(None);
+            };
+            let text = |i: usize| -> rusqlite::Result<Option<Vec<u8>>> {
+                Ok(match r.get_ref(i)? {
+                    ValueRef::Text(t) => Some(t.to_vec()),
+                    _ => None,
+                })
+            };
+            let date = match r.get_ref(3)? {
+                ValueRef::Integer(n) => Some(n),
+                _ => None,
+            };
+            Ok(Some((r.get(0)?, text(1)?, text(2)?, date)))
+        })?;
+        let unfinished = |state: i64| {
+            matches!(
+                SessionState::from_code(state),
+                Some(
+                    SessionState::Running
+                        | SessionState::Cancelled
+                        | SessionState::Interrupted
+                        | SessionState::Stopped
+                )
+            )
+        };
+        let Some((_, name, model, date_ns)) = row.filter(|r| unfinished(r.0)) else {
+            return Ok(vec![false; backups.len()]);
+        };
+        let date_secs = date_ns.map(|ns| ns.div_euclid(1_000_000_000));
+        let same = |stored: &Option<Vec<u8>>, ours: Option<&str>| match (stored, ours) {
+            (Some(s), Some(o)) => s.as_slice() == o.as_bytes(),
+            _ => false,
+        };
+        Ok(backups
+            .iter()
+            .map(|b| {
+                same(&name, b.device_name)
+                    && same(&model, b.product_type)
+                    && date_secs == b.last_backup_secs
+            })
+            .collect())
     }
 
     /// The newest [`SESSIONS_LIMIT`] sessions, newest first. Content-free.

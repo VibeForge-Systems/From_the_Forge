@@ -17,10 +17,17 @@ use oma_archive::space::SpaceProbe;
 use oma_archive::{ArchiveId, Library};
 use sha2::{Digest, Sha256};
 
-/// A fresh library in a private temporary directory.
+/// Free space the default test probe reports: 1 TiB of a 2 TiB volume,
+/// so no test depends on the runner's free disk (spec §12).
+pub const TEST_AVAILABLE: u64 = 1 << 40;
+
+/// A fresh library in a private temporary directory, with a fake space
+/// probe that reports [`TEST_AVAILABLE`].
 pub fn library() -> (tempfile::TempDir, Library) {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let lib = Library::new(tmp.path()).expect("library");
+    let lib = Library::new(tmp.path())
+        .expect("library")
+        .with_space_probe(fake_space(Some(TEST_AVAILABLE), Some(2 * TEST_AVAILABLE)));
     (tmp, lib)
 }
 

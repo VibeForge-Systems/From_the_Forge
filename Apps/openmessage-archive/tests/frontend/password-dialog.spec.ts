@@ -73,4 +73,18 @@ describe('BackupPasswordDialog', () => {
     expect(w.html()).not.toContain(PASSWORD);
     w.unmount();
   });
+
+  it('names what the click starts: validation, the extraction check, or a caller-supplied action', async () => {
+    const w = mount(BackupPasswordDialog, {
+      props: { open: true, deviceName: null, error: null },
+      attachTo: document.body,
+    });
+    const submit = () => w.find('button[type="submit"]').text();
+    expect(submit()).toBe('Unlock and validate');
+    await w.setProps({ resume: 'extractionCheck' });
+    expect(submit()).toBe('Unlock and run extraction check');
+    await w.setProps({ resume: 'import', submitLabel: 'Unlock and prepare import' });
+    expect(submit()).toBe('Unlock and prepare import');
+    w.unmount();
+  });
 });

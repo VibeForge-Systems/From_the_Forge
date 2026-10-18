@@ -829,6 +829,37 @@ questions 4, 6 and 16 also stay open):
     constants fit real data; the licence terms of the Digital Corpora iOS
     images (a possible source of iOS DDL) and of the S12 file.
 
+Added by milestone 4 (the archive import; spec Appendix B). All are
+**UNVERIFIED**; the import was built and tested on synthetic data only.
+
+29. Whether message, chat and attachment GUIDs are stable and unique across
+    backups, iOS upgrades, restores and devices; whether newer iOS versions
+    change chat GUID formats (one third-party report, for macOS 26 only);
+    whether real sms.db files ever contain duplicated GUIDs (the import
+    treats every occurrence of a duplicated key as unkeyed, D83).
+30. Real sizes and costs: `attributedBody` bytes per message, the archive's
+    growth factor `K` (5.2 on the synthetic generator; the code keeps a
+    provisional 3.0), the FTS index size, the cost of `secure_delete`,
+    `synchronous` FULL against NORMAL, and the fsync cost per attachment on
+    consumer SSDs and NTFS.
+31. On Windows: WAL and `-shm` on the `win32-longpath` VFS (they worked on
+    the `windows-2022` CI runner with a `-shm` path over 260 characters, not
+    yet on Windows 11); flushing a directory handle; NTFS durability of
+    renames and hard links; `CreateHardLinkW` on an existing target;
+    antivirus holding freshly written files; whether std adds the verbatim
+    prefix for long attachment paths; the lock-release delay after a kill;
+    whether `canonicalize` reveals mapped network drives; whether std
+    treats junctions as links.
+32. `File::try_lock` and WAL on SMB, NFS and virtualised shares (refused
+    when detected).
+33. Whether a Recently Deleted message's `message` row still holds its
+    text; whether reactions or group actions carry indexable `text`;
+    whether a typedstream transfer GUID equals `attachment.guid`; whether
+    Status.plist `Date` and Info.plist `Last Backup Date` describe the same
+    moment.
+34. The meaning of `destination_caller_id` (the owner's own address or
+    not); the contents of `payload_data` for polls and app messages.
+
 Two questions from the M3 research were settled by tests rather than
 hardware: a schema with double-quoted string literals still loads with
 `DQS_DDL` off (`crates/oma-backup/tests/staged_db.rs`), and table-valued

@@ -73,7 +73,7 @@ describe('ExtractionReport', () => {
     expect(cell(w, FAILURE_LABEL.tsTruncated)).toBe('1');
     expect(text).toContain('The temporary copy of the Messages database was deleted straight after reading.');
     expect(text).toContain('All temporary files were removed at the end of the check.');
-    expect(text).toContain('Nothing from this check was saved. Importing into an archive arrives in milestone 4.');
+    expect(text).toContain('Nothing from this check was saved. Importing into an archive is a separate step.');
   });
 
   it('says just "can be read" only when no qualifier applies', () => {

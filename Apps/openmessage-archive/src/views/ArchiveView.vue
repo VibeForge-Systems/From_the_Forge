@@ -1,17 +1,40 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue';
 import { RouterLink } from 'vue-router';
+import ArchiveList from '@/components/ArchiveList.vue';
+import ArchivePage from '@/components/ArchivePage.vue';
 import EmptyState from '@/components/EmptyState.vue';
 import LocationStateBadge from '@/components/LocationStateBadge.vue';
 import LocationStatusList from '@/components/LocationStatusList.vue';
 import PanelLayout from '@/components/PanelLayout.vue';
 import PlannedBadge from '@/components/PlannedBadge.vue';
+import { useArchives } from '@/stores/archives';
 import { useLayout } from '@/stores/layout';
 import { useSettings } from '@/stores/settings';
 import { SHORTCUTS, formatShortcut } from '@/services/shortcuts';
+import { UNENCRYPTED_NOTE } from '@/services/importText';
 
 const settings = useSettings();
 const layout = useLayout();
+const archives = useArchives();
+
+/** List the archives once the location is usable; select the first. */
+async function load(): Promise<void> {
+  if (!settings.locationUsable) return;
+  await archives.refresh();
+  const first = archives.entries[0];
+  if (!archives.selectedId && first) await archives.select(first.archiveId);
+}
+
+onMounted(() => {
+  archives.resumePolling();
+  void load();
+});
+onBeforeUnmount(() => archives.stopPolling());
+watch(
+  () => [settings.locationUsable, settings.location.path] as const,
+  () => void load(),
+);
 
 const keysFor = (id: string) => {
   const s = SHORTCUTS.find((x) => x.id === id);
@@ -19,33 +42,21 @@ const keysFor = (id: string) => {
 };
 
 const warnings = computed(() => settings.location.checks.filter((c) => c.level === 'warning'));
+const libraryError = computed(() =>
+  archives.listing?.libraryState === 'unusable' ? (archives.listing.libraryError?.message ?? null) : null,
+);
 </script>
 
 <template>
-  <PanelLayout left-label="Conversations" right-label="Details">
+  <PanelLayout left-label="Archives" right-label="Details">
     <template #left>
-      <div class="oma-panel-header">
-        <h2 class="oma-panel-title">Conversations</h2>
-        <span class="badge text-bg-light border" title="Conversations in this archive">0</span>
-      </div>
-      <div class="px-3 pb-2">
-        <label for="conversation-search" class="form-label small mb-1 d-flex justify-content-between">
-          <span>Search conversations</span>
-          <PlannedBadge capability="search" />
-        </label>
-        <input
-          id="conversation-search"
-          type="search"
-          class="form-control form-control-sm"
-          placeholder="Available after the first import"
-          disabled
-        />
-      </div>
-      <div class="oma-panel-body">
-        <EmptyState icon="chat-square-text" title="No conversations" compact :heading-level="3">
-          Conversations appear here once a backup has been imported.
-        </EmptyState>
-      </div>
+      <ArchiveList v-if="settings.locationUsable" />
+      <template v-else>
+        <div class="oma-panel-header">
+          <h2 class="oma-panel-title">Archives</h2>
+        </div>
+        <p class="px-3 small text-body-secondary">Choose an archive folder to see its archives.</p>
+      </template>
     </template>
 
     <div class="oma-thread-toolbar">
@@ -54,11 +65,11 @@ const warnings = computed(() => settings.location.checks.filter((c) => c.level =
         class="btn btn-sm btn-outline-secondary border-0"
         :aria-pressed="layout.leftVisible"
         aria-controls="oma-left-panel"
-        :title="`Show or hide conversations (${keysFor('toggle-left-panel')})`"
+        :title="`Show or hide archives (${keysFor('toggle-left-panel')})`"
         @click="layout.toggleLeft()"
       >
         <i class="bi bi-layout-sidebar" aria-hidden="true"></i>
-        <span class="visually-hidden">Toggle conversation list</span>
+        <span class="visually-hidden">Toggle archive list</span>
       </button>
       <span class="flex-grow-1"></span>
       <button
@@ -105,7 +116,8 @@ const warnings = computed(() => settings.location.checks.filter((c) => c.level =
             <RouterLink to="/backups">Go to Backups</RouterLink>
           </li>
           <li>
-            <strong>Import messages.</strong> <PlannedBadge capability="archive-database" />
+            <strong>Import messages.</strong> Create an archive and import a backup into it. Counts
+            are shown; the backup itself is never modified.
           </li>
           <li>
             <strong>Browse, search, and export.</strong> <PlannedBadge capability="viewer" />
@@ -151,7 +163,17 @@ const warnings = computed(() => settings.location.checks.filter((c) => c.level =
         </div>
       </div>
 
-      <EmptyState v-else icon="inboxes" title="Your archive library is ready">
+      <div v-else-if="archives.loading && !archives.listing" class="d-flex justify-content-center align-items-center gap-2 p-5" role="status">
+        <div class="spinner-border text-secondary" aria-hidden="true"></div>
+        <span>Looking for archives…</span>
+      </div>
+
+      <div v-else-if="libraryError" class="alert alert-danger m-4" role="alert">
+        <h2 class="h6">The archive folder cannot be used</h2>
+        <p class="mb-0">{{ libraryError }}</p>
+      </div>
+
+      <EmptyState v-else-if="archives.listing && archives.entries.length === 0" icon="inboxes" title="Your archive library is ready">
         <p>
           Archives will be stored in
           <span class="font-monospace text-break">{{ settings.location.path }}</span>.
@@ -160,19 +182,23 @@ const warnings = computed(() => settings.location.checks.filter((c) => c.level =
           <LocationStatusList :checks="warnings" />
         </div>
         <p class="text-body-secondary small">
-          Find your iPhone backup and check it on the Backups page, including whether its
-          messages can be read. Importing messages into the archive arrives in milestone 4. The
-          backup itself is never modified.
+          Create an archive, then import a backup into it. Check the backup first on the Backups
+          page if you like. The backup itself is never modified. {{ UNENCRYPTED_NOTE }}
         </p>
         <template #actions>
-          <RouterLink to="/backups" class="btn btn-primary">
+          <button type="button" class="btn btn-primary" @click="archives.openCreate()">
+            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Create archive…
+          </button>
+          <RouterLink to="/backups" class="btn btn-outline-secondary">
             <i class="bi bi-phone me-1" aria-hidden="true"></i>Find backups…
           </RouterLink>
-          <button type="button" class="btn btn-outline-secondary" disabled aria-describedby="import-planned">
-            <i class="bi bi-box-arrow-in-down me-1" aria-hidden="true"></i>Import messages
-          </button>
-          <span id="import-planned"><PlannedBadge capability="archive-database" /></span>
         </template>
+      </EmptyState>
+
+      <ArchivePage v-else-if="archives.selectedId" :key="archives.selectedId" />
+
+      <EmptyState v-else icon="archive" title="Archives" compact>
+        Select an archive to see its details.
       </EmptyState>
     </div>
 
@@ -198,6 +224,7 @@ const warnings = computed(() => settings.location.checks.filter((c) => c.level =
             <li><i class="bi bi-person-slash" aria-hidden="true"></i>No accounts or telemetry</li>
             <li><i class="bi bi-lock" aria-hidden="true"></i>Original backups are read-only</li>
             <li><i class="bi bi-key" aria-hidden="true"></i>Backup passwords are used once and never saved.</li>
+            <li><i class="bi bi-unlock" aria-hidden="true"></i>Archives are stored unencrypted</li>
           </ul>
         </section>
       </div>

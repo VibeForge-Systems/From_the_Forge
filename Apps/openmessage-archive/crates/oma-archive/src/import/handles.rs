@@ -28,11 +28,16 @@ fn rename(source: &'static str) -> &'static str {
     }
 }
 
+/// The handle table's merge definition.
+pub(crate) fn table_def() -> TableDef {
+    TableDef::new(Entity::Handle, "handle", true, &["service_class"])
+}
+
 impl Handles {
     pub(crate) fn new() -> Handles {
         Handles {
             kind: EntityKind {
-                def: TableDef::new(Entity::Handle, "handle", true, &["service_class"]),
+                def: table_def(),
                 key: KeyStyle::Natural {
                     address: 0,
                     service: 1,
@@ -84,6 +89,8 @@ impl PassWriter for Handles {
     fn read(
         &self,
         db: &SmsDb<'_>,
+        _conn: &Connection,
+        _run: &Run,
         from: Cursor,
         ctx: &mut MessagesCtx<'_>,
         f: &mut dyn FnMut(HandleRecord) -> ControlFlow<Brk>,
@@ -103,6 +110,14 @@ impl PassWriter for Handles {
             rowid: r.rowid,
             cells: self.cells(r),
         });
-        write_records(tx, &self.kind, run, recs, &mut counts.handles, issues)
+        write_records(
+            tx,
+            &self.kind,
+            run,
+            recs,
+            &mut counts.handles,
+            issues,
+            &mut |_, _| Ok(()),
+        )
     }
 }

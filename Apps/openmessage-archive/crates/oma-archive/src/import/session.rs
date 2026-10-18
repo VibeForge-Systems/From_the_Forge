@@ -174,6 +174,19 @@ pub(crate) struct SessionFacts {
     source: SourceBackup,
 }
 
+impl SessionFacts {
+    /// The backup's device name, when one is recorded as a string (for the
+    /// gate's comparison only; never logged).
+    pub(crate) fn device_name(&self) -> Option<&str> {
+        self.source.device_name.as_str()
+    }
+
+    /// The backup's product type, likewise.
+    pub(crate) fn product_type(&self) -> Option<&str> {
+        self.source.product_type.as_str()
+    }
+}
+
 impl std::fmt::Debug for SessionFacts {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SessionFacts")

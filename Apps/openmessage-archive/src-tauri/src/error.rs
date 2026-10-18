@@ -47,9 +47,45 @@ pub enum ErrorCode {
     WrongPassword,
     /// A backup check or a listing is already running.
     Busy,
+    // Milestone 4: archives (spec §15.4). Each has a fixed sentence in
+    // `archives::messages`.
+    /// Another program, or another copy of the app, holds the archive.
+    ArchiveLocked,
+    /// The archive was written by a newer version of the app.
+    ArchiveNewer,
+    /// The archive has an older schema and needs an upgrade first.
+    ArchiveNeedsUpgrade,
+    /// The archive was written by newer rules: readable, not importable.
+    ArchiveNewerRules,
+    /// The archive's structure cannot be trusted.
+    ArchiveDamaged,
+    /// The folder is not an archive.
+    NotAnArchive,
+    /// No archive with that id in the archive folder.
+    ArchiveNotFound,
+    /// The archive, or the archive folder, failed the permission or link
+    /// checks.
+    ArchivePermissions,
+    /// Locks cannot be trusted on the archive folder's volume.
+    LockUnreliable,
+    /// The archive folder is on a network volume (D54).
+    NetworkVolume,
+    /// The archive folder is on a virtualised shared folder (D54).
+    VirtualisedVolume,
+    /// Not enough free space in the archive folder.
+    InsufficientSpace,
+    /// The backup changed while it was read.
+    SourceChanged,
+    /// The backup is larger than the import can take (the key-scan or
+    /// Recently Deleted caps).
+    SourceTooLarge,
+    /// `confirm_import` for a job that is not waiting at the gate.
+    JobNotWaiting,
+    /// An input failed validation (a label, an id, a lineage).
+    InvalidInput,
 }
 
-#[derive(Debug, Clone, Serialize, TS, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS, thiserror::Error)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 #[error("{message}")]

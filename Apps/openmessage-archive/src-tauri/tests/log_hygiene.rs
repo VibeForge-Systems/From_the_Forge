@@ -9,6 +9,11 @@
 //! JSON, in the extraction report's JSON, in `BackupDetails` JSON or in the
 //! panic hook's output.
 //!
+//! M4 (§18.9): import jobs over every entry of the synthetic import
+//! catalogue, each confirmed at its gate, then a verify job; the events,
+//! the archive details and the listing are checked like the reports, and
+//! no log line carries an archive id or the archive's label.
+//!
 //! Its own test binary with one global capturing subscriber: a thread-local
 //! subscriber would miss events from worker threads.
 
@@ -16,10 +21,17 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use oma_archive::space::SpaceProbe;
+use oma_archive::{Label, LineageChoice, VerifyDepth};
 use oma_backup::{inspect, Candidate, Limits, Password, Zeroizing};
+use openmessage_archive_lib::archives::dto::ImportOptionsInput;
+use openmessage_archive_lib::archives::gate::GateAnswer;
+use openmessage_archive_lib::archives::worker::{run_import, run_verify, ImportSpec, VerifySpec};
+use openmessage_archive_lib::archives::{self, ArchiveEnv};
 use openmessage_archive_lib::backups::dto::{JobEvent, JobKind};
 use openmessage_archive_lib::backups::listing::{self, build_registry, ArchiveFacts, ListInputs};
 use openmessage_archive_lib::backups::worker::{self, JobSpec};
+use openmessage_archive_lib::backups::JobSubject;
 use openmessage_archive_lib::backups::{messages, JobEventSink, Jobs};
 use openmessage_archive_lib::settings::{AddedFolderEntry, AddedFolderKind};
 use tracing::field::{Field, Visit};
@@ -176,6 +188,134 @@ fn copy_tree(src: &Path, dst: &Path) {
     }
 }
 
+const LABEL_SENTINEL: &str = "SYNTH-LABEL-SENTINEL";
+
+fn imports_fixtures() -> PathBuf {
+    PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../tests/fixtures/imports"
+    ))
+}
+
+/// Every backup entry of the import catalogue.
+fn imports_catalogue() -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(imports_fixtures())
+        .expect("imports dir")
+        .flatten()
+        .filter(|e| e.path().join(UDID).is_dir())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+struct FakeSpace;
+
+impl SpaceProbe for FakeSpace {
+    fn available(&self, _: &Path) -> std::io::Result<u64> {
+        Ok(1 << 40)
+    }
+    fn total(&self, _: &Path) -> std::io::Result<u64> {
+        Ok(2 << 40)
+    }
+}
+
+/// Confirms the gate from inside the event stream (the gate is open
+/// before `importPreflight` is sent).
+struct Confirming<'a> {
+    jobs: &'a Jobs,
+    job_id: String,
+    events: Vec<JobEvent>,
+}
+
+impl JobEventSink for Confirming<'_> {
+    fn send(&mut self, event: JobEvent) {
+        if matches!(event, JobEvent::ImportPreflight { .. }) {
+            self.jobs
+                .confirm(&self.job_id, GateAnswer::Proceed(LineageChoice::New))
+                .expect("confirm");
+        }
+        self.events.push(event);
+    }
+}
+
+/// Import `name` into a fresh labelled archive, then verify it. Returns
+/// the archive id; `texts` receives the events, the details and the list.
+fn import_and_verify(name: &str, tmp: &Path, texts: &mut Vec<String>) -> String {
+    let dir = tmp.join(format!("imp-{name}")).join(UDID);
+    copy_tree(&imports_fixtures().join(name).join(UDID), &dir);
+    let library = tmp.join(format!("implib-{name}"));
+    std::fs::create_dir_all(&library).expect("mkdir");
+    let env = ArchiveEnv {
+        space: Some(std::sync::Arc::new(FakeSpace)),
+    };
+    let id = env
+        .library(&library)
+        .expect("library")
+        .create(Some(Label::parse(LABEL_SENTINEL).expect("label")))
+        .expect("create");
+    let limits = Limits::default();
+    let candidate = Candidate::for_dir(&dir).expect("candidate");
+    let inspection = inspect(&candidate, &limits, &mut 0).expect("inspect");
+    let backup_id = inspection.id.as_str().to_owned();
+    let jobs = Jobs::default();
+    let r = jobs
+        .reserve(JobSubject::import(&backup_id, id.as_str()), JobKind::Import)
+        .expect("reserve");
+    let password = name
+        .ends_with("-enc")
+        .then(|| Password::new(Zeroizing::new(PASSWORD.to_owned()), &limits).expect("pw"));
+    let spec = ImportSpec {
+        job: JobSpec {
+            job_id: r.job_id.clone(),
+            backup_id,
+            kind: JobKind::Import,
+            inspection,
+            library: library.clone(),
+            password,
+            limits,
+            cancel: r.cancel.clone(),
+        },
+        archive_id: id.clone(),
+        options: ImportOptionsInput {
+            include_recently_deleted: true,
+            copy_attachments: true,
+        },
+        gate: r.gate.clone().expect("gate"),
+        env: env.clone(),
+    };
+    let mut sink = Confirming {
+        jobs: &jobs,
+        job_id: r.job_id.clone(),
+        events: Vec::new(),
+    };
+    run_import(spec, &jobs, &mut sink);
+    let r = jobs
+        .reserve(JobSubject::archive(id.as_str()), JobKind::Verify)
+        .expect("reserve");
+    let mut verify_events = Sink::default();
+    run_verify(
+        VerifySpec {
+            job_id: r.job_id.clone(),
+            archive_id: id.clone(),
+            library: library.clone(),
+            depth: VerifyDepth::Full,
+            cancel: r.cancel.clone(),
+            env: env.clone(),
+        },
+        &jobs,
+        &mut verify_events,
+    );
+    for e in sink.events.iter().chain(verify_events.0.iter()) {
+        texts.push(serde_json::to_string(e).expect("json"));
+    }
+    let details = archives::details(&library, &env, &id, &jobs, &[]).expect("details");
+    texts.push(serde_json::to_string(&details).expect("json"));
+    let list = archives::listing(Some(&library), &env, &jobs);
+    texts.push(serde_json::to_string(&list).expect("json"));
+    id.as_str().to_owned()
+}
+
 #[derive(Default)]
 struct Sink(Vec<JobEvent>);
 
@@ -318,6 +458,28 @@ fn nothing_identifying_is_logged() {
         messages_catalogue().len(),
         "every catalogue entry ended with an extraction summary"
     );
+    // M4: an import and a full verify for every import catalogue entry.
+    let mut archive_ids = Vec::new();
+    let mut archive_texts = Vec::new();
+    for name in imports_catalogue() {
+        archive_ids.push(import_and_verify(&name, tmp.path(), &mut archive_texts));
+    }
+    assert!(archive_ids.len() >= 10, "the import catalogue was found");
+    assert_eq!(
+        archive_texts
+            .iter()
+            .filter(|t| t.contains("\"importFinished\"") && t.contains("\"completed\""))
+            .count(),
+        archive_ids.len(),
+        "every import completed"
+    );
+    for t in &archive_texts {
+        for forbidden in [PASSWORD, UDID, DEVICE_NAME] {
+            assert!(!t.contains(forbidden), "{forbidden:?} in {t}");
+        }
+    }
+    texts.extend(archive_texts);
+
     openmessage_archive_lib::panic_hook::install();
     let panicked = std::panic::catch_unwind(|| {
         panic!("SYNTH-BODY panic payload sentinel");
@@ -375,8 +537,12 @@ fn nothing_identifying_is_logged() {
             "Library/SMS",
             SNAPSHOT_SENTINEL,
             root.as_str(),
+            LABEL_SENTINEL,
         ] {
             assert!(!e.contains(forbidden), "{forbidden:?} logged in {e}");
+        }
+        for id in &archive_ids {
+            assert!(!e.contains(id.as_str()), "an archive id was logged: {e}");
         }
         assert!(!has_40_hex(e), "a fileID-like value was logged: {e}");
     }

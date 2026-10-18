@@ -28,7 +28,7 @@
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rusqlite::config::DbConfig;
@@ -48,7 +48,7 @@ const OPS_PER_TICK: i32 = 1000;
 /// wide margin and still bounds a crafted file.
 pub(crate) const READ_OP_BUDGET: u64 = 5_000_000;
 /// `journal_size_limit`: the WAL is truncated to this after checkpoints.
-const JOURNAL_SIZE_LIMIT: i64 = 64 << 20;
+pub(crate) const JOURNAL_SIZE_LIMIT: i64 = 64 << 20;
 /// `SQLITE_LIMIT_LENGTH`: the largest value. The largest capped source value
 /// is `attributedBody` at 16 MiB.
 const LIMIT_LENGTH: i32 = 64 << 20;
@@ -57,12 +57,32 @@ const LIMIT_SQL_LENGTH: i32 = 1 << 20;
 /// How long a connection waits on SQLite's own locks.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Shared with the progress handler.
+/// Shared with the progress handler: either an op budget (`active`) or a
+/// cancel token (`cancellable`, the verifier's long reads), never both.
 #[derive(Default)]
 struct Budget {
     active: AtomicBool,
     ticks_left: AtomicU64,
     tripped: AtomicBool,
+    cancellable: AtomicBool,
+    cancel: Mutex<Option<oma_backup::CancelToken>>,
+    cancelled: AtomicBool,
+}
+
+impl Budget {
+    /// The cancellable mode's check: `true` stops the statement.
+    fn cancel_hit(&self) -> bool {
+        let hit = self
+            .cancel
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(oma_backup::CancelToken::is_cancelled))
+            .unwrap_or(false);
+        if hit {
+            self.cancelled.store(true, Ordering::Relaxed);
+        }
+        hit
+    }
 }
 
 /// A hardened read-only connection with an op budget.
@@ -146,6 +166,9 @@ impl ReadConn {
             conn.progress_handler(
                 OPS_PER_TICK,
                 Some(move || {
+                    if handler_budget.cancellable.load(Ordering::Relaxed) {
+                        return handler_budget.cancel_hit();
+                    }
                     if !handler_budget.active.load(Ordering::Relaxed) {
                         return false;
                     }
@@ -197,6 +220,43 @@ impl ReadConn {
     }
 }
 
+impl ReadConn {
+    /// Run `f` without an op budget but stopped by `cancel` (checked every
+    /// [`OPS_PER_TICK`] VM operations): the verifier's long reads, which
+    /// run only on the user's request (spec §4.5, §11). A stop gives
+    /// `Cancelled`.
+    pub(crate) fn cancellable<T>(
+        &self,
+        cancel: &oma_backup::CancelToken,
+        stage: Stage,
+        f: impl FnOnce(&Connection) -> rusqlite::Result<T>,
+    ) -> Result<T, ArchiveError> {
+        if cancel.is_cancelled() {
+            return Err(ArchiveError::Cancelled);
+        }
+        if let Ok(mut slot) = self.budget.cancel.lock() {
+            *slot = Some(cancel.clone());
+        }
+        self.budget.cancelled.store(false, Ordering::Relaxed);
+        self.budget.cancellable.store(true, Ordering::Relaxed);
+        let result = f(&self.conn);
+        self.budget.cancellable.store(false, Ordering::Relaxed);
+        if let Ok(mut slot) = self.budget.cancel.lock() {
+            *slot = None;
+        }
+        let cancelled = self.budget.cancelled.swap(false, Ordering::Relaxed);
+        result.map_err(|e| {
+            if cancelled && primary_code(&e) == Some(SQLITE_INTERRUPT) {
+                ArchiveError::Cancelled
+            } else if primary_code(&e) == Some(crate::error::SQLITE_NOTADB) {
+                ArchiveError::NotAnArchive
+            } else {
+                ArchiveError::sqlite(stage, &e)
+            }
+        })
+    }
+}
+
 impl WriteConn {
     /// The ReadWrite profile on an existing database. The database must
     /// already be in WAL mode (set once, at creation).
@@ -231,6 +291,7 @@ impl WriteConn {
             Some(crate::error::SQLITE_NOTADB) => ArchiveError::NotAnArchive,
             _ => ArchiveError::sqlite(Stage::Configure, &e),
         })?;
+        crate::fault::observe_commits(&conn);
         Ok(WriteConn { conn })
     }
 
@@ -257,10 +318,100 @@ impl WriteConn {
     }
 }
 
+/// Run `f`, a single long statement in its own transaction, with the
+/// archive interrupt **armed** (spec §8.6): a progress handler checks
+/// `cancel` every [`OPS_PER_TICK`] VM operations and interrupts the
+/// statement once it is set, which SQLite reports as `SQLITE_INTERRUPT`.
+///
+/// The handler is removed before this returns, so the caller's `COMMIT`
+/// (or `ROLLBACK`) and every batch statement run disarmed: an interrupted
+/// INSERT, UPDATE or DELETE inside an explicit transaction rolls the whole
+/// transaction back (sqlite.org/c3ref/interrupt.html), so the batch path
+/// never arms it. Only the write connection is armed; read connections
+/// keep their op budget.
+pub(crate) fn armed<T>(
+    conn: &Connection,
+    cancel: &oma_backup::CancelToken,
+    f: impl FnOnce(&Connection) -> rusqlite::Result<T>,
+) -> rusqlite::Result<T> {
+    let token = cancel.clone();
+    conn.progress_handler(OPS_PER_TICK, Some(move || token.is_cancelled()))?;
+    let out = f(conn);
+    let disarmed = conn.progress_handler(0, None::<fn() -> bool>);
+    match (out, disarmed) {
+        (Ok(v), Ok(())) => Ok(v),
+        (Err(e), _) | (Ok(_), Err(e)) => Err(e),
+    }
+}
+
 /// An in-memory database with the ReadWrite hardening, for building the
 /// expected schema objects (§7.3).
 pub(crate) fn open_memory() -> Result<Connection, ArchiveError> {
     let conn = Connection::open_in_memory().map_err(|e| ArchiveError::sqlite(Stage::Open, &e))?;
     harden_common(&conn).map_err(|e| ArchiveError::sqlite(Stage::Configure, &e))?;
     Ok(conn)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LONG: &str =
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000000) \
+                        SELECT count(*) FROM n";
+
+    #[test]
+    fn an_armed_statement_stops_on_cancel_and_the_handler_is_removed() {
+        let conn = open_memory().expect("memory");
+        let token = oma_backup::CancelToken::new();
+        let n: i64 = armed(&conn, &token, |c| c.query_row(LONG, [], |r| r.get(0))).expect("runs");
+        assert_eq!(n, 2_000_000);
+        token.cancel();
+        let e = armed(&conn, &token, |c| {
+            c.query_row(LONG, [], |r| r.get::<_, i64>(0))
+        })
+        .expect_err("interrupted");
+        assert_eq!(primary_code(&e), Some(SQLITE_INTERRUPT));
+        // Disarmed afterwards: the same statement runs although the token
+        // stays cancelled.
+        let n: i64 = conn.query_row(LONG, [], |r| r.get(0)).expect("disarmed");
+        assert_eq!(n, 2_000_000);
+    }
+
+    #[test]
+    fn a_cancellable_read_stops_inside_a_statement() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = ArchiveDir::at(tmp.path().to_path_buf());
+        create_database_file(&dir).expect("file");
+        drop(WriteConn::open_new(&dir).expect("writer"));
+        let r = ReadConn::open(&dir).expect("reader");
+        let token = oma_backup::CancelToken::new();
+        let n: i64 = r
+            .cancellable(&token, Stage::Read, |c| {
+                c.query_row(LONG, [], |row| row.get(0))
+            })
+            .expect("runs");
+        assert_eq!(n, 2_000_000);
+        let endless = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) \
+                       SELECT count(*) FROM n";
+        let later = token.clone();
+        let canceller = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            later.cancel();
+        });
+        let e = r
+            .cancellable(&token, Stage::Read, |c| {
+                c.query_row(endless, [], |row| row.get::<_, i64>(0))
+            })
+            .expect_err("stopped");
+        canceller.join().expect("join");
+        assert!(matches!(e, ArchiveError::Cancelled), "{e:?}");
+        // The budget mode works again afterwards.
+        let n: i64 = r
+            .budgeted(READ_OP_BUDGET, Stage::Read, |c| {
+                c.query_row("SELECT 7", [], |row| row.get(0))
+            })
+            .expect("budgeted");
+        assert_eq!(n, 7);
+    }
 }

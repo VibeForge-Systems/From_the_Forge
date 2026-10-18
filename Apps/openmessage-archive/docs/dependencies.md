@@ -37,15 +37,20 @@ Two automated audits enforce the license policy:
 | sha1 / sha2 | 0.11.0 / 0.11.0 | MIT OR Apache-2.0 | HMAC-SHA1 and HMAC-SHA256 for PBKDF2; SHA-1 for fileIDs; SHA-256 for ids and staging names. Default features off, `zeroize` on |
 | zeroize | 1.9.1 | Apache-2.0 OR MIT | Wiping passwords, keys and plaintext buffers |
 | plist | 1.10.1 | MIT | Property lists, read only through the budgeted event-stream reader. Default features (`serde`) off; `enable_unstable_features_that_may_break_with_minor_version_bumps` on, because that feature is what makes `plist::stream` public. The exact pin makes any change to that API a reviewed upgrade |
-| rusqlite | 0.40.2 | MIT | Read-only access to staged copies of Manifest.db and (M3) sms.db. Features `bundled` (compiles SQLite 3.53.2, public-domain C source, through libsqlite3-sys 0.38.2, MIT), `limits` (`Connection::set_limit`) and `hooks` (the authorizer and progress handler that guard staged sms.db connections). `limits` and `hooks` are empty features that add no crates. `cache` (statement cache) stays off, because it adds `hashlink` |
+| rusqlite | 0.40.2 | MIT | Read-only access to staged copies of Manifest.db and (M3) sms.db, and (M4) **read-write** access to each archive's `archive.sqlite` (`oma-archive`: WAL, the import's batch transactions, the verifier's states), with its FTS5 index (FTS5 is compiled in by `bundled`). Features `bundled` (compiles SQLite 3.53.2, public-domain C source, through libsqlite3-sys 0.38.2, MIT), `limits` (`Connection::set_limit`) and `hooks`: the authorizer and progress handler that guard staged sms.db connections, the progress handler behind the archive's op budgets, cancellable reads and armed interrupt, and (tests only, through the `fault-injection` feature) the commit hook the ordering test observes. `limits` and `hooks` are empty features that add no crates. `cache` (statement cache) stays off, because it adds `hashlink` |
 | pbkdf2 (dev only) | 0.13.0 | MIT OR Apache-2.0 | Differential tests against the in-crate PBKDF2; never linked into the app |
 | fs4 | 1.1.0 | MIT OR Apache-2.0 | Free space for the archive's space checks (`oma_fs::available_space`): `statvfs` on Unix, `GetDiskFreeSpaceExW` (caller-scoped, so quotas count) on Windows. Default features off: `sync` (file locking) is not used. It depends on `rustix` (Unix) and `windows-sys` 0.61.2 (Windows), both already in the tree |
 | rustix (Linux only) | 1.1.5 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | `oma-fs` on Linux: `statfs` for the volume kind, `renameat2(RENAME_NOREPLACE)`, `O_NOFOLLOW` opens and `geteuid`, all without `unsafe`. Features `fs` and `process` (plus the default `std`). Already in the tree through Tauri's Linux stack, with both features on |
 
 `tracing-subscriber` (above) is also a dev-dependency of `oma-backup` and
-`oma-messages`, for their log-hygiene tests. The shell (`src-tauri`) depends
-on the workspace crates `oma-backup` (from M2) and `oma-messages` (from M3);
-neither adds a third-party crate beyond the list above. `oma-messages`
+`oma-messages`, for their log-hygiene tests (and of `oma-archive`, for
+its own). The shell (`src-tauri`) depends on the workspace crates
+`oma-backup` (from M2), `oma-messages` (from M3) and `oma-archive` (from
+M4, slice 4l); none adds a third-party crate beyond the list above.
+`oma-archive` depends only on crates already listed (`rusqlite`, `serde`,
+`serde_json`, `sha2`, `thiserror`, `dunce`, `tracing`, `zeroize`; `tempfile`
+and `tracing-subscriber` for its tests) and on the workspace crates
+`oma-backup`, `oma-fs` and `oma-messages`. `oma-messages`
 depends only on crates already listed (`rusqlite`, `sha2`, `thiserror`,
 `tracing`, `zeroize`) and on the workspace crates `oma-backup` and
 `oma-fs`; its typedstream decoder is our own code, not a dependency. No
@@ -162,6 +167,11 @@ them locally, is fine. See [supported-formats.md](supported-formats.md).
 
 ## Upgrade log
 
+**Milestone 4 in summary:** one new third-party crate, `fs4` 1.1.0 (MIT OR
+Apache-2.0), and a direct dependency on `rustix` 1.1.5 on Linux, which was
+already in the tree; the new workspace crate `oma-archive`; no JavaScript
+dependency change; `deny.toml` unchanged. Slice 4n changed no dependency.
+
 | Date | Change | Reason |
 |---|---|---|
 | 2026-10-17 | Initial set (Milestone 1) | — |
@@ -191,3 +201,4 @@ them locally, is fine. See [supported-formats.md](supported-formats.md).
 | on merge (M4, slice 4e) | `oma-archive` gains the dev-dependencies `oma-messages` (a workspace crate) and `serde_json` (already a workspace dependency) | The import catalogue test reads the content manifests and runs the M3 check, the key passes and staging over each entry. No new third-party crate: `Cargo.lock` changes only in `oma-archive`'s own dependency list. `cargo deny check` passes with the unchanged `deny.toml` |
 | on merge (M4, slice 4e) | Dev-only Python tooling: `make_synthetic_imports.py` needs only the existing `requirements.txt` (`cryptography`) | The import catalogue. It imports the M2 and M3 generators as modules; no new Python package |
 | on merge (M4, slice 4f) | `oma-archive` moves `oma-messages` and `serde_json` from dev-dependencies to dependencies, and adds `serde` and `zeroize` (all already workspace dependencies) | The import core reads sms.db through the `oma-messages` passes, stores `ImportCounts` as JSON, and zeroizes the source values a batch holds. No new third-party crate: `Cargo.lock` changes only in `oma-archive`'s own dependency list (`serde`, `zeroize` added). `cargo deny check` passes with the unchanged `deny.toml` |
+| on merge (M4, slice 4l) | The shell depends on the workspace crate `oma-archive` | The archive commands and the import and verify jobs. No new third-party crate: the only `Cargo.lock` change is `oma-archive` added to the shell's own dependency list. No new npm package. `cargo deny check` passes with the unchanged `deny.toml` |

@@ -19,11 +19,13 @@ pub mod worker;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use oma_backup::{CancelToken, Candidate};
 
+use crate::archives::dto::{ArchiveJobDto, ImportPreflightDto};
+use crate::archives::gate::{Gate, GateAnswer, GateClock, MonotonicClock, GATE_TIMEOUT};
 use crate::error::{ErrorCode, IpcError, IpcResult};
 use dto::{
     BackupList, BackupLocation, BackupSummary, CleanupDto, JobEvent, JobKind, JobPhase, JobSummary,
@@ -125,12 +127,67 @@ impl BackupRegistry {
 
 // ---------------------------------------------------------------- jobs
 
+/// What a job works on (D73): a backup, an archive, or both (an import).
+/// Two jobs that share either are never active together.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct JobSubject {
+    pub backup_id: Option<String>,
+    pub archive_id: Option<String>,
+}
+
+impl JobSubject {
+    pub fn backup(id: &str) -> JobSubject {
+        JobSubject {
+            backup_id: Some(id.to_owned()),
+            archive_id: None,
+        }
+    }
+
+    pub fn archive(id: &str) -> JobSubject {
+        JobSubject {
+            backup_id: None,
+            archive_id: Some(id.to_owned()),
+        }
+    }
+
+    pub fn import(backup_id: &str, archive_id: &str) -> JobSubject {
+        JobSubject {
+            backup_id: Some(backup_id.to_owned()),
+            archive_id: Some(archive_id.to_owned()),
+        }
+    }
+
+    fn shares_backup(&self, other: &JobSubject) -> bool {
+        self.backup_id.is_some() && self.backup_id == other.backup_id
+    }
+
+    fn shares_archive(&self, other: &JobSubject) -> bool {
+        self.archive_id.is_some() && self.archive_id == other.archive_id
+    }
+}
+
+impl From<&str> for JobSubject {
+    fn from(backup_id: &str) -> Self {
+        JobSubject::backup(backup_id)
+    }
+}
+
+impl From<&String> for JobSubject {
+    fn from(backup_id: &String) -> Self {
+        JobSubject::backup(backup_id)
+    }
+}
+
 /// A running job.
 pub struct ActiveJob {
-    pub backup_id: String,
+    pub subject: JobSubject,
     pub kind: JobKind,
     pub cancel: CancelToken,
     pub phase: Option<JobPhase>,
+    /// An import's gate (spec §15.1).
+    pub gate: Option<Arc<Gate>>,
+    /// What the gate shows, while the import waits there.
+    pub preflight: Option<ImportPreflightDto>,
 }
 
 /// What the last job for a backup left behind. In memory only.
@@ -138,7 +195,8 @@ pub struct ActiveJob {
 /// `report` and `extraction` are replaced together, whenever a job ends
 /// with a validation report: a Validate job sets `extraction` to `None`, so
 /// an old extraction report is never shown beside a newer validation
-/// (§16.1). A failed or cancelled job keeps both.
+/// (§16.1). A failed or cancelled job keeps both. Import summaries persist
+/// in the archive instead (M4 §15.1).
 #[derive(Debug, Clone, Default)]
 pub struct LastOutcome {
     pub report: Option<ValidationReportDto>,
@@ -158,6 +216,8 @@ pub struct Reservation {
     pub job_id: String,
     pub cancel: CancelToken,
     pub done: Sender<()>,
+    /// For an import: the gate its worker waits at.
+    pub gate: Option<Arc<Gate>>,
 }
 
 /// The job table: `Mutex<HashMap<JobId, ActiveJob>>`, an `AtomicU64`
@@ -166,29 +226,50 @@ pub struct Reservation {
 pub struct Jobs {
     table: Mutex<JobTable>,
     counter: AtomicU64,
+    gate_clock: Arc<dyn GateClock>,
+    gate_timeout: Duration,
 }
 
 impl Default for Jobs {
     fn default() -> Self {
-        Jobs {
-            table: Mutex::new(JobTable::default()),
-            counter: AtomicU64::new(1),
-        }
+        Jobs::with_gate(Arc::new(MonotonicClock::default()), GATE_TIMEOUT)
     }
 }
 
 impl Jobs {
+    /// A job table whose import gates use `clock` and `timeout` (tests).
+    pub fn with_gate(clock: Arc<dyn GateClock>, timeout: Duration) -> Jobs {
+        Jobs {
+            table: Mutex::new(JobTable::default()),
+            counter: AtomicU64::new(1),
+            gate_clock: clock,
+            gate_timeout: timeout,
+        }
+    }
+
     fn lock(&self) -> IpcResult<MutexGuard<'_, JobTable>> {
         self.table
             .lock()
             .map_err(|_| IpcError::internal("job table lock poisoned"))
     }
 
-    /// Reserve the job slot for `backup_id`, or `busy`.
-    pub fn reserve(&self, backup_id: &str, kind: JobKind) -> IpcResult<Reservation> {
+    /// Reserve the job slot for `subject`, or `busy`: when any active job
+    /// shares its backup or its archive, or when the one slot is taken
+    /// (D7, D73).
+    pub fn reserve(&self, subject: impl Into<JobSubject>, kind: JobKind) -> IpcResult<Reservation> {
+        let subject = subject.into();
         let mut t = self.lock()?;
-        if t.active.values().any(|j| j.backup_id == backup_id) {
+        if t.active.values().any(|j| j.subject.shares_backup(&subject)) {
             return Err(IpcError::new(ErrorCode::Busy, messages::BUSY_SAME));
+        }
+        if t.active
+            .values()
+            .any(|j| j.subject.shares_archive(&subject))
+        {
+            return Err(IpcError::new(
+                ErrorCode::Busy,
+                crate::archives::messages::BUSY_ARCHIVE,
+            ));
         }
         if t.active.len() >= MAX_CONCURRENT_JOBS {
             return Err(IpcError::new(ErrorCode::Busy, messages::BUSY_OTHER));
@@ -197,13 +278,17 @@ impl Jobs {
         let job_id = format!("job-{n}");
         let cancel = CancelToken::new();
         let (done, rx) = mpsc::channel();
+        let gate = (kind == JobKind::Import)
+            .then(|| Arc::new(Gate::new(self.gate_clock.clone(), self.gate_timeout)));
         t.active.insert(
             job_id.clone(),
             ActiveJob {
-                backup_id: backup_id.to_owned(),
+                subject,
                 kind,
                 cancel: cancel.clone(),
                 phase: None,
+                gate: gate.clone(),
+                preflight: None,
             },
         );
         t.completions.insert(job_id.clone(), rx);
@@ -211,6 +296,7 @@ impl Jobs {
             job_id,
             cancel,
             done,
+            gate,
         })
     }
 
@@ -223,17 +309,22 @@ impl Jobs {
     }
 
     /// Request cancellation. False when the job is unknown or already over.
+    /// A job waiting at the gate wakes and declines.
     pub fn cancel(&self, job_id: &str) -> bool {
-        match self.lock() {
+        let gate = match self.lock() {
             Ok(t) => match t.active.get(job_id) {
                 Some(j) => {
                     j.cancel.cancel();
-                    true
+                    j.gate.clone()
                 }
-                None => false,
+                None => return false,
             },
-            Err(_) => false,
+            Err(_) => return false,
+        };
+        if let Some(g) = gate {
+            g.wake();
         }
+        true
     }
 
     pub fn set_phase(&self, job_id: &str, phase: JobPhase) {
@@ -244,33 +335,93 @@ impl Jobs {
         }
     }
 
+    /// Show (or clear) what an import's gate asks.
+    pub fn set_preflight(&self, job_id: &str, preflight: Option<ImportPreflightDto>) {
+        if let Ok(mut t) = self.lock() {
+            if let Some(j) = t.active.get_mut(job_id) {
+                j.preflight = preflight;
+            }
+        }
+    }
+
+    /// Answer an import waiting at its gate (`confirm_import`). A
+    /// lineage the preflight does not list is `invalidInput`; a job that is
+    /// unknown, over, not an import or not at the gate is `jobNotWaiting`.
+    pub fn confirm(&self, job_id: &str, answer: GateAnswer) -> IpcResult<()> {
+        use crate::archives::messages as am;
+        let gate = {
+            let t = self.lock()?;
+            let job = t.active.get(job_id);
+            let (Some(gate), Some(preflight)) = (
+                job.and_then(|j| j.gate.clone()),
+                job.and_then(|j| j.preflight.as_ref()),
+            ) else {
+                return Err(IpcError::new(ErrorCode::JobNotWaiting, am::JOB_NOT_WAITING));
+            };
+            if let GateAnswer::Proceed(oma_archive::LineageChoice::Existing(id)) = answer {
+                if !preflight.lineages.iter().any(|l| l.lineage_id == id.get()) {
+                    return Err(IpcError::new(ErrorCode::InvalidInput, am::UNKNOWN_LINEAGE));
+                }
+            }
+            gate
+        };
+        gate.answer(answer)
+            .map_err(|_| IpcError::new(ErrorCode::JobNotWaiting, am::JOB_NOT_WAITING))
+    }
+
     /// Store the outcome and free the slot, atomically, before the terminal
     /// event is sent: when the UI sees `finished`, "Validate again" is
     /// already allowed and `get_backup_details` already has the report.
     pub fn finish(&self, job_id: &str, outcome: LastOutcome) {
         if let Ok(mut t) = self.lock() {
             if let Some(job) = t.active.remove(job_id) {
-                let last = t.last.entry(job.backup_id).or_default();
-                if outcome.report.is_some() {
-                    last.report = outcome.report;
-                    last.extraction = outcome.extraction;
+                if let Some(backup_id) = job.subject.backup_id {
+                    let last = t.last.entry(backup_id).or_default();
+                    if outcome.report.is_some() {
+                        last.report = outcome.report;
+                        last.extraction = outcome.extraction;
+                    }
+                    last.cleanup = outcome.cleanup;
                 }
-                last.cleanup = outcome.cleanup;
             }
             t.completions.remove(job_id);
         }
     }
 
+    /// The active job on this backup, if any.
     pub fn active_for(&self, backup_id: &str) -> Option<JobSummary> {
         let t = self.lock().ok()?;
         t.active
             .iter()
-            .find(|(_, j)| j.backup_id == backup_id)
+            .find(|(_, j)| j.subject.backup_id.as_deref() == Some(backup_id))
             .map(|(id, j)| JobSummary {
                 job_id: id.clone(),
-                backup_id: j.backup_id.clone(),
+                backup_id: backup_id.to_owned(),
                 kind: j.kind,
                 phase: j.phase,
+            })
+    }
+
+    /// The active job on this archive, and what its gate asks, if any.
+    pub fn active_for_archive(
+        &self,
+        archive_id: &str,
+    ) -> Option<(ArchiveJobDto, Option<ImportPreflightDto>)> {
+        let t = self.lock().ok()?;
+        t.active
+            .iter()
+            .find(|(_, j)| j.subject.archive_id.as_deref() == Some(archive_id))
+            .map(|(id, j)| {
+                (
+                    ArchiveJobDto {
+                        job_id: id.clone(),
+                        kind: j.kind,
+                        phase: j.phase,
+                        backup_id: j.subject.backup_id.clone(),
+                        waiting_at_gate: j.preflight.is_some(),
+                    },
+                    j.preflight.clone(),
+                )
             })
     }
 
@@ -292,19 +443,25 @@ impl Jobs {
         s
     }
 
-    /// The `RunEvent::Exit` handler: cancel every job, then wait for the
-    /// workers to finish their cleanup, up to `budget` in total. Workers are
+    /// The `RunEvent::Exit` handler: cancel every job and wake every gate,
+    /// then wait for the workers to finish their cleanup, up to `budget` in
+    /// total. A batch in flight finishes or rolls back. Workers are
     /// `std::thread`s, so this cannot deadlock an async runtime.
     pub fn cancel_all_and_wait(&self, budget: Duration) -> bool {
-        let receivers: Vec<Receiver<()>> = match self.lock() {
+        let (receivers, gates): (Vec<Receiver<()>>, Vec<Arc<Gate>>) = match self.lock() {
             Ok(mut t) => {
+                let mut gates = Vec::new();
                 for j in t.active.values() {
                     j.cancel.cancel();
+                    gates.extend(j.gate.clone());
                 }
-                t.completions.drain().map(|(_, rx)| rx).collect()
+                (t.completions.drain().map(|(_, rx)| rx).collect(), gates)
             }
             Err(_) => return false,
         };
+        for g in gates {
+            g.wake();
+        }
         let deadline = Instant::now() + budget;
         let mut all = true;
         for rx in receivers {
@@ -363,6 +520,77 @@ mod tests {
             .reserve("backup-b", JobKind::Validate)
             .expect("free again");
         assert_eq!(b.job_id, "job-2");
+    }
+
+    /// D73: a job that shares the backup or the archive of an active job
+    /// is busy, with the sentence for which one; otherwise the one slot
+    /// decides (D7).
+    #[test]
+    fn reserve_is_busy_by_subject() {
+        use crate::archives::messages::BUSY_ARCHIVE;
+        let jobs = Jobs::default();
+        let import = jobs
+            .reserve(JobSubject::import("b1", "a1"), JobKind::Import)
+            .expect("import");
+        assert!(import.gate.is_some());
+        let busy = |s: JobSubject, k| jobs.reserve(s, k).err().expect("busy");
+        let e = busy(JobSubject::backup("b1"), JobKind::Validate);
+        assert_eq!(
+            (e.code, e.message.as_str()),
+            (ErrorCode::Busy, messages::BUSY_SAME)
+        );
+        let e = busy(JobSubject::archive("a1"), JobKind::Verify);
+        assert_eq!(
+            (e.code, e.message.as_str()),
+            (ErrorCode::Busy, BUSY_ARCHIVE)
+        );
+        let e = busy(JobSubject::import("b2", "a1"), JobKind::Import);
+        assert_eq!(e.message, BUSY_ARCHIVE);
+        let e = busy(JobSubject::archive("a2"), JobKind::Verify);
+        assert_eq!(e.message, messages::BUSY_OTHER);
+        // The import shows on its backup and on its archive.
+        assert_eq!(jobs.active_for("b1").map(|j| j.kind), Some(JobKind::Import));
+        let (job, preflight) = jobs.active_for_archive("a1").expect("on the archive");
+        assert_eq!(job.backup_id.as_deref(), Some("b1"));
+        assert!(!job.waiting_at_gate && preflight.is_none());
+        assert!(jobs.active_for_archive("a2").is_none());
+        jobs.finish(&import.job_id, LastOutcome::default());
+        // A verify has no backup and leaves no backup outcome behind.
+        let v = jobs
+            .reserve(JobSubject::archive("a1"), JobKind::Verify)
+            .expect("verify");
+        assert!(v.gate.is_none());
+        assert!(jobs.active_for("b1").is_none());
+        jobs.finish(&v.job_id, LastOutcome::default());
+        assert!(jobs.last("b1").report.is_none());
+    }
+
+    /// The exit handler wakes an import waiting at its gate.
+    #[test]
+    fn exit_wakes_a_waiting_gate() {
+        let jobs = std::sync::Arc::new(Jobs::default());
+        let r = jobs
+            .reserve(JobSubject::import("b", "a"), JobKind::Import)
+            .expect("reserve");
+        let gate = r.gate.clone().expect("gate");
+        let watched = gate.clone();
+        let worker_jobs = jobs.clone();
+        let handle = std::thread::spawn(move || {
+            let ending = gate.wait(&r.cancel);
+            worker_jobs.finish(&r.job_id, LastOutcome::default());
+            drop(r.done);
+            ending
+        });
+        let started = Instant::now();
+        while !watched.is_waiting() {
+            std::thread::yield_now();
+        }
+        assert!(jobs.cancel_all_and_wait(Duration::from_secs(5)));
+        assert_eq!(
+            handle.join().expect("join"),
+            crate::archives::gate::GateEnding::Cancelled
+        );
+        assert!(started.elapsed() < GATE_TIMEOUT);
     }
 
     #[test]

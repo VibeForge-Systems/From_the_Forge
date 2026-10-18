@@ -309,10 +309,22 @@ body {
   --bs-modal-footer-border-color: var(--bs-border-color);
   --bs-modal-footer-border-width: var(--bs-border-width);
   width: min(36rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow: hidden;
   border: 0;
   border-radius: var(--bs-border-radius-lg);
   background: transparent;
   color: var(--bs-body-color);
+}
+
+/* A tall dialog scrolls its body; the header and the footer's buttons stay
+   on screen (the import confirmation is taller than an 860 px window). */
+.oma-dialog .modal-content {
+  max-height: calc(100vh - 2rem);
+}
+
+.oma-dialog .modal-body {
+  overflow-y: auto;
 }
 
 .oma-dialog::backdrop {
@@ -350,7 +362,8 @@ body {
   background: var(--bs-secondary-bg);
 }
 
-.oma-backup-page {
+.oma-backup-page,
+.oma-archive-page {
   max-width: 48rem;
 }
 

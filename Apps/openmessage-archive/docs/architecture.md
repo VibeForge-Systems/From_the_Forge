@@ -1,9 +1,10 @@
 # Architecture
 
-Status: Milestone 3 (the extraction check) is implemented; its sign-off
-is pending (see the README roadmap). Sections marked *planned* describe the
-intended design for later milestones. They will be revised against evidence
-as each milestone lands. Nothing in them is implemented yet.
+Status: Milestone 4 (the archive database and import) is implemented;
+its sign-off, like that of milestones 2 and 3, is pending (see the README
+roadmap). Sections marked *planned* describe the intended design for later
+milestones. They will be revised against evidence as each milestone lands.
+Nothing in them is implemented yet.
 
 ## Invariants
 
@@ -57,7 +58,7 @@ flowchart LR
     Shell --> FS["oma-fs ✔"]
     Shell --> Backup["oma-backup ✔"]
     Shell --> Messages["oma-messages ✔"]
-    Shell -.-> Archive["oma-archive (M4, in progress)"]
+    Shell --> Archive["oma-archive ✔"]
     Shell -.-> Export["oma-export (M6)"]
     Shell -.-> Device["oma-device (M7)"]
     Backup --> FS
@@ -73,12 +74,12 @@ flowchart LR
 
 | Unit | Responsibility | State |
 |---|---|---|
-| `src/` | Vue 3 UI: views, Pinia stores, the typed IPC client, the shortcut registry, and the capability roadmap | M1, M2 (Backups page), M3 (extraction report) |
-| `src-tauri/` | Tauri shell. Holds IPC commands, application state, settings persistence, archive-location validation, the backup registry, job table and DTOs, and (M3) the report mapping and the panic hook. Contains no domain logic. | M1, M2, M3 |
+| `src/` | Vue 3 UI: views, Pinia stores, the typed IPC client, the shortcut registry, and the capability roadmap | M1, M2 (Backups page), M3 (extraction report), M4 slice 4m (Archive page) |
+| `src-tauri/` | Tauri shell. Holds IPC commands, application state, settings persistence, archive-location validation, the backup registry, job table and DTOs, (M3) the report mapping and the panic hook, and (M4 slice 4l) the archive commands, the import gate and the import and verify jobs. Contains no domain logic. | M1, M2, M3, M4 (slice 4l) |
 | `crates/oma-fs` | Filesystem safety: filename sanitization, contained path resolution, and guards for backups, MobileSync, iMazing's default store and cloud sync. From M4: volume facts (`volume`: free space, network/virtualised/FAT detection), the Unix private-permission check (`perm::check_private`), and durable placement (`place`: `fsync_dir`, `create_dir_durable`, `place_noreplace`, `open_nofollow`). From slice 4d: `check_owned_unshared` (the library folder), `rename_dir_noreplace`, `create_new_private` and `total_space` | M1, M4 (slices 4a, 4d) |
 | `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them. From M4: `copy_file_to` streams one listed file's plaintext into a caller's writer, hashing it, under `Limits::attachment_bytes` and per-file stamps | ✔ M2, M3, M4 (slice 4b) |
 | `crates/oma-messages` | Scans and probes the sms.db schema by capability, streams typed records (handles, chats, the joins, messages, attachments, Recently Deleted links) as `Col<T>` values, decodes `attributedBody` with a clean-room typedstream decoder, and produces the aggregate `ExtractionReport`. Persists nothing. From M4: stable `KnownColumn` codes, raw values of unreadable cells (`raw_issues`), `payload_data` on request, the raw association columns, key-only passes and the storage class of text cells | ✔ M3, M4 (slice 4c) |
-| `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep. Not yet used by the shell | M4 (slice 4d; import, verify and the shell follow) |
+| `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep; slices 4e–4j the import; slice 4k the report-only verifier and `open_blob`. Used by the shell since slice 4l | ✔ M4 (slices 4d–4k) |
 | `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX | planned, M6 |
 | `crates/oma-device` | Detects devices and creates backups behind a platform trait | planned, M7 |
 
@@ -131,6 +132,15 @@ converts between IPC types and library calls.
   key-based structural test walks every reachable DTO type (I7). Counters
   that are not recorded cross as `null`, never as 0 (I5), and integers
   outside ±(2⁵³ − 1) are clamped with a `saturated` flag.
+- **Archives (M4 slice 4l).** Six commands: `list_archives`,
+  `create_archive`, `get_archive_details`, `start_import`,
+  `confirm_import` and `verify_archive` (§"The archive commands and jobs"
+  below). They take archive ids (`a<32hex>`), backup ids, booleans, a
+  lineage number and an optional label; never a path. Two new job kinds,
+  `import` and `verify`, use the same channel and job table; the new
+  events are `importPreflight` (non-terminal), `importFinished` and
+  `verifyFinished`, each under 1 KiB, with reports and the preflight
+  fetched through `get_archive_details`.
 
 ## Settings
 
@@ -180,10 +190,31 @@ re-checked:
     archive.sqlite-wal, -shm      SQLite's own files; same mode as the database
     attachments/
       .incoming/                  <n>.partial while a copy is in flight
-      <hh>/<64 hex>               content-addressed plaintext (from slice 4i)
+      <hh>/<64 hex>               content-addressed plaintext
     imports/
-      session-<n>.json            content-free provenance (from slice 4j)
+      session-<n>.json            content-free provenance (slice 4j)
 ```
+
+### Threat model for archive files (M4, spec §4.5)
+
+An `a<32hex>` directory may have been planted or altered by another program
+or user. The goals: nothing is written outside the archive directory, no
+code is loaded from it, listing and opening do bounded work, verification
+is cancellable, and no import writes into an archive that failed a check.
+The measures: id parsing; refusal of links and wrong types; owner and mode
+on Unix; a hardened read-only first connection (`DEFENSIVE`,
+`TRUSTED_SCHEMA` off, DQS off, no extensions, limits, an op budget for
+`list` and `open`); the schema fingerprint before any table read; CHECK
+constraints; `storage_name` parsed as `^[0-9a-f]{64}$`; no-follow opens;
+bounded walks; size caps on `imports/*.json`; the label re-validated.
+**Accepted:** SQLite's page parsing and the FTS5 integrity and merge code
+run over archive pages whose content may be anything, because M5 must read
+the index anyway, SQLite documents these settings for untrusted database
+files, verification runs only on request and only reports, and `list`
+never touches FTS. This is narrower than D44 for sms.db: the archive's FTS
+table is our own, and the fingerprint has matched its schema text.
+
+### Archive naming
 
 The directory name is a random id (`a` and 32 lowercase hex characters);
 the user's label lives only in the database (D52). There is no
@@ -235,14 +266,46 @@ Milestone 3, the extraction check (implemented; one job, `check_extraction`):
   → exactly one terminal event: extractionFinished | failed | cancelled
 ```
 
-Planned (M4–M5):
+Milestone 4, the import (implemented; one job, `start_import`, with the
+gate answered by `confirm_import`):
 
 ```
-  → oma-archive: the same for_each_* passes, cursors bound to the content digest;
-      single write transaction per batch, keyed for idempotent re-import;
-      a changed source aborts the import; FTS5 index updated incrementally
-  → UI: paged queries (keyset pagination by timestamp+id), virtualized thread list,
-        attachments loaded on demand through a scoped asset protocol
+  open → validate (M2) → if not importable: importFinished/notImportable
+  → Archive::import(&open_backup, options, gate, ctx)   (oma-archive)
+      preflight (reads only; nothing written to the archive):
+        a. stage sms.db[-wal] as M3 does; schema scan, quick_check, probe
+        b. P0: Recently Deleted scan; key scan (sorted 128-bit digests,
+           4,194,304 cap) marks every duplicated key unkeyed (D83)
+        c. resume plan (digest, framing, versions, options, lineage; D64),
+           lineages and boolean device evidence, order facts, space estimate
+        d. the gate: ImportGate::confirm → the shell publishes the preflight,
+           sends importPreflight and waits ≤ 2 min for confirm_import (D65)
+           → Decline / cancel / exit / timeout: nothing written
+      after Proceed: begin_write(Recovery::Run), the session row, then passes,
+        each in IMMEDIATE batches (1,000 rows / 32 MiB / 2 s) with the pass
+        cursor in the same transaction and a savepoint per record (D63):
+        P1 handles → P2 chats → P3 messages, bodies (FTS by triggers only),
+        parts, edits, unsent parts → P4/P5 chat links → P6 attachment rows
+        and files (write → sync_all → intent commit → no-replace rename →
+        directory flush → row commit) → P7 attachment links → P8 Recently
+        Deleted markers; space guards before every transaction and file
+      → staged sms.db removed (D74)
+      P9 finalize: statistics, session-local cleanup, completed, FTS merge,
+        wal_checkpoint(TRUNCATE); imports/session-<n>.json (best effort)
+  → close(): keys zeroized, staging removed
+  → exactly one terminal event: importFinished | failed | cancelled
+```
+
+A verify (`verify_archive`) opens the writer without recovery, runs the
+database, index and file checks of slice 4k, and records one `verify_run`
+row; its terminal event is `verifyFinished`.
+
+Planned (M5):
+
+```
+  → UI: paged queries through ArchiveReader (keyset pagination on
+        (chat_id, sort_key, message_id)), virtualized thread list,
+        attachments loaded on demand through BlobReader and a scoped asset protocol
 ```
 
 Decrypted intermediates are written only inside the archive library's
@@ -687,7 +750,8 @@ untouched, so the frozen catalogues cannot change by accident.
     the deleted messages were never seen by the newer session, so they are
     labelled. §8.7's list of exceptions does not name this case yet;
   - the display none-reasons are named (`attributedBodyUnusable`,
-    `textEmpty`, `noSource`); their codes are fixed in slice 4g.
+    `textEmpty`, `noSource`); slice 4g fixed their codes as 1, 2 and 3
+    (`DisplayNoneReason`).
 - **Owner decisions.** The model applies D60 (Recently Deleted excluded
   by default, its attachments included when opted in), D61 (text from
   before an unsend stays as an earlier body version) and D59 (raw values
@@ -696,7 +760,7 @@ untouched, so the frozen catalogues cannot change by accident.
 
 ### The import core (M4 slice 4f)
 
-`Archive::import_core` (`crates/oma-archive/src/import/`) is the import as
+`Archive::import` (`crates/oma-archive/src/import/`) is the import as
 far as slice 4f builds it: staging and the probe, the session's facts, the
 resume decision, the duplicate-key scan, the session bookkeeping, and the
 first two passes, **P1 handles and P2 chats**, in batches. The shell does
@@ -728,8 +792,7 @@ not call it yet (slice 4l).
   import also deletes any such rows a failed or superseded session still
   owns.
 - **The key scan runs before the resume decision**, on every import,
-  so the gate (slice 4j) can show its evidence before the lineage is
-  chosen; a continued session keeps its stored duplicate set (the same
+  so the gate can show its evidence before the lineage is chosen; a continued session keeps its stored duplicate set (the same
   set, as the digest is bound). Staging reports its bytes as the
   `StagingMessagesDb` phase.
 - **`source_backup`** holds the plist strings exactly as recorded
@@ -774,16 +837,13 @@ not call it yet (slice 4l).
 - **Cancel** (§8.6). The callback checks the token at the start of each
   record; the engine checks it every 128 rows. Either way the completed
   records are committed and the session becomes cancelled (2), resumable.
-- **Until finalize exists**, a session whose passes all ran stays running
-  (state 0) and the outcome is `CoreOutcome::PassesDone`: it is never
-  marked completed or a full observation. Two consequences: an import of
-  the **same content** continues the earlier session and has nothing left
-  to do, and every new import supersedes the previous one. The scenario
-  tests therefore stand in for finalize between steps (they mark the
-  session completed and empty its session-local tables), so a repeated
-  digest is a fresh session: the model's per-step counts and order
-  independence are asserted for every scenario, including the four that
-  repeat a digest.
+- **Until finalize existed** (slices 4f to 4i), a session whose passes
+  all ran stayed running (state 0) and the tests stood in for finalize
+  between steps. Since slice 4j finalize completes it (below), so an
+  import of the same content after a completed one is a fresh session
+  that re-observes it: the model's per-step counts and order independence
+  are asserted for every scenario, including the four that repeat a
+  digest.
 - **Crash points** (`fault.rs`, D85). `fault::point(FaultPoint::…)` marks
   the record start, before and after each batch commit, after the session
   transaction and the terminal state, each recovery step of `begin_write`,
@@ -809,13 +869,16 @@ not call it yet (slice 4l).
   a logged durability warning, and the id is returned. The intent
   reconcile flushes each `attachments/<hh>/` it removed a file from,
   through the same trait, before the intents' deletion commits. The
-  attachment store (slice 4i) uses the same trait.
+  attachment store (slice 4i) uses the same trait, which gained
+  `remove_file` (a default method) for partial files and replaced orphans.
 - **Store paths** (`blobs.rs`, `store_dir`). Before any file under
   `attachments/<hh>/` is touched, `attachments/` and `<hh>` must each be
   a real directory (no link, junction or reparse point) and, on Unix,
-  private (`check_private`). The reconcile goes through it today; slice
-  4i's placement and reads and the verifier will. A planted link at
-  `<hh>` leaves the intent in place and counts the file as left.
+  private (`check_private`). The reconcile, P6's "already archived" check
+  and its placement go through it, and so do the verifier and
+  `open_blob` (slice 4k). A
+  planted link at `<hh>` leaves the intent in place and counts the file as
+  left.
 - **Counts** (`counts.rs`). `ImportCounts` is numbers only; the handle and
   chat groups hold seen, inserted, already present, unkeyed, cells
   replaced, not applied, history added and value-issue cells.
@@ -858,6 +921,682 @@ leans awaiting the owner's confirmation.
   computed outside the crate (`bind.rs`), because they are the identity
   of every unkeyed row across sessions.
 
+### Messages, bodies and the FTS index (M4 slice 4g)
+
+Slice 4g adds the preflight's Recently Deleted steps and **P3 messages**
+(`import/preflight.rs`, `import/messages.rs`) to `Archive::import`.
+The passes now run P1, P2, P3; a session whose passes ran still stays
+running until finalize (slice 4j, below).
+
+- **P0** (spec §8.2 step 2). `for_each_recoverable` gives the sorted,
+  distinct message rowids of `chat_recoverable_message_join`; a join row
+  whose `message_id` is not a readable integer names no message. It is
+  re-run on every resume. `recoverable_message_part.part_text` is never
+  read (the reader's authorizer denies it). **Over 4,194,304 join rows the
+  backup is `NotImportable(OverRecentlyDeletedCap)`**: the spec says no
+  Recently Deleted content is imported over the cap, and the only way to
+  guarantee that without the set is to import nothing (a reading of §8.2
+  and §23; nothing is written).
+- **The Recently Deleted classification** runs inside the message key
+  scan, on the reader connection under an op budget that grows with the
+  set. With the default exclusion (D60), a Recently Deleted row whose GUID
+  is a usable key, unique in this source and already a keyed message of
+  the archive is **re-observed only**; every other one (an unkeyed or
+  duplicated one included) is **excluded**. Only digests outlive a row.
+  With the opt-in, nothing is classified and every row merges.
+- **P3** reads `for_each_message` with decoding on and raw blobs kept
+  (D59). Per record, in its savepoint:
+  - an excluded row is skipped: no row, no map, no join later
+    (`recentlyDeleted.excluded`);
+  - a re-observed row is mapped and recorded in `lineage_seen` only: no
+    column, body or rank changes (`recentlyDeleted.notUpdated`);
+  - every other row is keyed or unkeyed as in slice 4f. The unkeyed
+    fingerprint covers the 41 message cells and the body's `raw_hash`.
+    Its raw cells merge by the column rules. **Derived columns are
+    recomputed from the stored raw cells after the merge** (`service_class`,
+    `item_kind`, the `assoc_*` parse through `oma_messages::AssocRaw`,
+    `sort_key`, `first_src_rowid`), and only those that changed are
+    written, with `derived_by`. `handle_ref` and `other_handle_ref`
+    resolve the raw rowid through this session's map, and are set only by
+    the observation that takes the `handle_rowid` cell (a rowid means
+    something inside its session only); 0, a non-value and an unmapped
+    rowid give NULL.
+- **`sort_key`** (§6.5): `0x00 ‖ be64(date_utc_ns XOR 2^63)` when `date`
+  is in seconds or nanoseconds, else `0x01 ‖ first_rank ‖
+  be64(first_src_rowid XOR 2^63)` (50 bytes). `first_src_rowid` moves with
+  `first_rank`.
+- **Body versions** (`message_body`). The raw cells are `text`,
+  `attributedBody` and `message_summary_info` (exact bytes or their
+  states, with their `value_issue` rows as entity 5); `raw_hash` is
+  SHA-256 of `oma-body-raw-v1` and the three cells' fingerprint
+  encodings. One row per (message, `raw_hash`), inserted with `ON
+  CONFLICT DO NOTHING`; first and last rank move by min and max.
+  `current_body_id` moves to this observation's version when the record
+  is new or its rank is at least the message's `last_rank`. An edited
+  message gains a version; an unsent one gains an empty version and **its
+  earlier text stays indexed and searchable** (D61). A stored version
+  whose `decoder_version` differs from the build's is **re-derived in
+  place** (derived columns updated, child rows deleted and re-inserted);
+  the FTS update trigger re-indexes only when `display_text` changed. A
+  re-observation at a rank at least the version's `last_rank` refreshes
+  its edit label, which also reads `date_edited`, a message column.
+- **Child rows**: `message_body_part` from the decoded parts (UTF-16 and
+  UTF-8 spans, the first transfer GUID and mention, flags and present
+  keys as bits in the order pinned by `ATTR_FLAG_BITS` and
+  `ATTR_KEY_BITS`), `message_edit_entry` from `ec` (stored order; `at_kind`
+  1 integer, 2 real, 3 plist date with `at_raw` NULL), and
+  `message_unsent_part` from `rp`. Edit-entry bodies (`t`) are not decoded
+  (§0.2); their bytes are inside the raw summary.
+- **`display_text`** (D58, §10): the decoded `attributedBody` when it
+  decoded to non-empty text (`display_source` 1); else `text` when it is
+  non-empty valid UTF-8 (2); else `text` decoded lossily (3); else NULL with
+  `display_none_reason` 1 `attributedBodyUnusable` (the column holds a
+  value, or one over its cap or unreadable, that gave no text), 2
+  `textEmpty` (`text` is `''`) or 3 `noSource`. `sources_differ` compares
+  the decoded text with `text` when both are values, and is NULL
+  otherwise. These codes, `ItemKindCode`, `AssocKindCode`,
+  `EditLabelCode`, `TsErrorCode` and `SummaryTimeKind` are new closed
+  codes in `schema/codes.rs`, pinned by a test.
+- **FTS** (D62): the `message_fts` triggers from schema v1 index every
+  version's `display_text`; nothing writes the index from Rust. The rank-1
+  `integrity-check` runs after every catalogue import in the tests, and
+  the tokenizer table of §10 is asserted on `imp-fts-plain`.
+- **Counts**: `messages` (the entity group, without Recently Deleted
+  skips), `bodies` (added, unchanged, re-derived, current moved, display
+  sources and none-reasons, sources differ, decode failures, run issues)
+  and `recentlyDeleted` (P0's messages, excluded, not updated, imported).
+  The generator's `import.json` does not count messages yet; P3's counts
+  are asserted by targeted tests (`tests/messages.rs`, `tests/resume.rs`).
+- **Tests**: every catalogue entry and every scenario in every order is
+  compared with the content model for messages (columns, history, handle
+  reference, display text, every body version, sort order, exclusions);
+  a second session of each entry changes nothing; edits, unsends, an older
+  backup imported later, re-derivation, the tokenizer table, the Recently
+  Deleted policy and D58 on synthetic bodies (with decoded vectors from the
+  M3 typedstream catalogue) have their own tests; the cancel-at-every-record,
+  random-crash and kill-at-signal tests now run through P3 (the synthetic
+  source has messages, undecodable bodies and Recently Deleted rows).
+
+### Links, attachment rows and Recently Deleted markers (M4 slice 4h)
+
+Slice 4h adds the passes after P3 (`import/links.rs`, `import/rd.rs`,
+`import/attachments.rs`, `import/recently_deleted.rs`). The passes now run
+P1, P2, P3, P4, P5, P5b, P6, P7, P8; a session whose passes ran stayed
+running until finalize (slice 4j, below).
+
+- **P4 chat ↔ handle, P5 chat ↔ message, P7 message ↔ attachment.** Each
+  join row's two source rowids are resolved through this session's
+  `import_rowid_map`, so a link always joins two committed archive rows. A
+  row whose side does not resolve (unreadable, NULL, or no imported row) is
+  **counted, never inserted** (`unresolved`, by side). Links are a union:
+  never removed. `last_rank`/`last_session_id` follow the highest rank that
+  saw the link; `first_session_id` the lowest (an equal rank keeps the
+  stored one), so the result does not depend on import order.
+  `chat_message.join_date` follows the raw rule of §8.7 against the
+  link's `last_rank`, and its `sort_key` is copied from the message (the
+  `message_sort_au` trigger keeps it in step). `message_attachment.ord_rank`
+  and `ord_rowid` are replaced when the rank is at least `ord_rank`: the
+  attachments of a message are ordered by the highest-ranked backup that
+  saw each link (§6.5). A join cell's `value_issue` detail is not kept,
+  because the link tables have no single row id; its `_st` is.
+- **The Recently Deleted decisions after P3** (`RdSkip`) are re-derived
+  from durable state: of the rows the preflight classified, those P3 did
+  not map in this session were left out and those it mapped were only
+  re-observed. P5 and P7 **skip the joins of both** and count them as
+  `skippedRecentlyDeleted`, not as unresolved: a re-observed message is not
+  updated from its deleted state, links included (D60).
+- **P5b and the preflight's step 4.** Two streams of
+  `message_attachment_join`: the attachment rowids linked to a left-out
+  message, minus those linked to any other message. What remains gets **no
+  attachment row, no link and no file**; a join row
+  with an unreadable side is ignored. The preflight runs the same scan on
+  the preflight's excluded set and refuses a source whose candidates exceed
+  4,194,304 distinct rowids (`NotImportable(OverRecentlyDeletedCap)`,
+  nothing written); P5b re-runs it after P3 on every resume.
+- **P6's attachment rows.** Keyed on the exact GUID bytes (unkeyed by
+  fingerprint otherwise), merged by the column rules, mapped for P7 and
+  recorded in `lineage_seen`. In slice 4h no file was read; the files,
+  `blob`, `blob_intent`, `attachment_observation` and `current_blob_id`
+  arrived with the store in slice 4i (below).
+- **P8 markers.** One `message_recently_deleted` row per
+  `chat_recoverable_message_join` row whose message is mapped in this
+  session (imported with the opt-in, or re-observed by default), with the
+  chat resolved when it can be and the raw chat rowid, delete-date quad and
+  `ck_sync_state` kept. Two join rows for one message are two markers.
+  Join rows of left-out messages are counted as `notMarked`.
+- **The staged copy was only read.** After the last pass the import
+  checks, as M3's check does, that the staged connection is `query_only`,
+  that its authorizer refused nothing (`part_text` included) and that it
+  changed no row; otherwise the session fails. None of these is the guard;
+  the authorizer is.
+- **Counts**: `chatHandles`, `chatMessages` and `messageAttachments`
+  (`LinkCounts`: seen, inserted, already present, unresolved and by side,
+  skipped for Recently Deleted), `attachments` (the entity group), and in
+  `recentlyDeleted` `attachmentsExcluded`, `marked` and `notMarked`.
+- **"Not in the latest import"** (§8.7) needs no new column: a lineage's
+  newest full observation is read from `import_session`, and a row it
+  labels is one whose `lineage_seen.last_rank` for that lineage is lower.
+  The tests compute it that way; the reader query is M5's.
+- **Tests**: every entry and every scenario order now also match the
+  model's chat handles, message chats, message attachments in the §6.5
+  order, Recently Deleted markers, attachment rows and their columns and
+  history, the excluded attachments, and "not in the latest import" per
+  lineage (`tests/import_core.rs`); content snapshots, now with the
+  attachment, link and marker tables, are equal in both orders.
+  `tests/links.rs` covers the Recently Deleted attachments and markers,
+  rank-following links in both orders, re-observation and hostile orphan
+  joins; `tests/lineage.rs` the per-lineage labels and a cancelled or
+  WAL-skipped latest session. The synthetic crash and resume source now
+  has attachments and all three join tables (orphans, a NULL side, a
+  repeated join, extreme join rowids, an attachment linked only to a
+  Recently Deleted message), and the cancel test stops at every record of
+  every pass.
+
+### The attachment store and disk space (M4 slice 4i)
+
+Slice 4i gives P6 its files (`import/attachments.rs`, `blobs.rs`) and the
+import its space rules (`space.rs`).
+
+- **Phase A, while the pass reads, with no archive transaction open.**
+  Each record is classified: copying off (`notRequested`, and no lookup
+  at all), Recently Deleted-only (no row, no file), no lookup attempted,
+  not in the backup, blob or key unusable, or copyable. A copyable file is
+  **already archived** when the attachment's current blob, found by exact
+  GUID, has a store file that is a regular non-link file of `byte_len`
+  and the backup's file has that plaintext length: it is not read
+  (presence and length only, D66). Otherwise the space for it is checked,
+  `attachments/.incoming/<n>.partial` is created new (0600), the plaintext
+  streams into it through `OpenBackup::copy_file_to` and a 1 MiB
+  `BufWriter` (`into_inner` surfaces the last flush), and it is synced and
+  length-checked. A failed copy removes its partial file (five tries on
+  Windows; one that stays is counted and swept at the next write open).
+  `EFBIG`/`ERROR_FILE_TOO_LARGE` is counted per file and the pass goes on;
+  a changed source, a cancel or no space ends the batch at the record
+  before. A batch ends after 64 copied files, 256 MiB copied, or one file
+  of 64 MiB or more.
+- **Phase B** commits a `blob_intent` for each copied digest with no
+  `blob` row. **Phase C** places each file (`Placer`): a no-replace
+  rename when nothing is there; for a referenced name (or one placed
+  earlier in the batch) the copy is dropped if the store file is regular
+  with the right length (`deduplicated`), and otherwise left alone
+  (`storeConflict`); an unreferenced file is re-hashed through
+  `open_nofollow` and adopted if it matches its name, else removed (a
+  link is removed itself, never its target; a directory is a conflict)
+  and replaced (`orphanReplaced`). Each touched `<hh>` is flushed once
+  after the renames. **Phase D**, in the batch transaction: the attachment
+  merges, `blob` (`ON CONFLICT DO NOTHING`), one `attachment_observation`
+  per row and session (path class, lookup and copy codes, the blob read,
+  `size_matched_manifest`), `current_blob_id`, and the deletion of the
+  batch's intents. The order per file is write → `sync_all` → intent
+  commit → rename → directory flush → row commit; the crash tests kill at
+  each step.
+- **`current_blob_id`** is the blob of the highest-ranked session that
+  read bytes for the attachment (rank compared as bytes, as everywhere); a
+  session that read none never moves it. This is the catalogue model's
+  reading, and it keeps the result order-independent when a newer backup
+  lost a file.
+- **An exception to §8.7's order independence: same GUID, same length,
+  different bytes.** "Already archived" compares presence and length only
+  (D66, §9.1, §9.2), so when two backups hold different bytes of the same
+  length under one attachment GUID, whichever is imported first is
+  stored and becomes `current_blob_id`; the second finds a file of that
+  length, reads nothing, and its bytes are never stored. Imported in the
+  other order, the other version is kept. This is the cost of not
+  re-reading every archived attachment on every import; it is pinned by
+  `store.rs` (`same_length_different_bytes_keep_the_first_imported_version`).
+  Re-copying when a higher-ranked session meets a lower-ranked blob would
+  close it, at the price of re-reading every attachment of every newer
+  backup; that change is left for the v1 freeze review.
+- **Partial files are never left to the next import.** A copied file
+  whose record is not committed is removed at once and counted
+  (`partialsLeft`) if it cannot be: when the intent transaction or the
+  space guard before it fails (phase B), when the placement's `blob`
+  lookup fails, and when a cancel lands after the copy but before its
+  record was buffered. The counts kept outside the records (partial files
+  left, directory flushes) stay pending until a batch commits, so a batch
+  that rolls back into a resumable stop still records them. A `Partial`
+  that is dropped unplaced (a panic) makes one uncounted removal attempt;
+  the next write open's sweep remains the backstop for a process kill.
+- **The preflight estimates** (§8.2 step 5, §12): every attachment is
+  looked up and probed once more; the plaintext lengths of the files still
+  to copy are summed (Recently Deleted-only and already-archived files left
+  out), with the largest file, giving `SpaceEstimate`. Above the available
+  space it only warns; below `reserve + wal_allowance` the import returns
+  `ImportOutcome::InsufficientSpace` before the gate. Otherwise the
+  estimate is shown at the gate (`Preflight::space`) and returned in
+  `ImportSummary`.
+- **The space guard** (`SpaceGuard`) runs before every write transaction
+  of the passes (P6's intent transactions included): below the floor the
+  session stops (state 6, `insufficient_space`); otherwise
+  `max_page_count` is set to the page count plus the room above the floor
+  and read back, and any value other than the one requested stops the
+  session too (SQLite never sets it below the current size). Unknown free
+  space lifts the limit; the limit is lifted again when the passes end.
+  `SQLITE_FULL` and `ENOSPC` stop the session the same way; it resumes
+  once space is freed.
+- **The source** must be unchanged: a file whose stamp changes during its
+  copy, or `unchanged_since_open()` false (or unreadable) after P8, stops
+  the session with `source_changed` (state 6). The records before it are
+  committed with their files.
+- **Codes and counts.** New closed codes, pinned by a test:
+  `PathClassCode`, `LookupCode` (lookup and probe outcomes) and
+  `CopyCode`. `ImportCounts.attachmentFiles` counts every P6 row once in
+  an outcome (copied, replaced, deduplicated, adopted, orphan replaced,
+  already archived, store conflict, not requested, not looked up, not in
+  the backup, blob unavailable, over the limit, too large for the volume,
+  read failed, write failed), plus size mismatches, partial files left,
+  bytes copied, flushes, new blobs and current-blob moves.
+- **Fault points**: after a partial file is created, at the first write of
+  a copy, after `sync_all`, after the intent commit, after a rename, and
+  after the directory flushes; hooks fail a copy's first write with an OS
+  error and give the space guard a fixed page room.
+
+**Readings and deviations this slice takes** (implementation readings, not
+owner decisions):
+
+- **A Manifest `Size` mismatch is copied.** §9.1 step 1 names only
+  `Present`, but §9.2 says a mismatch "is recorded, and the bytes are
+  stored anyway"; the generator's model copies it too.
+- **The plaintext length of an encrypted file** is its Manifest `Size`
+  (the probe already checked it against the padded blob), through a new
+  `AttachmentKey::declared_size()` in `oma-backup`. Without a usable
+  `Size` the file is copied again rather than declared archived. The
+  estimate then counts the stored length, an upper bound.
+- **"Already archived" is looked up by exact GUID.** An unkeyed attachment
+  is always copied again; the store deduplicates it.
+- **A conflict with a referenced blob** still records that blob in the
+  observation (the bytes read hash to it), so `current_blob_id` may name
+  a blob whose file the verifier will report. A conflict where no `blob`
+  row exists records none.
+- **An I/O error placing one file** is counted (`writeFailed`) and the
+  pass goes on; a failed directory flush fails the session, because the
+  rows must not commit before their files' entries are durable.
+- **Progress for `CopyingAttachments` is in rows**, not bytes (§8.12).
+- **`EFBIG` on the database** is not mapped to `Stopped { VolumeFileLimit }`
+  yet: SQLite reports it as an I/O error, which fails the session.
+- **Counts outside a record** (a partial file that could not be removed,
+  flushes) are added to the next committed batch; a pass that stops
+  before buffering any record of a batch loses them (the partial file is
+  still swept).
+- **`K`** stays at the provisional 3.0 in code; the synthetic measurement
+  is in `compatibility.md`.
+
+### The gate, finalize and provenance (M4 slice 4j)
+
+Slice 4j completes the import: `Archive::import(ob, opts, gate, ctx)`
+(renamed from `import_core`) asks an `ImportGate` before the first write,
+then runs finalize and writes the provenance file. Its outcome is
+`ImportOutcome`: `Completed`, `Cancelled`, `Stopped`, `Declined`,
+`NotImportable` or `InsufficientSpace`.
+
+- **The gate** (`import/gate.rs`, spec §8.2 step 7, D65). After every
+  preflight read, the import builds a `Preflight` and calls
+  `ImportGate::confirm`; the answer is `Proceed { lineage }` or `Decline`.
+  **Decline writes nothing**: no write connection has been opened, and a
+  test hashes the database, its `-wal`, `attachments/` and `imports/`
+  before and after. A cancel while the gate waits is the same. The shell's
+  blocking gate with its 2-minute timeout came in slice 4l
+  (`src-tauri/src/archives/gate.rs`); `ProceedWith` and
+  `ProceedWithSuggestion` are the fixed gates tests and tools use.
+- **What the preflight shows.** The resume plan: `Continue { session,
+  lineage, from }` (the first pass not done, or `Finalize`) for an
+  unfinished session whose binding matches except for the lineage, or
+  `Fresh { supersedes, reason }`. Whether a completed session already
+  imported the same content. Every lineage (at most 1,000) with its
+  session and full-observation counts, the backup date of its newest full
+  observation, and **booleans only** for whether the backup's product type
+  and device name equal that session's (D51); the values are compared
+  inside the crate and never leave it. The suggested lineage: the one the
+  continuable session belongs to, else the one lineage whose model and
+  name both match, else a new one (D80). The key tallies per keyed table
+  (rows, keyable, distinct duplicated keys, rows to be imported unkeyed)
+  and the message keys already archived (the overlap; zero with a
+  non-empty archive is shown, not refused). The Recently Deleted counts,
+  the space estimate, the order facts (dated, the date's source, out of
+  range, older than the archive's highest-ranked completed session, a
+  different date source than that session), the encrypted source, the
+  cloud-sync folder and Windows ACL warnings, and the qualifiers. The
+  message-key scan now looks up every unique message key in the archive
+  (one indexed read each on the read-only connection), not only the
+  Recently Deleted ones.
+- **The lineage decides the resume.** The decision is made again with the
+  chosen lineage: an unfinished session continues only when that lineage
+  is its own; otherwise it is superseded. An `Existing` lineage that does
+  not exist is refused before anything is written.
+- **The staged sms.db is removed after P8,** before finalize (§8.11);
+  `ImportSummary::staging_removed` says whether it was.
+- **Finalize** (`import/finalize.rs`, §8.9), each step its own
+  transaction with the space guard before it and a cancel honoured between
+  steps: `chat_stats` (one row per chat, with the archive interrupt armed
+  around its single statement), `archive_stats`, the session-local rows in
+  chunks of 50,000, then the terminal state (completed, `ended_at_ns`,
+  `full_observation`, the final counts), the FTS merge steps (`merge =
+  500`, armed, until `total_changes()` grows by less than 2, at most
+  10,000 steps) and `wal_checkpoint(TRUNCATE)`. `full_observation` is 1
+  unless a WAL-related qualifier is set (§8.7). A cancel or error before
+  the terminal state records the session cancelled, stopped or failed as
+  after a pass (`Pass::Finalize`, code 9, in `import_issue`); a resume
+  finds every pass done and runs finalize again. **The terminal state is
+  best effort:** if it fails, nothing else is recorded, the session stays
+  running, the next write open marks it interrupted, and the outcome is
+  `Stopped { InsufficientSpace }` for `SQLITE_FULL` (an error otherwise).
+  After it the session is completed whatever follows: a cancel only skips
+  the remaining merge steps, and a failed merge step or checkpoint is
+  reported in `FinalizeReport`, never an error.
+- **The armed interrupt** (`conn::armed`, §8.6) is a progress handler on
+  the write connection that interrupts the one statement it wraps once the
+  cancel token is set. It is removed before the caller's `COMMIT`; batch
+  statements, the terminal update and every commit run disarmed (a test
+  cancels at a batch's commit point and the batch still commits).
+- **Provenance** (`provenance.rs`, §8.10, D70): `imports/session-<n>.json`
+  is written at every terminal state the import records (completed,
+  cancelled, stopped, failed) and rewritten when a continued session ends
+  again: `.tmp` created new (0600), written, synced, renamed, `imports/`
+  flushed. It holds the format and version, the session, its state,
+  versions, the import's own start and end times, resumes, the order class
+  and date source (not the date), `fullObservation`, the lineage number,
+  the product type and version and whether the backup was encrypted, the
+  qualifier names, the WAL outcome, the options and the counts
+  (re-serialised from `ImportCounts`). It holds no device name, GUID,
+  digest, rank, message date, path or label. A failure is logged by kind,
+  sets `provenance_written = false` and never changes the outcome. The
+  reader accepts only `^session-[0-9]+\.json$`, at most 64 KiB, opened
+  without following links, with a matching format, version and session.
+- **New fault points** (D85): while the gate waits; after the statistics;
+  after each cleanup chunk; after each merge step; before the checkpoint;
+  after the provenance `.tmp` is created and before its rename; inside a
+  migration step and before its commit. `tests/crash.rs` kills at every
+  one (a test fails if a point in `FaultPoint::ALL` has no kill): before
+  completion the session continues to the uninterrupted result; after it
+  the session is completed and consistent, the next write open sweeps the
+  `.tmp`, and the archive equals the uninterrupted one; a killed migration
+  step leaves version 1 and migrates afterwards. The observer hook
+  (`hooks::observe`) receives every fault point and, through rusqlite's
+  commit hook on write connections, every commit, for `tests/ordering.rs`.
+- **`tests/ordering.rs`** records every `StoreFs` call with the observed
+  points and commits in one sequence and asserts, for every placed file,
+  write → `sync_all` → intent commit → rename → directory flush → row
+  commit, and for creation, database commit and `.oma-new-*` flush before
+  the rename and the library flush after it.
+- **`tests/query_plans.rs`** pins `EXPLAIN QUERY PLAN` for every
+  index-dependent import statement, taken from the crate as it prepares
+  them (`hooks::plan_statements`: the merge reads by GUID, natural key and
+  fingerprint, the value-issue read, the body-version read, the overlap
+  lookup, the current-blob read, the map resolution, the occurrence
+  counter and the finalize `GROUP BY`), and for the M5 shapes of §6.5 (the
+  timeline keyset, FTS to the current body, a message's attachments in
+  order). No import statement scans a table except the statistics' one
+  pass over `chat`, and none sorts.
+- **The golden archive** `tests/fixtures/archives/golden-v1/` (§7.3,
+  §19.2) was made by `cargo run -p oma-archive --example make_golden` from
+  `imp-dev1-v1-plain` then `imp-dev1-v2-plain` (one lineage, fixed clock),
+  with its `SHA256SUMS` and `logical_snapshot.json`. `tests/golden.rs`
+  checks the sums, opens a copy read-write (`begin_write` with recovery),
+  runs the integrity, foreign-key, FTS and store checks, and compares the
+  snapshot. It is regenerated only until schema v1 freezes at the M4
+  release tag. Since slice 4k it also passes quick and full verify.
+
+**Readings and deviations this slice takes** (implementation readings, not
+owner decisions):
+
+- **The preflight has no M3 extraction status.** The import computes no
+  `ExtractionReport`; the qualifiers it records are shown instead. The
+  shell already has the M3 check.
+- **"Latest" for `sortsBeforeLatest`** is the archive's highest-ranked
+  completed session in any lineage, because the lineage is not chosen yet
+  when the gate is shown.
+- **A cancel after the terminal state is `Completed`**, with
+  `fts_merge_complete = false`: the session is complete and resumable work
+  is not needed.
+- **A failed terminal update leaves no provenance file** (the session is
+  still running); the file appears when the continued session ends.
+- **Superseded and interrupted sessions get no provenance file**: they are
+  set by another import or by the next write open, not at their own end.
+- **The `-wal` and `-shm` are left** after `Archive::close`, because the
+  read-only connection closes last; the golden generator removes the empty
+  `-wal` and the `-shm` from the fixture.
+
+### The integrity verifier and the blob reader (M4 slice 4k)
+
+`Archive::verify(depth, ctx)` (`verify.rs`, spec §11, D69) is
+**report-only**: it repairs, sweeps and reconciles nothing, so it reports
+what a crash left instead of cleaning it up. It runs under the archive's
+lock. Its reads use the ReadOnly connection in a **cancellable** mode (the
+progress handler stops the statement once the cancel token is set; there
+is no op budget, because a verify runs only on the user's request). It
+opens the writer with `begin_write(Recovery::Skip)` and writes only its
+results: a `verify_run` row (inserted with no outcome when the verify
+starts, so a crash leaves a visible unfinished run, and completed with the
+outcome and the counts as JSON at the end), and in a full verify each
+blob's `verify_state` and `verified_at_ns`. Recording is best effort: if
+it fails, the report still comes back, with `run: None`.
+
+| Check | Quick | Full | Reported as |
+|---|---|---|---|
+| Header, fingerprint and `archive_meta` (the open-time `inspect`, run again) | ✓ | ✓ | `SchemaCheck`; on anything but `Ok` nothing else runs and nothing is written |
+| Sessions whose deriver or decoder version is above `archive_meta`'s high-water mark | ✓ | ✓ | count |
+| `sqlite_stat1`/`sqlite_stat4`; newer rules | ✓ | ✓ | booleans, not problems |
+| `message_fts_config` holds `secure-delete = 1` | ✓ | ✓ | check state |
+| `PRAGMA quick_check(100)` / `PRAGMA integrity_check(100)` | quick | full | check state and the rows other than `ok` (a corruption error counts as one) |
+| `PRAGMA foreign_key_check` | ✓ | ✓ | total, and by child table (`v1.sql` names only) |
+| FTS rank-1 `integrity-check`, on the writer under the armed interrupt | ✓ | ✓ | check state (`Failed` is drift or corruption) |
+| `value_issue` and `value_history` rows whose entity row is missing or whose entity code is unknown (entities 6 and 7 have no single row and are skipped) | ✓ | ✓ | counts |
+| The label re-validated | ✓ | ✓ | boolean |
+| Sessions in state 0, `blob_intent` rows | ✓ | ✓ | counts (crash leftovers) |
+| Each `blob`: `storage_name` parses and spells `sha256`; a regular non-link file of `byte_len` | ✓ | ✓ | bad name, missing, not regular, length mismatch |
+| Each `blob`: re-hashed to the end through `open_checked`, progress in bytes | — | ✓ | hash mismatch, unreadable; `verify_state` set for every row |
+| `attachments/` walk: two levels, no link followed, at most `blobs + 10,000` entries | ✓ | ✓ | entries, unexpected names (and directories below `<hh>/`, never entered), orphans, links, partial files, truncated |
+| `imports/`: every entry read through `provenance::read` (name, at most 64 KiB, no link, format, version and session), at most `sessions + 1,000` entries | ✓ | ✓ | readable files, unreadable entries, `.tmp` leftovers, truncated |
+| Owner and mode of every archive file and directory (`check_private`; on Windows only links and types) | — | ✓ | count |
+
+The outcome is `Cancelled` if a cancel stopped it, else `Problems` if any
+problem was found, else `Incomplete` if a check could not run (an
+unlistable directory, a read error, no write connection for the FTS
+check), else `Ok`. `VerifyCounts::has_problems` names which fields are
+problems; the totals, `stat_tables` and `newer_rules` are not. A cancel is
+recorded as cancelled (outcome 2) and the checks that ran keep their
+results. An archive that needs a migration is refused with
+`NeedsMigration`; one written by newer rules verifies normally.
+`ArchiveReader::last_verify` reads the newest run back as a
+`VerifySummary`, dropping any table name in the stored counts that is not
+one of `v1.sql`'s. Progress is `ArchiveEvent::Verify` with
+`VerifyPhase::{CheckingDatabase, CheckingIndex, CheckingFiles}`. The full
+verify's recompute of derived columns is deferred (§21.2).
+
+**`open_blob`** (`ArchiveReader::open_blob` and `Archive::open_blob`,
+`blobs::open_checked`, spec §4.3, §9.5) is the one way attachment bytes
+are read back, by M5, M6 and the verifier: the row's `storage_name` must
+parse and spell its `sha256` (`BlobProblem::BadName` otherwise);
+`attachments/` and `<hh>/` must be private real directories, and the file
+is opened with `open_nofollow` and must be a regular file of `byte_len`
+bytes (`Missing`, `NotRegular`, `LengthMismatch`, `Io`). The returned
+`BlobReader` yields at most `byte_len` bytes, hashes them as they stream,
+and fails its final read with `InvalidData` (and every read after it) when
+the length or the digest differs, so a caller that reads to the end gets
+only the archived bytes. It is lock-free (a reader works while an import
+holds the lock; placed files are never replaced). `BlobId` is an
+archive-local row number.
+
+**Readings and deviations this slice takes** (implementation readings, not
+owner decisions):
+
+- **FTS drift is caught only by the rank-1 check.** Observed on the
+  bundled SQLite 3.53.2 (`tests/verify.rs`): `quick_check` and
+  `integrity_check` pass on an external-content index whose content was
+  changed with the triggers off. Dropping a trigger, the spec's example,
+  changes the schema and is refused by the fingerprint at open, so the
+  test drifts the content instead.
+- **A failed schema check stops the verify** without writing anything
+  (five checks are counted as not run), because nothing else may read
+  tables whose schema is not ours (§4.5).
+- **The `imports/` scan has its own bound** (`sessions + 1,000` entries);
+  the spec bounds only the `attachments/` walk.
+- **Leftovers count as problems** (running sessions, intents, partial and
+  `.tmp` files): they are what a crash left, and only the next import's
+  write open cleans them up.
+- **A quick verify writes no blob state;** only the full one sets
+  `verify_state` (also for missing, short and badly named files).
+- **The verify writes are not under the space guard.** They are one row
+  and one small update per 512 blobs; a failure leaves `run: None`.
+
+### The archive commands and jobs (M4 slice 4l)
+
+The shell side of M4 (spec §15) lives in `src-tauri/src/archives/`
+(Tauri-free: listing, details, the gate, the workers, DTOs, sentences) and
+`src-tauri/src/commands/archives.rs` (the six commands, each wired through
+`generate_handler!`, `COMMANDS`, an `allow-<kebab>` grant and a wrapper in
+`src/services/ipc.ts`).
+
+| Command | Input (`deny_unknown_fields`) | Returns |
+|---|---|---|
+| `list_archives` | — | `ArchiveListingDto { entries, libraryState, libraryError }` |
+| `create_archive` | `{ label? }` (≤ 200 UTF-8 bytes, no control or bidi characters; empty means none), else `invalidInput` | `ArchiveSummaryDto` |
+| `get_archive_details` | `{ archiveId }` | `ArchiveDetailsDto`: summary, sessions, last import (state, stop reason, counts), last verify, active job, the preflight while the job waits, `resumable`, `matchingBackupIds`, `resumeOptions` (the unfinished session's two options) |
+| `start_import` | `{ backupId, archiveId, password?, options: { includeRecentlyDeleted, copyAttachments } }` and the channel | `JobStarted` |
+| `confirm_import` | `{ jobId, proceed, lineage?: { kind: "existing", lineageId } \| { kind: "new" } }` | `()`; `jobNotWaiting` when the job is not at the gate, `invalidInput` without a lineage or with one the preflight does not list |
+| `verify_archive` | `{ archiveId, depth: "quick" \| "full" }` and the channel | `JobStarted` |
+
+- **Jobs by subject (D73).** `ActiveJob` holds a `JobSubject` (a backup,
+  an archive, or both for an import). `reserve` answers `busy` when an
+  active job shares either, then applies the one slot (D7). An import's
+  reservation carries its `Gate`. Changing the archive location is refused
+  while any job runs (an archive is only open inside a job).
+- **The gate (D65).** `archives::gate::Gate` is a `Mutex` + `Condvar`;
+  its deadline comes from a `GateClock` (two minutes; tests inject a
+  clock and advance it), and the wait re-reads the clock and the cancel
+  token at least every 250 ms. The worker's `ImportGate` opens the gate,
+  publishes the preflight in the job table, sends `importPreflight` and
+  waits. `confirm_import`, `cancel_job` and the exit handler (which
+  cancels and wakes every gate, then waits up to 5 s) end the wait; every
+  ending but Proceed declines, and the crate writes nothing on Decline.
+- **The import job** (`archives::worker::run_import`): `prepare_job`'s
+  steps (re-inspect, the password, the location, the reservation,
+  `confirm_library_unchanged`) after a read-only look at the archive;
+  then the staging sweep, `Library::open` (read-only first, under the
+  lock), `OpenBackup::open` and validation, `Archive::import` with the
+  shell's gate, the backup's `close` (which removes the staging folder)
+  and the archive's `close`. Exactly one terminal event:
+  `importFinished` (`completed`, `stopped` with its reason, the
+  `cancelledAtGate` endings `declined`, `cancelled` and `timedOut`, and
+  `notImportable` with its reason and sentence), `cancelled` for a cancel
+  before the gate or during the passes, or `failed`.
+- **The verify job** (`run_verify`): `Library::open`, `Archive::verify`,
+  `close`; `verifyFinished { outcome, recorded }`.
+- **Phases.** `JobPhase` gains one phase per `ImportPhase` and three
+  verify phases (`verifyingDatabase`, `verifyingIndex`,
+  `verifyingFiles`, distinct from the validation phases). Both crate
+  enums are non-exhaustive: a phase this build does not know is not
+  forwarded, and a test pins every known one.
+- **The list** merges `ArchiveEntry::InUse` with the job table: an archive
+  this app is importing into or verifying shows `importing` or
+  `verifying`.
+- **DTOs** (`archives/dto.rs`) clamp every counter (with `saturated`),
+  send dates as Unix milliseconds, device facts as `modelDiffers`,
+  `nameDiffers` and `deviceMatches`, and have one free-text field,
+  `ArchiveSummaryDto.label`. A structural guard over the generated
+  declarations (shared with the Backups guard through
+  `src-tauri/src/ts_guard.rs`) fails on any other `string` field and on
+  keys such as `guid`, `digest`, `rank`, `rowid`, `cursor` or `path`.
+- **Error codes.** Sixteen new `ErrorCode`s, each with one fixed sentence
+  (`archives::messages`), mirrored in `services/ipc.ts`'s `ERROR_CODES`
+  (enforced by `src/types/error-codes-exhaustive.ts`); a test maps every
+  `ArchiveError` variant and every import outcome.
+- **The library additions.** `ArchiveReader::last_import` (the newest
+  session: state, lineage, counts, stop reason, provisional) and
+  `ArchiveReader::resume_matches`, which compares listed backups' Info.plist
+  device name, model and backup date (to the second) with the newest
+  unfinished session's source inside the crate, for
+  `matchingBackupIds`.
+
+**Readings and deviations this slice takes** (implementation readings, not
+owner decisions):
+
+- **`importPreflight` carries only the job id.** The preflight (up to
+  1,000 lineages) cannot be guaranteed under 1 KiB, so, as for the
+  extraction report (D47), it is fetched with `get_archive_details`,
+  which also re-shows it after a reload.
+- **The archive jobs run in `archives::worker`**, started through
+  `worker::spawn_with`, not inside `worker::run`; they keep its
+  guarantees (slot freed before the event, exactly one terminal event).
+- **`importFinished` carries more than §15.3 lists:** the gate ending,
+  the session number, the not-importable reason, and a `notice`
+  (`{ code, message }`) with the sentence for `stopped` and
+  `notImportable`. `plaintextRemoved` is `null` when no session ran.
+- **A refusal for space before the gate** (`ImportOutcome::InsufficientSpace`)
+  ends with `failed` and `insufficientSpace`; a validation that is not
+  importable ends with `importFinished` `notImportable`
+  (`backupNotImportable`).
+- **A verify cancelled before it starts** ends with `cancelled`; one
+  cancelled while it runs ends with `verifyFinished` `cancelled` (its run
+  is recorded).
+- **The verify's per-table foreign-key counts stay in the archive;** only
+  the total crosses, so no table name is a DTO string.
+- **An import job stores no validation report** in the backup's last
+  outcome (only its cleanup), so the Backups page keeps its own last
+  report.
+- **`matchingBackupIds` is a pre-selection** by device name, model and
+  Info.plist date; whether a session continues is still decided by the
+  crate's resume rules (content digest and framing).
+
+### The Archive page (M4 slice 4m)
+
+The UI of spec §16, over the six archive commands. Counts, states and the
+label only; no message content, address, chat name or file name.
+
+- **`src/stores/archives.ts`** mirrors `stores/backups.ts`: the listing,
+  per-archive details and errors, one heard job (import or verify), the
+  import results from `importFinished` and `verifyFinished`, and the
+  dialogs' state. It polls `get_archive_details` every 2 s while a job runs
+  on an archive (heard or not), which gives the phase of a job the page
+  cannot hear and the gate after a reload. The import password passes
+  through `submitPassword` into `startImport` and is stored nowhere.
+- **The gate** (`ImportPreflightDialog.vue`) is shown from the store's
+  `gate`: the heard job once `importPreflight` arrived and the details carry
+  its preflight, else any archive whose details say an import waits there.
+  Gates answered from this page are remembered, so a stale poll cannot
+  re-show one. Each fact is its own sentence (`services/importText.ts`);
+  the suggested lineage is pre-selected; Cancel, Escape and the backdrop
+  decline. The dialogs are mounted once in `App.vue`
+  (`ArchiveDialogs.vue`), so the gate appears on whatever page is open.
+- **Pages.** The Archive page lists the archives with their status
+  badges and shows the selected one: actions (Import from a backup…,
+  Continue importing… when `resumable` (its import dialog starts from the
+  unfinished session's `resumeOptions`, because a continue must use the
+  same options, D64; a preflight with other options says
+  `optionsDiffer`, not that the backup or the app changed), quick and
+  full verify, Cancel
+  through the progress card), the last import (`ImportSummary.vue`), the
+  last verify (`VerifySummary.vue`, one sentence per finding kind), the
+  archive's counts and its sessions. The Backups page's **Import
+  messages…** opens the import dialog with that backup selected, enabled
+  under the same rule as Validate; the dialog offers **Create archive
+  first…** when there is none. `roadmap.ts` marks `archive-database`
+  available and rewords `hardening` (D69).
+- **Progress.** `JobProgress.vue` takes any `ProgressJob`
+  (`src/types/progress.ts`). Counted phases are rows; the staging copy, and
+  `verifyingFiles` in a full verify, count bytes. A job the page cannot
+  hear shows its phase without a count.
+
+**Readings and deviations this slice takes** (implementation readings, not
+owner decisions):
+
+- **`CopyingAttachments` counts attachment rows, not bytes** (spec §8.12
+  says bytes): the crate reports rows (slice 4j), and the label says so.
+- **The import dialog's button is "Prepare import"**, since the import
+  first stops at the gate; the password dialog says "Unlock and prepare
+  import" (its `submitLabel` prop).
+- **Labels are checked in the webview too** (200 UTF-8 bytes, no C0/C1
+  controls or bidirectional formatting characters), before IPC; the
+  backend's `Label::parse` remains the rule.
+- **"Older than the newest backup" and the zero-overlap sentence** follow
+  the preflight's flags; zero overlap is stated only when the archive
+  already has an import set.
+- **The temporary copy line** ("was deleted: yes/no") is shown only for
+  the session the page heard finish, from `stagingRemoved`; after a
+  reload it is not known and not shown.
+- **Backdrop clicks decline the gate**, like Escape. Declining writes
+  nothing.
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`
@@ -897,7 +1636,7 @@ future network feature must re-examine this.
 | Reference implementations | GPL, LGPL and CC BY-SA projects (imessage-exporter, imessage-database, crabstep, crabapple, pymobiledevice3, pyiosbackup, libimobiledevice including `idevicebackup2`, the andrewdotn answer) are behavioural references only | The project must remain Apache-2.0. Clean-room code, or MIT/BSD sources with attribution. |
 | sms.db parsing | Capability-based: probe columns by name and treat missing ones as absent | The schema changes with every major iOS release. Positional `SELECT *` breaks silently. |
 | Node.js worker | None | Nothing so far needs one. Revisit only with a concrete requirement. |
-| Single instance | Not enforced in M1 or M2 | Atomic settings writes keep two instances safe. Staging sessions are locked, and the sweep skips sessions younger than 5 minutes. The archive database (M4) will take an exclusive lock per archive. |
+| Single instance | Not enforced for the app itself; enforced per archive from M4 | Atomic settings writes keep two instances safe. Staging sessions are locked, and the sweep skips sessions younger than 5 minutes. From M4 each archive has a sidecar `archive.lock` held for every write open, and a lock self-test at open refuses a volume whose locks do not exclude a second handle (`LockUnreliable`); a second instance sees the archive as `inUse` and cannot write to it (D53). The lock-free `ArchiveReader` still reads committed state. |
 
 ### Milestone 2 decisions
 
@@ -962,38 +1701,54 @@ superseded by D22: sms.db is staged on disk.
 | D49 | Source values | `Col<T>` | `Option<T>` | M4 can tell "not recorded" from "NULL" from "bad" |
 | D50 | Lookup scope | Only `Library/SMS/Attachments/` and `StickerCache/` | Every `~/` and `/var/mobile` class | Never reaches non-Messages files; the other classes stay counts |
 
-### Milestone 4 decisions in force (slices 4d–4f)
+### Milestone 4 decisions
 
-The full M4 decision list (D51–D88) lands with the M4 documentation slice.
-These are the ones the archive skeleton and the import core already
-implement. D51, D59, D60 and D61 are owner-confirmed (2026-10-18); of the
-owner questions, D69, D70, D71, D79 and D82 remain leans awaiting the
-owner's confirmation.
+The full M4 list, D51–D88 (spec §22). **D51, D59, D60 and D61 are
+owner-confirmed (2026-10-18).** Of the other questions put in the spec to
+the owner, **D69, D70, D71, D79 and D82 are leans awaiting the owner's
+confirmation**; the code implements the lean, and each is marked. The rest
+are design decisions of the M4 spec.
 
 | # | Topic | Choice | Main alternative | Trade-off |
 |---|---|---|---|---|
 | D51 | Device identity (**owner-confirmed 2026-10-18**) | The archive is the de-duplication scope; boolean device evidence at the gate and the user picks the lineage (D80); the UDID is never stored or hashed, D14 unchanged | Identify the phone by UDID | No device identifier in the archive, at the cost of the user choosing the lineage |
-| D59 | Raw blobs (**owner-confirmed 2026-10-18**) | Always keep the raw `attributedBody`, `message_summary_info` and `payload_data` bytes within the caps; disclosed in privacy.md | Keep only decoded text | Re-derivation with a newer decoder needs no backup; the archive holds more source bytes |
-| D60 | Recently Deleted (**owner-confirmed 2026-10-18**) | Excluded by default; opt-in per import; attachments included when opted in; already-archived messages are marked but not updated from their deleted state | Import everything | The user decides per import; deleted-state rows never overwrite archived ones |
-| D61 | Text captured before an unsend (**owner-confirmed 2026-10-18**) | Kept; the message is marked unsent by the sender; disclosed in privacy.md | Remove the earlier text | The archive keeps what it already captured, and says so |
 | D52 | Archive naming | `a<32hex>`; label in the database; created through `.oma-new-*` with a no-replace rename | Label as directory name | No untrusted names on disk |
 | D53 | Locking | Sidecar `archive.lock` + `try_lock` + self-test; NORMAL locking with WAL; lock-free `ArchiveReader` | `locking_mode=EXCLUSIVE` | Details can be read during imports; external tools can still read the database |
 | D54 | Volumes | Network and virtualised volumes refused for archives; FAT warned | Warn on virtualised | WAL and locks are unreliable there |
-| D75 | `application_id` | `0x4F4D4131` ("OMA1"), unregistered | Register it | Registration is optional |
-| D76 | Views | None in v1; views are disabled on every connection | Read views | `highlight()` fails in views with `TRUSTED_SCHEMA` off |
-| D78 | Permissions | 0700/0600 on Unix, re-checked at every open; the library itself must be ours and not writable by others | Leave the umask | Plaintext archive; ACL inheritance on Windows is disclosed with the privacy write-up |
-| D84 | Reader | `ArchiveReader`: lock-free, query-only, fingerprint first | Read through the locked `Archive` | Details during imports |
+| D55 | Value model | `STRICT` tables; each source value stored with its `Col` state (`_st`); text stored raw as BLOB with its storage class in `value_issue`; time quads | A single nullable column | Wider tables, versus losing D49's distinctions between absent, NULL and unreadable |
 | D56 | Keys | Exact GUID bytes, or the tagged (address, service); unkeyed rows by fingerprint and durable occurrence | Synthesise keys | No fabrication; unkeyed rows may repeat across changed sources |
 | D57 | Merge | Never delete; rank decides; missing or unreadable values never replace values; only changed columns are updated | Last import wins | Older backups can be imported later without regression |
+| D58 | Body source | Decoded `attributedBody`, else valid `text`, else lossy `text`, else NULL with a reason | Prefer `text` | M3 found `text = ''` next to a body |
+| D59 | Raw blobs (**owner-confirmed 2026-10-18**) | Always keep the raw `attributedBody`, `message_summary_info` and `payload_data` bytes within the caps; disclosed in privacy.md | Keep only decoded text | Re-derivation with a newer decoder needs no backup; the archive holds more source bytes |
+| D60 | Recently Deleted (**owner-confirmed 2026-10-18**) | Excluded by default; opt-in per import; attachments included when opted in; already-archived messages are marked but not updated from their deleted state | Import everything | The user decides per import; deleted-state rows never overwrite archived ones |
+| D61 | Text captured before an unsend (**owner-confirmed 2026-10-18**) | Kept; the message is marked unsent by the sender; disclosed in privacy.md | Remove the earlier text | The archive keeps what it already captured, and says so |
+| D62 | FTS | External content over `message_body.display_text`, unicode61 `remove_diacritics 2`, `detail=full`, guarded triggers, every version indexed, `secure-delete` | Writes from Rust; trigram now | Snippets, rebuild and drift checks; CJK limits stated |
 | D63 | Transactions | `IMMEDIATE` batches (1,000 rows / 32 MiB / 2 s), a savepoint per record, the importer's own cursor, `synchronous=FULL` | Per-row transactions | Durable and resumable at batch granularity |
 | D64 | Resume binding | Digest and framing, versions, read profile, options and lineage; otherwise supersede | Resume across any change | One rule set per session |
-| D80 | Lineage | The caller (the gate, later) picks an existing lineage or a new one | Infer from device fields | No silent identity claim |
+| D65 | Confirmation | A gate inside the import job (`ImportGate`), after every preflight read and before the first write; the shell waits for `confirm_import` at most two minutes; Decline, cancel, exit and the timeout write nothing | Two jobs | One staging and one password, versus a longer plaintext window (disclosed) |
+| D66 | Attachment copy | `copy_file_to(Write)`, hashed while streaming; batched fsyncs; durable intents; no-replace placement; an orphan re-hashed before it is adopted; an archived file with the same length is not re-read | Re-read every file at import | Half the I/O; changed bytes at the same length are found only by a full verify |
+| D67 | Storage names | `blob.storage_name` separate from `sha256`; the v1 CHECK ties them; M8's migration drops the CHECK for keyed names | Path = hash | M8 can switch to keyed names in one module |
+| D68 | Disk space | Warn on the estimate; hard guards before every write transaction and file; `max_page_count` with read-back; the reserve clamped to 1–10 GiB | Refuse on the estimate | An unmeasured `K` never blocks an import that fits, and a wrong one never fills the disk |
+| D69 | Verifier (roadmap: a lean **awaiting the owner's confirmation**) | The library verifier ships in M4, report-only, quick and full (slice 4k); the verify job is the shell's (4l) and its sentence per finding the UI's (4m); repair stays in M8 | All verification in M8 | The M4 brief asks for integrity checks; nothing is repaired before M8 |
+| D70 | Provenance file (product fields: a lean **awaiting the owner's confirmation**) | `imports/session-<n>.json`, content-free, best effort, written at each terminal state; it includes the product type and version | A full copy of the session row | Survives database damage without personal data |
+| D71 | Diagnostic log (a lean **awaiting the owner's confirmation**) | The persistent, redacted log file (D15) is deferred again, to M8 | Ship it in M4 | A new on-disk artifact needs its own review |
+| D72 | Thumbnails | Deferred to M5; no `thumbnails/` directory in v1 | Reserve the directory | No speculative layout |
+| D73 | Jobs | `reserve` by subject (backup, archive or both); `Import` and `Verify` kinds; one job at a time (D7) | Key jobs by backup only | An archive can never be double-booked |
+| D74 | Staged sms.db lifetime | The whole import, the gate and P6 included; removed after P8, before finalize | Re-stage per pass | One copy, versus a longer plaintext window (disclosed) |
+| D75 | `application_id` | `0x4F4D4131` ("OMA1"), unregistered | Register it | Registration is optional |
+| D76 | Views | None in v1; views are disabled on every connection | Read views | `highlight()` fails in views with `TRUSTED_SCHEMA` off |
+| D77 | Unicode normalisation | None in M4: raw bytes are stored and the tokenizer folds diacritics | `unicode-normalization` | No new crate; NFC and NFD forms match in search through `remove_diacritics 2` |
+| D78 | Permissions | 0700/0600 on Unix, re-checked at every open; the library itself must be ours and not writable by others | Leave the umask | Plaintext archive; ACL inheritance on Windows is disclosed with the privacy write-up |
+| D79 | Untested iOS versions (a lean **awaiting the owner's confirmation**; extends D43) | Imports are allowed; raw values are stored as read; derived columns are marked provisional through the session's `ios_version_untested` qualifier, which the gate states | Refuse imports from untested versions | Storing raw values approximates nothing, and derived values can be re-derived when the rules improve |
+| D80 | Lineage | The user picks an existing lineage or a new one at the gate, with a suggestion and boolean device evidence; only the chosen lineage continues an unfinished session | Infer from device fields | No silent identity claim |
 | D81 | Rank | (dated, bounded date, content digest), memcmp-compared; undated below dated | Session id as tie-break | Order independence; no host-clock wins |
 | D82 | Value history (column list: a lean **awaiting the owner's confirmation**) | The closed list of 11 history columns keeps every other observed value | History for every column | Content kept where it matters |
 | D83 | In-source duplicate keys | Every occurrence unkeyed; found by a sorted 128-bit digest scan; persisted per session | Key the first in rowid order | Rowid-order independence; a collision can only demote |
+| D84 | Reader | `ArchiveReader`: lock-free, query-only, fingerprint first | Read through the locked `Archive` | Details during imports |
 | D85 | Fault injection | Non-default `fault-injection` feature, per-thread hooks and fault points; crash by killing a re-executed child | Environment variables in release builds; `abort()` | No test hooks in shipped code; deterministic boundaries |
-| D86 | Windows long paths | `win32-longpath` with a verbatim path; if WAL and `-shm` fail there in CI, refuse library paths whose deepest archive path exceeds 240 characters | `EXCLUSIVE` locking | Keeps D53's reader. **UNVERIFIED** until the Windows run |
+| D86 | Windows long paths | `win32-longpath` with a verbatim path; if WAL and `-shm` fail there in CI, refuse library paths whose deepest archive path exceeds 240 characters | `EXCLUSIVE` locking | Keeps D53's reader. On the `windows-2022` CI runner ([run 39137381988](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39137381988)) WAL and `-shm` worked on `win32-longpath` with a `-shm` path over 260 characters, so the fallback is not applied. Not yet run on Windows 11 |
 | D87 | Migrations | Explicit `migrate()` only; fingerprint first; space checked before anything changes; unfinished sessions superseded; a real migration refused until the pre-migration copy exists | Migrate on open | No surprise writes; reads never migrate |
+| D88 | Stopped state | Session state 6, `stopped`, for resumable stops (space, a changed source, a volume limit) | Reuse cancelled or failed | "Failed" is kept for errors that cannot be continued. A file-size limit hit on the database itself (`EFBIG`) still fails the session; only per-file limits on attachments are handled |
 
 ## Logging
 
@@ -1045,5 +1800,16 @@ text, and its errors carry codes and kinds only.
 `Display` against the label, the id, the library path and any 32-hex run;
 `tests/source_rules.rs` bans `instrument` without `skip_all`.
 
-The persistent, redacted diagnostic log file is deferred to M4 (D15); the
-M4 spec defers it again, to M8 (D71, awaiting the owner).
+The shell (slice 4l) logs archive job ids, kinds, phases and outcomes,
+never an archive id or label; `src-tauri/tests/log_hygiene.rs` imports and
+fully verifies every import catalogue entry through the jobs and checks
+the log for planted sentinels, the password, the UDID, the device name,
+temporary paths, the archive id and the label, and every event, details
+and listing JSON for planted sentinels, the password and the UDID. Together with spec §13.2, M4 never logs natural keys,
+fingerprints, content digests, ranks, attachment hashes or storage names,
+source rowids and cursors, device names or product types, display text,
+values from `value_issue` or `value_history`, or SQLite error text (only
+the primary code).
+
+The persistent, redacted diagnostic log file was deferred to M4 (D15); M4
+defers it again, to M8 (D71, a lean awaiting the owner).

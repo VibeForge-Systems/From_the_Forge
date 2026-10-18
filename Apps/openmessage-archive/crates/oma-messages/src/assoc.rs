@@ -141,6 +141,24 @@ impl std::fmt::Debug for AssocRaw {
 }
 
 impl AssocRaw {
+    /// The five columns as a caller holds them, for example as an archive
+    /// stores them (M4 re-derives the association from stored raw values).
+    pub fn new(
+        raw_type: Col<i64>,
+        raw_guid: Col<Redacted<SqlText>>,
+        emoji: Col<Redacted<SqlText>>,
+        range_location: Col<i64>,
+        range_length: Col<i64>,
+    ) -> AssocRaw {
+        AssocRaw {
+            raw_type,
+            raw_guid,
+            emoji,
+            range_location,
+            range_length,
+        }
+    }
+
     /// The association these columns describe, or `None` (§11.1).
     pub fn association(&self) -> Option<Association> {
         Association::from_columns(
@@ -280,12 +298,8 @@ mod tests {
     /// R4: the raw columns keep what `Association` folds together.
     #[test]
     fn raw_columns_keep_the_states_association_folds() {
-        let raw = |t: Col<i64>, g: Col<Redacted<SqlText>>| AssocRaw {
-            raw_type: t,
-            raw_guid: g,
-            emoji: Col::Absent,
-            range_location: Col::Null,
-            range_length: Col::Value(3),
+        let raw = |t: Col<i64>, g: Col<Redacted<SqlText>>| {
+            AssocRaw::new(t, g, Col::Absent, Col::Null, Col::Value(3))
         };
         // '' and NULL both give no association, but stay apart raw.
         let empty = raw(Col::Value(0), text(""));

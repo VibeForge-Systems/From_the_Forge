@@ -1,4 +1,15 @@
 import type {
+  ArchiveDetailsDto,
+  ArchiveEntryDto,
+  ArchiveListingDto,
+  ArchiveSummaryDto,
+  EntityCountsDto,
+  ImportCountsDto,
+  ImportPreflightDto,
+  LastImportDto,
+  LinkCountsDto,
+  VerifyCountsDto,
+  VerifySummaryDto,
   ArchiveLocationStatus,
   BackupDetails,
   BackupList,
@@ -276,6 +287,262 @@ export function extractionReport(overrides: Partial<ExtractionReportDto> = {}): 
     checkedAt: '2026-10-18T10:00:00Z',
     durationMs: 120,
     saturated: false,
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------- M4 archives
+
+/** A synthetic archive id (`a` + 32 hex digits). */
+export const ARCHIVE_ID = `a${'1'.repeat(32)}`;
+export const OTHER_ARCHIVE_ID = `a${'2'.repeat(32)}`;
+
+export function archiveSummary(overrides: Partial<ArchiveSummaryDto> = {}): ArchiveSummaryDto {
+  return {
+    archiveId: ARCHIVE_ID,
+    label: 'Synthetic archive',
+    labelUnreadable: false,
+    schemaVersion: 1,
+    createdAtMs: Date.UTC(2026, 9, 1, 12, 0, 0),
+    stats: null,
+    sessions: { running: 0, completed: 0, cancelled: 0, failed: 0, interrupted: 0, superseded: 0, stopped: 0 },
+    resumableSession: null,
+    resumableState: null,
+    newerRules: false,
+    statTables: false,
+    ...overrides,
+  };
+}
+
+export function archiveEntry(overrides: Partial<ArchiveEntryDto> = {}): ArchiveEntryDto {
+  const status = overrides.status ?? 'ready';
+  return {
+    archiveId: ARCHIVE_ID,
+    status,
+    schemaVersion: null,
+    damage: null,
+    refusal: null,
+    summary: status === 'ready' ? archiveSummary({ archiveId: overrides.archiveId ?? ARCHIVE_ID }) : null,
+    ...overrides,
+  };
+}
+
+export function archiveListing(entries: ArchiveEntryDto[] = [archiveEntry()]): ArchiveListingDto {
+  return { entries, libraryState: 'ready', libraryError: null };
+}
+
+export function archiveDetails(overrides: Partial<ArchiveDetailsDto> = {}): ArchiveDetailsDto {
+  return {
+    summary: archiveSummary(),
+    sessions: [],
+    lastImport: null,
+    lastVerify: null,
+    activeJob: null,
+    preflight: null,
+    resumable: false,
+    matchingBackupIds: [],
+    resumeOptions: null,
+    ...overrides,
+  };
+}
+
+function entityCounts(seen: number): EntityCountsDto {
+  return {
+    seen,
+    inserted: seen,
+    alreadyPresent: 0,
+    unkeyed: 0,
+    cellsReplaced: 0,
+    notApplied: 0,
+    historyAdded: 0,
+    valueIssueCells: 0,
+    saturated: false,
+  };
+}
+
+function linkCounts(seen: number): LinkCountsDto {
+  return {
+    seen,
+    inserted: seen,
+    alreadyPresent: 0,
+    unresolved: 0,
+    unresolvedFirst: 0,
+    unresolvedSecond: 0,
+    skippedRecentlyDeleted: 0,
+    saturated: false,
+  };
+}
+
+export function importCounts(): ImportCountsDto {
+  return {
+    handles: entityCounts(6),
+    chats: entityCounts(4),
+    messages: entityCounts(40),
+    bodies: {
+      added: 38,
+      unchanged: 0,
+      rederived: 0,
+      currentMoved: 0,
+      displayAttributedBody: 30,
+      displayText: 8,
+      displayTextLossy: 0,
+      noneAttributedBodyUnusable: 0,
+      noneTextEmpty: 1,
+      noneNoSource: 1,
+      sourcesDiffer: 0,
+      decodeFailed: 0,
+      runIssues: 0,
+      saturated: false,
+    },
+    chatHandles: linkCounts(6),
+    chatMessages: linkCounts(39),
+    attachments: entityCounts(3),
+    attachmentFiles: {
+      copied: 2,
+      replaced: 0,
+      deduplicated: 0,
+      adopted: 0,
+      orphanReplaced: 0,
+      alreadyArchived: 0,
+      storeConflicts: 0,
+      notRequested: 0,
+      notLookedUp: 0,
+      notInBackup: 1,
+      blobUnavailable: 0,
+      overLimit: 0,
+      tooLargeForVolume: 0,
+      readFailed: 0,
+      writeFailed: 0,
+      sizeMismatch: 0,
+      partialsLeft: 0,
+      bytesCopied: 2048,
+      fsyncs: 3,
+      blobsAdded: 2,
+      currentMoved: 0,
+      saturated: false,
+    },
+    messageAttachments: linkCounts(3),
+    recentlyDeleted: {
+      messages: 1,
+      excluded: 1,
+      notUpdated: 0,
+      imported: 0,
+      attachmentsExcluded: 0,
+      marked: 0,
+      notMarked: 0,
+      saturated: false,
+    },
+    batches: 7,
+    resumes: 0,
+    saturated: false,
+  };
+}
+
+export function lastImport(overrides: Partial<LastImportDto> = {}): LastImportDto {
+  return {
+    session: 1,
+    lineageId: 1,
+    state: 'completed',
+    startedAtMs: Date.UTC(2026, 9, 18, 10, 0, 0),
+    endedAtMs: Date.UTC(2026, 9, 18, 10, 5, 0),
+    resumes: 0,
+    stopReason: null,
+    provisional: false,
+    counts: importCounts(),
+    ...overrides,
+  };
+}
+
+/** A first-import preflight with nothing to warn about. */
+export function preflight(overrides: Partial<ImportPreflightDto> = {}): ImportPreflightDto {
+  const keys = (rows: number) => ({ rows, keyable: rows, duplicatedKeys: 0, unkeyed: 0 });
+  return {
+    resume: { kind: 'fresh', supersedes: 0, reason: 'nothingToContinue' },
+    sameContentCompleted: false,
+    device: 'firstImport',
+    lineages: [],
+    suggestedLineage: { kind: 'new' },
+    keys: {
+      handles: keys(6),
+      chats: keys(4),
+      messages: keys(40),
+      attachments: keys(3),
+      messagesAlreadyArchived: 0,
+    },
+    recentlyDeleted: { messages: 0, excluded: 0, alreadyArchived: 0, attachmentsExcluded: 0 },
+    space: {
+      stagedBytes: 65536,
+      bytesToCopy: 2048,
+      filesToCopy: 2,
+      largestFile: 1024,
+      reserve: 1073741824,
+      walAllowance: 1048576,
+      needed: 2 * 1073741824,
+      available: 100 * 1073741824,
+      warns: false,
+    },
+    order: { dated: true, source: 'statusPlistDate', outOfRange: false, sortsBeforeLatest: false, sourceDiffers: false },
+    encryptedSource: false,
+    syncFolderWarning: false,
+    windowsAclInherited: false,
+    qualifiers: [],
+    provisional: false,
+    saturated: false,
+    ...overrides,
+  };
+}
+
+export function verifyCounts(overrides: Partial<VerifyCountsDto> = {}): VerifyCountsDto {
+  return {
+    schema: 'ok',
+    newerRules: false,
+    rulesAboveHighWater: 0,
+    statTables: true,
+    ftsSecureDelete: 'ok',
+    sqliteCheck: 'ok',
+    sqliteCheckMessages: 0,
+    foreignKeyViolations: 0,
+    valueIssueOrphans: 0,
+    valueHistoryOrphans: 0,
+    labelUnreadable: false,
+    sessionsRunning: 0,
+    blobIntents: 0,
+    ftsIntegrity: 'ok',
+    blobs: 2,
+    blobBadName: 0,
+    blobMissing: 0,
+    blobNotRegular: 0,
+    blobLengthMismatch: 0,
+    blobsHashed: 0,
+    bytesHashed: 0,
+    blobHashMismatch: 0,
+    blobUnreadable: 0,
+    storeEntries: 2,
+    storeUnexpected: 0,
+    storeOrphans: 0,
+    storeLinks: 0,
+    storeWalkTruncated: false,
+    partialFiles: 0,
+    provenanceFiles: 1,
+    provenanceUnreadable: 0,
+    provenanceTmpFiles: 0,
+    importsScanTruncated: false,
+    notPrivate: 0,
+    checksNotRun: 0,
+    hasProblems: false,
+    saturated: false,
+    ...overrides,
+  };
+}
+
+export function verifySummary(overrides: Partial<VerifySummaryDto> = {}): VerifySummaryDto {
+  return {
+    run: 1,
+    depth: 'quick',
+    startedAtMs: Date.UTC(2026, 9, 18, 11, 0, 0),
+    endedAtMs: Date.UTC(2026, 9, 18, 11, 0, 3),
+    outcome: 'ok',
+    counts: verifyCounts(),
     ...overrides,
   };
 }
