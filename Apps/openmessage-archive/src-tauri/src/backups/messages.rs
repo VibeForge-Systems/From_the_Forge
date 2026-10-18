@@ -48,6 +48,7 @@ pub const LOCK_UNSUPPORTED: &str = "Your archive folder is on a drive that does 
 /// confirmation is Apple's (support.apple.com/en-us/109054); see
 /// `docs/supported-formats.md`.
 pub const RUN_BACKUP_AGAIN: &str = "Run the backup again with the app or tool that made it, and keep the iPhone unlocked until it completes. On iOS 16 or later, enter the iPhone's passcode when the iPhone asks you to confirm the backup.";
+pub const SOURCE_CHANGED: &str = "The backup changed while a file was being copied from it. Run the check again when no backup is in progress.";
 pub const TOO_MANY_FOLDERS: &str = "You can add up to 32 backup folders. Forget one first.";
 
 /// `1234567` → `1,234,567`.
@@ -245,6 +246,13 @@ fn limit_message(what: LimitKind, value: u64, cap: u64) -> String {
         }
         LimitKind::RootEntries => format!("The folder has more than {c} entries."),
         LimitKind::PasswordBytes => PASSWORD_TOO_LONG.into(),
+        LimitKind::SmsDbBytes => format!(
+            "The backup's Messages database is larger than {}, the current limit.",
+            mib(cap)
+        ),
+        LimitKind::SummaryArray => {
+            "A value in the backup's Messages database exceeds safe processing limits.".into()
+        }
     }
 }
 
@@ -335,6 +343,11 @@ pub fn to_ipc(e: &BackupError, limits: &Limits) -> IpcError {
             os_code,
             ..
         } => IpcError::new(ErrorCode::Io, io_message(*side, *kind, *os_code)),
+        BackupError::SourceChanged => IpcError::new(ErrorCode::Io, SOURCE_CHANGED),
+        BackupError::SchemaExceedsLimits => IpcError::new(
+            ErrorCode::UnsupportedBackup,
+            "A database in this backup has a structure larger than this app's safety limits allow.",
+        ),
         BackupError::StagingRefused(StagingRefusal::Guard) => {
             IpcError::internal("staging guard refused")
         }
@@ -682,6 +695,11 @@ mod tests {
                 ErrorCode::Internal,
             ),
             (BackupError::Internal("x"), ErrorCode::Internal),
+            (BackupError::SourceChanged, ErrorCode::Io),
+            (
+                BackupError::SchemaExceedsLimits,
+                ErrorCode::UnsupportedBackup,
+            ),
         ];
         for r in [
             UnsupportedReason::LegacyMbdb,
@@ -728,6 +746,8 @@ mod tests {
             LimitKind::ManifestRows,
             LimitKind::MbFileBytes,
             LimitKind::RootEntries,
+            LimitKind::SmsDbBytes,
+            LimitKind::SummaryArray,
         ] {
             v.push((
                 BackupError::LimitExceeded {

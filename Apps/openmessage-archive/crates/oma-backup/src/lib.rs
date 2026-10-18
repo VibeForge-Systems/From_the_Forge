@@ -13,6 +13,7 @@
 pub mod bplist;
 mod cancel;
 mod cbc_stream;
+mod db_limits;
 mod discover;
 mod error;
 mod extract;
@@ -27,11 +28,15 @@ mod manifest_db;
 mod mbfile;
 mod open;
 mod plists;
+mod prober;
+mod staged_conn;
 mod staging;
 mod text;
 mod validate;
+mod wal;
 
 pub use cancel::{CancelToken, JobCtx, Phase, Progress, ProgressSink};
+pub use db_limits::StagedDbLimits;
 pub use discover::{
     classify_added_folder, default_backup_roots, library_relation, scan_root, AddedFolder,
     Candidate, DefaultRoot, LibraryRelation, RefusalReason, RootKind, RootScan, RootScanState,
@@ -40,23 +45,30 @@ pub use discover::{
 pub use error::{
     BackupError, FileUnavailable, IoOp, IoSide, MalformedDetail, StagingRefusal, UnsupportedReason,
 };
-pub use extract::{ExtractedFile, StagedConnection, StagedDatabase};
+pub use extract::{
+    AttachmentKey, ContentDigest, ExtractedFile, FileEntry, StagedDatabase, WalOutcome, WalPolicy,
+};
 pub use id::{BackupId, LocationId};
 pub use inspect::{inspect, Classification, Inspection, Layout};
 pub use keybag::KeybagNote;
 pub use keys::Password;
-pub use limits::{LimitKind, Limits};
+pub use limits::{LimitKind, Limits, SMS_DB_BYTES_DEFAULT};
 pub use manifest_db::{EntryKind, ManifestEntry, OpenMode};
 pub use mbfile::MbFile;
 pub use open::{OpenBackup, OpenError};
 pub use plists::{
     BackupFile, InfoPlist, ManifestPlist, NoteKind, ParseNote, SnapshotState, Sourced, StatusPlist,
 };
+pub use prober::{BlobProbe, FileProber};
+pub use staged_conn::{Budgeted, ReadPolicy, StagedConnection, TextEncoding, OPS_PER_TICK};
 pub use staging::{sweep_stale, CleanupReport, StagingRoot, StagingSession, SweepReport};
+#[cfg(windows)]
+pub use staging::{FILE_ATTRIBUTE_NOT_CONTENT_INDEXED, FILE_ATTRIBUTE_TEMPORARY};
 pub use text::DisplayText;
 pub use validate::{
     Check, CheckId, CheckLevel, Finding, ManifestStats, SmsDbStatus, ValidationReport,
     SMS_DB_DOMAIN, SMS_DB_FILE_ID, SMS_DB_PATH,
 };
+pub use wal::{HeaderFacts, WalFacts};
 /// Re-exported so callers can build a [`Password`] without naming the crate.
 pub use zeroize::Zeroizing;

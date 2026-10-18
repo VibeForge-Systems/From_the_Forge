@@ -42,7 +42,14 @@ pub struct Limits {
     pub list_plist_bytes_total: u64,
     /// Maximum password length in UTF-8 bytes (1024).
     pub password_bytes: usize,
+    /// Cap on a staged database's source blob plus its `-wal` blob, in bytes
+    /// (32 GiB), checked before anything is copied. Real sms.db sizes are
+    /// **UNVERIFIED**; the cap protects the archive volume (D40).
+    pub sms_db_bytes: u64,
 }
+
+/// The production value of [`Limits::sms_db_bytes`]: 32 GiB (D40).
+pub const SMS_DB_BYTES_DEFAULT: u64 = 32 << 30;
 
 impl Default for Limits {
     fn default() -> Self {
@@ -64,6 +71,7 @@ impl Default for Limits {
             list_backups_total: 512,
             list_plist_bytes_total: 256 << 20,
             password_bytes: 1024,
+            sms_db_bytes: SMS_DB_BYTES_DEFAULT,
         }
     }
 }
@@ -97,6 +105,11 @@ pub enum LimitKind {
     RootEntries,
     /// A password longer than `password_bytes`.
     PasswordBytes,
+    /// A staged database and its `-wal` together larger than `sms_db_bytes`.
+    SmsDbBytes,
+    /// A `message_summary_info` array longer than its cap. Reported by
+    /// `oma-messages` through [`crate::bplist::ReadOpts::array_cap`].
+    SummaryArray,
 }
 
 #[cfg(test)]
@@ -123,5 +136,6 @@ mod tests {
         assert_eq!(l.list_backups_total, 512);
         assert_eq!(l.list_plist_bytes_total, 268_435_456);
         assert_eq!(l.password_bytes, 1024);
+        assert_eq!(l.sms_db_bytes, 34_359_738_368);
     }
 }

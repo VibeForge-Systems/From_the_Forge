@@ -13,12 +13,12 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use rusqlite::limits::Limit as SqlLimit;
 use rusqlite::types::ValueRef;
 use rusqlite::{config::DbConfig, Connection, InterruptHandle, OpenFlags, Row};
 use sha1::{Digest, Sha1};
 
 use crate::cancel::CancelToken;
+use crate::db_limits::{StagedDbLimits, MANIFEST_LIMITS};
 use crate::error::{sqlite_error, BackupError, MalformedDetail};
 use crate::limits::{LimitKind, Limits};
 use crate::mbfile::MbFile;
@@ -177,69 +177,35 @@ pub(crate) struct SchemaFacts {
 
 const REQUIRED_COLUMNS: [&str; 5] = ["fileID", "domain", "relativePath", "flags", "file"];
 
-/// `sqlite3_limit` values for one kind of staged database
-/// (sqlite.org/security.html).
-pub(crate) struct SqlLimits {
-    length: i32,
-    sql_length: i32,
-    expr_depth: i32,
-    column: i32,
-    vdbe_op: i32,
-    function_arg: i32,
-    like_pattern_length: i32,
-    variable_number: i32,
-}
-
-/// Manifest.db: five known columns and fixed, simple queries.
-pub(crate) const MANIFEST_LIMITS: SqlLimits = SqlLimits {
-    length: 1 << 20,
-    sql_length: 1 << 16,
-    expr_depth: 100,
-    column: 100,
-    vdbe_op: 25_000,
-    function_arg: 8,
-    like_pattern_length: 50,
-    variable_number: 10,
-};
-
-/// Other staged databases (sms.db for M3). Wider than Manifest.db's: the
-/// `message` table has many columns and bodies can be long. Provisional: M3
-/// tunes these against its queries.
-pub(crate) const STAGED_DB_LIMITS: SqlLimits = SqlLimits {
-    length: 64 << 20,
-    sql_length: 1 << 16,
-    expr_depth: 100,
-    column: 2000,
-    vdbe_op: 250_000,
-    function_arg: 32,
-    like_pattern_length: 50,
-    variable_number: 999,
-};
-
-fn harden(conn: &Connection, limits: &SqlLimits) -> rusqlite::Result<()> {
+/// The hardening every staged connection gets (§7.2, M3 §3.1), whatever its
+/// numeric limits.
+///
+/// - `DEFENSIVE` on and `TRUSTED_SCHEMA` off.
+/// - Double-quoted string literals off for DML and DDL. The bundled build
+///   does not set `SQLITE_DQS`, so the legacy misfeature is otherwise on
+///   (sqlite.org/quirks.html): with it off, a double-quoted identifier that
+///   names no column fails to prepare instead of becoming a string.
+/// - Triggers and views off (sqlite.org/security.html): nothing here uses
+///   either, so a hostile schema's triggers never fire and its views cannot
+///   be queried.
+/// - `query_only`, `cell_size_check`, in-memory temp storage, no mmap.
+/// - The numeric limits, no `ATTACH`, a trigger depth of 1.
+///
+/// Then the schema is touched, so a database that cannot be loaded fails
+/// here.
+pub(crate) fn harden(conn: &Connection, limits: &StagedDbLimits) -> rusqlite::Result<()> {
     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)?;
     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_TRUSTED_SCHEMA, false)?;
+    conn.set_db_config(DbConfig::SQLITE_DBCONFIG_DQS_DML, false)?;
+    conn.set_db_config(DbConfig::SQLITE_DBCONFIG_DQS_DDL, false)?;
+    conn.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_TRIGGER, false)?;
+    conn.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_VIEW, false)?;
     conn.pragma_update(None, "query_only", true)?;
     conn.pragma_update(None, "cell_size_check", true)?;
     // Never spill decrypted pages to the OS temp directory.
     conn.pragma_update(None, "temp_store", "MEMORY")?;
     conn.pragma_update(None, "mmap_size", 0)?;
-    conn.set_limit(SqlLimit::SQLITE_LIMIT_LENGTH, limits.length)?;
-    conn.set_limit(SqlLimit::SQLITE_LIMIT_SQL_LENGTH, limits.sql_length)?;
-    conn.set_limit(SqlLimit::SQLITE_LIMIT_ATTACHED, 0)?;
-    conn.set_limit(SqlLimit::SQLITE_LIMIT_EXPR_DEPTH, limits.expr_depth)?;
-    conn.set_limit(SqlLimit::SQLITE_LIMIT_COLUMN, limits.column)?;
-    conn.set_limit(SqlLimit::SQLITE_LIMIT_VDBE_OP, limits.vdbe_op)?;
-    conn.set_limit(SqlLimit::SQLITE_LIMIT_FUNCTION_ARG, limits.function_arg)?;
-    conn.set_limit(SqlLimit::SQLITE_LIMIT_TRIGGER_DEPTH, 1)?;
-    conn.set_limit(
-        SqlLimit::SQLITE_LIMIT_LIKE_PATTERN_LENGTH,
-        limits.like_pattern_length,
-    )?;
-    conn.set_limit(
-        SqlLimit::SQLITE_LIMIT_VARIABLE_NUMBER,
-        limits.variable_number,
-    )?;
+    limits.apply(conn)?;
     // Touch the schema, so a database that cannot be read fails here.
     conn.query_row("SELECT count(*) FROM sqlite_schema", [], |r| {
         r.get::<_, i64>(0)
@@ -253,7 +219,7 @@ fn harden(conn: &Connection, limits: &SqlLimits) -> rusqlite::Result<()> {
 pub(crate) fn open_staged(
     path: &Path,
     file: BackupFile,
-    limits: &SqlLimits,
+    limits: &StagedDbLimits,
 ) -> Result<(Connection, OpenMode), BackupError> {
     let read_only = open_connection(
         path,
@@ -676,6 +642,22 @@ mod tests {
             .conn()
             .execute("INSERT INTO Files VALUES ('a','b','c',1,NULL)", [])
             .is_err());
+        // M3 §3.1: the Manifest.db connection is hardened the same way.
+        // Double-quoted strings are off, so an unknown identifier fails.
+        assert!(m.conn().prepare("SELECT \"nosuch\" FROM Files").is_err());
+        for (config, name) in [
+            (DbConfig::SQLITE_DBCONFIG_DQS_DML, "DQS_DML"),
+            (DbConfig::SQLITE_DBCONFIG_DQS_DDL, "DQS_DDL"),
+            (DbConfig::SQLITE_DBCONFIG_ENABLE_TRIGGER, "ENABLE_TRIGGER"),
+            (DbConfig::SQLITE_DBCONFIG_ENABLE_VIEW, "ENABLE_VIEW"),
+            (DbConfig::SQLITE_DBCONFIG_TRUSTED_SCHEMA, "TRUSTED_SCHEMA"),
+        ] {
+            assert!(!m.conn().db_config(config).expect("db_config"), "{name}");
+        }
+        assert!(m
+            .conn()
+            .db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE)
+            .expect("db_config"));
         m.close();
     }
 
