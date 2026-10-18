@@ -80,5 +80,5 @@ impl<'a> BulkWriter<'a> {
 /// The import's `message.sort_key` for a dated instant (`Some(unix ns)`) or
 /// an undated row (its first rank and first source rowid).
 pub fn sort_key(utc_ns: Option<i64>, first_rank: &[u8; 41], first_src_rowid: i64) -> Vec<u8> {
-    crate::import::encode_sort_key(utc_ns, first_rank, first_src_rowid)
+    crate::sortkey::encode(utc_ns, first_rank, first_src_rowid)
 }

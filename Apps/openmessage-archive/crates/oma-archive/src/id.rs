@@ -145,7 +145,7 @@ pub struct Label(String);
 
 /// `true` for the Unicode bidirectional formatting characters: ALM, LRM,
 /// RLM, LRE, RLE, PDF, LRO, RLO, LRI, RLI, FSI and PDI.
-fn is_bidi_control(c: char) -> bool {
+pub(crate) fn is_bidi_control(c: char) -> bool {
     matches!(
         c,
         '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'

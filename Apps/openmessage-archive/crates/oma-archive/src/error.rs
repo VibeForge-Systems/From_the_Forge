@@ -93,6 +93,8 @@ pub enum Stage {
     Batch,
     /// The verifier's reads and its result rows.
     Verify,
+    /// A viewer read (M5 §3.2).
+    View,
 }
 
 /// Which file-system operation an I/O error came from.
@@ -195,6 +197,11 @@ pub enum ArchiveError {
     /// The work was cancelled.
     #[error("cancelled")]
     Cancelled,
+    /// A viewer read needed more work than its budget, or more time than
+    /// its deadline, allows (M5 §3.2). The query was too broad; this never
+    /// means the archive is damaged.
+    #[error("query too broad")]
+    QueryTooBroad,
     /// A bug.
     #[error("internal")]
     Internal(&'static str),

@@ -84,7 +84,6 @@ pub use gate::{
     LINEAGES_LIMIT,
 };
 #[cfg(feature = "fault-injection")]
-pub(crate) use messages::encode_sort_key;
 pub use preflight::{KEY_SCAN_CAP, RECOVERABLE_SCAN_CAP};
 pub(crate) use session::{supersede_sessions, unfinished_sessions};
 pub use session::{ORDER_KEY_FLOOR_NS, ORDER_KEY_SLACK_NS};

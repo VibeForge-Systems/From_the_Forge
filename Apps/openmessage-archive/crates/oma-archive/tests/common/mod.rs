@@ -7,6 +7,7 @@
 
 pub mod bulk;
 pub mod import;
+pub mod viewer;
 
 use std::collections::BTreeMap;
 use std::fs;

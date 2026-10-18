@@ -65,9 +65,11 @@ mod progress;
 mod provenance;
 mod reader;
 pub mod schema;
+mod sortkey;
 pub mod space;
 mod store_fs;
 mod verify;
+mod view;
 
 #[cfg(feature = "fault-injection")]
 pub use fault::hooks;
@@ -104,6 +106,13 @@ pub use store_fs::{DirSync, Placed, RealFs, StoreFs};
 pub use verify::{
     CheckState, SchemaCheck, VerifyCounts, VerifyDepth, VerifyReport, VerifySummary,
     IMPORTS_SCAN_SLACK, SQLITE_CHECK_ROWS, STORE_WALK_SLACK,
+};
+pub use view::{
+    CappedCount, ChatId, ChatLabel, ChatStatsFacts, ContentText, Conversation, ConversationIndex,
+    ConversationSort, DirectionCode, HandleId, MaskKind, MessageId, NameFilter, NameFilterError,
+    OptContent, Participant, Preview, PreviewBody, TextPiece, UrlRun, BODY_PAGE_UTF16,
+    CONVERSATIONS_PER_CALL, CONVERSATION_INDEX_LIMIT, IDENTIFIER_UTF16, LABEL_PARTICIPANTS,
+    PREVIEW_SCAN_ROWS, PREVIEW_UTF16,
 };
 
 /// The app version recorded in `archive_meta.created_by`,

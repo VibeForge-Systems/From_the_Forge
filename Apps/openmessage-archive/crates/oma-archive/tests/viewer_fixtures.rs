@@ -18,8 +18,9 @@
 //!   folded items, and every masked string is in the archive.
 //!
 //! The `viewer` expectations themselves are asserted against the viewer
-//! reads from slice 5b. The committed fixtures are never written: backups
-//! are opened in place with a temporary staging directory.
+//! reads from slice 5b: the conversations in `viewer_conversations.rs`.
+//! The committed fixtures are never written: backups are opened in place
+//! with a temporary staging directory.
 #![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 mod common;
@@ -30,14 +31,14 @@ mod media;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Cursor;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use common::import::*;
+use common::viewer::{self, at, json_at, viewer_root, ENTRIES, SCENARIOS};
 use common::*;
 use image::codecs::gif::GifDecoder;
 use image::codecs::jpeg::JpegDecoder;
 use image::{AnimationDecoder, ColorType, ImageDecoder, ImageReader};
-use oma_archive::{LineageChoice, LineageId};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -50,45 +51,12 @@ const INPUT_SUMS_SHA256: &str = "ee33f1fde09cf332384f61595c9705a5b256fb12cf86a0c
 const EXPECTED_SUMS_SHA256: &str =
     "dca1842ac6f35752e75cfd28940fd6fc45e5e59a8f64e1c8c60e26604c9d3899";
 
-/// The entries the catalogue must hold.
-const ENTRIES: &[&str] = &[
-    "view-hostile-text-plain",
-    "view-lin-a1-plain",
-    "view-lin-a2-plain",
-    "view-lin-a3-incomplete-plain",
-    "view-lin-b-plain",
-    "view-lin-rd-plain",
-    "view-main-plain",
-    "view-media-plain",
-    "view-media2-plain",
-    "view-oldcols-plain",
-];
-
-/// The scenarios the catalogue must hold.
-const SCENARIOS: &[&str] = &["lineages", "media-copy-off", "media-older-blob", "rd-first"];
-
 /// Text values over this many UTF-8 bytes are written as
 /// `sha256:<hex>:<bytes>` in the manifests (the generator's `LONG_TEXT`).
 const LONG_TEXT: usize = 4096;
 
-fn viewer_root() -> PathBuf {
-    PathBuf::from(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../tests/fixtures/viewer"
-    ))
-}
-
-/// A path below the catalogue from a `/`-separated relative name.
-fn at(rel: &str) -> PathBuf {
-    rel.split('/').fold(viewer_root(), |p, part| p.join(part))
-}
-
 fn sha256_hex(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
-}
-
-fn json_at(rel: &str) -> Value {
-    serde_json::from_slice(&fs::read(at(rel)).expect("json")).expect("parse")
 }
 
 /// Every file below `dir`, relative to `base`, with `/` separators.
@@ -435,28 +403,10 @@ fn assert_matches_model(db: &Path, m: &Value, labels: &LineageLabels, what: &str
 
 /// Import the steps of one order into a fresh archive and compare.
 fn import_order(order: &Value, m: &Value, what: &str) {
-    let (tmp, lib) = library();
-    let id = lib.create(None).expect("create");
-    let db = db_path(&tmp, &id);
-    let mut lineages: BTreeMap<String, LineageId> = BTreeMap::new();
-    for step in order.as_array().expect("steps") {
-        let entry = step["entry"].as_str().expect("entry");
-        let label = step["lineage"].as_str().expect("lineage");
-        let mut o = opts(1000);
-        o.include_recently_deleted = step["includeRecentlyDeleted"] == true;
-        o.copy_attachments = step["copyAttachments"] != false;
-        o.ios_version_untested = step["iosVersionUntested"] == true;
-        let mut a = lib.open(&id).expect("open");
-        let src = open_dir(&viewer_root().join(entry).join(UDID), None);
-        let choice: LineageChoice = lineage_for(&mut lineages, label);
-        let s = import(&mut a, &src, &o, choice);
-        lineages.insert(label.to_owned(), s.lineage);
-        drop(a);
-        assert!(src.ob.close().removed, "{what}: staging not removed");
-    }
+    let i = viewer::import_order(order, what);
+    let db = i.db();
     assert_consistent(&db);
-    let labels: LineageLabels = lineages.iter().map(|(k, v)| (v.get(), k.clone())).collect();
-    assert_matches_model(&db, m, &labels, what);
+    assert_matches_model(&db, m, &i.labels, what);
 }
 
 #[test]
@@ -622,21 +572,7 @@ fn the_viewer_statement_is_self_consistent() {
     let mut items = BTreeSet::new();
     let mut chip_states = BTreeSet::new();
     let mut structure = BTreeSet::new();
-    let docs: Vec<(String, Value)> = ENTRIES
-        .iter()
-        .map(|e| {
-            (
-                e.to_string(),
-                json_at(&format!("{e}.expected/content.json")),
-            )
-        })
-        .chain(SCENARIOS.iter().map(|s| {
-            (
-                s.to_string(),
-                json_at(&format!("scenarios/{s}.content.json")),
-            )
-        }))
-        .collect();
+    let docs = viewer::model_docs();
     for (what, m) in &docs {
         check_viewer(m, what);
         let v = &m["viewer"];

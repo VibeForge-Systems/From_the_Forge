@@ -228,6 +228,8 @@ pub mod hooks {
         pub terminal_error: Option<i32>,
         /// Fail every provenance file write before its `.tmp` is created.
         pub provenance_fails: bool,
+        /// Replace every viewer phase's op budget (VM operations; M5 §3.2).
+        pub view_op_budget: Option<u64>,
     }
 
     thread_local! {
@@ -263,6 +265,12 @@ pub mod hooks {
     /// code prepares them (for `tests/query_plans.rs`).
     pub fn plan_statements() -> Vec<(&'static str, String)> {
         crate::import::plan_statements()
+    }
+
+    /// The viewer's index-dependent statements, by name, exactly as the
+    /// code prepares them (for `tests/query_plans.rs`, M5 §3.5).
+    pub fn viewer_statements() -> Vec<(&'static str, String)> {
+        crate::view::plan_statements()
     }
 
     pub use crate::bulk::{sort_key, BulkFinalize, BulkWriter};
@@ -521,6 +529,19 @@ pub(crate) fn read_op_budget(ops: u64) -> u64 {
     #[cfg(feature = "fault-injection")]
     {
         hooks::current().read_op_budget.unwrap_or(ops)
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        ops
+    }
+}
+
+/// The viewer phase budget to use instead of `ops`, if a test set one.
+#[inline]
+pub(crate) fn view_op_budget(ops: u64) -> u64 {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current().view_op_budget.unwrap_or(ops)
     }
     #[cfg(not(feature = "fault-injection"))]
     {

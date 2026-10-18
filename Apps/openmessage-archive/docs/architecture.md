@@ -1597,6 +1597,74 @@ owner decisions):
 - **Backdrop clicks decline the gate**, like Escape. Declining writes
   nothing.
 
+### Viewer reads: budgets and the conversation list (M5 slice 5b1)
+
+The first M5 reads, in `crates/oma-archive` (`sortkey.rs`, `conn.rs`,
+`view/`). Nothing here changes the schema or writes a file.
+
+- **One `sort_key` encoder** (`sortkey.rs`): `0x00 ‖ be64(ns XOR 2^63)`
+  for a dated message, `0x01 ‖ first_rank ‖ be64(first_src_rowid XOR
+  2^63)` for an undated one. The import, the test-only bulk generator
+  and the viewer share it. Every undated key sorts after every dated key,
+  so each read that means "recent", "newest" or "on or after a date" is
+  bounded with `sort_key < X'01'`. Sort keys never leave the crate.
+- **Viewer phases** (`ReadConn::viewing`, M5 D90): one phase runs under
+  an op budget (`ViewBudget`: `List` 5 M, `Scan` 2 M, `Assembly` 4 M,
+  `Month` 2 M, `Detail` 4 M, `Search` 30 M, `Hits` 6 M, `ScanBatch` 2 M,
+  `Lookup` 100 k VM operations), an optional cancel token and a
+  deadline, all checked by the progress handler every 1,000 operations.
+  Over budget or past the deadline is `ArchiveError::QueryTooBroad`; a
+  cancel, or an interrupt through `ReadConn::interrupt_handle`, is
+  `Cancelled`. Neither is ever `Damaged`: `budgeted()` and
+  `Damaged(WorkBudget)` keep their M4 meaning for `info`, `list`, `open`
+  and the other M4 reads. Each phase resets the budget and every stop
+  flag, so a trip in one phase does not interrupt the next. SQLite counts
+  operations per statement, so a phase made of many short statements
+  calls `Phase::checkpoint` between them; work inside one opcode cannot be
+  stopped and is bounded by construction. Every viewer call wraps its
+  phases in one `BEGIN DEFERRED … COMMIT` (`ReadConn::snapshot`): one
+  snapshot per call, and no read transaction outlives a call, so an
+  import's `wal_checkpoint(TRUNCATE)` is never held back.
+- **Content text** (`view/text.rs`): every content string leaves as an
+  `OptContent`: a `ContentText` (`Redacted<String>`, cut at a char
+  boundary to its cap with `truncated` and `full_utf16`, `lossy` when a
+  BLOB was decoded with replacement characters, `stored_as_blob` from
+  `value_issue` kind 3, and the `bidi_controls` and `invisible` facts of
+  the whole value), or `Missing(ValueState)` for NULL, absent, too large
+  or unreadable. URL runs (`http://`/`https://` to the next whitespace,
+  `hidden` when a bidi control or invisible character is inside) and
+  masking (`mask_utf16`, which widens over a split surrogate pair) are
+  ready for the thread pages.
+- **The conversation list** (`view/conversations.rs`):
+  `conversation_index(sort, filter)` returns at most 100,000 chat ids,
+  computed per call because v1 has no recency index and `chat_stats` is
+  stale while an import runs. `Recent` orders by each chat's newest
+  **dated** key (reactions and events included), chats with none last by
+  id; `Name` by the label's text, case-insensitively; `Count` by
+  `chat_stats.message_count`. A `NameFilter` (at most 128 bytes, no
+  control characters) matches the name, the identifier and every
+  participant's address in Rust. `conversations(ids)` (at most 200)
+  returns, per chat: the label by §8.4's precedence (a name recorded but
+  unreadable never falls through), the service, the `chat_handle` count
+  (`group` when more than one; `chat.style` is never read), `chat_stats`
+  with `stats_stale` when the newest session is not a completed one, and
+  live facts from the timeline index: the newest dated instant, the first
+  dated row of 2007 or later and the number before it, the undated count,
+  "empty", and a preview. The preview is the newest dated row that is not
+  a folded reaction, within 50 rows; a reaction folds only when its
+  target resolves through `message_guid` (`key_kind = 1`) to a timeline
+  item of the same chat. One-time-code parts are withheld (D115): by their
+  ranges when the formatting was decoded cleanly (`display_source = 1`,
+  no `run_issue`), otherwise the whole text. List previews never reveal.
+- **Tests.** `tests/viewer_conversations.rs` checks the order and every
+  row's facts against the viewer catalogue's Python model for every entry
+  and scenario, the undated rules against an oracle over
+  `message.date_utc_ns` on a bulk archive, the orders and the filter,
+  masking, `QueryTooBroad`, reads while an import holds the lock, stale
+  statistics and "reading writes nothing". `tests/query_plans.rs` pins
+  every viewer statement (`hooks::viewer_statements`) and checks that only
+  the conversation list scans `chat` or sorts.
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`

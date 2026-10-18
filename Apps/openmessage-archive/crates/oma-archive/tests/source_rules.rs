@@ -9,7 +9,8 @@
 //! - No `INSERT OR REPLACE` (it deletes the row and changes its id), and no
 //!   `RETURNING` (with `ON CONFLICT … DO UPDATE … WHERE` it returns no row
 //!   when the WHERE is false; spec §8.5).
-//! - No `interrupt()` (the armed interrupt guard arrives with the import).
+//! - No `interrupt()` outside `conn.rs`, which owns every connection (the
+//!   viewer's `InterruptHandle`, M5 §3.2).
 //! - The fault-injection hooks are compiled only with their feature.
 #![allow(clippy::disallowed_methods)]
 
@@ -84,7 +85,9 @@ fn violations(name: &str, text: &str) -> Vec<String> {
         if code.contains("RETURNING") {
             out.push(format!("{at}: RETURNING"));
         }
-        if code.contains("interrupt()") {
+        // `conn.rs` owns every connection, so only it may interrupt one
+        // (the viewer's `InterruptHandle`, M5 §3.2, and its test).
+        if code.contains("interrupt()") && name != "conn.rs" {
             out.push(format!("{at}: interrupt()"));
         }
         if in_tests {

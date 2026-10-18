@@ -11,6 +11,13 @@
 //! Beyond the exact text: no import statement scans a table except the
 //! finalize statistics, which scan `chat` once by design, and none builds
 //! a temporary B-tree.
+//!
+//! The viewer's statements (`hooks::viewer_statements`, M5 spec §3.5) are
+//! pinned the same way, and every read of the timeline is checked to stay
+//! on `chat_message_timeline` with its dated bound (`sort_key<?`, the
+//! literal `X'01'`) where the statement means "dated". Only the
+//! conversation list scans `chat` (once per call, by design: v1 has no
+//! recency index, §3.10), and only its orders sort in a temporary B-tree.
 #![allow(clippy::disallowed_methods)]
 
 mod common;
@@ -129,6 +136,127 @@ const PINNED: &[(&str, &[&str])] = &[
             "USE TEMP B-TREE FOR ORDER BY",
         ],
     ),
+    (
+        "viewer value issue",
+        &[
+            "SEARCH value_issue USING PRIMARY KEY (entity=? AND row_id=? AND col=? AND kind=?)",
+        ],
+    ),
+    (
+        "viewer fold row",
+        &[
+            "SEARCH message USING INTEGER PRIMARY KEY (rowid=?)",
+        ],
+    ),
+    (
+        "viewer keyed message by guid",
+        &[
+            "SEARCH message USING COVERING INDEX message_guid (guid=?)",
+        ],
+    ),
+    (
+        "viewer timeline membership",
+        &[
+            "SEARCH chat_message USING PRIMARY KEY (chat_id=? AND message_id=?)",
+        ],
+    ),
+    (
+        "viewer conversation order (recent)",
+        &[
+            "SCAN c",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SEARCH chat_message USING COVERING INDEX chat_message_timeline (chat_id=? AND sort_key<?)",
+            "USE TEMP B-TREE FOR ORDER BY",
+        ],
+    ),
+    (
+        "viewer conversation order (count)",
+        &[
+            "SCAN c",
+            "SEARCH s USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN",
+            "USE TEMP B-TREE FOR ORDER BY",
+        ],
+    ),
+    (
+        "viewer chat names",
+        &[
+            "SCAN chat",
+        ],
+    ),
+    (
+        "viewer chat participants (all)",
+        &[
+            "SCAN ch",
+            "SEARCH h USING INTEGER PRIMARY KEY (rowid=?)",
+        ],
+    ),
+    (
+        "viewer newest session",
+        &[
+            "SCAN import_session",
+        ],
+    ),
+    (
+        "viewer conversation row",
+        &[
+            "SEARCH c USING INTEGER PRIMARY KEY (rowid=?)",
+            "SEARCH s USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN",
+        ],
+    ),
+    (
+        "viewer participants",
+        &[
+            "SEARCH ch USING PRIMARY KEY (chat_id=?)",
+            "SEARCH h USING INTEGER PRIMARY KEY (rowid=?)",
+        ],
+    ),
+    (
+        "viewer participant count",
+        &[
+            "SEARCH chat_handle USING PRIMARY KEY (chat_id=?)",
+        ],
+    ),
+    (
+        "viewer newest dated rows",
+        &[
+            "SEARCH chat_message USING COVERING INDEX chat_message_timeline (chat_id=? AND sort_key<?)",
+        ],
+    ),
+    (
+        "viewer first dated from",
+        &[
+            "SEARCH chat_message USING COVERING INDEX chat_message_timeline (chat_id=? AND sort_key>? AND sort_key<?)",
+        ],
+    ),
+    (
+        "viewer count dated before",
+        &[
+            "CO-ROUTINE (subquery-1)",
+            "SEARCH chat_message USING COVERING INDEX chat_message_timeline (chat_id=? AND sort_key<?)",
+            "SCAN (subquery-1)",
+        ],
+    ),
+    (
+        "viewer count undated",
+        &[
+            "CO-ROUTINE (subquery-1)",
+            "SEARCH chat_message USING COVERING INDEX chat_message_timeline (chat_id=? AND sort_key>?)",
+            "SCAN (subquery-1)",
+        ],
+    ),
+    (
+        "viewer preview row",
+        &[
+            "SEARCH m USING INTEGER PRIMARY KEY (rowid=?)",
+            "SEARCH b USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN",
+        ],
+    ),
+    (
+        "viewer flagged parts",
+        &[
+            "SEARCH message_body_part USING PRIMARY KEY (body_id=?)",
+        ],
+    ),
 ];
 
 fn plan(c: &rusqlite::Connection, sql: &str) -> Vec<String> {
@@ -150,6 +278,7 @@ fn every_index_dependent_statement_has_its_pinned_plan() {
     let statements: Vec<(&str, String)> = oma_archive::hooks::plan_statements()
         .into_iter()
         .chain(CONTRACT.iter().map(|(n, s)| (*n, (*s).to_owned())))
+        .chain(oma_archive::hooks::viewer_statements())
         .collect();
     assert_eq!(statements.len(), PINNED.len());
     let mut mismatches = Vec::new();
@@ -169,6 +298,42 @@ fn every_index_dependent_statement_has_its_pinned_plan() {
         "plans changed:\n{}",
         mismatches.join("\n")
     );
+}
+
+#[test]
+fn viewer_statements_stay_on_their_indexes() {
+    let (tmp, lib) = library();
+    let id = lib.create(None).expect("create");
+    let c = raw(&db_path(&tmp, &id));
+    let list_scans = [
+        "viewer conversation order (recent)",
+        "viewer conversation order (count)",
+        "viewer chat names",
+        "viewer chat participants (all)",
+    ];
+    for (name, sql) in oma_archive::hooks::viewer_statements() {
+        let lines = plan(&c, &sql);
+        for line in &lines {
+            if line.starts_with("SCAN") && !line.starts_with("SCAN (subquery") {
+                let allowed = list_scans.contains(&name)
+                    || (name, line.as_str()) == ("viewer newest session", "SCAN import_session");
+                assert!(allowed, "{name}: {line}");
+            }
+            if line.contains("TEMP B-TREE") {
+                assert!(
+                    name.starts_with("viewer conversation order"),
+                    "{name}: {line}"
+                );
+            }
+        }
+        // "Dated" reads keep their bound to the dated range.
+        if sql.contains("chat_message") && sql.contains("X'01'") {
+            assert!(
+                lines.iter().any(|l| l.contains("chat_message_timeline")),
+                "{name}: {lines:?}"
+            );
+        }
+    }
 }
 
 #[test]

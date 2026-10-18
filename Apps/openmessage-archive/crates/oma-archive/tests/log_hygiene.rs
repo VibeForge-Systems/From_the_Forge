@@ -215,6 +215,27 @@ fn logs_errors_and_debug_output_hold_no_label_id_or_path() {
         reader.open_blob(oma_archive::BlobId::new(any_blob)),
         reader.open_blob(oma_archive::BlobId::new(-1))
     ));
+    // The viewer's conversation list (M5 §3.5): its Debug output, a name
+    // filter's, and its errors carry no content.
+    let filter = oma_archive::NameFilter::new("SYNTH").expect("filter");
+    shown.push(format!("{filter:?}"));
+    for sort in [
+        oma_archive::ConversationSort::Recent,
+        oma_archive::ConversationSort::Name,
+        oma_archive::ConversationSort::Count,
+    ] {
+        let index = reader
+            .conversation_index(sort, Some(&filter))
+            .expect("index");
+        assert!(!index.ids.is_empty(), "the filter matches the catalogue");
+        let rows = reader
+            .conversations(&index.ids[..index.ids.len().min(200)])
+            .expect("rows");
+        assert!(rows.iter().any(|r| r.preview.is_some()));
+        shown.push(format!("{index:?} {rows:?} {rows:#?}"));
+    }
+    let e = ArchiveError::QueryTooBroad;
+    shown.push(format!("{e} {e:?}"));
     drop(reader);
     for depth in [
         oma_archive::VerifyDepth::Quick,

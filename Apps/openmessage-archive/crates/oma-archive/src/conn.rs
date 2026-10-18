@@ -17,6 +17,7 @@
 //! | `journal_mode` | read, never set | WAL, set only at creation |
 //! | `SQLITE_LIMIT_ATTACHED` 0 and the length limits | yes | yes |
 //! | op budget (progress handler) | yes | no |
+//! | viewer phases: op budget, cancel and deadline together (M5 §3.2) | yes | no |
 //! | `locking_mode` | NORMAL | NORMAL |
 //!
 //! No code outside this module may open, copy, hash or map the database or
@@ -29,7 +30,7 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rusqlite::config::DbConfig;
 use rusqlite::limits::Limit;
@@ -57,8 +58,11 @@ const LIMIT_SQL_LENGTH: i32 = 1 << 20;
 /// How long a connection waits on SQLite's own locks.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Shared with the progress handler: either an op budget (`active`) or a
-/// cancel token (`cancellable`, the verifier's long reads), never both.
+/// Shared with the progress handler. Three modes, never mixed by one
+/// caller: an op budget alone (`budgeted`, the M4 reads), a cancel token
+/// alone (`cancellable`, the verifier's long reads), or a viewer phase
+/// (`viewing`): an op budget, an optional cancel token and a deadline
+/// together.
 #[derive(Default)]
 struct Budget {
     active: AtomicBool,
@@ -67,6 +71,9 @@ struct Budget {
     cancellable: AtomicBool,
     cancel: Mutex<Option<oma_backup::CancelToken>>,
     cancelled: AtomicBool,
+    deadline_on: AtomicBool,
+    deadline: Mutex<Option<Instant>>,
+    deadline_hit: AtomicBool,
 }
 
 impl Budget {
@@ -82,6 +89,187 @@ impl Budget {
             self.cancelled.store(true, Ordering::Relaxed);
         }
         hit
+    }
+
+    /// The deadline's check: `true` stops the statement.
+    fn deadline_passed(&self) -> bool {
+        let hit = self
+            .deadline
+            .lock()
+            .ok()
+            .and_then(|g| *g)
+            .is_some_and(|d| Instant::now() >= d);
+        if hit {
+            self.deadline_hit.store(true, Ordering::Relaxed);
+        }
+        hit
+    }
+
+    /// The progress handler: `true` interrupts the running statement.
+    fn tick(&self) -> bool {
+        if self.cancellable.load(Ordering::Relaxed) && self.cancel_hit() {
+            return true;
+        }
+        if self.deadline_on.load(Ordering::Relaxed) && self.deadline_passed() {
+            return true;
+        }
+        if !self.active.load(Ordering::Relaxed) {
+            return false;
+        }
+        let left = self.ticks_left.load(Ordering::Relaxed);
+        if left == 0 {
+            self.tripped.store(true, Ordering::Relaxed);
+            return true;
+        }
+        self.ticks_left
+            .store(left.saturating_sub(1), Ordering::Relaxed);
+        false
+    }
+
+    /// Why the current viewer phase was stopped, if it was. A cancel wins
+    /// over the budget and the deadline.
+    fn stop(&self) -> Option<Stop> {
+        if self.cancelled.load(Ordering::Relaxed) {
+            Some(Stop::Cancelled)
+        } else if self.tripped.load(Ordering::Relaxed) || self.deadline_hit.load(Ordering::Relaxed)
+        {
+            Some(Stop::TooBroad)
+        } else {
+            None
+        }
+    }
+}
+
+/// The work budget of one viewer phase (M5 spec §3.2). Each phase of a
+/// viewer call runs under its own budget, which resets at the phase's
+/// start, so a trip in one phase never interrupts the next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)] // the later viewer slices (5b2–5d) use the other phases
+pub(crate) enum ViewBudget {
+    /// `conversation_index`, `conversations`.
+    List,
+    /// The keyset scan of `thread_page` and `reply_thread`.
+    Scan,
+    /// The batch loads for one page or one detail.
+    Assembly,
+    /// `day_counts`.
+    Month,
+    /// `message_detail`, `message_text`.
+    Detail,
+    /// The full-text collection of a words search.
+    Search,
+    /// `search_hits` for one page, highlighting included.
+    Hits,
+    /// One batch of the exact-text scan.
+    ScanBatch,
+    /// `attachment`, `inspect_blob` and the blob row reads.
+    Lookup,
+}
+
+impl ViewBudget {
+    /// The phase's VM-operation budget. Re-measured by the slice that
+    /// first uses each phase.
+    pub(crate) const fn ops(self) -> u64 {
+        match self {
+            ViewBudget::List => 5_000_000,
+            ViewBudget::Scan | ViewBudget::Month | ViewBudget::ScanBatch => 2_000_000,
+            ViewBudget::Assembly | ViewBudget::Detail => 4_000_000,
+            ViewBudget::Search => 30_000_000,
+            ViewBudget::Hits => 6_000_000,
+            ViewBudget::Lookup => 100_000,
+        }
+    }
+
+    /// How long a call whose first phase is this one may take in total:
+    /// 2 s for a page, a detail or a month; 5 s for the conversation list
+    /// and a words search; 20 s for an exact-text scan.
+    pub(crate) const fn window(self) -> Duration {
+        match self {
+            ViewBudget::List | ViewBudget::Search | ViewBudget::Hits => Duration::from_secs(5),
+            ViewBudget::ScanBatch => Duration::from_secs(20),
+            ViewBudget::Scan
+            | ViewBudget::Assembly
+            | ViewBudget::Month
+            | ViewBudget::Detail
+            | ViewBudget::Lookup => Duration::from_secs(2),
+        }
+    }
+}
+
+/// Why a viewer phase was stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Stop {
+    /// The budget or the deadline ran out: `QueryTooBroad`.
+    TooBroad,
+    /// The cancel token was set, or the connection was interrupted through
+    /// its [`rusqlite::InterruptHandle`]: `Cancelled`.
+    Cancelled,
+}
+
+impl Stop {
+    fn error(self) -> ArchiveError {
+        match self {
+            Stop::TooBroad => ArchiveError::QueryTooBroad,
+            Stop::Cancelled => ArchiveError::Cancelled,
+        }
+    }
+}
+
+/// The connection as one viewer phase sees it.
+pub(crate) struct Phase<'a> {
+    conn: &'a Connection,
+    budget: &'a Budget,
+}
+
+impl Phase<'_> {
+    /// The connection.
+    #[allow(dead_code)] // the thread pages (5b2) read through it directly
+    pub(crate) fn conn(&self) -> &Connection {
+        self.conn
+    }
+
+    /// Why the phase has been stopped so far, if it has: a caller that can
+    /// return a partial result checks this after an interrupted statement.
+    #[allow(dead_code)] // partial pages arrive with slice 5b2
+    pub(crate) fn stopped(&self) -> Option<Stop> {
+        self.budget.stop()
+    }
+
+    /// A SQLite error of this phase as an archive error: an interrupt is
+    /// `QueryTooBroad` or `Cancelled` (an interrupt from the handle, with
+    /// neither flag set, is a cancel), never `Damaged`.
+    pub(crate) fn err(&self, e: &rusqlite::Error) -> ArchiveError {
+        match primary_code(e) {
+            Some(SQLITE_INTERRUPT) => self.budget.stop().unwrap_or(Stop::Cancelled).error(),
+            Some(crate::error::SQLITE_NOTADB) => ArchiveError::NotAnArchive,
+            _ => ArchiveError::sqlite(Stage::View, e),
+        }
+    }
+
+    /// Between statements: stop the phase if it was already stopped, its
+    /// cancel token is set or its deadline has passed. SQLite runs the
+    /// progress handler only every [`OPS_PER_TICK`] operations **within**
+    /// one statement, so a phase of many short statements checks here.
+    pub(crate) fn checkpoint(&self) -> Result<(), ArchiveError> {
+        let b = self.budget;
+        if b.cancellable.load(Ordering::Relaxed) {
+            b.cancel_hit();
+        }
+        if b.deadline_on.load(Ordering::Relaxed) {
+            b.deadline_passed();
+        }
+        match b.stop() {
+            Some(stop) => Err(stop.error()),
+            None => Ok(()),
+        }
+    }
+
+    /// Run `f` and map its SQLite error with [`Phase::err`].
+    pub(crate) fn sql<T>(
+        &self,
+        f: impl FnOnce(&Connection) -> rusqlite::Result<T>,
+    ) -> Result<T, ArchiveError> {
+        f(self.conn).map_err(|e| self.err(&e))
     }
 }
 
@@ -163,26 +351,7 @@ impl ReadConn {
             conn.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_TRIGGER, false)?;
             conn.pragma_update(None, "query_only", true)?;
             let handler_budget = Arc::clone(&budget);
-            conn.progress_handler(
-                OPS_PER_TICK,
-                Some(move || {
-                    if handler_budget.cancellable.load(Ordering::Relaxed) {
-                        return handler_budget.cancel_hit();
-                    }
-                    if !handler_budget.active.load(Ordering::Relaxed) {
-                        return false;
-                    }
-                    let left = handler_budget.ticks_left.load(Ordering::Relaxed);
-                    if left == 0 {
-                        handler_budget.tripped.store(true, Ordering::Relaxed);
-                        return true;
-                    }
-                    handler_budget
-                        .ticks_left
-                        .store(left.saturating_sub(1), Ordering::Relaxed);
-                    false
-                }),
-            )?;
+            conn.progress_handler(OPS_PER_TICK, Some(move || handler_budget.tick()))?;
             Ok(())
         };
         configure().map_err(|e| match primary_code(&e) {
@@ -254,6 +423,115 @@ impl ReadConn {
                 ArchiveError::sqlite(stage, &e)
             }
         })
+    }
+}
+
+impl ReadConn {
+    /// Run `f`, one viewer phase, under `b`'s op budget, the optional
+    /// `cancel` token and `deadline`, all checked every [`OPS_PER_TICK`]
+    /// VM operations (M5 spec §3.2, D90). Over budget or past the deadline
+    /// gives `QueryTooBroad`; a cancel gives `Cancelled`; neither is ever
+    /// `Damaged`. The budget, the cancel token and every stop flag are
+    /// reset at the start of each phase, so a trip in one phase does not
+    /// interrupt the next. Work inside one VM opcode (an FTS5 doclist
+    /// merge, one SQL function call) cannot be stopped part-way; callers
+    /// bound it by construction. SQLite counts operations per statement,
+    /// so a statement shorter than [`OPS_PER_TICK`] is never stopped:
+    /// a phase that runs many short statements calls
+    /// [`Phase::checkpoint`] between them.
+    pub(crate) fn viewing<T>(
+        &self,
+        b: ViewBudget,
+        cancel: Option<&oma_backup::CancelToken>,
+        deadline: Instant,
+        f: impl FnOnce(&Phase<'_>) -> Result<T, ArchiveError>,
+    ) -> Result<T, ArchiveError> {
+        if cancel.is_some_and(oma_backup::CancelToken::is_cancelled) {
+            return Err(ArchiveError::Cancelled);
+        }
+        if Instant::now() >= deadline {
+            return Err(ArchiveError::QueryTooBroad);
+        }
+        let ops = crate::fault::view_op_budget(b.ops());
+        let budget = &self.budget;
+        budget.tripped.store(false, Ordering::Relaxed);
+        budget.cancelled.store(false, Ordering::Relaxed);
+        budget.deadline_hit.store(false, Ordering::Relaxed);
+        budget.ticks_left.store(
+            ops / u64::try_from(OPS_PER_TICK).unwrap_or(1000),
+            Ordering::Relaxed,
+        );
+        if let Ok(mut slot) = budget.cancel.lock() {
+            *slot = cancel.cloned();
+        }
+        if let Ok(mut slot) = budget.deadline.lock() {
+            *slot = Some(deadline);
+        }
+        budget
+            .cancellable
+            .store(cancel.is_some(), Ordering::Relaxed);
+        budget.deadline_on.store(true, Ordering::Relaxed);
+        budget.active.store(true, Ordering::Relaxed);
+        let result = f(&Phase {
+            conn: &self.conn,
+            budget,
+        });
+        budget.active.store(false, Ordering::Relaxed);
+        budget.deadline_on.store(false, Ordering::Relaxed);
+        budget.cancellable.store(false, Ordering::Relaxed);
+        let stop = budget.stop();
+        budget.tripped.store(false, Ordering::Relaxed);
+        budget.cancelled.store(false, Ordering::Relaxed);
+        budget.deadline_hit.store(false, Ordering::Relaxed);
+        if let Ok(mut slot) = budget.cancel.lock() {
+            *slot = None;
+        }
+        if let Ok(mut slot) = budget.deadline.lock() {
+            *slot = None;
+        }
+        match result {
+            // A closure that mapped an interrupt itself, without the
+            // phase: still never `Damaged`.
+            Err(ArchiveError::Sqlite {
+                code: Some(SQLITE_INTERRUPT),
+                ..
+            }) => Err(stop.unwrap_or(Stop::Cancelled).error()),
+            other => other,
+        }
+    }
+
+    /// Run `f`, every phase of one viewer call, inside one `BEGIN DEFERRED
+    /// … COMMIT` read transaction, so the call sees one snapshot (M5 spec
+    /// §3.4). No read transaction outlives a call, so an import's
+    /// `wal_checkpoint(TRUNCATE)` is never held back for longer than one
+    /// call.
+    pub(crate) fn snapshot<T>(
+        &self,
+        f: impl FnOnce() -> Result<T, ArchiveError>,
+    ) -> Result<T, ArchiveError> {
+        self.conn
+            .execute_batch("BEGIN DEFERRED")
+            .map_err(|e| ArchiveError::sqlite(Stage::View, &e))?;
+        let out = f();
+        let end = if out.is_ok() { "COMMIT" } else { "ROLLBACK" };
+        let ended = self.conn.execute_batch(end);
+        if ended.is_err() && !self.conn.is_autocommit() {
+            // A transaction must never outlive the call.
+            let _ = self.conn.execute_batch("ROLLBACK");
+        }
+        match (out, ended) {
+            (Ok(v), Ok(())) => Ok(v),
+            (Ok(_), Err(e)) => Err(ArchiveError::sqlite(Stage::View, &e)),
+            (Err(e), _) => Err(e),
+        }
+    }
+
+    /// A handle that interrupts this connection's running statement from
+    /// another thread (`cancel_search`, M5 spec §3.2). Kept outside any
+    /// lock on the reader; an interrupt it causes surfaces as `Cancelled`.
+    #[allow(dead_code)] // the search slice (5c) calls it
+    pub(crate) fn interrupt_handle(&self) -> rusqlite::InterruptHandle {
+        self.conn.get_interrupt_handle()
     }
 }
 
@@ -413,5 +691,202 @@ mod tests {
             })
             .expect("budgeted");
         assert_eq!(n, 7);
+    }
+
+    fn reader() -> (tempfile::TempDir, ReadConn) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = ArchiveDir::at(tmp.path().to_path_buf());
+        create_database_file(&dir).expect("file");
+        drop(WriteConn::open_new(&dir).expect("writer"));
+        let r = ReadConn::open(&dir).expect("reader");
+        (tmp, r)
+    }
+
+    const ENDLESS: &str = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) \
+                           SELECT count(*) FROM n";
+
+    /// Well inside the `List` budget, well over the `Lookup` one.
+    const MEDIUM: &str =
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 100000) \
+                          SELECT count(*) FROM n";
+
+    fn soon() -> Instant {
+        Instant::now() + Duration::from_secs(60)
+    }
+
+    #[test]
+    fn a_viewer_phase_over_budget_is_too_broad_never_damaged() {
+        let (_tmp, r) = reader();
+        let e = r
+            .viewing(ViewBudget::Lookup, None, soon(), |p| {
+                p.sql(|c| c.query_row(LONG, [], |row| row.get::<_, i64>(0)))
+            })
+            .expect_err("over budget");
+        assert!(matches!(e, ArchiveError::QueryTooBroad), "{e:?}");
+        // Within the phase the trip is visible and stays: a later
+        // statement is interrupted too (a caller returns what it has).
+        let (first, second, stop) = r
+            .viewing(ViewBudget::Lookup, None, soon(), |p| {
+                let first = p.sql(|c| c.query_row(LONG, [], |row| row.get::<_, i64>(0)));
+                let second = p.sql(|c| c.query_row(LONG, [], |row| row.get::<_, i64>(0)));
+                Ok((first.is_err(), second.is_err(), p.stopped()))
+            })
+            .expect("the closure returns what it has");
+        assert!(first && second);
+        assert_eq!(stop, Some(Stop::TooBroad));
+    }
+
+    #[test]
+    fn a_trip_in_one_phase_does_not_interrupt_the_next() {
+        let (_tmp, r) = reader();
+        let out = r.snapshot(|| {
+            let e = r
+                .viewing(ViewBudget::Lookup, None, soon(), |p| {
+                    p.sql(|c| c.query_row(MEDIUM, [], |row| row.get::<_, i64>(0)))
+                })
+                .expect_err("tripped");
+            assert!(matches!(e, ArchiveError::QueryTooBroad));
+            r.viewing(ViewBudget::List, None, soon(), |p| {
+                assert_eq!(p.stopped(), None);
+                p.sql(|c| c.query_row(MEDIUM, [], |row| row.get::<_, i64>(0)))
+            })
+        });
+        assert_eq!(out.expect("the next phase runs"), 100_000);
+        assert!(r.conn.is_autocommit(), "no transaction outlives the call");
+        // budgeted() keeps its M4 meaning afterwards.
+        let n: i64 = r
+            .budgeted(READ_OP_BUDGET, Stage::Read, |c| {
+                c.query_row("SELECT 7", [], |row| row.get(0))
+            })
+            .expect("budgeted");
+        assert_eq!(n, 7);
+    }
+
+    #[test]
+    fn cancel_and_deadline_stop_a_viewer_phase() {
+        let (_tmp, r) = reader();
+        // Already cancelled: nothing runs.
+        let token = oma_backup::CancelToken::new();
+        token.cancel();
+        let e = r
+            .viewing(ViewBudget::Search, Some(&token), soon(), |_| Ok(()))
+            .expect_err("cancelled");
+        assert!(matches!(e, ArchiveError::Cancelled));
+        // Cancelled during a statement.
+        let token = oma_backup::CancelToken::new();
+        let later = token.clone();
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            later.cancel();
+        });
+        let huge = Instant::now() + Duration::from_secs(600);
+        let e = r.viewing(ViewBudget::Search, Some(&token), huge, |p| {
+            // An endless statement under an unreachable budget.
+            p.sql(|c| c.query_row(ENDLESS, [], |row| row.get::<_, i64>(0)))
+        });
+        t.join().expect("join");
+        // The Search budget (30 M ops) may run out first on a fast
+        // machine; either way it is never Damaged.
+        assert!(
+            matches!(
+                e,
+                Err(ArchiveError::Cancelled | ArchiveError::QueryTooBroad)
+            ),
+            "{e:?}"
+        );
+        // A deadline already past: refused before any work.
+        let e = r
+            .viewing(ViewBudget::List, None, Instant::now(), |_| Ok(()))
+            .expect_err("past");
+        assert!(matches!(e, ArchiveError::QueryTooBroad));
+        // A deadline that passes during a statement.
+        let e = r
+            .viewing(
+                ViewBudget::List,
+                None,
+                Instant::now() + Duration::from_millis(1),
+                |p| {
+                    std::thread::sleep(Duration::from_millis(5));
+                    p.sql(|c| c.query_row(LONG, [], |row| row.get::<_, i64>(0)))
+                },
+            )
+            .expect_err("deadline");
+        assert!(matches!(e, ArchiveError::QueryTooBroad), "{e:?}");
+    }
+
+    #[test]
+    fn a_cancel_mid_statement_is_cancelled_under_a_large_budget() {
+        let (_tmp, r) = reader();
+        // The handler checks the token too: cancel after the phase's own
+        // check passed; LONG fits the Search budget, so only the cancel
+        // can stop it.
+        let token = oma_backup::CancelToken::new();
+        let e = r.viewing(ViewBudget::Search, Some(&token), soon(), |p| {
+            token.cancel();
+            p.sql(|c| c.query_row(LONG, [], |row| row.get::<_, i64>(0)))
+        });
+        assert!(matches!(e, Err(ArchiveError::Cancelled)), "{e:?}");
+    }
+
+    #[test]
+    fn the_interrupt_handle_stops_a_viewer_phase_as_a_cancel() {
+        let (_tmp, r) = reader();
+        let handle = r.interrupt_handle();
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            handle.interrupt();
+        });
+        let huge = Instant::now() + Duration::from_secs(600);
+        let e = r.viewing(ViewBudget::Search, None, huge, |p| {
+            p.sql(|c| c.query_row(ENDLESS, [], |row| row.get::<_, i64>(0)))
+        });
+        t.join().expect("join");
+        assert!(
+            matches!(
+                e,
+                Err(ArchiveError::Cancelled | ArchiveError::QueryTooBroad)
+            ),
+            "{e:?}"
+        );
+        // The connection works afterwards.
+        let n = r
+            .viewing(ViewBudget::Lookup, None, soon(), |p| {
+                p.sql(|c| c.query_row("SELECT 7", [], |row| row.get::<_, i64>(0)))
+            })
+            .expect("works");
+        assert_eq!(n, 7);
+    }
+
+    #[test]
+    fn a_checkpoint_between_statements_sees_cancel_and_deadline() {
+        let (_tmp, r) = reader();
+        let token = oma_backup::CancelToken::new();
+        let e = r.viewing(ViewBudget::List, Some(&token), soon(), |p| {
+            p.checkpoint()?;
+            token.cancel();
+            p.checkpoint()
+        });
+        assert!(matches!(e, Err(ArchiveError::Cancelled)), "{e:?}");
+        let e = r.viewing(
+            ViewBudget::List,
+            None,
+            Instant::now() + Duration::from_millis(2),
+            |p| {
+                p.checkpoint()?;
+                std::thread::sleep(Duration::from_millis(5));
+                p.checkpoint()
+            },
+        );
+        assert!(matches!(e, Err(ArchiveError::QueryTooBroad)), "{e:?}");
+    }
+
+    #[test]
+    fn budgets_and_windows_are_the_designed_ones() {
+        assert_eq!(ViewBudget::List.ops(), 5_000_000);
+        assert_eq!(ViewBudget::Search.ops(), 30_000_000);
+        assert_eq!(ViewBudget::Lookup.ops(), 100_000);
+        assert_eq!(ViewBudget::Scan.window(), Duration::from_secs(2));
+        assert_eq!(ViewBudget::Search.window(), Duration::from_secs(5));
+        assert_eq!(ViewBudget::ScanBatch.window(), Duration::from_secs(20));
     }
 }

@@ -324,6 +324,17 @@ Never hand-edit generated files.
   index-dependent statements, taken from the crate through
   `hooks::plan_statements`. A new merge read or lookup goes into that list;
   a changed plan is re-pinned deliberately.
+- **Viewer reads run in phases (`ReadConn::viewing`, M5 slice 5b1).**
+  Each phase has its own op budget, an optional cancel token and a
+  deadline; overruns are `QueryTooBroad`, cancels `Cancelled`, never
+  `Damaged`. Wrap a call's phases in `ReadConn::snapshot` (one read
+  transaction per call), call `Phase::checkpoint` between short
+  statements, and bound every "recent", "newest" or "from a date" read
+  with `sort_key < X'01'` (`sortkey.rs` is the one encoder). Content
+  leaves the crate only as `OptContent`/`ContentText` (`Redacted`), with
+  one-time codes masked unless the caller reveals them. Every viewer
+  statement is listed in `view::plan_statements` and pinned in
+  `tests/query_plans.rs`. Only `conn.rs` may call `interrupt()`.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush

@@ -362,7 +362,7 @@ impl ArchiveReader {
     }
 
     /// Reads need the current schema; an older one gives `NeedsMigration`.
-    fn require_current(&self) -> Result<(), ArchiveError> {
+    pub(crate) fn require_current(&self) -> Result<(), ArchiveError> {
         if self.inspected.version < self.build_version {
             Err(ArchiveError::NeedsMigration {
                 found: self.inspected.version,
