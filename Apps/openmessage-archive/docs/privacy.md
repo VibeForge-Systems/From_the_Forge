@@ -147,7 +147,9 @@ antivirus) applies to it as well. In addition:
 - **What is never read.** The text of Recently Deleted messages
   (`recoverable_message_part.part_text`) is refused by an SQLite authorizer
   on the connection, so no query can read it. Poll and app payloads
-  (`payload_data`) are read only as "present or not". The check counts
+  (`payload_data`) are read only as "present or not". (From milestone 4
+  the reader can also return their bytes, up to 1 MiB, but only when the
+  caller asks for raw values; the extraction check never does.) The check counts
   Recently Deleted entries and nothing more; whether milestone 4 imports
   them is still to be decided, and the current lean is to exclude them by
   default.

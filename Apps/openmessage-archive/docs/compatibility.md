@@ -185,6 +185,31 @@ than the 87-byte fixture file or sms.db; the multi-chunk (over 1 MiB) and
 mid-file cancellation paths are covered by unit tests on in-memory data
 only.
 
+### Milestone 4 reader additions (slice 4c)
+
+Observed by `crates/oma-messages/tests/m4_readers.rs`, `resume.rs`,
+`sql_guards.rs`, `redaction.rs` and `log_hygiene.rs` in the same Linux
+container on 2026-10-18; not CI, not a desktop, synthetic databases and
+the M3 catalogue only:
+
+- The four key passes returned exactly the (rowid, key) sequence of the
+  full passes on `msgs-full-plain` and `msgs-full-enc`, and on a built
+  database with an oversized `guid` and `id`, a NULL key and a
+  BLOB-stored key; they broke and resumed exactly at and around 16-row
+  page boundaries, including rows keyed `i64::MIN` and `i64::MAX`.
+- `payload_data` was `None` without raw values; with them, a 1 MiB value
+  was read, one byte more was `Oversized`, an integer was unreadable with
+  its raw value kept, and the pass's issue counts were the same in both
+  modes.
+- Raw values were kept for text, real, out-of-range integer and blob cells
+  in integer, boolean, time and text columns, not for text over 4 KiB, and not
+  for the presence-only `chat.properties`; none appeared in any `Debug`
+  output or log line.
+- Every query form fit the `sql_length` and `vdbe_op` limits with a 2x
+  margin and tripped no guard of the read-only connection.
+
+**Not yet observed:** any of this on Windows, or on a real sms.db.
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI

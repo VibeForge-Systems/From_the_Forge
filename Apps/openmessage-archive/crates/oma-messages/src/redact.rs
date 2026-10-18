@@ -4,7 +4,8 @@
 //!   `Display` and no `Serialize`; the value is read with
 //!   [`Redacted::expose`].
 //! - [`SqlText`] is TEXT (or BLOB-stored text) kept as the bytes SQLite
-//!   returned. It is never repaired, and it is zeroized on drop.
+//!   returned, with the storage class SQLite reported ([`TextClass`]). It is
+//!   never repaired, and it is zeroized on drop.
 //! - [`RawBlob`] is a BLOB kept on request. It is zeroized on drop.
 //!
 //! What is **not** zeroized: SQLite's page cache and buffers, and rusqlite's
@@ -64,53 +65,87 @@ impl ByteLen for zeroize::Zeroizing<String> {
     }
 }
 
-/// Text from the database, as the bytes SQLite returned. It may not be
-/// valid UTF-8; [`SqlText::to_str`] says whether it is. Zeroized on drop.
+/// The storage class SQLite reported for a text-bearing cell (M4 R7).
+///
+/// sms.db's text columns are typeless in places, so a cell may hold a BLOB.
+/// The bytes are the same either way; the class is kept so a store that
+/// writes every value as a BLOB (the M4 archive) does not erase it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TextClass {
+    /// SQLite reported `text`.
+    Text,
+    /// SQLite reported `blob`.
+    Blob,
+}
+
+/// Text from the database, as the bytes SQLite returned, with the storage
+/// class it reported. It may not be valid UTF-8; [`SqlText::to_str`] says
+/// whether it is. Two values are equal only when their bytes and their
+/// classes are. Zeroized on drop.
 #[derive(Clone, PartialEq, Eq)]
-pub struct SqlText(Box<[u8]>);
+pub struct SqlText {
+    bytes: Box<[u8]>,
+    class: TextClass,
+}
 
 impl SqlText {
-    /// Copy bytes SQLite returned.
+    /// Copy bytes SQLite returned as `text`.
     pub fn from_bytes(bytes: &[u8]) -> Self {
-        SqlText(bytes.into())
+        SqlText::from_bytes_with_class(bytes, TextClass::Text)
+    }
+
+    /// Copy bytes SQLite returned with the given storage class.
+    pub fn from_bytes_with_class(bytes: &[u8], class: TextClass) -> Self {
+        SqlText {
+            bytes: bytes.into(),
+            class,
+        }
     }
 
     /// The bytes.
     pub fn as_bytes(&self) -> &[u8] {
-        &self.0
+        &self.bytes
+    }
+
+    /// The storage class SQLite reported for the cell (M4 R7).
+    pub fn class(&self) -> TextClass {
+        self.class
     }
 
     /// The text, when it is valid UTF-8.
     pub fn to_str(&self) -> Option<&str> {
-        std::str::from_utf8(&self.0).ok()
+        std::str::from_utf8(&self.bytes).ok()
     }
 
     /// The length in bytes.
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.bytes.len()
     }
 
     /// `true` for the empty string.
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.bytes.is_empty()
     }
 }
 
 impl ByteLen for SqlText {
     fn byte_len(&self) -> usize {
-        self.0.len()
+        self.bytes.len()
     }
 }
 
 impl fmt::Debug for SqlText {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "SqlText(<{} bytes>)", self.0.len())
+        match self.class {
+            TextClass::Text => write!(f, "SqlText(<{} bytes>)", self.bytes.len()),
+            TextClass::Blob => write!(f, "SqlText(<{} bytes>, blob)", self.bytes.len()),
+        }
     }
 }
 
 impl Drop for SqlText {
     fn drop(&mut self) {
-        self.0.zeroize();
+        self.bytes.zeroize();
     }
 }
 
@@ -186,6 +221,14 @@ mod tests {
         let good = SqlText::from_bytes("héllo".as_bytes());
         assert_eq!(good.to_str(), Some("héllo"));
         assert!(SqlText::from_bytes(b"").is_empty());
+        // The storage class is kept, shown, and part of equality (R7).
+        assert_eq!(good.class(), TextClass::Text);
+        let as_blob = SqlText::from_bytes_with_class(good.as_bytes(), TextClass::Blob);
+        assert_eq!(as_blob.class(), TextClass::Blob);
+        assert_eq!(as_blob.as_bytes(), good.as_bytes());
+        assert_ne!(as_blob, good);
+        assert_eq!(format!("{as_blob:?}"), "SqlText(<6 bytes>, blob)");
+        assert_eq!(format!("{good:?}"), "SqlText(<6 bytes>)");
         assert!(RawBlob::from_bytes(b"").is_empty());
         assert_eq!(
             Redacted::new(good.clone()).into_inner().as_bytes(),

@@ -61,6 +61,7 @@ mod db;
 mod error;
 mod guidset;
 mod progress;
+mod raw;
 mod records;
 mod redact;
 mod report;
@@ -71,14 +72,14 @@ mod typedstream;
 mod value;
 
 pub use aggregates::{aggregate_queries, AggregateId, Aggregates, AGG_OPS_BASE, AGG_OPS_PER_ROW};
-pub use assoc::{AssocTarget, Association};
+pub use assoc::{AssocRaw, AssocTarget, Association};
 pub use attachments::{
     classify as classify_attachment_path, AttachmentLocation, AttachmentLocator, LookupOutcome,
     NotAttemptedReason, PathClass, ATTACHMENT_LOOKUP_DOMAIN,
 };
 pub use caps::{
-    CAP_ATTRIBUTED_BODY, CAP_GUID, CAP_IDENTIFIER, CAP_OTHER_TEXT, CAP_PROPERTIES, CAP_SUMMARY,
-    CAP_TEXT, INTEGER_BYTES, ROW_BYTES_BUDGET,
+    CAP_ATTRIBUTED_BODY, CAP_GUID, CAP_IDENTIFIER, CAP_OTHER_TEXT, CAP_PAYLOAD_DATA,
+    CAP_PROPERTIES, CAP_RAW_UNREADABLE, CAP_SUMMARY, CAP_TEXT, INTEGER_BYTES, ROW_BYTES_BUDGET,
 };
 pub use check::{check, CheckOptions};
 pub use codes::{AssociatedKind, ItemKind, Reaction, ServiceClass};
@@ -90,12 +91,13 @@ pub use db::{
 pub use error::{BackupStage, MessagesError, Stage};
 pub use guidset::{GuidCounts, GuidSets, GUID_SET_CAP};
 pub use progress::{MessagesCtx, MessagesPhase, MessagesProgress, MessagesSink};
+pub use raw::{RawIssue, RawSql};
 pub use records::{
     AttachmentRecord, AttributedOutcome, Body, ChatHandleLink, ChatMessageLink, ChatRecord,
-    EditLabel, HandleRecord, MessageAttachmentLink, MessageReadOptions, MessageRecord,
-    RecoverableLink, ReplyInfo,
+    EditLabel, HandleKeyRow, HandleRecord, KeyRow, MessageAttachmentLink, MessageReadOptions,
+    MessageRecord, RecoverableLink, ReplyInfo,
 };
-pub use redact::{ByteLen, RawBlob, Redacted, SqlText};
+pub use redact::{ByteLen, RawBlob, Redacted, SqlText, TextClass};
 pub use report::{
     AssociationCounts, AttachmentCounts, AttributedState, BodyCounts, ChatCounts, DateCounts,
     DbFacts, EditLabelCounts, ExtractionReport, ExtractionStatus, FailureCounts, HandleCounts,

@@ -23,12 +23,13 @@
 //!   bodies. Which source is current after an edit is **UNVERIFIED**.
 //! - **Group-ness** is not a field (D39).
 
-use crate::assoc::Association;
+use crate::assoc::{AssocRaw, Association};
 use crate::codes::{ItemKind, ServiceClass};
 use crate::col::{Col, IssueKind};
 use crate::db::RowReader;
 use crate::error::MessagesError;
 use crate::guidset::GuidSets;
+use crate::raw::RawIssue;
 use crate::redact::{RawBlob, Redacted, SqlText};
 use crate::schema::known::message as c;
 use crate::summary::{self, SummaryInfo};
@@ -46,9 +47,10 @@ pub struct MessageReadOptions {
     /// Decode `attributedBody` (default `true`). When `false`, a present
     /// body is [`AttributedOutcome::NotDecoded`].
     pub decode_attributed_body: bool,
-    /// Keep the raw `attributedBody` and `message_summary_info` bytes in the
-    /// record (default `false`, D32). Only values within their caps are
-    /// ever read.
+    /// Keep raw values in the record (default `false`, D32): the raw
+    /// `attributedBody` and `message_summary_info` bytes, `payload_data`
+    /// (M4 R3) and the raw value of every unreadable cell (`raw_issues`,
+    /// M4 R2). Only values within their caps are ever read.
     pub keep_raw_blobs: bool,
     /// The typedstream budget for each body.
     pub ts_budget: TsBudget,
@@ -316,14 +318,20 @@ pub struct MessageRecord {
     pub from_me_derived_for_location: Option<bool>,
     /// The association (tapback, sticker or poll vote), if any (§11.1).
     pub association: Option<Association>,
+    /// The five association columns as read, always filled (M4 R4).
+    pub assoc_raw: AssocRaw,
     /// Reply facts (§11.2).
     pub reply: ReplyInfo,
     /// `balloon_bundle_id`.
     pub balloon_bundle_id: Col<Redacted<SqlText>>,
     /// `expressive_send_style_id`.
     pub expressive_send_style_id: Col<Redacted<SqlText>>,
-    /// `payload_data`: its storage class only.
+    /// `payload_data`: its storage class.
     pub payload_data_type: Col<SqlType>,
+    /// `payload_data`'s value under [`crate::CAP_PAYLOAD_DATA`] (M4 R3):
+    /// `Some` only with `keep_raw_blobs`, `None` otherwise (not read). Its
+    /// contents (polls, app and link payloads) are not decoded.
+    pub payload_data: Option<Col<Redacted<RawBlob>>>,
     /// `message_summary_info`, parsed (§11.3).
     pub summary: Col<SummaryInfo>,
     /// The edit label derived from the row (§11.3).
@@ -347,6 +355,9 @@ pub struct MessageRecord {
     pub raw_attributed_body: Option<Redacted<RawBlob>>,
     /// The raw `message_summary_info`, only with `keep_raw_blobs`.
     pub raw_message_summary_info: Option<Redacted<RawBlob>>,
+    /// The raw values of unreadable cells, only with `keep_raw_blobs`
+    /// (M4 R2).
+    pub raw_issues: Vec<RawIssue>,
 }
 
 shape_debug!(MessageRecord {
@@ -357,8 +368,8 @@ shape_debug!(MessageRecord {
     expressive_send_style_id, payload_data_type, summary, part_count, schedule_type,
     schedule_state, filter_action, filter_sub_action, error, was_downgraded,
 } kinds {
-    service_class, body, item_kind, from_me_derived_for_location, association, reply,
-    edit_label, raw_attributed_body, raw_message_summary_info,
+    service_class, body, item_kind, from_me_derived_for_location, association, assoc_raw,
+    reply, edit_label, raw_attributed_body, raw_message_summary_info, raw_issues,
 });
 
 impl MessageRecord {
@@ -414,13 +425,14 @@ impl MessageRecord {
         };
         let edit_label = EditLabel::derive(&date_edited, &summary, &text_column, &attributed);
 
-        let association = Association::from_columns(
-            r.integer(c::ASSOCIATED_MESSAGE_TYPE)?,
-            r.text(c::ASSOCIATED_MESSAGE_GUID)?,
-            r.text(c::ASSOCIATED_MESSAGE_EMOJI)?,
-            r.integer(c::ASSOCIATED_MESSAGE_RANGE_LOCATION)?,
-            r.integer(c::ASSOCIATED_MESSAGE_RANGE_LENGTH)?,
-        );
+        let assoc_raw = AssocRaw {
+            raw_type: r.integer(c::ASSOCIATED_MESSAGE_TYPE)?,
+            raw_guid: r.text(c::ASSOCIATED_MESSAGE_GUID)?,
+            emoji: r.text(c::ASSOCIATED_MESSAGE_EMOJI)?,
+            range_location: r.integer(c::ASSOCIATED_MESSAGE_RANGE_LOCATION)?,
+            range_length: r.integer(c::ASSOCIATED_MESSAGE_RANGE_LENGTH)?,
+        };
+        let association = assoc_raw.association();
         let reply = ReplyInfo {
             thread_originator_guid: r.text(c::THREAD_ORIGINATOR_GUID)?,
             thread_originator_part: r.text(c::THREAD_ORIGINATOR_PART)?,
@@ -483,10 +495,12 @@ impl MessageRecord {
             handle_id,
             other_handle,
             association,
+            assoc_raw,
             reply,
             balloon_bundle_id: r.text(c::BALLOON_BUNDLE_ID)?,
             expressive_send_style_id: r.text(c::EXPRESSIVE_SEND_STYLE_ID)?,
             payload_data_type: r.type_only(c::PAYLOAD_DATA)?,
+            payload_data: r.blob_on_request(c::PAYLOAD_DATA)?,
             summary,
             edit_label,
             part_count: r.integer(c::PART_COUNT)?,
@@ -498,6 +512,7 @@ impl MessageRecord {
             was_downgraded: r.boolean(c::WAS_DOWNGRADED)?,
             raw_attributed_body,
             raw_message_summary_info,
+            raw_issues: r.take_raw_issues(),
         })
     }
 }

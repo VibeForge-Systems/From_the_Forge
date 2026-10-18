@@ -14,6 +14,13 @@
 //! -- Cursor::Start: no WHERE clause; ORDER BY "ROWID" LIMIT ?1
 //! ```
 //!
+//! **Three query forms per table.** The record query reads every present
+//! known column. The raw form, built only for `message`, also reads
+//! `payload_data` under its cap (M4 R3); it is used only when the caller
+//! keeps raw blobs, so the M3 check never reads that column's bytes. The key
+//! form (M4 R6) reads the key and the identifying columns only: `guid` for
+//! `message`, `chat` and `attachment`, and `id` and `service` for `handle`.
+//!
 //! **Keyset paging.** Tables keyed by a validated `ROWID` alias page on it;
 //! join tables page on their implicit `rowid`. There are no joins in record
 //! queries. One row at a time goes from the stepping statement to the
@@ -46,9 +53,10 @@ use crate::col::IssueKind;
 use crate::error::{BackupStage, MessagesError, Stage};
 use crate::guidset::GuidSets;
 use crate::progress::{BackupSinkAdapter, MessagesCtx, MessagesPhase};
+use crate::raw::{raw_cap, RawIssue, RawSql};
 use crate::records::{
-    AttachmentRecord, ChatHandleLink, ChatMessageLink, ChatRecord, HandleRecord,
-    MessageAttachmentLink, MessageReadOptions, MessageRecord, RecoverableLink,
+    AttachmentRecord, ChatHandleLink, ChatMessageLink, ChatRecord, HandleKeyRow, HandleRecord,
+    KeyRow, MessageAttachmentLink, MessageReadOptions, MessageRecord, RecoverableLink,
 };
 use crate::redact::{RawBlob, Redacted, SqlText};
 use crate::schema::{
@@ -165,6 +173,7 @@ pub struct ProbeOptions {
     page_rows: u32,
     integrity_ops_per_page: u64,
     integrity_ops_base: u64,
+    keep_raw_values: bool,
 }
 
 impl Default for ProbeOptions {
@@ -173,6 +182,7 @@ impl Default for ProbeOptions {
             page_rows: PAGE_ROWS_DEFAULT,
             integrity_ops_per_page: QC_OPS_PER_PAGE,
             integrity_ops_base: QC_OPS_BASE,
+            keep_raw_values: false,
         }
     }
 }
@@ -195,6 +205,20 @@ impl ProbeOptions {
     /// Rows per page.
     pub fn page_rows(&self) -> u32 {
         self.page_rows
+    }
+
+    /// Whether the `handle`, `chat`, `attachment` and link passes fill each
+    /// record's `raw_issues` (M4 R2; default `false`). The `message` pass
+    /// follows [`MessageReadOptions::keep_raw_blobs`] instead, like its
+    /// other raw values.
+    pub fn with_keep_raw_values(mut self, on: bool) -> Self {
+        self.keep_raw_values = on;
+        self
+    }
+
+    /// See [`ProbeOptions::with_keep_raw_values`].
+    pub fn keep_raw_values(&self) -> bool {
+        self.keep_raw_values
     }
 }
 
@@ -232,10 +256,34 @@ impl<B> PassOutcome<B> {
     }
 }
 
-/// One table's record query: the SQL for both cursor forms, and where each
-/// known column landed in the result.
+/// Which form of a table's query (module docs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SelectKind {
+    /// Every present known column.
+    Records,
+    /// As `Records`, plus the values of `BlobOnRequest` columns.
+    RawRecords,
+    /// The key and the identifying columns only.
+    Keys,
+}
+
+/// The identifying columns the key form reads, besides the key.
+fn key_columns(t: KnownTable) -> &'static [u8] {
+    use crate::schema::known::{attachment, chat, handle, message};
+    match t {
+        KnownTable::Message => &[message::GUID],
+        KnownTable::Chat => &[chat::GUID],
+        KnownTable::Attachment => &[attachment::GUID],
+        KnownTable::Handle => &[handle::ID, handle::SERVICE],
+        _ => &[],
+    }
+}
+
+/// One table's query in one form: the SQL for both cursor forms, and where
+/// each known column landed in the result.
 pub(crate) struct Select {
     table: KnownTable,
+    kind: SelectKind,
     sql_start: String,
     sql_after: String,
     /// Indexed by the column's index in the known list.
@@ -243,19 +291,31 @@ pub(crate) struct Select {
 }
 
 impl Select {
-    fn build(t: KnownTable, tc: &TableCaps) -> Option<Self> {
+    fn build(t: KnownTable, tc: &TableCaps, kind: SelectKind) -> Option<Self> {
         let key = match t.layout() {
             TableLayout::RowidAlias => "\"ROWID\"",
             TableLayout::Join => "rowid",
             TableLayout::CountOnly | TableLayout::Properties => return None,
         };
+        let has_on_request = t
+            .known_columns()
+            .any(|c| c.kind() == Some(ColumnKind::BlobOnRequest));
+        match kind {
+            SelectKind::Records => {}
+            SelectKind::RawRecords if has_on_request => {}
+            SelectKind::Keys if !key_columns(t).is_empty() => {}
+            SelectKind::RawRecords | SelectKind::Keys => return None,
+        }
         let mut exprs: Vec<String> = Vec::new();
         let mut pos = Vec::new();
         if t.layout() == TableLayout::Join {
             exprs.push(key.to_owned());
         }
         for c in t.known_columns() {
-            if !tc.present_columns.contains(c) {
+            let wanted = kind != SelectKind::Keys
+                || c.kind() == Some(ColumnKind::RowId)
+                || key_columns(t).contains(&c.index());
+            if !wanted || !tc.present_columns.contains(c) {
                 pos.push(None);
                 continue;
             }
@@ -278,6 +338,16 @@ impl Select {
                     exprs.push(format!("octet_length(\"{name}\")"));
                 }
                 Some(ColumnKind::TypeOnly) => exprs.push(format!("typeof(\"{name}\")")),
+                Some(ColumnKind::BlobOnRequest) => {
+                    exprs.push(format!("typeof(\"{name}\")"));
+                    if kind == SelectKind::RawRecords {
+                        let cap = c.cap().unwrap_or(0);
+                        exprs.push(format!(
+                            "CASE WHEN octet_length(\"{name}\") <= {cap} THEN \"{name}\" END"
+                        ));
+                        exprs.push(format!("octet_length(\"{name}\")"));
+                    }
+                }
                 None => {
                     pos.push(None);
                     continue;
@@ -289,6 +359,7 @@ impl Select {
         let table = t.name();
         Some(Select {
             table: t,
+            kind,
             sql_start: format!("SELECT {cols} FROM \"{table}\" ORDER BY {key} LIMIT ?1"),
             sql_after: format!(
                 "SELECT {cols} FROM \"{table}\" WHERE {key} > ?1 ORDER BY {key} LIMIT ?2"
@@ -303,10 +374,14 @@ impl Select {
 }
 
 /// Reads one row's known columns through a [`Select`]'s position map.
+/// With `keep_raw`, the raw value of every unreadable cell it reads is
+/// collected for the record's `raw_issues` (M4 R2).
 pub(crate) struct RowReader<'a, 'r> {
     row: &'a Row<'r>,
     sel: &'a Select,
     issues: &'a mut ValueIssues,
+    keep_raw: bool,
+    raw_issues: Vec<RawIssue>,
 }
 
 impl<'a> RowReader<'a, '_> {
@@ -327,24 +402,59 @@ impl<'a> RowReader<'a, '_> {
         KnownColumn::new(self.sel.table, index)
     }
 
+    /// Keep the raw value `v` of `index`'s cell when `col` came out
+    /// unreadable and raw values are kept.
+    fn keep_if_unreadable<T>(&mut self, index: u8, v: ValueRef<'_>, col: &Col<T>) {
+        if !self.keep_raw || !matches!(col, Col::Unreadable(_)) {
+            return;
+        }
+        let column = self.column(index);
+        if let Some(raw) = RawSql::capture(v, raw_cap(column)) {
+            self.raw_issues.push(RawIssue { column, raw });
+        }
+    }
+
+    /// The raw values collected so far, in column-code order; the record
+    /// takes them last.
+    pub(crate) fn take_raw_issues(&mut self) -> Vec<RawIssue> {
+        let mut out = std::mem::take(&mut self.raw_issues);
+        out.sort_by_key(|i| i.column.code());
+        out
+    }
+
     pub(crate) fn integer(&mut self, index: u8) -> Result<Col<i64>, MessagesError> {
         match self.sel.at(index) {
             None => Ok(Col::Absent),
-            Some(i) => Ok(value::integer(self.get(i)?, self.issues)),
+            Some(i) => {
+                let v = self.get(i)?;
+                let col = value::integer(v, self.issues);
+                self.keep_if_unreadable(index, v, &col);
+                Ok(col)
+            }
         }
     }
 
     pub(crate) fn boolean(&mut self, index: u8) -> Result<Col<bool>, MessagesError> {
         match self.sel.at(index) {
             None => Ok(Col::Absent),
-            Some(i) => Ok(value::boolean(self.get(i)?, self.issues)),
+            Some(i) => {
+                let v = self.get(i)?;
+                let col = value::boolean(v, self.issues);
+                self.keep_if_unreadable(index, v, &col);
+                Ok(col)
+            }
         }
     }
 
     pub(crate) fn time(&mut self, index: u8) -> Result<Col<CocoaTime>, MessagesError> {
         match self.sel.at(index) {
             None => Ok(Col::Absent),
-            Some(i) => Ok(value::time(self.get(i)?, self.issues)),
+            Some(i) => {
+                let v = self.get(i)?;
+                let col = value::time(v, self.issues);
+                self.keep_if_unreadable(index, v, &col);
+                Ok(col)
+            }
         }
     }
 
@@ -353,7 +463,9 @@ impl<'a> RowReader<'a, '_> {
             None => Ok(Col::Absent),
             Some(i) => {
                 let (v, len) = self.pair(i)?;
-                Ok(value::text(v, len, self.column(index), self.issues))
+                let col = value::text(v, len, self.column(index), self.issues);
+                self.keep_if_unreadable(index, v, &col);
+                Ok(col)
             }
         }
     }
@@ -363,7 +475,35 @@ impl<'a> RowReader<'a, '_> {
             None => Ok(Col::Absent),
             Some(i) => {
                 let (v, len) = self.pair(i)?;
-                Ok(value::blob(v, len, self.column(index), self.issues))
+                let col = value::blob(v, len, self.column(index), self.issues);
+                self.keep_if_unreadable(index, v, &col);
+                Ok(col)
+            }
+        }
+    }
+
+    /// The value of a `BlobOnRequest` column (M4 R3): `None` unless the row
+    /// comes from the raw form of the query. Its counts go to a scratch
+    /// [`ValueIssues`], so a pass's counts do not depend on whether raw
+    /// blobs are kept.
+    pub(crate) fn blob_on_request(
+        &mut self,
+        index: u8,
+    ) -> Result<Option<Col<Redacted<RawBlob>>>, MessagesError> {
+        if self.sel.kind != SelectKind::RawRecords {
+            return Ok(None);
+        }
+        match self.sel.at(index) {
+            None => Ok(Some(Col::Absent)),
+            Some(i) => {
+                let at = i
+                    .checked_add(1)
+                    .ok_or(MessagesError::Internal("result column out of range"))?;
+                let (v, len) = self.pair(at)?;
+                let mut scratch = ValueIssues::default();
+                let col = value::blob(v, len, self.column(index), &mut scratch);
+                self.keep_if_unreadable(index, v, &col);
+                Ok(Some(col))
             }
         }
     }
@@ -404,12 +544,14 @@ pub(crate) trait FromRow: Sized {
     fn from_row(rowid: i64, r: &mut RowReader<'_, '_>) -> Result<Self, MessagesError>;
 }
 
-/// Which table a pass reads, and how it reports.
+/// Which table a pass reads, in which form, and how it reports.
 #[derive(Clone, Copy)]
 struct PassSpec {
     table: KnownTable,
     phase: MessagesPhase,
     stage: Stage,
+    kind: SelectKind,
+    keep_raw: bool,
 }
 
 /// A staged sms.db that passed the probe: the gate and the streaming API.
@@ -488,7 +630,15 @@ impl<'s> SmsDb<'s> {
             .tables
             .iter()
             .filter(|tc| tc.present)
-            .filter_map(|tc| Select::build(tc.table, tc))
+            .flat_map(|tc| {
+                [
+                    SelectKind::Records,
+                    SelectKind::RawRecords,
+                    SelectKind::Keys,
+                ]
+                .into_iter()
+                .filter_map(|kind| Select::build(tc.table, tc, kind))
+            })
             .collect();
         Ok(Probe::Supported(SmsDb {
             conn,
@@ -513,8 +663,9 @@ impl<'s> SmsDb<'s> {
         &self.opts
     }
 
-    /// Every record query, both cursor forms. Our own SQL, built from the
-    /// static list; exposed for the statement-size tests.
+    /// Every query of every form (records, raw records and keys), both
+    /// cursor forms. Our own SQL, built from the static list; exposed for
+    /// the statement-size tests.
     pub fn record_queries(&self) -> impl Iterator<Item = &str> {
         self.selects
             .iter()
@@ -579,6 +730,12 @@ impl<'s> SmsDb<'s> {
                 table: KnownTable::Message,
                 phase: MessagesPhase::ReadingMessages,
                 stage: Stage::Messages,
+                kind: if opts.keep_raw_blobs {
+                    SelectKind::RawRecords
+                } else {
+                    SelectKind::Records
+                },
+                keep_raw: opts.keep_raw_blobs,
             },
             from,
             ctx,
@@ -616,6 +773,8 @@ impl<'s> SmsDb<'s> {
                 table: KnownTable::Attachment,
                 phase: MessagesPhase::CheckingAttachments,
                 stage: Stage::Attachments,
+                kind: SelectKind::Records,
+                keep_raw: self.opts.keep_raw_values,
             },
             from,
             ctx,
@@ -638,6 +797,124 @@ impl<'s> SmsDb<'s> {
         f: impl FnMut(RecoverableLink) -> ControlFlow<B>,
     ) -> Result<PassOutcome<B>, MessagesError> {
         self.pass(from, ctx, f)
+    }
+
+    /// The key and `guid` of every `message` row, and nothing else (M4 R6),
+    /// for the archive import's duplicate-key scan. Paged, capped and
+    /// resumable like [`SmsDb::for_each_message`]; reported as
+    /// [`MessagesPhase::ReadingMessages`].
+    pub fn for_each_message_key<B>(
+        &self,
+        from: Cursor,
+        ctx: &mut MessagesCtx<'_>,
+        f: impl FnMut(KeyRow) -> ControlFlow<B>,
+    ) -> Result<PassOutcome<B>, MessagesError> {
+        self.key_pass(
+            KnownTable::Message,
+            MessagesPhase::ReadingMessages,
+            Stage::Messages,
+            from,
+            ctx,
+            f,
+        )
+    }
+
+    /// The key and `guid` of every `chat` row (M4 R6).
+    pub fn for_each_chat_key<B>(
+        &self,
+        from: Cursor,
+        ctx: &mut MessagesCtx<'_>,
+        f: impl FnMut(KeyRow) -> ControlFlow<B>,
+    ) -> Result<PassOutcome<B>, MessagesError> {
+        self.key_pass(
+            KnownTable::Chat,
+            MessagesPhase::ReadingChats,
+            Stage::Chats,
+            from,
+            ctx,
+            f,
+        )
+    }
+
+    /// The key and `guid` of every `attachment` row (M4 R6). An empty pass
+    /// when the optional table is absent. No file is looked up.
+    pub fn for_each_attachment_key<B>(
+        &self,
+        from: Cursor,
+        ctx: &mut MessagesCtx<'_>,
+        f: impl FnMut(KeyRow) -> ControlFlow<B>,
+    ) -> Result<PassOutcome<B>, MessagesError> {
+        self.key_pass(
+            KnownTable::Attachment,
+            MessagesPhase::CheckingAttachments,
+            Stage::Attachments,
+            from,
+            ctx,
+            f,
+        )
+    }
+
+    /// The key, `id` and `service` of every `handle` row (M4 R6).
+    pub fn for_each_handle_key<B>(
+        &self,
+        from: Cursor,
+        ctx: &mut MessagesCtx<'_>,
+        f: impl FnMut(HandleKeyRow) -> ControlFlow<B>,
+    ) -> Result<PassOutcome<B>, MessagesError> {
+        use crate::schema::known::handle;
+        self.pass_with(
+            PassSpec {
+                table: KnownTable::Handle,
+                phase: MessagesPhase::ReadingHandles,
+                stage: Stage::Handles,
+                kind: SelectKind::Keys,
+                keep_raw: false,
+            },
+            from,
+            ctx,
+            |rowid, r| {
+                Ok(HandleKeyRow {
+                    rowid,
+                    id: r.text(handle::ID)?,
+                    service: r.text(handle::SERVICE)?,
+                })
+            },
+            f,
+        )
+    }
+
+    /// A key pass over a table keyed by `guid`.
+    fn key_pass<B>(
+        &self,
+        table: KnownTable,
+        phase: MessagesPhase,
+        stage: Stage,
+        from: Cursor,
+        ctx: &mut MessagesCtx<'_>,
+        f: impl FnMut(KeyRow) -> ControlFlow<B>,
+    ) -> Result<PassOutcome<B>, MessagesError> {
+        let guid = key_columns(table)
+            .first()
+            .copied()
+            .ok_or(MessagesError::Internal("no key column"))?;
+        self.pass_with(
+            PassSpec {
+                table,
+                phase,
+                stage,
+                kind: SelectKind::Keys,
+                keep_raw: false,
+            },
+            from,
+            ctx,
+            |rowid, r| {
+                Ok(KeyRow {
+                    rowid,
+                    guid: r.text(guid)?,
+                })
+            },
+            f,
+        )
     }
 
     /// The aggregates (§7.3): integer SQL under op budgets, then the GUID
@@ -674,6 +951,8 @@ impl<'s> SmsDb<'s> {
             table: R::TABLE,
             phase: R::PHASE,
             stage: R::STAGE,
+            kind: SelectKind::Records,
+            keep_raw: self.opts.keep_raw_values,
         };
         self.pass_with(spec, from, ctx, R::from_row, f)
     }
@@ -689,7 +968,11 @@ impl<'s> SmsDb<'s> {
         mut f: impl FnMut(R) -> ControlFlow<B>,
     ) -> Result<PassOutcome<B>, MessagesError> {
         let mut out = PassOutcome::empty();
-        let Some(sel) = self.selects.iter().find(|s| s.table == spec.table) else {
+        let Some(sel) = self
+            .selects
+            .iter()
+            .find(|s| s.table == spec.table && s.kind == spec.kind)
+        else {
             // An absent optional table; required tables always have a query.
             return Ok(out);
         };
@@ -738,6 +1021,8 @@ impl<'s> SmsDb<'s> {
                         row,
                         sel,
                         issues: &mut out.value_issues,
+                        keep_raw: spec.keep_raw,
+                        raw_issues: Vec::new(),
                     };
                     let record = build(key, &mut reader)?;
                     out.rows = out.rows.saturating_add(1);
@@ -811,7 +1096,8 @@ mod tests {
             generated_columns: 0,
             wrong_case_columns: 0,
         };
-        let s = Select::build(KnownTable::Handle, &tc).expect("handle has a query");
+        let s = Select::build(KnownTable::Handle, &tc, SelectKind::Records)
+            .expect("handle has a query");
         assert!(s.sql_start.starts_with(
             "SELECT \"ROWID\", CASE WHEN octet_length(\"id\") <= 4096 THEN \"id\" END, octet_length(\"id\"), "
         ));
@@ -824,5 +1110,61 @@ mod tests {
         assert_eq!(s.at(0), Some(0));
         assert_eq!(s.at(1), Some(1));
         assert_eq!(s.at(2), Some(3));
+
+        // The key form reads the key, `id` and `service` only (R6).
+        let k = Select::build(KnownTable::Handle, &tc, SelectKind::Keys).expect("keys");
+        assert_eq!(
+            k.sql_start,
+            "SELECT \"ROWID\", CASE WHEN octet_length(\"id\") <= 4096 THEN \"id\" END, \
+             octet_length(\"id\"), CASE WHEN octet_length(\"service\") <= 65536 THEN \
+             \"service\" END, octet_length(\"service\") FROM \"handle\" ORDER BY \"ROWID\" LIMIT ?1"
+        );
+        assert_eq!((k.at(1), k.at(2), k.at(3)), (Some(1), Some(3), None));
+        // `handle` has no column read on request, so no raw form.
+        assert!(Select::build(KnownTable::Handle, &tc, SelectKind::RawRecords).is_none());
+    }
+
+    /// `message`'s three forms: `payload_data` is read for its class only,
+    /// for its class and capped value in the raw form, and not at all in
+    /// the key form.
+    #[test]
+    fn message_forms() {
+        use crate::schema::known::message;
+        let mut cols = crate::schema::KnownColumnSet::default();
+        for c in KnownTable::Message.known_columns() {
+            cols.insert(c.index());
+        }
+        let tc = TableCaps {
+            table: KnownTable::Message,
+            present: true,
+            rows: Some(0),
+            present_columns: cols,
+            unknown_columns: 0,
+            generated_columns: 0,
+            wrong_case_columns: 0,
+        };
+        let plain = Select::build(KnownTable::Message, &tc, SelectKind::Records).expect("records");
+        let raw = Select::build(KnownTable::Message, &tc, SelectKind::RawRecords).expect("raw");
+        let keys = Select::build(KnownTable::Message, &tc, SelectKind::Keys).expect("keys");
+        let cap = crate::caps::CAP_PAYLOAD_DATA;
+        let value =
+            format!("CASE WHEN octet_length(\"payload_data\") <= {cap} THEN \"payload_data\" END");
+        assert!(plain.sql_start.contains("typeof(\"payload_data\")"));
+        assert!(!plain.sql_start.contains(&value));
+        assert!(raw.sql_start.contains(&format!(
+            "typeof(\"payload_data\"), {value}, octet_length(\"payload_data\")"
+        )));
+        assert_eq!(
+            plain.at(message::PAYLOAD_DATA),
+            raw.at(message::PAYLOAD_DATA)
+        );
+        assert!(!keys.sql_start.contains("payload_data"));
+        assert!(!keys.sql_start.contains("\"text\""));
+        assert_eq!(
+            keys.sql_after,
+            "SELECT \"ROWID\", CASE WHEN octet_length(\"guid\") <= 256 THEN \"guid\" END, \
+             octet_length(\"guid\") FROM \"message\" WHERE \"ROWID\" > ?1 ORDER BY \"ROWID\" LIMIT ?2"
+        );
+        assert_eq!(keys.at(message::TEXT), None);
     }
 }

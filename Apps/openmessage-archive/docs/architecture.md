@@ -76,7 +76,7 @@ flowchart LR
 | `src-tauri/` | Tauri shell. Holds IPC commands, application state, settings persistence, archive-location validation, the backup registry, job table and DTOs, and (M3) the report mapping and the panic hook. Contains no domain logic. | M1, M2, M3 |
 | `crates/oma-fs` | Filesystem safety: filename sanitization, contained path resolution, and guards for backups, MobileSync, iMazing's default store and cloud sync. From M4: volume facts (`volume`: free space, network/virtualised/FAT detection), the Unix private-permission check (`perm::check_private`), and durable placement (`place`: `fsync_dir`, `create_dir_durable`, `place_noreplace`, `open_nofollow`) | M1, M4 (slice 4a) |
 | `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them. From M4: `copy_file_to` streams one listed file's plaintext into a caller's writer, hashing it, under `Limits::attachment_bytes` and per-file stamps | ✔ M2, M3, M4 (slice 4b) |
-| `crates/oma-messages` | Scans and probes the sms.db schema by capability, streams typed records (handles, chats, the joins, messages, attachments, Recently Deleted links) as `Col<T>` values, decodes `attributedBody` with a clean-room typedstream decoder, and produces the aggregate `ExtractionReport`. Persists nothing. | ✔ M3 |
+| `crates/oma-messages` | Scans and probes the sms.db schema by capability, streams typed records (handles, chats, the joins, messages, attachments, Recently Deleted links) as `Col<T>` values, decodes `attributedBody` with a clean-room typedstream decoder, and produces the aggregate `ExtractionReport`. Persists nothing. From M4: stable `KnownColumn` codes, raw values of unreadable cells (`raw_issues`), `payload_data` on request, the raw association columns, key-only passes and the storage class of text cells | ✔ M3, M4 (slice 4c) |
 | `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity | planned, M4 |
 | `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX | planned, M6 |
 | `crates/oma-device` | Detects devices and creates backups behind a platform trait | planned, M7 |
@@ -461,6 +461,72 @@ recorded", never 0.
   1 MiB read, so a cancel inside a large file stops within one chunk.
 - **Not done here:** `AttachmentKey` stays opaque and cannot be persisted,
   so the import must copy inside its attachment pass (M4 §9.1).
+
+### The reader additions for the archive import (M4 slice 4c)
+
+`oma-messages` gains what the archive import needs to store every source
+value without a second read and without fabricating one (M4 spec §3.3).
+All of it is additive; the extraction check's report is unchanged, because
+every new read is off unless asked for.
+
+- **Stable column codes.** `KnownColumn::code()` is a `u16` written beside
+  each column in the static list: the table's `code_base()` (`message`
+  100, `handle` 200, `chat` 300, the joins 400–600 and 800, `attachment`
+  700, `_SqliteDatabaseProperties` 900) plus a per-column number.
+  `KnownColumn::from_code` reverses it. Reordering the list cannot change
+  a code; a compile-time check keeps codes in their table's range and
+  unique, and a unit test pins every code. A removed column retires its
+  code. The archive stores these codes (`value_issue.col`), so a code is
+  never reused.
+- **Raw values of unreadable cells (R2).** Every record has
+  `raw_issues: Vec<RawIssue>`, where `RawIssue { column, raw: RawSql }`
+  holds what SQLite returned for an `Unreadable` cell, in its storage
+  class (`Integer`, `Real`, `Text` or `Blob`). It is filled only when
+  asked: `MessageReadOptions::keep_raw_blobs` for messages, and
+  `ProbeOptions::with_keep_raw_values` for the other passes. A text or
+  blob value is kept up to the column's cap, or `CAP_RAW_UNREADABLE`
+  (4 KiB) for an integer, boolean or time column; a larger one is not
+  kept, and the `Col` still says "unreadable". Columns read for presence
+  only (`chat.properties`) never materialise a value, so they have no raw
+  value. A property list that does not parse is not a raw issue: its bytes
+  are `raw_message_summary_info`. Issues are listed in column-code order.
+  `RawSql`'s `Debug` prints only the class and a length, never a value,
+  not even an integer.
+- **`payload_data` on request (R3).** With `keep_raw_blobs`, the message
+  pass uses a third form of its query that also selects
+  `CASE WHEN octet_length("payload_data") <= 1048576 THEN "payload_data"
+  END` and its length, so `MessageRecord::payload_data` is
+  `Some(Col<Redacted<RawBlob>>)` and a larger value is `Oversized`.
+  Without it the field is `None` and the bytes are never read, as in M3.
+  The value's counts go to a scratch counter, so a pass's `ValueIssues`
+  does not depend on the option. Its contents (polls, app and link
+  payloads) are not decoded. Whether the import keeps it is D59, an owner
+  decision; the lean (keep it, within the cap, and disclose it) still
+  awaits the owner's confirmation.
+- **Raw association columns (R4).** `MessageRecord::assoc_raw` holds the
+  five `associated_message_*` columns exactly as read, for every row.
+  `Association` maps `''` to NULL and returns `None` for several distinct
+  states; `assoc_raw` keeps them apart, and `AssocRaw::association()`
+  derives the same `Association` the record carries.
+- **Key-only passes (R6).** `for_each_message_key`, `for_each_chat_key`
+  and `for_each_attachment_key` yield `KeyRow { rowid, guid }`, and
+  `for_each_handle_key` yields `HandleKeyRow { rowid, id, service }`
+  (sms.db's own uniqueness). They select the key and those columns only,
+  under the same caps, pages, cursors and cancellation as the record
+  passes, so the import's duplicate-key scan never reads a body. They
+  report the phase of the table's record pass (`ReadingMessages`,
+  `ReadingChats`, `CheckingAttachments`, `ReadingHandles`), so the shell's
+  phase mapping is unchanged. An absent optional `attachment` table gives
+  an empty pass.
+- **Storage class of text (R7).** `SqlText::class()` is `TextClass::Text`
+  or `TextClass::Blob`, as SQLite reported the cell. Equality compares the
+  class as well as the bytes, and `Debug` adds `, blob` for a BLOB cell.
+  The archive stores text as BLOBs, so it records the class separately.
+- **Statement limits.** `record_queries()` now lists every form (records,
+  the raw message form and the four key forms); each still fits the
+  `sql_length` and `vdbe_op` limits with a 2x margin.
+- **Not done here:** `chat.properties` raw bytes (R5) are deferred
+  (M4 §21.2); the property list is still read for presence and size only.
 
 ### Status and qualifiers (D43)
 

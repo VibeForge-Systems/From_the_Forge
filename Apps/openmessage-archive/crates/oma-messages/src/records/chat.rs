@@ -6,6 +6,7 @@ use crate::col::Col;
 use crate::db::{FromRow, RowReader};
 use crate::error::{MessagesError, Stage};
 use crate::progress::MessagesPhase;
+use crate::raw::RawIssue;
 use crate::redact::{Redacted, SqlText};
 use crate::schema::known::chat as c;
 use crate::schema::KnownTable;
@@ -53,13 +54,15 @@ pub struct ChatRecord {
     /// `last_read_message_timestamp`; its unit is **UNVERIFIED**, so it is
     /// classified per value.
     pub last_read_message_timestamp: Col<CocoaTime>,
+    /// The raw values of unreadable cells, when kept (M4 R2).
+    pub raw_issues: Vec<RawIssue>,
 }
 
 shape_debug!(ChatRecord {
     guid, style, chat_identifier, service_name, display_name, room_name, group_id,
     properties, is_archived, is_filtered, is_blackholed, is_pending_review, is_recovered,
     last_read_message_timestamp,
-} kinds { service_class });
+} kinds { service_class, raw_issues });
 
 impl FromRow for ChatRecord {
     const TABLE: KnownTable = KnownTable::Chat;
@@ -85,6 +88,7 @@ impl FromRow for ChatRecord {
             is_pending_review: r.boolean(c::IS_PENDING_REVIEW)?,
             is_recovered: r.boolean(c::IS_RECOVERED)?,
             last_read_message_timestamp: r.time(c::LAST_READ_MESSAGE_TIMESTAMP)?,
+            raw_issues: r.take_raw_issues(),
         })
     }
 }

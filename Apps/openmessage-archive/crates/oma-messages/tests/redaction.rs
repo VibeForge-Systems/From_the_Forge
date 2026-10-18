@@ -2,7 +2,9 @@
 //! (M3 §14 item 7, §19.3 `redaction.rs`): records from every pass over the
 //! catalogue's richest fixtures, attachment locations and keys, the
 //! capabilities and the report. The report's `Debug` also withholds the
-//! date range (D31).
+//! date range (D31). Raw values are kept (M4 R2, R3), so the hostile
+//! fixture's unreadable cells and `payload_data` are in the records, and the
+//! M4 key rows (R6) are printed too.
 #![allow(clippy::disallowed_types, clippy::disallowed_methods)]
 mod common;
 
@@ -12,7 +14,7 @@ use common::*;
 use oma_backup::{CancelToken, WalPolicy};
 use oma_messages::{
     connect, stage, AttachmentLocator, CheckOptions, Connect, Cursor, GuidSets, MessageReadOptions,
-    MessagesCtx, MessagesProgress, Probe, SmsDb,
+    MessagesCtx, MessagesProgress, Probe, ProbeOptions, SmsDb,
 };
 
 fn debug_of_every_record(name: &str, password: Option<&str>) -> Vec<String> {
@@ -29,7 +31,8 @@ fn debug_of_every_record(name: &str, password: Option<&str>) -> Vec<String> {
     let Connect::Ready(conn) = connect(&staged, &ctx).expect("connect") else {
         panic!("limits");
     };
-    let Probe::Supported(db) = SmsDb::open(&conn, &mut ctx).expect("probe") else {
+    let opts = ProbeOptions::default().with_keep_raw_values(true);
+    let Probe::Supported(db) = SmsDb::open_with(&conn, &opts, &mut ctx).expect("probe") else {
         panic!("not supported");
     };
     out.push(format!("{db:?}"));
@@ -55,9 +58,20 @@ fn debug_of_every_record(name: &str, password: Option<&str>) -> Vec<String> {
             .as_ref()
             .map(|a| format!("{a:?} {:?}", a.target))
             .unwrap_or_default();
-        push(format!("{r:?} {:?} {:?} {extra}", r.body, r.summary))
+        push(format!(
+            "{r:?} {:?} {:?} {extra} {:?} {:?} {:?}",
+            r.body, r.summary, r.assoc_raw, r.payload_data, r.raw_issues
+        ))
     })
     .expect("messages");
+    db.for_each_message_key(Cursor::Start, &mut ctx, |r| push(format!("{r:?}")))
+        .expect("keys");
+    db.for_each_chat_key(Cursor::Start, &mut ctx, |r| push(format!("{r:?}")))
+        .expect("keys");
+    db.for_each_attachment_key(Cursor::Start, &mut ctx, |r| push(format!("{r:?}")))
+        .expect("keys");
+    db.for_each_handle_key(Cursor::Start, &mut ctx, |r| push(format!("{r:?}")))
+        .expect("keys");
     db.for_each_message_attachment(Cursor::Start, &mut ctx, |r| push(format!("{r:?}")))
         .expect("links");
     let mut locator = AttachmentLocator::new(&ob, true);

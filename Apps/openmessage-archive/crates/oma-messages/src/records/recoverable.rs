@@ -7,6 +7,7 @@ use crate::col::Col;
 use crate::db::{FromRow, RowReader};
 use crate::error::{MessagesError, Stage};
 use crate::progress::MessagesPhase;
+use crate::raw::RawIssue;
 use crate::schema::known::chat_recoverable_message_join as c;
 use crate::schema::KnownTable;
 use crate::time::CocoaTime;
@@ -28,6 +29,8 @@ pub struct RecoverableLink {
     pub delete_date: Col<CocoaTime>,
     /// `ck_sync_state`, raw.
     pub ck_sync_state: Col<i64>,
+    /// The raw values of unreadable cells, when kept (M4 R2).
+    pub raw_issues: Vec<RawIssue>,
 }
 
 shape_debug!(RecoverableLink {
@@ -35,7 +38,7 @@ shape_debug!(RecoverableLink {
     message_id,
     delete_date,
     ck_sync_state
-});
+} kinds { raw_issues });
 
 impl FromRow for RecoverableLink {
     const TABLE: KnownTable = KnownTable::ChatRecoverableMessageJoin;
@@ -49,6 +52,7 @@ impl FromRow for RecoverableLink {
             message_id: r.integer(c::MESSAGE_ID)?,
             delete_date: r.time(c::DELETE_DATE)?,
             ck_sync_state: r.integer(c::CK_SYNC_STATE)?,
+            raw_issues: r.take_raw_issues(),
         })
     }
 }

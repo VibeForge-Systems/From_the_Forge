@@ -628,7 +628,8 @@ itself.
   still **UNVERIFIED**. S4 says Apple "doesn't seem to be using it", so it
   is read and counted but drives no label.
 - **Polls** (iOS 26) live in `payload_data` (S2); M3 reads only its storage
-  class. Poll votes use associated type 4000.
+  class. From M4 the reader can keep its raw bytes, up to 1 MiB, without
+  decoding them. Poll votes use associated type 4000.
 
 ### Message bodies and typedstream
 
