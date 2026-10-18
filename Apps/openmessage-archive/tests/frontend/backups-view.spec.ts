@@ -16,12 +16,15 @@ vi.mock('@/services/ipc', async (importOriginal) => {
       checkExtraction: vi.fn(),
       cancelJob: vi.fn(),
       updateSettings: vi.fn(),
+      listArchives: vi.fn(),
+      getArchiveDetails: vi.fn(),
     },
   };
 });
 import { IpcError, ipc } from '@/services/ipc';
 import BackupsView from '@/views/BackupsView.vue';
 import { useBackups } from '@/stores/backups';
+import { useArchives } from '@/stores/archives';
 import { useSettings } from '@/stores/settings';
 import type { BackupDetails, BackupList, BackupState } from '@/types';
 import {
@@ -102,13 +105,18 @@ describe('BackupsView', () => {
     expect(w.text()).toContain('Select a backup to see its details.');
   });
 
-  it('offers Validate for a ready backup, with Import messages disabled and planned', async () => {
+  it('offers Validate and Import messages for a ready backup; Import opens the dialog with it selected', async () => {
+    api.listArchives.mockResolvedValue({ entries: [], libraryState: 'ready', libraryError: null });
     const w = await mountWith(backupList(), details());
     const validate = button(w, 'Validate');
     expect(validate?.attributes('disabled')).toBeUndefined();
     const imp = button(w, 'Import messages');
-    expect(imp?.attributes('disabled')).toBeDefined();
-    expect(w.find('#import-planned').text()).toContain('Planned · M4');
+    expect(imp?.attributes('disabled')).toBeUndefined();
+    expect(w.find('#import-planned').exists()).toBe(false);
+    expect(w.find('#backup-import-note').text()).toContain('asks you to confirm');
+    expect(w.find('#backup-import-note').text()).toContain('The archive is stored unencrypted.');
+    await imp?.trigger('click');
+    expect(useArchives().importDialog).toEqual({ archiveId: null, backupId: 'b1', continuing: false });
     expect(w.text()).toContain('The backup itself is never changed.');
     expect(w.text()).toContain('from Info.plist');
   });
@@ -118,7 +126,8 @@ describe('BackupsView', () => {
     const w = await mountWith(backupList([s]), details(s));
     expect(button(w, 'Unlock and validate…')?.attributes('disabled')).toBeUndefined();
     expect(w.text()).toContain('Encrypted');
-    expect(button(w, 'Import messages')?.attributes('disabled')).toBeDefined();
+    // The password is asked for by the import itself, once the dialog is filled in.
+    expect(button(w, 'Import messages')?.attributes('disabled')).toBeUndefined();
   });
 
   it.each(['incomplete', 'unsupported', 'unreadable'] as BackupState[])(
@@ -311,7 +320,7 @@ describe('BackupsView', () => {
     );
   });
 
-  it('never renders an enabled Import messages button in any state', async () => {
+  it('enables Import messages exactly when Validate is enabled, and never while an archive job runs', async () => {
     for (const state of ['ready', 'needsPassword', 'incomplete', 'unsupported', 'unreadable', 'notInspected'] as BackupState[]) {
       setActivePinia(createPinia());
       const settings = useSettings();
@@ -319,10 +328,33 @@ describe('BackupsView', () => {
       settings.snapshot = snapshot();
       const s = summary({ state });
       const w = await mountWith(backupList([s]), details(s));
-      expect(button(w, 'Import messages')?.attributes('disabled')).toBeDefined();
-      expect(w.find('#import-planned .oma-planned').exists()).toBe(true);
+      const validate = button(w, 'Validate') ?? button(w, 'Unlock and validate');
+      expect(button(w, 'Import messages')?.attributes('disabled')).toBe(validate?.attributes('disabled'));
+      expect(w.find('.oma-planned').exists()).toBe(false);
       w.unmount();
     }
+    setActivePinia(createPinia());
+    const settings = useSettings();
+    settings.loaded = true;
+    settings.snapshot = snapshot();
+    const w = await mountWith(backupList(), details());
+    useArchives().job = {
+      jobId: 'job-9',
+      archiveId: 'a' + '0'.repeat(32),
+      backupId: 'b2',
+      kind: 'verify',
+      depth: 'quick',
+      options: null,
+      phase: null,
+      done: 0,
+      total: null,
+      cancelling: false,
+      ended: false,
+      waitingAtGate: false,
+    };
+    await flushPromises();
+    expect(button(w, 'Import messages')?.attributes('disabled')).toBeDefined();
+    w.unmount();
   });
 
   // ---------------------------------------------------------------- M3

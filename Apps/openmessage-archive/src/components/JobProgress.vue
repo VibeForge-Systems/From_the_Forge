@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { JobState } from '@/stores/backups';
-import type { JobPhase } from '@/types';
+import type { JobKind, JobPhase } from '@/types';
+import type { ProgressJob } from '@/types/progress';
 
-const props = defineProps<{ job: JobState }>();
+const props = defineProps<{ job: ProgressJob }>();
 const emit = defineEmits<{ cancel: [] }>();
 
 const nf = new Intl.NumberFormat();
@@ -16,7 +16,8 @@ const LABEL: Record<JobPhase, string> = {
   checkingFiles: 'Checking file records',
   checkingMessagesDb: 'Checking the Messages database',
   extracting: 'Extracting a file',
-  // The archive import (M4); counted in attachment rows.
+  // The archive import (M4); counted in attachment rows, not bytes (the
+  // crate reports rows; see docs/architecture.md, slice 4j).
   copyingAttachments: 'Copying attachments',
   // The extraction check (M3 §17.3).
   stagingMessagesDb: 'Copying the Messages database',
@@ -50,7 +51,11 @@ const LABEL: Record<JobPhase, string> = {
   verifyingFiles: 'Checking attachment files',
 };
 
-/** Phases whose `done` and `total` count items; the copy counts bytes. */
+/**
+ * Phases whose `done` and `total` count items (rows or files). The staging
+ * copy counts bytes, and so does `verifyingFiles` in a full verify. The
+ * import's scans, the estimate, the gate and finalize report no total.
+ */
 const COUNTED: ReadonlySet<JobPhase> = new Set<JobPhase>([
   'checkingFiles',
   'readingSchema',
@@ -67,7 +72,13 @@ const COUNTED: ReadonlySet<JobPhase> = new Set<JobPhase>([
   'copyingAttachments',
   'importingAttachmentLinks',
   'importingRecentlyDeleted',
+  'verifyingFiles',
 ]);
+
+/** Whether this job's phase counts bytes. */
+function countsBytes(j: ProgressJob, phase: JobPhase): boolean {
+  return phase === 'stagingMessagesDb' || (phase === 'verifyingFiles' && j.depth === 'full');
+}
 
 const MIB = 1024 * 1024;
 const mib = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
@@ -85,18 +96,22 @@ const phaseLabel = computed(() => {
 const label = computed(() => {
   const j = props.job;
   if (j.cancelling || j.phase === null || j.total === null) return phaseLabel.value;
+  if (countsBytes(j, j.phase)) {
+    return `${LABEL[j.phase]} (${megabytes(j.done)} of ${megabytes(j.total)})`;
+  }
   if (COUNTED.has(j.phase)) {
     return `${LABEL[j.phase]} (${nf.format(j.done)} of ${nf.format(j.total)})`;
-  }
-  if (j.phase === 'stagingMessagesDb') {
-    return `${LABEL.stagingMessagesDb} (${megabytes(j.done)} of ${megabytes(j.total)})`;
   }
   return phaseLabel.value;
 });
 
-const ariaLabel = computed(() =>
-  props.job.kind === 'extractionCheck' ? 'Extraction check progress' : 'Validation progress',
-);
+const ARIA: Record<JobKind, string> = {
+  validate: 'Validation progress',
+  extractionCheck: 'Extraction check progress',
+  import: 'Import progress',
+  verify: 'Verification progress',
+};
+const ariaLabel = computed(() => ARIA[props.job.kind]);
 
 const percent = computed(() => {
   const { done, total } = props.job;

@@ -11,15 +11,16 @@ import ExtractionReport from '@/components/ExtractionReport.vue';
 import JobProgress from '@/components/JobProgress.vue';
 import LocationStatusList from '@/components/LocationStatusList.vue';
 import PanelLayout from '@/components/PanelLayout.vue';
-import PlannedBadge from '@/components/PlannedBadge.vue';
 import ValidationReport from '@/components/ValidationReport.vue';
 import { LEFTOVER_FILES_MESSAGE, useBackups } from '@/stores/backups';
+import { useArchives } from '@/stores/archives';
 import { useLayout } from '@/stores/layout';
 import { SHORTCUTS, formatShortcut } from '@/services/shortcuts';
 import { isDefaultLocation } from '@/services/backupText';
 import { OUTCOME_LABEL } from '@/services/extractionText';
 
 const backups = useBackups();
+const archives = useArchives();
 const layout = useLayout();
 
 const keysFor = (id: string) => {
@@ -58,6 +59,12 @@ const canValidate = computed(
     !backups.jobRunning &&
     summary.value?.state !== 'notInspected',
 );
+// Import (M4): the same rule as Validate, and no archive job running. The
+// dialog offers to create an archive first when there is none.
+const canImport = computed(() => canValidate.value && !archives.jobRunning);
+function importMessages(): void {
+  if (summary.value) archives.openImport({ backupId: summary.value.id });
+}
 const validateLabel = computed(() => {
   const again = !!details.value?.lastReport;
   if (encrypted.value) return again ? 'Unlock and validate again…' : 'Unlock and validate…';
@@ -270,10 +277,16 @@ function onPasswordSubmit(password: string): void {
               >
                 Refresh
               </button>
-              <button type="button" class="btn btn-outline-secondary" disabled aria-describedby="import-planned">
-                <i class="bi bi-box-arrow-in-down me-1" aria-hidden="true"></i>Import messages
+              <button
+                v-if="!thisJob"
+                type="button"
+                class="btn btn-outline-primary"
+                :disabled="!canImport"
+                :aria-describedby="`${describedBy} backup-import-note`"
+                @click="importMessages()"
+              >
+                <i class="bi bi-box-arrow-in-down me-1" aria-hidden="true"></i>Import messages…
               </button>
-              <span id="import-planned"><PlannedBadge capability="archive-database" /></span>
             </div>
             <p id="backup-validate-note" class="small text-body-secondary mt-2 mb-0">
               Validation copies the backup's file index (Manifest.db) into your archive folder,
@@ -287,6 +300,11 @@ function onPasswordSubmit(password: string): void {
               extracted, and deletes the copy. Attachments are not copied. Nothing is saved, and no
               message text, names or numbers are shown. If the app crashes during the check, the
               copy is deleted the next time the app starts.
+            </p>
+            <p id="backup-import-note" class="small text-body-secondary mt-2 mb-0">
+              Importing copies the messages, and optionally the attachment files, into an archive in
+              your archive folder. Before anything is written, it shows what it will do and asks you
+              to confirm. The archive is stored unencrypted.
             </p>
           </div>
         </section>

@@ -10,21 +10,35 @@ describe('roadmap', () => {
     }
   });
 
-  it('claims milestones 1 and 2 and the milestone 3 extraction check as available', () => {
+  it('claims milestones 1 to 4 as available and everything later as planned', () => {
     const available = CAPABILITIES.filter((c) => c.status === 'available').map((c) => c.id);
-    expect(available).toEqual(['shell', 'backup-import', 'extraction']);
+    expect(available).toEqual(['shell', 'backup-import', 'extraction', 'archive-database']);
     for (const c of CAPABILITIES) {
-      if (c.milestone >= 4) expect(c.status).toBe('planned');
+      if (c.milestone >= 5) expect(c.status).toBe('planned');
     }
   });
 
-  it('describes the extraction check as counts only, with importing in milestone 4', () => {
+  it('describes the extraction check as counts only, and the archive import as shipped', () => {
     const e = capability('extraction');
     expect(e.title).toBe('Check that messages can be read');
-    expect(e.summary).toContain('Shows counts only; nothing is saved until milestone 4.');
+    expect(e.summary).toContain('Shows counts only; the check itself saves nothing.');
+    expect(e.summary).not.toContain('milestone 4');
     expect(capability('backup-import').summary).not.toContain('milestone 3');
-    expect(capability('archive-database').milestone).toBe(4);
-    expect(capability('archive-database').summary).toContain('copy attachments');
+    const a = capability('archive-database');
+    expect(a.milestone).toBe(4);
+    expect(a.summary).toBe(
+      'Import messages and copy attachments into a versioned SQLite archive, with transactional, resumable imports, an FTS5 index, and an integrity check.',
+    );
+  });
+
+  it('moves basic verification to milestone 4 and leaves repair to milestone 8 (D69)', () => {
+    const h = capability('hardening');
+    expect(h.milestone).toBe(8);
+    expect(h.status).toBe('planned');
+    expect(h.summary).toBe(
+      'Archive repair and recovery tests, accessibility review, the diagnostic log, and signed packages.',
+    );
+    expect(h.summary).not.toContain('verification');
   });
 
   it('throws on an unknown capability rather than rendering nothing', () => {

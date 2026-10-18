@@ -73,7 +73,7 @@ flowchart LR
 
 | Unit | Responsibility | State |
 |---|---|---|
-| `src/` | Vue 3 UI: views, Pinia stores, the typed IPC client, the shortcut registry, and the capability roadmap | M1, M2 (Backups page), M3 (extraction report) |
+| `src/` | Vue 3 UI: views, Pinia stores, the typed IPC client, the shortcut registry, and the capability roadmap | M1, M2 (Backups page), M3 (extraction report), M4 slice 4m (Archive page) |
 | `src-tauri/` | Tauri shell. Holds IPC commands, application state, settings persistence, archive-location validation, the backup registry, job table and DTOs, (M3) the report mapping and the panic hook, and (M4 slice 4l) the archive commands, the import gate and the import and verify jobs. Contains no domain logic. | M1, M2, M3, M4 (slice 4l) |
 | `crates/oma-fs` | Filesystem safety: filename sanitization, contained path resolution, and guards for backups, MobileSync, iMazing's default store and cloud sync. From M4: volume facts (`volume`: free space, network/virtualised/FAT detection), the Unix private-permission check (`perm::check_private`), and durable placement (`place`: `fsync_dir`, `create_dir_durable`, `place_noreplace`, `open_nofollow`). From slice 4d: `check_owned_unshared` (the library folder), `rename_dir_noreplace`, `create_new_private` and `total_space` | M1, M4 (slices 4a, 4d) |
 | `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them. From M4: `copy_file_to` streams one listed file's plaintext into a caller's writer, hashing it, under `Limits::attachment_bytes` and per-file stamps | ✔ M2, M3, M4 (slice 4b) |
@@ -1461,6 +1461,61 @@ owner decisions):
 - **`matchingBackupIds` is a pre-selection** by device name, model and
   Info.plist date; whether a session continues is still decided by the
   crate's resume rules (content digest and framing).
+
+### The Archive page (M4 slice 4m)
+
+The UI of spec §16, over the six archive commands. Counts, states and the
+label only; no message content, address, chat name or file name.
+
+- **`src/stores/archives.ts`** mirrors `stores/backups.ts`: the listing,
+  per-archive details and errors, one heard job (import or verify), the
+  import results from `importFinished` and `verifyFinished`, and the
+  dialogs' state. It polls `get_archive_details` every 2 s while a job runs
+  on an archive (heard or not), which gives the phase of a job the page
+  cannot hear and the gate after a reload. The import password passes
+  through `submitPassword` into `startImport` and is stored nowhere.
+- **The gate** (`ImportPreflightDialog.vue`) is shown from the store's
+  `gate`: the heard job once `importPreflight` arrived and the details carry
+  its preflight, else any archive whose details say an import waits there.
+  Gates answered from this page are remembered, so a stale poll cannot
+  re-show one. Each fact is its own sentence (`services/importText.ts`);
+  the suggested lineage is pre-selected; Cancel, Escape and the backdrop
+  decline. The dialogs are mounted once in `App.vue`
+  (`ArchiveDialogs.vue`), so the gate appears on whatever page is open.
+- **Pages.** The Archive page lists the archives with their status
+  badges and shows the selected one: actions (Import from a backup…,
+  Continue importing… when `resumable`, quick and full verify, Cancel
+  through the progress card), the last import (`ImportSummary.vue`), the
+  last verify (`VerifySummary.vue`, one sentence per finding kind), the
+  archive's counts and its sessions. The Backups page's **Import
+  messages…** opens the import dialog with that backup selected, enabled
+  under the same rule as Validate; the dialog offers **Create archive
+  first…** when there is none. `roadmap.ts` marks `archive-database`
+  available and rewords `hardening` (D69).
+- **Progress.** `JobProgress.vue` takes any `ProgressJob`
+  (`src/types/progress.ts`). Counted phases are rows; the staging copy, and
+  `verifyingFiles` in a full verify, count bytes. A job the page cannot
+  hear shows its phase without a count.
+
+**Readings and deviations this slice takes** (implementation readings, not
+owner decisions):
+
+- **`CopyingAttachments` counts attachment rows, not bytes** (spec §8.12
+  says bytes): the crate reports rows (slice 4j), and the label says so.
+- **The import dialog's button is "Prepare import"**, since the import
+  first stops at the gate; the password dialog says "Unlock and prepare
+  import" (its `submitLabel` prop).
+- **Labels are checked in the webview too** (200 UTF-8 bytes, no C0/C1
+  controls or bidirectional formatting characters), before IPC; the
+  backend's `Label::parse` remains the rule.
+- **"Older than the newest backup" and the zero-overlap sentence** follow
+  the preflight's flags; zero overlap is stated only when the archive
+  already has an import set.
+- **The temporary copy line** ("was deleted: yes/no") is shown only for
+  the session the page heard finish, from `stagingRemoved`; after a
+  reload it is not known and not shown.
+- **Backdrop clicks decline the gate**, like Escape. Declining writes
+  nothing.
 
 ### Status and qualifiers (D43)
 

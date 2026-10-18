@@ -46,15 +46,15 @@ export const CAPABILITIES: readonly Capability[] = [
     milestone: 3,
     status: 'available',
     summary:
-      'Locate the Messages database, detect its layout, and check that messages, chats, addresses and attachment references can be read. Shows counts only; nothing is saved until milestone 4.',
+      'Locate the Messages database, detect its layout, and check that messages, chats, addresses and attachment references can be read. Shows counts only; the check itself saves nothing.',
   },
   {
     id: 'archive-database',
     title: 'Archive database',
     milestone: 4,
-    status: 'planned',
+    status: 'available',
     summary:
-      'Extract messages and copy attachments into a versioned SQLite archive, with transactional, resumable imports and FTS5 indexes.',
+      'Import messages and copy attachments into a versioned SQLite archive, with transactional, resumable imports, an FTS5 index, and an integrity check.',
   },
   {
     id: 'viewer',
@@ -89,7 +89,7 @@ export const CAPABILITIES: readonly Capability[] = [
     title: 'Hardening and release',
     milestone: 8,
     status: 'planned',
-    summary: 'Archive verification, recovery tests, accessibility review, and signed packages.',
+    summary: 'Archive repair and recovery tests, accessibility review, the diagnostic log, and signed packages.',
   },
 ];
 

@@ -122,7 +122,7 @@ Each one is enforced in code. Keep it that way.
   estimate and guards, the gate, finalize and the provenance files,
   `Archive::import`; and the report-only verifier `Archive::verify` with
   `open_blob`), driven by the shell's six archive commands and its
-  import and verify jobs (slice 4l, no UI yet); the planned
+  import and verify jobs (slice 4l), and the Archive page (slice 4m); the planned
   crates are `oma-export` (M6) and `oma-device` (M7). Each must build and test without
   Tauri. The shell's `src-tauri/src/backups/` (registry, job table, worker,
   DTOs, messages) and `src-tauri/src/archives/` (listing, details, the
@@ -158,6 +158,15 @@ Never hand-edit generated files.
   so update that test in the same change.
 - **Shortcuts are declared only in `src/services/shortcuts.ts`.** The help
   dialog renders from it.
+- **Archive sentences live in `src/services/importText.ts`,** from exhaustive
+  `Record<…>` tables over the DTOs' closed kinds, so a new kind fails the
+  typecheck until it has words. The archive UI shows counts, states and the
+  label only (rendered with interpolation), never message content.
+- **The archive dialogs are mounted once, in `App.vue`**
+  (`components/ArchiveDialogs.vue`), so the import gate shows on any page
+  while an import waits. `stores/archives.ts` owns the job, the gate (live,
+  or re-shown from `get_archive_details` after a reload) and the 2-second
+  details polling; it never stores a password.
 
 ## Dependencies and licensing
 

@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, toRef } from 'vue';
 import { useRouter } from 'vue-router';
 import AppNavbar from '@/components/AppNavbar.vue';
+import ArchiveDialogs from '@/components/ArchiveDialogs.vue';
 import ShortcutHelpDialog from '@/components/ShortcutHelpDialog.vue';
 import ToastHost from '@/components/ToastHost.vue';
 import { nextTheme, useTheme } from '@/composables/useTheme';
@@ -68,4 +69,5 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   </div>
   <ToastHost />
   <ShortcutHelpDialog :open="showShortcuts" @close="showShortcuts = false" />
+  <ArchiveDialogs />
 </template>
