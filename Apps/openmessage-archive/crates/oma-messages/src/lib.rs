@@ -21,8 +21,12 @@
 //! because it is over its cap" apart. Content and identifiers are held as
 //! [`Redacted`] bytes whose `Debug` prints only a length.
 //!
-//! The message, attachment and aggregate passes, the typedstream decoder and
-//! the report land in later slices of Milestone 3.
+//! [`decode_attributed_body`] is a clean-room, budgeted, fail-closed decoder
+//! for the typedstream blobs in `message.attributedBody`. It returns the text
+//! with its runs and parts, or one of a closed set of [`TsErrorKind`]s.
+//!
+//! The message, attachment and aggregate passes and the report land in
+//! later slices of Milestone 3.
 #![cfg_attr(
     not(test),
     deny(
@@ -43,6 +47,7 @@ mod records;
 mod redact;
 mod schema;
 mod time;
+mod typedstream;
 mod value;
 
 pub use caps::{
@@ -67,6 +72,11 @@ pub use schema::{
     KnownColumnSet, KnownTable, Probe, TableCaps, Unsupported, UnsupportedReason,
 };
 pub use time::{CocoaTime, TimeInterp, COCOA_EPOCH_UNIX_S, NS_MAX, NS_THRESHOLD, SECONDS_MAX};
+pub use typedstream::{
+    decode_attributed_body, decode_attributed_body_with_stats, AttrFlag, AttrFlags, AttrKey,
+    AttrKeysPresent, AttributedBody, BodyPart, BodyRun, RunAttrs, RunIssue, SharedValue, TsBudget,
+    TsError, TsErrorKind, TsStats, ValueId,
+};
 pub use value::{BlobSize, SqlType, ValueIssues};
 
 /// Re-exported so callers can name the encoding a database declares.

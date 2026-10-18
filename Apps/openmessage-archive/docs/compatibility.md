@@ -138,6 +138,26 @@ deliberately differ, are in
 Any later change to a fixture invalidates this record until the run is
 repeated and recorded with the new checksum.
 
+## Oracle run 2 (typedstream vectors, M3)
+
+`scripts/fixtures/verify_typedstream_with_oracle.py` runs `pytypedstream`
+0.1.0 (LGPL-3.0-or-later) as a black-box subprocess against every vector in
+`tests/fixtures/typedstream`. For each vector, `expected.json` says whether
+the oracle's decoded structure must equal ours (`compare`), the oracle must
+reject it (`must_fail`), or it is exempt, with the reason (the `0x87`
+vectors, which pytypedstream 0.1.0 rejects but Apple's encoder was observed
+to write, and our own budget and policy vectors). Details are in
+[`tests/fixtures/typedstream/README.md`](../tests/fixtures/typedstream/README.md).
+This checks the vectors against one independent decoder; it says nothing
+about real Messages data, which remains untested.
+
+| Date | Versions | SHA-256 of `SHA256SUMS` checked | Result |
+|---|---|---|---|
+| 2026-10-18 | pytypedstream 0.1.0 (wheel SHA-256 `499920d4cb8bec8fd9d9cdd4c6312765eb418c398c10371ab1c9c0051104d278`, installed with `--require-hashes`), Python 3.13.16, Linux | `43a9f7f612976ad9d51097a86552c7eaa4718095747981dde556deafd62de0d9` | ALL ORACLE CHECKS PASSED: 46 compared, 24 rejected as expected, 10 exempt (run twice that day, with the same result) |
+
+The `fixtures_integrity` test in `crates/oma-messages` pins this checksum,
+so a change to any vector fails until the run is repeated and recorded.
+
 ## Manual checklist for milestone 2 (not yet run)
 
 Record each run here only once it has actually been done.

@@ -56,6 +56,14 @@ impl<T: ByteLen> ByteLen for Redacted<T> {
     }
 }
 
+/// Decoded text owned by this crate (for example an `attributedBody`'s
+/// text). `Zeroizing` clears it on drop.
+impl ByteLen for zeroize::Zeroizing<String> {
+    fn byte_len(&self) -> usize {
+        self.len()
+    }
+}
+
 /// Text from the database, as the bytes SQLite returned. It may not be
 /// valid UTF-8; [`SqlText::to_str`] says whether it is. Zeroized on drop.
 #[derive(Clone, PartialEq, Eq)]
