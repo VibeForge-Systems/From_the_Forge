@@ -456,8 +456,10 @@ Open after milestone 2 (each **UNVERIFIED** above):
     occur.
 16. Real sizes of sms.db, Info.plist, Manifest.plist and Manifest.db.
 17. Platform behaviour: WebView2 password autosave; Tauri channel delivery
-    above 8 KiB (re-check on every Tauri upgrade); whether bundled SQLite
-    opens staged paths beyond MAX_PATH on Windows; whether `File::try_lock`
+    above 8 KiB (re-check on every Tauri upgrade); bundled SQLite's default
+    Windows VFS does **not** open staged paths beyond MAX_PATH (found by the
+    Windows CI long-path test, 2026-10-18), so staged databases are opened
+    through the `win32-longpath` VFS with a verbatim path; whether `File::try_lock`
     works on the SMB and NFS shares users choose for archive folders.
 18. The layout of iMazing's `iMazing.Versions` folder; whether iMazing ever
     uses the singular `iMazing\Backup`; the meaning of `BackupState`

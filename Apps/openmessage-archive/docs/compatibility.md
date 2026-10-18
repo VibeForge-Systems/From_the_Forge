@@ -10,8 +10,7 @@ Legend: **Supported**: tested and working. **CI**: built and unit-tested in
 CI, not exercised by hand. **CI (synthetic fixtures only)**: exercised by
 automated tests against the committed synthetic backups in
 `tests/fixtures/backups/`, **not** against a backup made from a real device.
-**CI pending**: the CI workflow has not yet run on this code; any local run
-is named in the cell. **Untested**: expected to work but not yet verified.
+**Untested**: expected to work but not yet verified.
 **Planned**: not
 implemented. **Unsupported**: deliberately out of scope, and detected and
 reported when encountered.
@@ -32,9 +31,9 @@ Last updated: Milestone 2 (2026-10-18).
 
 | Platform | Shell and settings (M1) | Backup discovery and validation (M2) | Direct device backup (M7) | Notes |
 |---|---|---|---|---|
-| Windows 11 x64 | CI | CI (synthetic fixtures only), once the Windows CI job passes. Default-location discovery: **Untested** until run on Windows 11. | Planned | Needs WebView2, which ships with Windows 11. The Windows CI job is the first MSVC build of bundled SQLite and the first run of the Windows-only tests (junctions, a ~200-character library path). Direct backup will need Apple's Mobile Device Service (Apple Devices app or iTunes). |
+| Windows 11 x64 | CI | CI (synthetic fixtures only; windows-2022 runner, [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)). Default-location discovery: **Untested** until run on Windows 11. | Planned | Needs WebView2, which ships with Windows 11. CI builds bundled SQLite with MSVC and runs the Windows-only tests (junctions, a ~200-character library path). That long-path test found that bundled SQLite's default VFS cannot open a staged copy beyond MAX_PATH; staged databases are now opened through the `win32-longpath` VFS. Direct backup will need Apple's Mobile Device Service (Apple Devices app or iTunes). |
 | Windows 11 ARM64 | Untested | Untested | Planned | Not built in CI yet |
-| Ubuntu 22.04 x64 | CI | CI pending (synthetic fixtures only): no CI run on the M2 code yet | Planned | CI build baseline, which sets the glibc floor. Needs `libwebkit2gtk-4.1-0`. |
+| Ubuntu 22.04 x64 | CI | CI (synthetic fixtures only; [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)) | Planned | CI build baseline, which sets the glibc floor. Needs `libwebkit2gtk-4.1-0`. |
 | Ubuntu 24.04 x64 | Supported (built and unit-tested during M1 development) | Local run only (synthetic fixtures only): `cargo test --workspace` and `npm test` passed in an Ubuntu 24.04.5 LTS container on 2026-10-18. Not CI, not a desktop. | Planned | Ships libimobiledevice 1.3.0, which is old. M7 will not depend on it. |
 | Ubuntu 26.04.1 LTS x64 | **Supported** (built from source with `npm run tauri dev`, every M1 check done by hand on a real desktop, a QEMU VM; 2026-10-17/18) | Untested on a real desktop (see the headless smoke test below) | Planned | First manual run anywhere. The native picker chose an ordinary folder. A folder laid out like a backup (`Manifest.db` + `Info.plist`) was refused with the reason shown, and the previous location was kept. The choice survived a restart. Ships libimobiledevice 1.4.0. |
 | Debian 12, Fedora 40+ | Untested | Untested | Planned | Need WebKitGTK 4.1 |
@@ -90,17 +89,17 @@ generated stand-ins.
 
 | Backup kind | Backup discovery and validation (M2) | Messages extraction (M3) |
 |---|---|---|
-Every row in this table is **CI pending**: the tests have passed only in a
-local Ubuntu 24.04.5 LTS container (2026-10-18). A cell becomes "CI" once a
-workflow run on the M2 code passes, and that run is cited here.
+Every row in this table passed in CI on Ubuntu 22.04 and Windows (windows-2022)
+in [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524), and locally in an Ubuntu 24.04.5 LTS container (2026-10-18). All of it
+is against synthetic fixtures; none of it is a real-device test.
 
 | Backup kind | Backup discovery and validation (M2) | Messages extraction (M3) |
 |---|---|---|
-| Format 3.x, unencrypted (binary and XML plists; WAL-mode Manifest.db) | CI pending; passed locally (synthetic fixtures only, not real-device tested) | Planned |
-| Format 3.x, encrypted (two-stage PBKDF2 keybag; three EncryptionKey shapes, two of them Rust-only and UNVERIFIED) | CI pending; passed locally (synthetic fixtures only, not real-device tested) | Planned |
-| Format 2.4 (`Manifest.mbdb`) | Detected and reported as unsupported (CI pending; passed locally, synthetic stub) | — |
-| Incomplete (`SnapshotState` ≠ `finished`, or no Status.plist) | Detected and reported (CI pending; passed locally, synthetic stub) | — |
-| Hostile inputs (plist reference bombs, oversized records, hostile iteration counts, truncated keybags, bad padding, symlinked blobs, hostile path names) | Refused or counted as specified (CI pending; passed locally, synthetic fixtures) | — |
+| Format 3.x, unencrypted (binary and XML plists; WAL-mode Manifest.db) | CI (synthetic fixtures only, not real-device tested) | Planned |
+| Format 3.x, encrypted (two-stage PBKDF2 keybag; three EncryptionKey shapes, two of them Rust-only and UNVERIFIED) | CI (synthetic fixtures only, not real-device tested) | Planned |
+| Format 2.4 (`Manifest.mbdb`) | Detected and reported as unsupported (CI, synthetic stub) | — |
+| Incomplete (`SnapshotState` ≠ `finished`, or no Status.plist) | Detected and reported (CI, synthetic stub) | — |
+| Hostile inputs (plist reference bombs, oversized records, hostile iteration counts, truncated keybags, bad padding, symlinked blobs, hostile path names) | Refused or counted as specified (CI, synthetic fixtures) | — |
 
 ### Real backup (manual)
 
@@ -122,7 +121,7 @@ the device model, how the backup was made, and the operating system.
 | iMazing backup folder (default `<roaming>\iMazing\Backups`, Windows) | Untested: not verified on real data; synthetic tests only. The default location was observed in iMazing 3.x's settings on one Windows 11 machine (2026-10-18), but discovery there has not been run. `iMazing.Versions` is never listed (synthetic test). An interrupted iMazing backup's Status.plist shape was observed and is reproduced synthetically: it is reported as incomplete. A relocated iMazing store must be added with "Add backup folder…". |
 | Backup created by `idevicebackup2` or pymobiledevice3 | Untested; same format. Add its folder with "Add backup folder…". |
 | iCloud backup | Unsupported: it is not stored locally, and fetching it would need a network service |
-| Partial or in-progress backup (`SnapshotState` ≠ `finished`) | Detected and reported, never validated as complete (CI pending; passed locally, synthetic stub) |
+| Partial or in-progress backup (`SnapshotState` ≠ `finished`) | Detected and reported, never validated as complete (CI, synthetic stub) |
 
 ## Oracle run (encrypted fixtures)
 
