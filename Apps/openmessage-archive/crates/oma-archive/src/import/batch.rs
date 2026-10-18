@@ -204,6 +204,8 @@ pub(crate) enum PassError {
     Read(MessagesError),
     /// `rows_done` differs from the probe's `count(*)`.
     CountMismatch,
+    /// P5b's scan went over the cap the preflight checked.
+    ScanOverLimit,
 }
 
 /// A stored cursor.

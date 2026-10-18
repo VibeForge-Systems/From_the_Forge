@@ -13,6 +13,9 @@
 //! - A resumed session writes every row at the rank stored on its session
 //!   row, even when this attempt's clock or dates would give another.
 //!
+//! Every pass (P1–P8) is covered: the cancel test stops at every record of
+//! every pass, and the synthetic source has rows in every pass's table.
+//!
 //! Process kills are in `crash.rs`.
 #![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
@@ -26,22 +29,42 @@ use common::*;
 use oma_archive::hooks::{arm, count, hits, FaultPoint};
 use oma_archive::{CancelToken, CoreOutcome, LineageChoice, ORDER_KEY_FLOOR_NS};
 
-/// The source rowids of each pass of a finished session, in pass order.
-fn pass_rowids(db: &std::path::Path, session: i64) -> Vec<Vec<i64>> {
-    let c = read_only(db);
-    [1i64, 2, 3]
+/// The source tables of the passes, in pass order (P1–P8).
+const PASS_TABLES: [&str; 8] = [
+    "handle",
+    "chat",
+    "message",
+    "chat_handle_join",
+    "chat_message_join",
+    "attachment",
+    "message_attachment_join",
+    "chat_recoverable_message_join",
+];
+
+/// The rowids each pass reads from a catalogue entry's sms.db, in pass
+/// order (read from a copy; the catalogue is never opened in place).
+fn pass_rowids(entry: &str) -> Vec<Vec<i64>> {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let from = imports_root()
+        .join(entry)
+        .join(UDID)
+        .join(&oma_backup::SMS_DB_FILE_ID[..2])
+        .join(oma_backup::SMS_DB_FILE_ID);
+    let copy = tmp.path().join("sms.db");
+    std::fs::copy(from, &copy).expect("copy");
+    let c = read_only(&copy);
+    PASS_TABLES
         .iter()
-        .map(|src| {
-            c.prepare(
-                "SELECT src_rowid FROM import_rowid_map WHERE session_id = ?1 AND src = ?2 \
-                 ORDER BY src_rowid",
-            )
-            .expect("prepare")
-            .query_map(rusqlite::params![session, src], |r| r.get(0))
-            .expect("query")
-            .collect::<Result<_, _>>()
-            .expect("rows")
-        })
+        .map(
+            |t| match c.prepare(&format!("SELECT rowid FROM \"{t}\" ORDER BY rowid")) {
+                Ok(mut stmt) => stmt
+                    .query_map([], |r| r.get(0))
+                    .expect("query")
+                    .collect::<Result<_, _>>()
+                    .expect("rows"),
+                Err(_) => Vec::new(),
+            },
+        )
         .collect()
 }
 
@@ -78,8 +101,20 @@ fn a_cancel_at_every_record_commits_what_completed_and_resumes_to_the_same_archi
     src.ob.close();
     let bdb = db_path(&btmp, &bid);
     let want = logical_snapshot(&bdb, Scope::WithSessions);
-    let order = pass_rowids(&bdb, base.session);
+    let order = pass_rowids(entry);
     let total: usize = order.iter().map(Vec::len).sum();
+    // Every pass read every row of its table.
+    let done_rows: Vec<i64> = cursors(&bdb, base.session)
+        .values()
+        .map(|(_, rows, _)| *rows)
+        .collect();
+    assert_eq!(
+        done_rows,
+        order
+            .iter()
+            .map(|p| i64::try_from(p.len()).expect("n"))
+            .collect::<Vec<_>>()
+    );
     assert_eq!(
         usize::try_from(records).expect("n"),
         total,
@@ -101,13 +136,17 @@ fn a_cancel_at_every_record_commits_what_completed_and_resumes_to_the_same_archi
             panic!("record {k}: not cancelled: {out:?}");
         };
         let done = u64::from(k) - 1;
-        assert_eq!(
-            s.counts.handles.seen + s.counts.chats.seen + s.counts.messages.seen,
-            done,
-            "record {k}"
-        );
         drop(a);
         let db = db_path(&tmp, &id);
+        let committed: i64 = cursors(&db, s.session)
+            .values()
+            .map(|(_, rows, _)| *rows)
+            .sum();
+        assert_eq!(
+            u64::try_from(committed).expect("n"),
+            done,
+            "record {k}: every completed record is committed"
+        );
         // The cursor is the last completed record of the pass it stopped in;
         // every earlier pass is done.
         let cur = cursors(&db, s.session);
@@ -154,6 +193,14 @@ fn a_cancel_at_every_record_commits_what_completed_and_resumes_to_the_same_archi
         assert_eq!(s2.counts.chats, base.counts.chats, "record {k}");
         assert_eq!(s2.counts.messages, base.counts.messages, "record {k}");
         assert_eq!(s2.counts.bodies, base.counts.bodies, "record {k}");
+        assert_eq!(s2.counts.chat_handles, base.counts.chat_handles);
+        assert_eq!(s2.counts.chat_messages, base.counts.chat_messages);
+        assert_eq!(s2.counts.attachments, base.counts.attachments);
+        assert_eq!(
+            s2.counts.message_attachments,
+            base.counts.message_attachments
+        );
+        assert_eq!(s2.counts.recently_deleted, base.counts.recently_deleted);
         assert_eq!(s2.counts.resumes, 1);
         drop(a);
         src.ob.close();
@@ -237,6 +284,30 @@ fn random_crashes_at_batch_boundaries_never_change_the_result() {
         base.counts.messages
     );
     assert!(base.counts.bodies.decode_failed > 0);
+    // The links: orphans and a NULL side are unresolved, the joins of the
+    // excluded messages are skipped, and the attachment linked only to an
+    // excluded message has no row.
+    let ch = base.counts.chat_handles;
+    assert_eq!(
+        (ch.unresolved_first, ch.unresolved_second),
+        (2, 1),
+        "{ch:?}"
+    );
+    let cm = base.counts.chat_messages;
+    assert_eq!(cm.skipped_recently_deleted, 3, "{cm:?}");
+    assert_eq!((cm.unresolved, cm.unresolved_second), (1, 1), "{cm:?}");
+    assert!(cm.already_present >= 1, "the repeated join: {cm:?}");
+    assert_eq!(base.counts.recently_deleted.attachments_excluded, 1);
+    let ma = base.counts.message_attachments;
+    assert_eq!(ma.skipped_recently_deleted, 2, "{ma:?}");
+    assert_eq!(ma.unresolved_second, 1, "{ma:?}");
+    assert!(
+        base.counts.attachments.unkeyed >= 2,
+        "{:?}",
+        base.counts.attachments
+    );
+    assert_eq!(base.counts.recently_deleted.marked, 0);
+    assert_eq!(base.counts.recently_deleted.not_marked, 3);
     assert!(max[&FaultPoint::BatchAfterCommit] >= 8, "{max:?}");
     let db0 = db_path(&tmp0, &id0);
     let want = logical_snapshot(&db0, Scope::WithSessions);
@@ -250,7 +321,10 @@ fn random_crashes_at_batch_boundaries_never_change_the_result() {
                 |r| r.get(0),
             )
             .expect("count");
-        assert_eq!(n, 3, "{extreme}");
+        assert_eq!(
+            n, 4,
+            "{extreme}: a handle, a chat, a message, an attachment"
+        );
     }
     drop(c);
 
@@ -300,6 +374,13 @@ fn random_crashes_at_batch_boundaries_never_change_the_result() {
         assert_eq!(
             done.counts.recently_deleted, base.counts.recently_deleted,
             "run {run}"
+        );
+        assert_eq!(done.counts.chat_handles, base.counts.chat_handles);
+        assert_eq!(done.counts.chat_messages, base.counts.chat_messages);
+        assert_eq!(done.counts.attachments, base.counts.attachments);
+        assert_eq!(
+            done.counts.message_attachments,
+            base.counts.message_attachments
         );
         let db = db_path(&tmp, &id);
         assert_consistent(&db);

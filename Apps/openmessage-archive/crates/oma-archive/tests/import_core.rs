@@ -1,8 +1,12 @@
-//! The import core (slices 4f and 4g) on the import catalogue: P1 handles,
-//! P2 chats and P3 messages (columns, history, handle reference, body
-//! versions and display text, sort order, Recently Deleted exclusion)
-//! against the generator's content model and counts, every scenario in
-//! every order, the session's facts, and the refusals.
+//! The import core (slices 4f to 4h) on the import catalogue, against the
+//! generator's content model (the content oracle) and counts, for every
+//! entry and every scenario in every order: P1 handles, P2 chats, P3
+//! messages (columns, history, handle reference, body versions and display
+//! text, sort order), P4 and P5 chat links, P6 attachment rows (their
+//! files are slice 4i's), P7 attachment links in the §6.5 order, P8 the
+//! Recently Deleted markers, the Recently Deleted exclusion of messages and
+//! attachments, and "not in the latest import" per lineage. Also the
+//! session's facts and the refusals.
 //!
 //! The model is a second statement of the spec's rules, so agreement shows
 //! self-consistency, not correctness against a real device.
@@ -28,10 +32,15 @@ fn manifest_of(rel: &str) -> Value {
 
 /// Compare the archive with a manifest; returns how many history values
 /// and unkeyed rows the comparison covered.
-fn assert_view(db: &std::path::Path, m: &Value, what: &str) -> (usize, usize) {
-    let view = manifest_view(db);
+fn assert_view(
+    db: &std::path::Path,
+    m: &Value,
+    labels: &LineageLabels,
+    what: &str,
+) -> (usize, usize) {
+    let view = manifest_view(db, labels);
     let mut covered = (0, 0);
-    for plural in ["handles", "chats"] {
+    for plural in ["handles", "chats", "attachments"] {
         let want = manifest_expected(m, plural);
         for r in &want {
             covered.0 += r["history"].as_object().map_or(0, |h| {
@@ -56,8 +65,13 @@ fn assert_view(db: &std::path::Path, m: &Value, what: &str) -> (usize, usize) {
 /// Compare the archive's messages with a manifest: every message's
 /// columns, history, handle, display text and body versions; their order;
 /// and the Recently Deleted exclusions. Returns (messages, body versions).
-fn assert_messages(db: &std::path::Path, m: &Value, what: &str) -> (usize, usize) {
-    let got = message_view(db);
+fn assert_messages(
+    db: &std::path::Path,
+    m: &Value,
+    labels: &LineageLabels,
+    what: &str,
+) -> (usize, usize) {
+    let got = message_view(db, labels);
     let want = message_expected(m);
     let g: Vec<String> = {
         let mut v: Vec<String> = got.iter().map(Value::to_string).collect();
@@ -103,6 +117,24 @@ fn assert_messages(db: &std::path::Path, m: &Value, what: &str) -> (usize, usize
             .expect("count");
         assert_eq!(n, 0, "{what}: an excluded message was imported");
     }
+    // Excluded keyed attachments have no row (spec §8.8).
+    for r in m["content"]["excluded"]["attachments"]
+        .as_array()
+        .expect("excluded")
+    {
+        let guid = r
+            .as_str()
+            .and_then(|s| s.strip_prefix("guid:"))
+            .expect("guid ref");
+        let n: i64 = c
+            .query_row(
+                "SELECT count(*) FROM attachment WHERE guid = ?1",
+                [guid.as_bytes()],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(n, 0, "{what}: an excluded attachment was imported");
+    }
     let bodies = want
         .iter()
         .map(|x| x["bodies"].as_array().map_or(0, Vec::len))
@@ -111,7 +143,7 @@ fn assert_messages(db: &std::path::Path, m: &Value, what: &str) -> (usize, usize
 }
 
 #[test]
-fn every_entry_imports_its_handles_and_chats_as_the_model_says() {
+fn every_entry_imports_as_the_model_says() {
     for entry in ENTRIES {
         let (tmp, lib) = library();
         let id = lib.create(None).expect("create");
@@ -123,17 +155,42 @@ fn every_entry_imports_its_handles_and_chats_as_the_model_says() {
         assert!(src.ob.close().removed, "{entry}: staging not removed");
         let db = db_path(&tmp, &id);
         assert_consistent(&db);
-        let (_, unkeyed) = assert_view(
-            &db,
-            &manifest_of(&format!("{entry}.expected/content.json")),
-            entry,
-        );
+        let labels = single_lineage(&db);
+        let m = manifest_of(&format!("{entry}.expected/content.json"));
+        let (_, unkeyed) = assert_view(&db, &m, &labels, entry);
         assert_eq!(unkeyed > 0, *entry == "imp-keys-hostile-plain", "{entry}");
-        let (messages, _) = assert_messages(
-            &db,
-            &manifest_of(&format!("{entry}.expected/content.json")),
-            entry,
+        let (messages, _) = assert_messages(&db, &m, &labels, entry);
+        // The Recently Deleted counts against the model's exclusions.
+        let ex = &m["content"]["excluded"];
+        let n = |k: &str| ex[k].as_array().map_or(0, Vec::len) as u64;
+        let u = |k: &str| ex[k].as_u64().expect("count");
+        assert_eq!(
+            s.counts.recently_deleted.excluded,
+            n("messages") + u("unkeyedMessageRows"),
+            "{entry}"
         );
+        assert_eq!(
+            s.counts.recently_deleted.attachments_excluded,
+            n("attachments") + u("unkeyedAttachmentRows"),
+            "{entry}"
+        );
+        assert_eq!(
+            s.counts.attachments.inserted,
+            u64::try_from(m["content"]["attachments"].as_array().expect("a").len()).expect("n"),
+            "{entry}"
+        );
+        // Every link pass accounts for every source row once.
+        for l in [
+            s.counts.chat_handles,
+            s.counts.chat_messages,
+            s.counts.message_attachments,
+        ] {
+            assert_eq!(
+                l.inserted + l.already_present + l.unresolved + l.skipped_recently_deleted,
+                l.seen,
+                "{entry}: {l:?}"
+            );
+        }
         assert!(messages > 0, "{entry}");
         assert_eq!(
             s.counts.recently_deleted.not_updated, 0,
@@ -156,7 +213,7 @@ fn every_entry_imports_its_handles_and_chats_as_the_model_says() {
             want["counts"]["chats"],
             "{entry}: chat counts"
         );
-        assert_eq!(s.counts.batches, 3, "{entry}: one batch per pass");
+        assert_eq!(s.counts.batches, 8, "{entry}: one batch per pass");
     }
 }
 
@@ -179,6 +236,7 @@ fn every_scenario_holds_in_every_order() {
     names.sort();
     assert_eq!(names.len(), 10);
     let mut history_values = 0;
+    let mut not_in_latest = 0;
     let mut repeated_steps = 0;
     let mut body_versions = 0;
     for name in &names {
@@ -224,8 +282,10 @@ fn every_scenario_holds_in_every_order() {
                 }
             }
             assert_consistent(&db);
-            history_values += assert_view(&db, &m, &format!("{name} order {oi}")).0;
-            let (_, bodies) = assert_messages(&db, &m, &format!("{name} order {oi}"));
+            let by_id: LineageLabels = labels.iter().map(|(k, v)| (v.get(), k.clone())).collect();
+            history_values += assert_view(&db, &m, &by_id, &format!("{name} order {oi}")).0;
+            let (_, bodies) = assert_messages(&db, &m, &by_id, &format!("{name} order {oi}"));
+            not_in_latest += count_not_in_latest(&m);
             body_versions = body_versions.max(bodies);
             snapshots.push(logical_snapshot(&db, Scope::Content));
         }
@@ -240,6 +300,18 @@ fn every_scenario_holds_in_every_order() {
     // dev1-v2-plain-enc each repeat a digest.
     assert!(repeated_steps >= 4, "{repeated_steps}");
     assert!(body_versions > 0);
+    // The lineages and dev1-v1-v2 scenarios label rows "not in the latest
+    // import" (rows of v1 that v2 no longer holds).
+    assert!(not_in_latest >= 2, "{not_in_latest}");
+}
+
+/// How many rows a manifest labels "not in the latest import".
+fn count_not_in_latest(m: &Value) -> usize {
+    ["chats", "messages", "attachments"]
+        .iter()
+        .flat_map(|p| m["content"][*p].as_array().expect("list"))
+        .filter(|r| r["notInLatest"].as_array().is_some_and(|l| !l.is_empty()))
+        .count()
 }
 
 /// Unkeyed rows are idempotent across sessions: the hostile entry imported

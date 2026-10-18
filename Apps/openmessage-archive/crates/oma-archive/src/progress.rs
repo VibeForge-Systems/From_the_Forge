@@ -38,8 +38,8 @@ impl Clock for FixedClock {
     }
 }
 
-/// A phase of an import (spec §8.12). Slices 4f and 4g have the phases up
-/// to the message pass; the others arrive with their passes.
+/// A phase of an import (spec §8.12). Slices 4f to 4h have the phases up
+/// to P8; the attachment copy, the gate and finalize add theirs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ImportPhase {
@@ -47,7 +47,8 @@ pub enum ImportPhase {
     StagingMessagesDb,
     /// Scanning the schema, `quick_check` and the probe.
     ReadingSchema,
-    /// P0: the Recently Deleted scan.
+    /// P0, the Recently Deleted scan; also the preflight's and P5b's scans
+    /// for attachments linked only to excluded messages.
     ScanningRecentlyDeleted,
     /// The duplicate-key scan.
     ScanningKeys,
@@ -59,6 +60,15 @@ pub enum ImportPhase {
     ImportingChats,
     /// P3.
     ImportingMessages,
+    /// P4 and P5: the chat links.
+    ImportingChatLinks,
+    /// P6: the attachment rows. `done` and `total` are rows; no file is
+    /// copied yet (the store is slice 4i).
+    ImportingAttachments,
+    /// P7: the message ↔ attachment links.
+    ImportingAttachmentLinks,
+    /// P8: the Recently Deleted markers.
+    ImportingRecentlyDeleted,
 }
 
 /// A progress event. Content-free.

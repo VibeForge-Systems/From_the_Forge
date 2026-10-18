@@ -346,6 +346,7 @@ pub fn logical_snapshot(db: &Path, scope: Scope) -> Value {
         (1i64, "handle", "natural_key"),
         (2, "chat", "guid"),
         (3, "message", "guid"),
+        (4, "attachment", "guid"),
     ] {
         let sql = format!("SELECT id, key_kind, {key}, unkeyed_fp, unkeyed_occ FROM {table}");
         let mut s = c.prepare(&sql).expect("prepare");
@@ -402,11 +403,14 @@ pub fn logical_snapshot(db: &Path, scope: Scope) -> Value {
         json!(rows(&c, "SELECT * FROM handle", &plain)),
     );
     out.insert("chat".into(), json!(rows(&c, "SELECT * FROM chat", &plain)));
-    // Message tables, with every row reference replaced by its key.
+    // Message, attachment and link tables, with every row reference
+    // replaced by its key.
     let refs = |n: &str, v: ValueRef<'_>| -> Option<Value> {
         let entity = match n {
-            "handle_ref" | "other_handle_ref" => 1,
+            "handle_ref" | "other_handle_ref" | "handle_id" => 1,
+            "chat_id" | "chat_ref" => 2,
             "message_id" => 3,
+            "attachment_id" => 4,
             "current_body_id" | "body_id" => 5,
             _ => return plain(n, v),
         };
@@ -418,6 +422,11 @@ pub fn logical_snapshot(db: &Path, scope: Scope) -> Value {
         "message_body_part",
         "message_edit_entry",
         "message_unsent_part",
+        "attachment",
+        "chat_handle",
+        "chat_message",
+        "message_attachment",
+        "message_recently_deleted",
     ] {
         out.insert(
             t.into(),
@@ -523,6 +532,7 @@ fn source_name(table: &str, col: &str) -> String {
         ("handle", "address") => "id".into(),
         ("message", "assoc_type") => "associated_message_type".into(),
         ("message", "assoc_guid_raw") => "associated_message_guid".into(),
+        ("attachment", "emoji_description") => "emoji_image_short_description".into(),
         (_, c) => c.into(),
     }
 }
@@ -577,6 +587,11 @@ const TEXT_COLS: &[(&str, &str)] = &[
     ("chat", "display_name"),
     ("chat", "room_name"),
     ("chat", "group_id"),
+    ("attachment", "guid"),
+    ("attachment", "filename"),
+    ("attachment", "mime_type"),
+    ("attachment", "transfer_name"),
+    ("attachment", "emoji_description"),
 ];
 
 const SAMPLED: &[(&str, &[&str])] = &[
@@ -601,6 +616,18 @@ const SAMPLED: &[(&str, &[&str])] = &[
             "room_name",
             "group_id",
             "is_archived",
+        ],
+    ),
+    (
+        "attachment",
+        &[
+            "guid",
+            "filename",
+            "mime_type",
+            "transfer_name",
+            "total_bytes",
+            "is_sticker",
+            "emoji_description",
         ],
     ),
 ];
@@ -719,13 +746,97 @@ fn manifest_ref(table: &str, c: &rusqlite::Connection, id: i64) -> String {
     }
 }
 
-/// The archive's handles and chats in the manifest's form: per table, a
-/// list of `{ref, columns, history}`, with every unkeyed row's ref
-/// `"unkeyed"` (the manifest numbers them locally; compare by content).
-pub fn manifest_view(db: &Path) -> BTreeMap<&'static str, Vec<Value>> {
+/// Lineage ids by the labels a test gave them (`L1`, `L2`: the manifest's
+/// names for the user's choices at the gate).
+pub type LineageLabels = BTreeMap<i64, String>;
+
+/// The labels of a single import into an empty archive: its one lineage is
+/// `L1`.
+pub fn single_lineage(db: &Path) -> LineageLabels {
+    let c = read_only(db);
+    let ids: Vec<i64> = c
+        .prepare("SELECT id FROM lineage ORDER BY id")
+        .expect("prepare")
+        .query_map([], |r| r.get(0))
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("ids");
+    ids.into_iter()
+        .enumerate()
+        .map(|(i, id)| (id, format!("L{}", i + 1)))
+        .collect()
+}
+
+/// The lineages that label a row "not in the latest import" (spec §8.7):
+/// those whose newest **full observation** ranks above the highest rank at
+/// which that lineage saw the row. Finalize (slice 4j) sets
+/// `full_observation`; until then [`finish_sessions`] stands in for it.
+fn not_in_latest(c: &rusqlite::Connection, entity: i64, id: i64, labels: &LineageLabels) -> Value {
+    let mut out: Vec<String> = c
+        .prepare(
+            "SELECT s.lineage_id FROM lineage_seen s \
+             WHERE s.entity = ?1 AND s.row_id = ?2 AND s.last_rank < \
+               (SELECT max(rank) FROM import_session i \
+                WHERE i.lineage_id = s.lineage_id AND i.full_observation = 1)",
+        )
+        .expect("prepare")
+        .query_map(rusqlite::params![entity, id], |r| r.get::<_, i64>(0))
+        .expect("query")
+        .map(|l| {
+            let l = l.expect("lineage");
+            labels
+                .get(&l)
+                .cloned()
+                .unwrap_or_else(|| format!("lineage {l}"))
+        })
+        .collect();
+    out.sort();
+    json!(out)
+}
+
+/// A list of manifest refs with every unkeyed ref collapsed to `"unkeyed"`
+/// (the manifest numbers unkeyed rows locally), sorted; `dedup` for the
+/// manifest's sets of names.
+fn collapse(refs: impl Iterator<Item = String>, dedup: bool) -> Value {
+    let mut v: Vec<String> = refs
+        .map(|r| {
+            if r.starts_with("unkeyed") {
+                "unkeyed".to_owned()
+            } else {
+                r
+            }
+        })
+        .collect();
+    v.sort();
+    if dedup {
+        v.dedup();
+    }
+    json!(v)
+}
+
+/// The ids `sql` (one `?1` parameter) returns.
+fn ids_of(c: &rusqlite::Connection, sql: &str, p: i64) -> Vec<i64> {
+    c.prepare(sql)
+        .expect("prepare")
+        .query_map([p], |r| r.get(0))
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("ids")
+}
+
+/// The archive's handles, chats and attachments in the manifest's form:
+/// per table, a list of `{ref, columns, history}`, with every unkeyed
+/// row's ref `"unkeyed"` (the manifest numbers them locally; compare by
+/// content). Chats also carry their `handles` (P4) and, like attachments,
+/// `notInLatest`. An attachment's blobs are slice 4i's.
+pub fn manifest_view(db: &Path, labels: &LineageLabels) -> BTreeMap<&'static str, Vec<Value>> {
     let c = read_only(db);
     let mut out = BTreeMap::new();
-    for (table, entity, plural) in [("handle", 1i64, "handles"), ("chat", 2, "chats")] {
+    for (table, entity, plural) in [
+        ("handle", 1i64, "handles"),
+        ("chat", 2, "chats"),
+        ("attachment", 4, "attachments"),
+    ] {
         let sampled = SAMPLED
             .iter()
             .find(|(t, _)| *t == table)
@@ -742,18 +853,7 @@ pub fn manifest_view(db: &Path) -> BTreeMap<&'static str, Vec<Value>> {
         for id in ids {
             let mut columns = Map::new();
             for col in sampled {
-                let issues: Vec<(i64, Option<i64>)> = c
-                    .prepare(
-                        "SELECT kind, bytes FROM value_issue \
-                         WHERE entity = ?1 AND row_id = ?2 AND col = ?3",
-                    )
-                    .expect("prepare")
-                    .query_map(rusqlite::params![entity, id, code_of(table, col)], |r| {
-                        Ok((r.get(0)?, r.get(1)?))
-                    })
-                    .expect("query")
-                    .collect::<Result<_, _>>()
-                    .expect("issues");
+                let issues = issues_of(&c, table, id, col);
                 let v = c
                     .query_row(
                         &format!("SELECT {col}, {col}_st FROM {table} WHERE id = ?1"),
@@ -779,11 +879,26 @@ pub fn manifest_view(db: &Path) -> BTreeMap<&'static str, Vec<Value>> {
             for v in history.values_mut() {
                 v.sort_by_key(|x| x.to_string());
             }
-            list.push(json!({
+            let mut row = json!({
                 "ref": manifest_ref(table, &c, id),
                 "columns": Value::Object(columns),
                 "history": history,
-            }));
+            });
+            if table == "chat" {
+                let handles = ids_of(
+                    &c,
+                    "SELECT handle_id FROM chat_handle WHERE chat_id = ?1",
+                    id,
+                );
+                row["handles"] = collapse(
+                    handles.into_iter().map(|h| manifest_ref("handle", &c, h)),
+                    false,
+                );
+            }
+            if table != "handle" {
+                row["notInLatest"] = not_in_latest(&c, entity, id, labels);
+            }
+            list.push(row);
         }
         list.sort_by_key(|v| v.to_string());
         out.insert(plural, list);
@@ -791,8 +906,8 @@ pub fn manifest_view(db: &Path) -> BTreeMap<&'static str, Vec<Value>> {
     out
 }
 
-/// `{ref, columns, history}` of a manifest's handles or chats, with
-/// unkeyed refs replaced by `"unkeyed"` and history lists sorted as
+/// A manifest's handles, chats or attachments in [`manifest_view`]'s form,
+/// with unkeyed refs replaced by `"unkeyed"` and history lists sorted as
 /// [`manifest_view`] sorts them.
 pub fn manifest_expected(m: &Value, plural: &str) -> Vec<Value> {
     let mut out: Vec<Value> = m["content"][plural]
@@ -814,17 +929,33 @@ pub fn manifest_expected(m: &Value, plural: &str) -> Vec<Value> {
                     }
                 }
             }
-            json!({ "ref": rf, "columns": r["columns"], "history": history })
+            let mut row = json!({ "ref": rf, "columns": r["columns"], "history": history });
+            if plural == "chats" {
+                row["handles"] = collapse(str_list(&r["handles"]), false);
+            }
+            if plural != "handles" {
+                row["notInLatest"] = r["notInLatest"].clone();
+            }
+            row
         })
         .collect();
     out.sort_by_key(|v| v.to_string());
     out
 }
 
+/// The strings of a JSON list.
+fn str_list(v: &Value) -> impl Iterator<Item = String> + '_ {
+    v.as_array()
+        .expect("list")
+        .iter()
+        .map(|x| x.as_str().expect("string").to_owned())
+}
+
 fn code_of(table: &str, col: &str) -> i64 {
     let entity = match table {
         "handle" => oma_archive::schema::codes::Entity::Handle,
         "message" => oma_archive::schema::codes::Entity::Message,
+        "attachment" => oma_archive::schema::codes::Entity::Attachment,
         _ => oma_archive::schema::codes::Entity::Chat,
     };
     oma_archive::schema::codes::ARCHIVE_COLUMNS
@@ -846,6 +977,7 @@ fn issues_of(c: &rusqlite::Connection, table: &str, id: i64, col: &str) -> Vec<(
     let entity = match table {
         "handle" => 1,
         "chat" => 2,
+        "attachment" => 4,
         _ => 3,
     };
     c.prepare("SELECT kind, bytes FROM value_issue WHERE entity = ?1 AND row_id = ?2 AND col = ?3")
@@ -886,9 +1018,10 @@ type BodyDisplay = (i64, Option<i64>, Option<i64>, Option<String>);
 
 /// The archive's messages in the manifest's form, in archive order
 /// (`sort_key`, then id): `{ref, sort, handle, display, bodies, columns,
-/// history}`, with unkeyed refs (message and handle) as `"unkeyed"`. The
-/// joins, Recently Deleted markers and lineage labels are slice 4h's.
-pub fn message_view(db: &Path) -> Vec<Value> {
+/// history, chats, attachments, recentlyDeleted, notInLatest}`, with
+/// unkeyed refs as `"unkeyed"`. `attachments` is in the order of spec
+/// §6.5: `ord_rank` descending, `ord_rowid` ascending.
+pub fn message_view(db: &Path, labels: &LineageLabels) -> Vec<Value> {
     let c = read_only(db);
     let ids: Vec<MessageKeys> = c
         .prepare(
@@ -986,6 +1119,27 @@ pub fn message_view(db: &Path) -> Vec<Value> {
             let r = manifest_ref("handle", &c, h);
             Value::String(r)
         });
+        let chats = ids_of(
+            &c,
+            "SELECT chat_id FROM chat_message WHERE message_id = ?1",
+            id,
+        );
+        let attachments = ids_of(
+            &c,
+            "SELECT attachment_id FROM message_attachment WHERE message_id = ?1 \
+             ORDER BY ord_rank DESC, ord_rowid ASC",
+            id,
+        );
+        let markers: Vec<String> = c
+            .prepare("SELECT chat_ref FROM message_recently_deleted WHERE message_id = ?1")
+            .expect("prepare")
+            .query_map([id], |r| r.get::<_, Option<i64>>(0))
+            .expect("query")
+            .map(|r| match r.expect("marker") {
+                Some(chat) => manifest_ref("chat", &c, chat),
+                None => "(unresolved)".to_owned(),
+            })
+            .collect();
         out.push(json!({
             "ref": manifest_ref("message", &c, id),
             "sort": sort,
@@ -994,6 +1148,16 @@ pub fn message_view(db: &Path) -> Vec<Value> {
             "bodies": list,
             "columns": Value::Object(columns),
             "history": history,
+            "chats": collapse(chats.into_iter().map(|x| manifest_ref("chat", &c, x)), false),
+            "attachments": attachments
+                .into_iter()
+                .map(|a| {
+                    let r = manifest_ref("attachment", &c, a);
+                    json!(if r.starts_with("unkeyed") { "unkeyed".to_owned() } else { r })
+                })
+                .collect::<Vec<_>>(),
+            "recentlyDeleted": collapse(markers.into_iter(), true),
+            "notInLatest": not_in_latest(&c, 3, id, labels),
         }));
     }
     out
@@ -1029,6 +1193,15 @@ pub fn message_expected(m: &Value) -> Vec<Value> {
                 "bodies": bodies,
                 "columns": r["columns"],
                 "history": history,
+                "chats": collapse(str_list(&r["chats"]), false),
+                "attachments": r["attachments"]
+                    .as_array()
+                    .expect("attachments")
+                    .iter()
+                    .map(unkeyed)
+                    .collect::<Vec<_>>(),
+                "recentlyDeleted": collapse(str_list(&r["recentlyDeleted"]), true),
+                "notInLatest": r["notInLatest"],
             })
         })
         .collect()
@@ -1118,14 +1291,17 @@ pub fn full_schema() -> String {
 /// `i64::MAX`, in insertion order.
 pub const SYNTHETIC_RD_POSITIONS: [usize; 3] = [5, 17, 29];
 
-/// A synthetic sms.db: `handles` handle rows, `chats` chat rows and
-/// `messages` message rows with shuffled rowids that include `i64::MIN` and
-/// `i64::MAX`, duplicated keys (every occurrence must be unkeyed),
-/// identical keyless rows (same fingerprint, counted occurrences), empty
-/// identifiers and NULLs. Messages also carry undecodable
-/// `attributedBody` and `message_summary_info` bytes, invalid UTF-8,
-/// tapbacks, out-of-range booleans and undated rows, and three of them are
-/// in Recently Deleted. Every value is synthetic.
+/// A synthetic sms.db: `handles` handle rows, `chats` chat rows,
+/// `messages` message rows and `messages / 3` (at least 6) attachment rows
+/// with shuffled rowids that include `i64::MIN` and `i64::MAX`, duplicated
+/// keys (every occurrence must be unkeyed), identical keyless rows (same
+/// fingerprint, counted occurrences), empty identifiers and NULLs. Messages
+/// also carry undecodable `attributedBody` and `message_summary_info`
+/// bytes, invalid UTF-8, tapbacks, out-of-range booleans and undated rows,
+/// and three of them are in Recently Deleted. The three join tables link
+/// them, with orphans, a NULL side, a repeated join, `chat_message_join`
+/// rowids at the extremes, and an attachment linked only to a Recently
+/// Deleted message. Every value is synthetic.
 pub fn synthetic_sms(seed: u64, handles: usize, chats: usize, messages: usize) -> Vec<u8> {
     let mut rng = Rng::new(seed);
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -1270,6 +1446,126 @@ pub fn synthetic_sms(seed: u64, handles: usize, chats: usize, messages: usize) -
                 rusqlite::params![cids.first().copied().unwrap_or(1), m, i64::try_from(n).expect("n")],
             )
             .expect("recoverable");
+        }
+    }
+    // Attachments: every 7th has no GUID and identical content (same
+    // fingerprint), every 9th repeats an earlier GUID.
+    let aids = rowids(&mut rng, (messages / 3).max(6));
+    for (i, rowid) in aids.iter().enumerate() {
+        let keyless = i % 7 == 6;
+        let guid: Option<String> = if keyless {
+            None
+        } else if i % 9 == 8 {
+            Some(format!("SYNTH-ATT-GUID-{:04}", i % 3))
+        } else {
+            Some(format!("SYNTH-ATT-GUID-{i:04}"))
+        };
+        let filename = if keyless {
+            "~/Library/SMS/Attachments/00/00/SYNTH-SAME/SYNTH-FILE.bin".to_owned()
+        } else {
+            format!(
+                "~/Library/SMS/Attachments/{:02x}/{:02}/SYNTH-{i}/SYNTH-FILE-{i}.jpeg",
+                i % 256,
+                i % 100
+            )
+        };
+        c.execute(
+            "INSERT INTO attachment (ROWID, guid, filename, mime_type, transfer_name, total_bytes, \
+                 is_sticker, created_date) VALUES (?1, ?2, ?3, 'image/jpeg', ?4, ?5, 0, ?6)",
+            rusqlite::params![
+                rowid,
+                guid,
+                filename,
+                (!keyless).then(|| format!("SYNTH-FILE-{i}.jpeg")),
+                if keyless { 26 } else { 26 + i64::try_from(i).expect("i") },
+                if keyless { 0 } else { 790_000_000 + i64::try_from(i).expect("i") }
+            ],
+        )
+        .expect("attachment");
+    }
+    // chat_handle_join: one or two handles per chat, an orphan on each side
+    // and a NULL side.
+    let mut chat_handles: Vec<(Option<i64>, Option<i64>)> = Vec::new();
+    for (i, chat) in cids.iter().enumerate() {
+        if !hids.is_empty() {
+            chat_handles.push((Some(*chat), Some(hids[i % hids.len()])));
+            if i % 3 == 0 {
+                chat_handles.push((Some(*chat), Some(hids[(i * 7 + 1) % hids.len()])));
+            }
+        }
+    }
+    if let (Some(chat), Some(handle)) = (cids.first(), hids.first()) {
+        chat_handles.extend([
+            (Some(*chat), Some(999_999_999)),
+            (Some(888_888_888), Some(*handle)),
+            (None, Some(*handle)),
+        ]);
+    }
+    for (chat, handle) in &chat_handles {
+        c.execute(
+            "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (?1, ?2)",
+            rusqlite::params![chat, handle],
+        )
+        .expect("chat_handle_join");
+    }
+    // chat_message_join, at shuffled rowids including the extremes: every
+    // message in a chat (the Recently Deleted ones too), one in two chats,
+    // one join repeated, and an orphan.
+    if !cids.is_empty() {
+        let mut joins: Vec<(i64, i64, i64)> = mids
+            .iter()
+            .enumerate()
+            .map(|(i, m)| {
+                let chat = cids[usize::try_from(rng.below(cids.len() as u64)).expect("i")];
+                (
+                    chat,
+                    *m,
+                    790_000_000_000_000_000 + i64::try_from(i).expect("i"),
+                )
+            })
+            .collect();
+        if let Some(first) = joins.first().copied() {
+            joins.push((cids[cids.len() - 1], first.1, first.2));
+            joins.push(first);
+        }
+        joins.push((cids[0], 777_777_777, 0));
+        let jids = rowids(&mut rng, joins.len());
+        for ((chat, message, date), rowid) in joins.iter().zip(&jids) {
+            c.execute(
+                "INSERT INTO chat_message_join (ROWID, chat_id, message_id, message_date) \
+                 VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![rowid, chat, message, date],
+            )
+            .expect("chat_message_join");
+        }
+    }
+    // message_attachment_join: each attachment on a message; the second
+    // only on a Recently Deleted message (excluded with it), the third on
+    // that message and a live one, and an orphan.
+    if plain.len() > SYNTHETIC_RD_POSITIONS[0] + 2 {
+        let rd_message = plain[SYNTHETIC_RD_POSITIONS[0]];
+        let live = |j: usize| {
+            let mut k = (j * 3 + 1) % plain.len();
+            if SYNTHETIC_RD_POSITIONS.contains(&k) {
+                k = (k + 1) % plain.len();
+            }
+            plain[k]
+        };
+        let mut links: Vec<(i64, i64)> = Vec::new();
+        for (j, a) in aids.iter().enumerate() {
+            match j {
+                1 => links.push((rd_message, *a)),
+                2 => links.extend([(rd_message, *a), (live(j), *a)]),
+                _ => links.push((live(j), *a)),
+            }
+        }
+        links.push((live(0), 666_666_666));
+        for (message, attachment) in &links {
+            c.execute(
+                "INSERT INTO message_attachment_join (message_id, attachment_id) VALUES (?1, ?2)",
+                rusqlite::params![message, attachment],
+            )
+            .expect("message_attachment_join");
         }
     }
     drop(c);

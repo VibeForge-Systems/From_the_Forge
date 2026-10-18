@@ -205,8 +205,8 @@ fn lineage_choice(arg: &str) -> LineageChoice {
     }
 }
 
-/// The synthetic source every import crash uses: enough handles, chats and
-/// messages for several 16-row batches per pass.
+/// The synthetic source every import crash uses: enough handles, chats,
+/// messages and links for several 16-row batches in most passes.
 struct Fixture {
     _tmp: tempfile::TempDir,
     backup: PathBuf,
@@ -324,9 +324,13 @@ fn plan(fx: &Fixture) -> Vec<(FaultPoint, u32)> {
     }
     if !cfg!(windows) {
         let records = hits(FaultPoint::Record);
-        // 70 handles, 45 chats and 40 messages.
-        assert_eq!(records, 155);
-        out.extend([1, 17, 58, 131, records].map(|n| (FaultPoint::Record, n)));
+        // 70 handles, 45 chats, 40 messages, 63 chat-handle links, 43
+        // chat-message links, 13 attachments, 15 message-attachment links
+        // and 3 Recently Deleted rows: a kill in every pass.
+        assert_eq!(records, 292);
+        out.extend(
+            [1, 17, 58, 131, 170, 210, 230, 260, 280, records].map(|n| (FaultPoint::Record, n)),
+        );
         for p in [
             FaultPoint::SessionCommitted,
             FaultPoint::RecoverySwept,

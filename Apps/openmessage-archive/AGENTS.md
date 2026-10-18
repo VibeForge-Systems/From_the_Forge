@@ -116,8 +116,9 @@ Each one is enforced in code. Keep it that way.
   (M3) are implemented; `oma-archive` (M4) is in progress (its skeleton:
   create, open, lock, schema v1, fingerprint, migrations; and the import
   core: sessions, the Recently Deleted and duplicate-key scans, the merge
-  engine, and the handle, chat and message passes with body versions and
-  the FTS index, `Archive::import_core`); the planned
+  engine, the handle, chat and message passes with body versions and the
+  FTS index, the link passes, the attachment rows (no files yet) and the
+  Recently Deleted markers, `Archive::import_core`); the planned
   crates are `oma-export` (M6) and `oma-device` (M7). Each must build and test without
   Tauri. The shell's `src-tauri/src/backups/` (registry, job table, worker,
   DTOs, messages) has no Tauri types either, so it is tested without a
@@ -266,8 +267,13 @@ Never hand-edit generated files.
   triggers fire only on real changes. A batch never commits after a
   statement error. Derived columns (`item_kind`, `assoc_*`, `sort_key`,
   a body's `display_text`) are computed in Rust from the stored raw cells;
-  the FTS index is written **only** by the `message_body` triggers. Until finalize exists (slice 4j) a session whose passes
+  the FTS index is written **only** by the `message_body` triggers. Links
+  resolve both sides through this session's `import_rowid_map` and are
+  never inserted with an unresolved side; the Recently Deleted decisions
+  after P3 (`import/rd.rs`) are re-derived from that map, never carried
+  over from the preflight. Until finalize exists (slice 4j) a session whose passes
   all ran stays **running**: `CoreOutcome::PassesDone` is not "completed".
+  P6 writes attachment rows only; the store is slice 4i.
 - **Crash points are `fault::point(FaultPoint::…)` calls.** They compile
   to nothing without the feature. `tests/crash.rs` re-runs its own binary
   with `OMA_TEST_FAULT=<point>:<n>` and kills the child there; add a point

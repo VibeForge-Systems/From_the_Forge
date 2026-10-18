@@ -390,6 +390,42 @@ regenerated: `SHA256SUMS` and `EXPECTED.SHA256SUMS` are unchanged.
 
 **Not yet observed:** any of this on Windows.
 
+### Milestone 4 links, attachment rows and Recently Deleted markers (slice 4h)
+
+Run in the same Linux container on 2026-10-18 (bundled SQLite 3.53.2);
+not CI, not a desktop, synthetic data only. The catalogue was not
+regenerated: `SHA256SUMS` and `EXPECTED.SHA256SUMS` are unchanged.
+
+- **Against the model.** Each of the 12 entries alone, and all ten
+  scenarios in every order, gave exactly their manifests' chat handles,
+  message chats, message attachments in the §6.5 order, Recently Deleted
+  markers, attachment rows (sampled columns, `Col` states and history),
+  excluded attachments, and "not in the latest import" per lineage (with
+  the tests standing in for finalize's `full_observation`). Content
+  snapshots, now including the attachment, link and marker tables, were
+  equal in both orders.
+- **Recently Deleted** on `imp-rd-plain`: by default the attachment linked
+  only to an excluded message had no row and no link, the one shared with
+  a live message kept its live link only, and nothing was marked; after v1
+  the two archived messages were marked once each and no v1 link was lost;
+  with the opt-in all four messages and both attachments were imported and
+  the message deleted from two chats had two markers.
+- **Links** followed rank in both orders of v1 and v2 (first session the
+  lower rank, last session and attachment order the higher), links only
+  v1 saw stayed, a second session of every entry inserted no link, and the
+  hostile entry's orphan joins were counted and never stored.
+- **Lineages**: dev1 v1, dev2, dev1 v2 labelled v1's dropped chat,
+  message and attachment rows for device 1's lineage only; a cancelled
+  latest session and a WAL-skipped one labelled nothing.
+- **Crash, cancel and resume** now run through P8 on a synthetic source
+  with attachments and all three join tables; a cancel at every record of
+  every pass and kills in every pass resumed to the uninterrupted result.
+  `integrity_check`, `foreign_key_check` and the FTS rank-1 check were
+  clean after every import.
+- **Not tested:** attachment files (none is read or copied yet; slice 4i).
+
+**Not yet observed:** any of this on Windows.
+
 ### Synthetic fixtures
 
 Every M2 cell in this table passed in CI on Ubuntu 22.04 and Windows

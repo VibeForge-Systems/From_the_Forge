@@ -187,6 +187,12 @@ milestone's documentation.
   Deleted is **marked** as recently deleted, but its archived content is
   not updated from the deleted copy. The text of Recently Deleted message
   parts (`recoverable_message_part.part_text`) is never read either way.
+  By default, an attachment that belongs **only** to excluded messages is
+  left out as well: the archive gets no record of it (and, once
+  attachment files are copied, no file). An attachment also used by a
+  message that is imported is kept. The mark records, for each backup
+  that showed the message in Recently Deleted, which conversation it was
+  deleted from and the deletion time as the backup stores it.
 - **Text captured before an unsend (D61).** If the archive already holds a
   message's text and a later backup shows the sender unsent it, the
   archive **keeps the earlier text** (it stays searchable) and marks the

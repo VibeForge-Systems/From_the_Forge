@@ -4,9 +4,10 @@
 //! transaction as every batch, reloaded on resume and added to, never reset.
 //! Nothing here is content: no value, key, digest, date or path.
 //!
-//! Slices 4f and 4g count the handle, chat and message passes, the body
-//! versions and the Recently Deleted policy; the link and attachment groups
-//! arrive with their passes.
+//! Slices 4f to 4h count the handle, chat, message and attachment-row
+//! passes, the body versions, the three link passes and the Recently
+//! Deleted policy and markers. The attachment file counts (copies, the
+//! store) arrive with the store (slice 4i).
 
 use serde::{Deserialize, Serialize};
 
@@ -82,6 +83,46 @@ pub struct RecentlyDeletedCounts {
     pub not_updated: u64,
     /// Recently Deleted messages imported (the opt-in).
     pub imported: u64,
+    /// Attachments linked only to excluded messages: no row (and, once the
+    /// store exists, no file; spec §8.8).
+    pub attachments_excluded: u64,
+    /// P8: markers written (`message_recently_deleted` rows).
+    pub marked: u64,
+    /// P8: Recently Deleted join rows not marked, because their message is
+    /// not mapped in this session (excluded, missing or unreadable).
+    pub not_marked: u64,
+}
+
+/// What one link pass did (P4 `chat_handle`, P5 `chat_message`, P7
+/// `message_attachment`; spec §8.4). The *first* side is the chat (P4,
+/// P5) or the message (P7); the *second* is the handle, the message or
+/// the attachment.
+///
+/// Every source join row is counted once in `seen`, and once in exactly one
+/// of `inserted`, `already_present`, `unresolved` and
+/// `skipped_recently_deleted`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+#[non_exhaustive]
+pub struct LinkCounts {
+    /// Source join rows completed by the pass.
+    pub seen: u64,
+    /// Rows that became a new link.
+    pub inserted: u64,
+    /// Rows naming a link already stored (its ranks and values merged).
+    pub already_present: u64,
+    /// Rows not linked because a side named no row of this session: an
+    /// unreadable or NULL id, or a rowid that is not in the source table (or
+    /// whose row was not imported). Never inserted (spec §8.4).
+    pub unresolved: u64,
+    /// Of `unresolved`: rows whose first side did not resolve.
+    pub unresolved_first: u64,
+    /// Of `unresolved`: rows whose second side did not resolve.
+    pub unresolved_second: u64,
+    /// Rows skipped because a side is a Recently Deleted message the policy
+    /// left out or only re-observed, or an attachment linked only to such
+    /// messages (spec §8.8). Counted here, not as unresolved.
+    pub skipped_recently_deleted: u64,
 }
 
 /// Everything an import counted.
@@ -98,7 +139,16 @@ pub struct ImportCounts {
     pub messages: EntityCounts,
     /// P3: body versions.
     pub bodies: BodyCounts,
-    /// P0 and P3: the Recently Deleted policy.
+    /// P4: chat ↔ handle links.
+    pub chat_handles: LinkCounts,
+    /// P5: chat ↔ message links.
+    pub chat_messages: LinkCounts,
+    /// P6: attachment rows (the files are slice 4i's). Records the Recently
+    /// Deleted policy skipped are counted in `recently_deleted`, not here.
+    pub attachments: EntityCounts,
+    /// P7: message ↔ attachment links.
+    pub message_attachments: LinkCounts,
+    /// P0, P3, P5b, P6 and P8: the Recently Deleted policy and markers.
     pub recently_deleted: RecentlyDeletedCounts,
     /// Batch transactions committed (depends on the batch budget).
     pub batches: u64,

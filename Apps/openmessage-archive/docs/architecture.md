@@ -955,6 +955,81 @@ running until finalize (slice 4j).
   random-crash and kill-at-signal tests now run through P3 (the synthetic
   source has messages, undecodable bodies and Recently Deleted rows).
 
+### Links, attachment rows and Recently Deleted markers (M4 slice 4h)
+
+Slice 4h adds the passes after P3 (`import/links.rs`, `import/rd.rs`,
+`import/attachments.rs`, `import/recently_deleted.rs`). The passes now run
+P1, P2, P3, P4, P5, P5b, P6, P7, P8; a session whose passes ran still stays
+running until finalize (slice 4j).
+
+- **P4 chat ↔ handle, P5 chat ↔ message, P7 message ↔ attachment.** Each
+  join row's two source rowids are resolved through this session's
+  `import_rowid_map`, so a link always joins two committed archive rows. A
+  row whose side does not resolve (unreadable, NULL, or no imported row) is
+  **counted, never inserted** (`unresolved`, by side). Links are a union:
+  never removed. `last_rank`/`last_session_id` follow the highest rank that
+  saw the link; `first_session_id` the lowest (an equal rank keeps the
+  stored one), so the result does not depend on import order.
+  `chat_message.join_date` follows the raw rule of §8.7 against the
+  link's `last_rank`, and its `sort_key` is copied from the message (the
+  `message_sort_au` trigger keeps it in step). `message_attachment.ord_rank`
+  and `ord_rowid` are replaced when the rank is at least `ord_rank`: the
+  attachments of a message are ordered by the highest-ranked backup that
+  saw each link (§6.5). A join cell's `value_issue` detail is not kept,
+  because the link tables have no single row id; its `_st` is.
+- **The Recently Deleted decisions after P3** (`RdSkip`) are re-derived
+  from durable state: of the rows the preflight classified, those P3 did
+  not map in this session were left out and those it mapped were only
+  re-observed. P5 and P7 **skip the joins of both** and count them as
+  `skippedRecentlyDeleted`, not as unresolved: a re-observed message is not
+  updated from its deleted state, links included (D60).
+- **P5b and the preflight's step 4.** Two streams of
+  `message_attachment_join`: the attachment rowids linked to a left-out
+  message, minus those linked to any other message. What remains gets **no
+  attachment row and no link** (and, from slice 4i, no file); a join row
+  with an unreadable side is ignored. The preflight runs the same scan on
+  the preflight's excluded set and refuses a source whose candidates exceed
+  4,194,304 distinct rowids (`NotImportable(OverRecentlyDeletedCap)`,
+  nothing written); P5b re-runs it after P3 on every resume.
+- **P6 writes the attachment rows only.** Keyed on the exact GUID bytes
+  (unkeyed by fingerprint otherwise), merged by the column rules, mapped
+  for P7 and recorded in `lineage_seen`. **No file is looked up, read or
+  copied**: `blob`, `blob_intent`, `attachment_observation` and
+  `current_blob_id` arrive with the store in slice 4i.
+- **P8 markers.** One `message_recently_deleted` row per
+  `chat_recoverable_message_join` row whose message is mapped in this
+  session (imported with the opt-in, or re-observed by default), with the
+  chat resolved when it can be and the raw chat rowid, delete-date quad and
+  `ck_sync_state` kept. Two join rows for one message are two markers.
+  Join rows of left-out messages are counted as `notMarked`.
+- **The staged copy was only read.** After the last pass the import
+  checks, as M3's check does, that the staged connection is `query_only`,
+  that its authorizer refused nothing (`part_text` included) and that it
+  changed no row; otherwise the session fails. None of these is the guard;
+  the authorizer is.
+- **Counts**: `chatHandles`, `chatMessages` and `messageAttachments`
+  (`LinkCounts`: seen, inserted, already present, unresolved and by side,
+  skipped for Recently Deleted), `attachments` (the entity group), and in
+  `recentlyDeleted` `attachmentsExcluded`, `marked` and `notMarked`.
+- **"Not in the latest import"** (§8.7) needs no new column: a lineage's
+  newest full observation is read from `import_session`, and a row it
+  labels is one whose `lineage_seen.last_rank` for that lineage is lower.
+  The tests compute it that way; the reader query is M5's.
+- **Tests**: every entry and every scenario order now also match the
+  model's chat handles, message chats, message attachments in the §6.5
+  order, Recently Deleted markers, attachment rows and their columns and
+  history, the excluded attachments, and "not in the latest import" per
+  lineage (`tests/import_core.rs`); content snapshots, now with the
+  attachment, link and marker tables, are equal in both orders.
+  `tests/links.rs` covers the Recently Deleted attachments and markers,
+  rank-following links in both orders, re-observation and hostile orphan
+  joins; `tests/lineage.rs` the per-lineage labels and a cancelled or
+  WAL-skipped latest session. The synthetic crash and resume source now
+  has attachments and all three join tables (orphans, a NULL side, a
+  repeated join, extreme join rowids, an attachment linked only to a
+  Recently Deleted message), and the cancel test stops at every record of
+  every pass.
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`
@@ -1059,7 +1134,7 @@ superseded by D22: sms.db is staged on disk.
 | D49 | Source values | `Col<T>` | `Option<T>` | M4 can tell "not recorded" from "NULL" from "bad" |
 | D50 | Lookup scope | Only `Library/SMS/Attachments/` and `StickerCache/` | Every `~/` and `/var/mobile` class | Never reaches non-Messages files; the other classes stay counts |
 
-### Milestone 4 decisions in force (slices 4d–4g)
+### Milestone 4 decisions in force (slices 4d–4h)
 
 The full M4 decision list (D51–D88) lands with the M4 documentation slice.
 These are the ones the archive skeleton and the import core already

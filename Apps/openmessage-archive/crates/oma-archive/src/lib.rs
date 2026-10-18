@@ -21,9 +21,10 @@
 //! migration framework with no real migration.
 //!
 //! [`Archive::import_core`] is the transactional, resumable import as far
-//! as it is built (slices 4f and 4g: the session, the Recently Deleted and
-//! duplicate-key scans, the merge engine, and the handle, chat and message
-//! passes; see its module documentation).
+//! as it is built (slices 4f to 4h: the session, the Recently Deleted and
+//! duplicate-key scans, the merge engine, the handle, chat and message
+//! passes, the link passes, the attachment rows without their files, and
+//! the Recently Deleted markers; see its module documentation).
 //!
 //! Every connection is opened by one module, with the hardening of spec
 //! §5.5 (`DEFENSIVE`, `TRUSTED_SCHEMA` off, no `ATTACH`, an op budget on
@@ -66,8 +67,8 @@ pub use error::{ArchiveError, DamageKind, IoOp, LocationRefusal, PermProblem, Re
 pub use id::{ArchiveId, IdError, Label, LabelState, ARCHIVE_ID_LEN, LABEL_MAX_BYTES};
 pub use import::{
     BatchBudget, BodyCounts, CoreOutcome, EntityCounts, ImportCounts, ImportOptions, ImportSummary,
-    KeyScanTable, LineageChoice, LineageId, NotImportable, RecentlyDeletedCounts, StopReason,
-    KEY_SCAN_CAP, ORDER_KEY_FLOOR_NS, ORDER_KEY_SLACK_NS, RECOVERABLE_SCAN_CAP,
+    KeyScanTable, LineageChoice, LineageId, LinkCounts, NotImportable, RecentlyDeletedCounts,
+    StopReason, KEY_SCAN_CAP, ORDER_KEY_FLOOR_NS, ORDER_KEY_SLACK_NS, RECOVERABLE_SCAN_CAP,
 };
 pub use library::{ArchiveEntry, Library, SweepReport, LIST_LIMIT, SWEEP_MIN_AGE};
 pub use lock::{LOCK_RETRIES, LOCK_RETRY_WAIT};

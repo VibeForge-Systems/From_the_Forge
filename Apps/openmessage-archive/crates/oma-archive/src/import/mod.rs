@@ -1,4 +1,4 @@
-//! The import core (spec §8; slices 4f and 4g).
+//! The import core (spec §8; slices 4f to 4h).
 //!
 //! [`Archive::import_core`] runs the parts of the import that exist so
 //! far, in the order of spec §2:
@@ -7,25 +7,33 @@
 //! 2. compute the session's facts: the content digest and its framing, the
 //!    read profile, the rank (§8.7), the qualifiers;
 //! 3. P0, the Recently Deleted scan (§8.2 step 2), then the duplicate-key
-//!    scan with the Recently Deleted classification (step 3), which always
-//!    run, then the resume decision (step 1);
+//!    scan with the Recently Deleted classification (step 3), then the scan
+//!    for attachments linked only to excluded messages (step 4, which
+//!    refuses a source over its cap), which always run, then the resume
+//!    decision (step 1);
 //! 4. the archive's first write ([`Archive::begin_write`] with recovery),
 //!    then the session bookkeeping transaction (§8.3);
-//! 5. **P1 handles, P2 chats and P3 messages** (with their body versions,
-//!    the FTS index through its triggers, and the Recently Deleted
-//!    policy), in batches (§8.5), each committing its cursor, counts and
-//!    issues with its rows.
+//! 5. the passes, in batches (§8.5), each committing its cursor, counts and
+//!    issues with its rows: **P1 handles, P2 chats, P3 messages** (with
+//!    their body versions, the FTS index through its triggers, and the
+//!    Recently Deleted policy), **P4 chat ↔ handle, P5 chat ↔ message, P5b**
+//!    (the Recently Deleted attachment exclusion, re-derived from durable
+//!    state; it writes nothing), **P6 attachment rows, P7 message ↔
+//!    attachment and P8 the Recently Deleted markers**.
 //!
-//! **What is not here yet.** The attachment preflight, the gate, P4–P8
-//! and finalize arrive in slices 4h–4j. Until
-//! finalize exists, a session whose passes all ran is left **running**
-//! (state 0) and the outcome is [`CoreOutcome::PassesDone`]: it is never
-//! marked completed or a full observation. The next write open marks it
-//! interrupted, and an import of the same content continues it (its passes
-//! are already done). A cancel, a stop or a failure is recorded as such.
+//! **What is not here yet.** P6 writes the attachment rows only: no file
+//! is looked up, read or copied, and no `blob` or `attachment_observation`
+//! row exists until the store arrives (slice 4i). The attachment estimate,
+//! the gate and finalize arrive in slices 4i and 4j. Until finalize exists,
+//! a session whose passes all ran is left **running** (state 0) and the
+//! outcome is [`CoreOutcome::PassesDone`]: it is never marked completed or
+//! a full observation. The next write open marks it interrupted, and an
+//! import of the same content continues it (its passes are already done).
+//! A cancel, a stop or a failure is recorded as such.
 //!
 //! The shell does not call this yet (slice 4l).
 
+mod attachments;
 mod batch;
 mod bind;
 mod chats;
@@ -33,10 +41,13 @@ mod counts;
 mod entity;
 mod handles;
 mod keys;
+mod links;
 mod map;
 mod merge;
 mod messages;
 mod preflight;
+mod rd;
+mod recently_deleted;
 mod session;
 
 use oma_backup::{OpenBackup, WalPolicy};
@@ -46,7 +57,7 @@ use oma_messages::{
 };
 
 pub use batch::BatchBudget;
-pub use counts::{BodyCounts, EntityCounts, ImportCounts, RecentlyDeletedCounts};
+pub use counts::{BodyCounts, EntityCounts, ImportCounts, LinkCounts, RecentlyDeletedCounts};
 pub use preflight::{KEY_SCAN_CAP, RECOVERABLE_SCAN_CAP};
 pub(crate) use session::{supersede_sessions, unfinished_sessions};
 pub use session::{ORDER_KEY_FLOOR_NS, ORDER_KEY_SLACK_NS};
@@ -141,8 +152,9 @@ pub enum NotImportable {
     Incomplete,
     /// A keyed table has more than [`KEY_SCAN_CAP`] rows (§23).
     OverKeyScanCap(KeyScanTable),
-    /// Recently Deleted lists more than [`RECOVERABLE_SCAN_CAP`] rows, so
-    /// the default exclusion could not be applied (§23).
+    /// Recently Deleted lists more than [`RECOVERABLE_SCAN_CAP`] rows, or
+    /// its excluded messages link more than that many distinct attachment
+    /// rowids, so the default exclusion could not be applied (§23).
     OverRecentlyDeletedCap,
 }
 
@@ -174,9 +186,9 @@ pub struct ImportSummary {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CoreOutcome {
-    /// Every pass this build has (P1–P3) is done. The session stays
-    /// running (state 0) until finalize exists (slice 4j); see the module
-    /// documentation.
+    /// Every pass this build has (P1–P8, P6 without files) is done. The
+    /// session stays running (state 0) until finalize exists (slice 4j);
+    /// see the module documentation.
     PassesDone(ImportSummary),
     /// Cancelled. With a session, its completed records are committed and
     /// it is resumable (state 2); `None` when the cancel came before the
@@ -374,6 +386,26 @@ impl Archive {
             Err(ScanError::Read(e)) => return Err(messages_err(e)),
             Err(ScanError::Archive(e)) => return Err(ArchiveError::sqlite(Stage::Preflight, &e)),
         };
+        // Step 4: the attachments linked only to excluded messages. Only
+        // the cap matters here (the estimate that uses the set is slice
+        // 4i's); P5b re-derives the set after P3 from durable state.
+        if !rd_plan.excluded.is_empty() {
+            ctx.progress.event(ArchiveEvent::Import {
+                phase: ImportPhase::ScanningRecentlyDeleted,
+                done: 0,
+                total: None,
+            });
+            match rd::scan_attachments(&db, &rd_plan.excluded, mctx) {
+                Ok(rd::AttachmentScan::Done(_)) => {}
+                Ok(rd::AttachmentScan::OverLimit) => {
+                    return Ok(CoreOutcome::NotImportable(
+                        NotImportable::OverRecentlyDeletedCap,
+                    ))
+                }
+                Err(MessagesError::Cancelled) => return Ok(CoreOutcome::Cancelled(None)),
+                Err(e) => return Err(messages_err(e)),
+            }
+        }
         let decision = self
             .reader()
             .budgeted(READ_OP_BUDGET, Stage::Preflight, |c| {
@@ -460,7 +492,7 @@ impl Archive {
                 return Ok(end);
             }
             let p = run_pass(
-                &messages::Messages::new(rd_plan),
+                &messages::Messages::new(rd_plan.clone()),
                 &db,
                 wc,
                 &run,
@@ -471,18 +503,120 @@ impl Archive {
             if let Some(end) = step(p, Pass::Messages)? {
                 return Ok(end);
             }
-            Ok((PassEnd::Done, Pass::Messages))
+            // The Recently Deleted decisions, from this session's map.
+            let mut skip = rd::derive_after_p3(wc, run.session, &rd_plan)
+                .map_err(|e| (PassError::Batch(e), Pass::Messages))?;
+            let p = run_pass(&links::ChatHandles, &db, wc, &run, &mut counts, ctx, mctx);
+            if let Some(end) = step(p, Pass::ChatHandles)? {
+                return Ok(end);
+            }
+            let p = run_pass(
+                &links::ChatMessages::new(&skip),
+                &db,
+                wc,
+                &run,
+                &mut counts,
+                ctx,
+                mctx,
+            );
+            if let Some(end) = step(p, Pass::ChatMessages)? {
+                return Ok(end);
+            }
+            // P5b: reads only; re-run on every resume.
+            if !skip.excluded.is_empty() {
+                ctx.progress.event(ArchiveEvent::Import {
+                    phase: ImportPhase::ScanningRecentlyDeleted,
+                    done: 0,
+                    total: None,
+                });
+            }
+            match rd::scan_attachments(&db, &skip.excluded, mctx) {
+                Ok(rd::AttachmentScan::Done(a)) => skip.attachments = a,
+                Ok(rd::AttachmentScan::OverLimit) => {
+                    return Err((PassError::ScanOverLimit, Pass::Attachments))
+                }
+                Err(MessagesError::Cancelled) => {
+                    return Ok((PassEnd::Cancelled, Pass::Attachments))
+                }
+                Err(e) => return Err((PassError::Read(e), Pass::Attachments)),
+            }
+            let p = run_pass(
+                &attachments::Attachments::new(&skip),
+                &db,
+                wc,
+                &run,
+                &mut counts,
+                ctx,
+                mctx,
+            );
+            if let Some(end) = step(p, Pass::Attachments)? {
+                return Ok(end);
+            }
+            let p = run_pass(
+                &links::MessageAttachments::new(&skip),
+                &db,
+                wc,
+                &run,
+                &mut counts,
+                ctx,
+                mctx,
+            );
+            if let Some(end) = step(p, Pass::MessageAttachments)? {
+                return Ok(end);
+            }
+            let p = run_pass(
+                &recently_deleted::RecentlyDeleted,
+                &db,
+                wc,
+                &run,
+                &mut counts,
+                ctx,
+                mctx,
+            );
+            if let Some(end) = step(p, Pass::RecentlyDeleted)? {
+                return Ok(end);
+            }
+            Ok((PassEnd::Done, Pass::RecentlyDeleted))
         })();
         let end_now = ctx.clock.now_ns();
         match ended {
             Ok((PassEnd::Done, _)) => {
+                // The staged copy was only read (M3 §7.5): `query_only`, no
+                // authorizer refusal (`part_text` included) and no change.
+                // None is the guard; the authorizer is.
+                let untouched = conn.query_only().unwrap_or(false)
+                    && conn.authorizer_denials() == 0
+                    && conn.total_changes() == 0;
+                if !untouched {
+                    session::end_session(
+                        wc,
+                        started.session,
+                        SessionState::Failed,
+                        Some((Pass::RecentlyDeleted.code(), IssueCode::SourceReadFailed)),
+                        &counts,
+                        end_now,
+                    );
+                    tracing::warn!(
+                        session = started.session,
+                        "the staged sms.db was not only read"
+                    );
+                    return Err(ArchiveError::Internal(
+                        "the staged sms.db connection was written or refused an action",
+                    ));
+                }
                 tracing::info!(
                     session = started.session,
                     handles = counts.handles.seen,
                     chats = counts.chats.seen,
                     messages = counts.messages.seen,
                     bodies = counts.bodies.added,
+                    chat_handles = counts.chat_handles.seen,
+                    chat_messages = counts.chat_messages.seen,
+                    attachments = counts.attachments.seen,
+                    message_attachments = counts.message_attachments.seen,
                     rd_excluded = counts.recently_deleted.excluded,
+                    rd_attachments_excluded = counts.recently_deleted.attachments_excluded,
+                    rd_marked = counts.recently_deleted.marked,
                     batches = counts.batches,
                     "import passes done"
                 );
@@ -566,6 +700,15 @@ fn classify(e: PassError) -> (SessionState, IssueCode, Result<StopReason, Archiv
             IssueCode::ArchiveError,
             Err(ArchiveError::Internal(
                 "pass row count differs from the probe",
+            )),
+        ),
+        // The preflight ran the same scan under the same cap on the same
+        // staged copy, so this is unreachable unless the copy changed.
+        PassError::ScanOverLimit => (
+            SessionState::Failed,
+            IssueCode::ArchiveError,
+            Err(ArchiveError::Internal(
+                "the Recently Deleted attachment scan exceeded its cap after the preflight",
             )),
         ),
     }
