@@ -272,7 +272,8 @@ pub fn snapshot(dir: &Path) -> Vec<(String, String)> {
                 .strip_prefix(base)
                 .expect("prefix")
                 .to_string_lossy()
-                .into_owned();
+                // `/` on every OS, so callers can filter with one spelling.
+                .replace('\\', "/");
             let m = fs::symlink_metadata(&p).expect("meta");
             if m.is_dir() {
                 out.push((rel, "dir".into()));
