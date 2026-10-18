@@ -9,3 +9,5 @@ target/
 *.db
 *.db-*
 !tests/fixtures/**
+# Python virtual environment for the fixture generator and oracle check.
+.venv-fixtures/

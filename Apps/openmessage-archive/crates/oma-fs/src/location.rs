@@ -1,6 +1,6 @@
 //! Facts about where a directory sits: inside an iPhone backup, inside the
-//! system's MobileSync backup store, at a filesystem root, or in a folder a
-//! cloud client synchronizes.
+//! system's MobileSync backup store or iMazing's default backup store, at a
+//! filesystem root, or in a folder a cloud client synchronizes.
 //!
 //! These guards protect the project's two hardest invariants: the original
 //! backup is never modified, and message data stays local unless the user
@@ -46,6 +46,24 @@ pub fn enclosing_backup_dir(path: &Path) -> Option<&Path> {
 /// `%USERPROFILE%\Apple\MobileSync\Backup`,
 /// `~/Library/Application Support/MobileSync/Backup`).
 pub fn is_within_mobilesync(path: &Path) -> bool {
+    has_adjacent_components(path, "MobileSync", "Backup")
+}
+
+/// `true` when `path` is, or is inside, an `iMazing/Backups` directory —
+/// iMazing's default backup location (`%APPDATA%\iMazing\Backups`, observed
+/// in iMazing 3.x's settings on Windows 11). iMazing manages that store,
+/// including its `iMazing.Versions` snapshots, so archive data must not be
+/// written there. Matched like [`is_within_mobilesync`]: by component,
+/// case-insensitively. iMazing lets the user move its store; a moved store
+/// is not recognised, though each backup inside it is still refused by
+/// [`enclosing_backup_dir`].
+pub fn is_within_imazing_backups(path: &Path) -> bool {
+    has_adjacent_components(path, "iMazing", "Backups")
+}
+
+/// `true` when two consecutive normal components of `path` are `first` and
+/// `second`, compared ASCII case-insensitively.
+fn has_adjacent_components(path: &Path, first: &str, second: &str) -> bool {
     let names: Vec<&str> = path
         .components()
         .filter_map(|c| match c {
@@ -55,7 +73,7 @@ pub fn is_within_mobilesync(path: &Path) -> bool {
         .collect();
     names
         .windows(2)
-        .any(|w| w[0].eq_ignore_ascii_case("MobileSync") && w[1].eq_ignore_ascii_case("Backup"))
+        .any(|w| w[0].eq_ignore_ascii_case(first) && w[1].eq_ignore_ascii_case(second))
 }
 
 /// `true` when `path` is a filesystem root (`/`, `C:\`, `\\server\share\`).
@@ -168,6 +186,31 @@ mod tests {
         assert!(!is_within_mobilesync(&unrelated));
         let reversed: PathBuf = ["Backup", "MobileSync"].iter().collect();
         assert!(!is_within_mobilesync(&reversed));
+    }
+
+    #[test]
+    fn imazing_store_is_detected_case_insensitively() {
+        for p in [
+            "C:\\Users\\a\\AppData\\Roaming\\iMazing\\Backups",
+            "C:\\Users\\a\\AppData\\Roaming\\iMazing\\Backups\\00008030-0011",
+            "C:\\Users\\a\\AppData\\Roaming\\iMazing\\Backups\\iMazing.Versions\\x",
+            "/home/a/IMAZING/backups/lib",
+        ] {
+            let path: PathBuf = p.split(['\\', '/']).collect();
+            assert!(is_within_imazing_backups(&path), "{p}");
+            assert!(!is_within_mobilesync(&path), "{p}");
+        }
+        for parts in [
+            // The singular form is not the observed default.
+            &["Users", "a", "iMazing", "Backup"][..],
+            &["Users", "a", "iMazing"][..],
+            &["Users", "a", "iMazing Backups"][..],
+            &["Backups", "iMazing"][..],
+            &["Users", "a", "iMazingX", "Backups"][..],
+        ] {
+            let path: PathBuf = parts.iter().collect();
+            assert!(!is_within_imazing_backups(&path), "{path:?}");
+        }
     }
 
     #[test]
