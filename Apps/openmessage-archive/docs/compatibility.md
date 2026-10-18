@@ -21,24 +21,27 @@ Last updated: Milestone 1.
 | Windows 11 ARM64 | Untested | Planned | Planned | Not built in CI yet |
 | Ubuntu 22.04 x64 | CI | Planned | Planned | CI build baseline, which sets the glibc floor. Needs `libwebkit2gtk-4.1-0`. |
 | Ubuntu 24.04 x64 | Supported (built and unit-tested during M1 development) | Planned | Planned | Ships libimobiledevice 1.3.0, which is old. M7 will not depend on it. |
-| Ubuntu 26.04.1 LTS x64 | Launches; folder picker works (built from source with `npm run tauri dev`, run by hand on a real desktop, a QEMU VM; reported 2026-10-17) | Planned | Planned | First manual run anywhere. Choosing an ordinary folder through the native picker succeeded. Picking a folder laid out like a backup (`Manifest.db` + `Info.plist`) was refused with the reason shown, and the previous location was kept. Persistence across restarts has not been reported yet. Ships libimobiledevice 1.4.0. |
+| Ubuntu 26.04.1 LTS x64 | **Supported** (built from source with `npm run tauri dev`, every M1 check done by hand on a real desktop, a QEMU VM; 2026-10-17/18) | Planned | Planned | First manual run anywhere. The native picker chose an ordinary folder. A folder laid out like a backup (`Manifest.db` + `Info.plist`) was refused with the reason shown, and the previous location was kept. The choice survived a restart. Ships libimobiledevice 1.4.0. |
 | Debian 12, Fedora 40+ | Untested | Planned | Planned | Need WebKitGTK 4.1 |
 | macOS | Unsupported for now | — | — | The architecture keeps platform code behind interfaces so it can be added later |
 
 "Supported (built and unit-tested)" on Ubuntu 24.04 means the release build,
 all unit tests, and the `.deb` bundle succeeded.
 
-On Ubuntu 26.04.1, a development build opened on a real desktop. Two
-checks passed by hand:
+On Ubuntu 26.04.1, a development build ran on a real desktop and passed
+every M1 manual check:
 
 - **The native GTK picker works.** An ordinary folder was chosen through
   it. This is the step that could not be completed headlessly.
 - **Backup folders are refused.** Picking a folder that looks like an iPhone
   backup was rejected with "This folder is inside an iPhone backup (…)",
   and the previously saved location was kept.
+- **The setting persists.** After the app was closed and relaunched, the
+  chosen folder was still set and still showed **Ready**.
 
-M1 sign-off on Linux still needs one manual check: the chosen folder must
-survive a restart. Windows 11 still has no manual run at all.
+That completes M1's manual sign-off on Linux. The release `.deb`, `.rpm`
+and AppImage packages have been built by CI, but nobody has installed and
+run them by hand yet. Windows 11 still has no manual run at all.
 
 ## iOS versions and backup types
 
