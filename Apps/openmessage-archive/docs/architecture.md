@@ -687,7 +687,8 @@ untouched, so the frozen catalogues cannot change by accident.
     the deleted messages were never seen by the newer session, so they are
     labelled. §8.7's list of exceptions does not name this case yet;
   - the display none-reasons are named (`attributedBodyUnusable`,
-    `textEmpty`, `noSource`); their codes are fixed in slice 4g.
+    `textEmpty`, `noSource`); slice 4g fixed their codes as 1, 2 and 3
+    (`DisplayNoneReason`).
 - **Owner decisions.** The model applies D60 (Recently Deleted excluded
   by default, its attachments included when opted in), D61 (text from
   before an unsend stays as an earlier body version) and D59 (raw values
@@ -858,6 +859,102 @@ leans awaiting the owner's confirmation.
   computed outside the crate (`bind.rs`), because they are the identity
   of every unkeyed row across sessions.
 
+### Messages, bodies and the FTS index (M4 slice 4g)
+
+Slice 4g adds the preflight's Recently Deleted steps and **P3 messages**
+(`import/preflight.rs`, `import/messages.rs`) to `Archive::import_core`.
+The passes now run P1, P2, P3; a session whose passes ran still stays
+running until finalize (slice 4j).
+
+- **P0** (spec §8.2 step 2). `for_each_recoverable` gives the sorted,
+  distinct message rowids of `chat_recoverable_message_join`; a join row
+  whose `message_id` is not a readable integer names no message. It is
+  re-run on every resume. `recoverable_message_part.part_text` is never
+  read (the reader's authorizer denies it). **Over 4,194,304 join rows the
+  backup is `NotImportable(OverRecentlyDeletedCap)`**: the spec says no
+  Recently Deleted content is imported over the cap, and the only way to
+  guarantee that without the set is to import nothing (a reading of §8.2
+  and §23; nothing is written).
+- **The Recently Deleted classification** runs inside the message key
+  scan, on the reader connection under an op budget that grows with the
+  set. With the default exclusion (D60), a Recently Deleted row whose GUID
+  is a usable key, unique in this source and already a keyed message of
+  the archive is **re-observed only**; every other one (an unkeyed or
+  duplicated one included) is **excluded**. Only digests outlive a row.
+  With the opt-in, nothing is classified and every row merges.
+- **P3** reads `for_each_message` with decoding on and raw blobs kept
+  (D59). Per record, in its savepoint:
+  - an excluded row is skipped: no row, no map, no join later
+    (`recentlyDeleted.excluded`);
+  - a re-observed row is mapped and recorded in `lineage_seen` only: no
+    column, body or rank changes (`recentlyDeleted.notUpdated`);
+  - every other row is keyed or unkeyed as in slice 4f. The unkeyed
+    fingerprint covers the 41 message cells and the body's `raw_hash`.
+    Its raw cells merge by the column rules. **Derived columns are
+    recomputed from the stored raw cells after the merge** (`service_class`,
+    `item_kind`, the `assoc_*` parse through `oma_messages::AssocRaw`,
+    `sort_key`, `first_src_rowid`), and only those that changed are
+    written, with `derived_by`. `handle_ref` and `other_handle_ref`
+    resolve the raw rowid through this session's map, and are set only by
+    the observation that takes the `handle_rowid` cell (a rowid means
+    something inside its session only); 0, a non-value and an unmapped
+    rowid give NULL.
+- **`sort_key`** (§6.5): `0x00 ‖ be64(date_utc_ns XOR 2^63)` when `date`
+  is in seconds or nanoseconds, else `0x01 ‖ first_rank ‖
+  be64(first_src_rowid XOR 2^63)` (50 bytes). `first_src_rowid` moves with
+  `first_rank`.
+- **Body versions** (`message_body`). The raw cells are `text`,
+  `attributedBody` and `message_summary_info` (exact bytes or their
+  states, with their `value_issue` rows as entity 5); `raw_hash` is
+  SHA-256 of `oma-body-raw-v1` and the three cells' fingerprint
+  encodings. One row per (message, `raw_hash`), inserted with `ON
+  CONFLICT DO NOTHING`; first and last rank move by min and max.
+  `current_body_id` moves to this observation's version when the record
+  is new or its rank is at least the message's `last_rank`. An edited
+  message gains a version; an unsent one gains an empty version and **its
+  earlier text stays indexed and searchable** (D61). A stored version
+  whose `decoder_version` differs from the build's is **re-derived in
+  place** (derived columns updated, child rows deleted and re-inserted);
+  the FTS update trigger re-indexes only when `display_text` changed. A
+  re-observation at a rank at least the version's `last_rank` refreshes
+  its edit label, which also reads `date_edited`, a message column.
+- **Child rows**: `message_body_part` from the decoded parts (UTF-16 and
+  UTF-8 spans, the first transfer GUID and mention, flags and present
+  keys as bits in the order pinned by `ATTR_FLAG_BITS` and
+  `ATTR_KEY_BITS`), `message_edit_entry` from `ec` (stored order; `at_kind`
+  1 integer, 2 real, 3 plist date with `at_raw` NULL), and
+  `message_unsent_part` from `rp`. Edit-entry bodies (`t`) are not decoded
+  (§0.2); their bytes are inside the raw summary.
+- **`display_text`** (D58, §10): the decoded `attributedBody` when it
+  decoded to non-empty text (`display_source` 1); else `text` when it is
+  non-empty valid UTF-8 (2); else `text` decoded lossily (3); else NULL with
+  `display_none_reason` 1 `attributedBodyUnusable` (the column holds a
+  value, or one over its cap or unreadable, that gave no text), 2
+  `textEmpty` (`text` is `''`) or 3 `noSource`. `sources_differ` compares
+  the decoded text with `text` when both are values, and is NULL
+  otherwise. These codes, `ItemKindCode`, `AssocKindCode`,
+  `EditLabelCode`, `TsErrorCode` and `SummaryTimeKind` are new closed
+  codes in `schema/codes.rs`, pinned by a test.
+- **FTS** (D62): the `message_fts` triggers from schema v1 index every
+  version's `display_text`; nothing writes the index from Rust. The rank-1
+  `integrity-check` runs after every catalogue import in the tests, and
+  the tokenizer table of §10 is asserted on `imp-fts-plain`.
+- **Counts**: `messages` (the entity group, without Recently Deleted
+  skips), `bodies` (added, unchanged, re-derived, current moved, display
+  sources and none-reasons, sources differ, decode failures, run issues)
+  and `recentlyDeleted` (P0's messages, excluded, not updated, imported).
+  The generator's `import.json` does not count messages yet; P3's counts
+  are asserted by targeted tests (`tests/messages.rs`, `tests/resume.rs`).
+- **Tests**: every catalogue entry and every scenario in every order is
+  compared with the content model for messages (columns, history, handle
+  reference, display text, every body version, sort order, exclusions);
+  a second session of each entry changes nothing; edits, unsends, an older
+  backup imported later, re-derivation, the tokenizer table, the Recently
+  Deleted policy and D58 on synthetic bodies (with decoded vectors from the
+  M3 typedstream catalogue) have their own tests; the cancel-at-every-record,
+  random-crash and kill-at-signal tests now run through P3 (the synthetic
+  source has messages, undecodable bodies and Recently Deleted rows).
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`
@@ -962,7 +1059,7 @@ superseded by D22: sms.db is staged on disk.
 | D49 | Source values | `Col<T>` | `Option<T>` | M4 can tell "not recorded" from "NULL" from "bad" |
 | D50 | Lookup scope | Only `Library/SMS/Attachments/` and `StickerCache/` | Every `~/` and `/var/mobile` class | Never reaches non-Messages files; the other classes stay counts |
 
-### Milestone 4 decisions in force (slices 4d–4f)
+### Milestone 4 decisions in force (slices 4d–4g)
 
 The full M4 decision list (D51–D88) lands with the M4 documentation slice.
 These are the ones the archive skeleton and the import core already
@@ -985,6 +1082,8 @@ owner's confirmation.
 | D84 | Reader | `ArchiveReader`: lock-free, query-only, fingerprint first | Read through the locked `Archive` | Details during imports |
 | D56 | Keys | Exact GUID bytes, or the tagged (address, service); unkeyed rows by fingerprint and durable occurrence | Synthesise keys | No fabrication; unkeyed rows may repeat across changed sources |
 | D57 | Merge | Never delete; rank decides; missing or unreadable values never replace values; only changed columns are updated | Last import wins | Older backups can be imported later without regression |
+| D58 | Body source | Decoded `attributedBody`, else valid `text`, else lossy `text`, else NULL with a reason | Prefer `text` | M3 found `text = ''` next to a body |
+| D62 | FTS | External content over `message_body.display_text`, unicode61 `remove_diacritics 2`, `detail=full`, guarded triggers, every version indexed, `secure-delete` | Writes from Rust; trigram now | Snippets, rebuild and drift checks; CJK limits stated |
 | D63 | Transactions | `IMMEDIATE` batches (1,000 rows / 32 MiB / 2 s), a savepoint per record, the importer's own cursor, `synchronous=FULL` | Per-row transactions | Durable and resumable at batch granularity |
 | D64 | Resume binding | Digest and framing, versions, read profile, options and lineage; otherwise supersede | Resume across any change | One rule set per session |
 | D80 | Lineage | The caller (the gate, later) picks an existing lineage or a new one | Infer from device fields | No silent identity claim |

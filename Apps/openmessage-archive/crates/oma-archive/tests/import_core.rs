@@ -1,6 +1,8 @@
-//! The import core (slice 4f) on the import catalogue: P1 handles and P2
-//! chats against the generator's content model and counts, every scenario
-//! in every order, the session's facts, and the refusals.
+//! The import core (slices 4f and 4g) on the import catalogue: P1 handles,
+//! P2 chats and P3 messages (columns, history, handle reference, body
+//! versions and display text, sort order, Recently Deleted exclusion)
+//! against the generator's content model and counts, every scenario in
+//! every order, the session's facts, and the refusals.
 //!
 //! The model is a second statement of the spec's rules, so agreement shows
 //! self-consistency, not correctness against a real device.
@@ -51,6 +53,63 @@ fn assert_view(db: &std::path::Path, m: &Value, what: &str) -> (usize, usize) {
     covered
 }
 
+/// Compare the archive's messages with a manifest: every message's
+/// columns, history, handle, display text and body versions; their order;
+/// and the Recently Deleted exclusions. Returns (messages, body versions).
+fn assert_messages(db: &std::path::Path, m: &Value, what: &str) -> (usize, usize) {
+    let got = message_view(db);
+    let want = message_expected(m);
+    let g: Vec<String> = {
+        let mut v: Vec<String> = got.iter().map(Value::to_string).collect();
+        v.sort();
+        v
+    };
+    let w: Vec<String> = {
+        let mut v: Vec<String> = want.iter().map(Value::to_string).collect();
+        v.sort();
+        v
+    };
+    if g != w {
+        let gs: BTreeSet<&String> = g.iter().collect();
+        let ws: BTreeSet<&String> = w.iter().collect();
+        panic!(
+            "{what}: messages differ ({} in the archive, {} in the model)\n  only in the archive: {:#?}\n  only in the model: {:#?}",
+            g.len(),
+            w.len(),
+            gs.difference(&ws).collect::<Vec<_>>(),
+            ws.difference(&gs).collect::<Vec<_>>()
+        );
+    }
+    // The sort order (spec §6.5): ties are unspecified, so compare the
+    // sequence of sort positions.
+    let sorts = |v: &[Value]| v.iter().map(|x| x["sort"].clone()).collect::<Vec<_>>();
+    assert_eq!(sorts(&got), sorts(&want), "{what}: message order");
+    // Excluded keyed messages are not in the archive.
+    let c = read_only(db);
+    for r in m["content"]["excluded"]["messages"]
+        .as_array()
+        .expect("excluded")
+    {
+        let guid = r
+            .as_str()
+            .and_then(|s| s.strip_prefix("guid:"))
+            .expect("guid ref");
+        let n: i64 = c
+            .query_row(
+                "SELECT count(*) FROM message WHERE guid = ?1",
+                [guid.as_bytes()],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(n, 0, "{what}: an excluded message was imported");
+    }
+    let bodies = want
+        .iter()
+        .map(|x| x["bodies"].as_array().map_or(0, Vec::len))
+        .sum();
+    (want.len(), bodies)
+}
+
 #[test]
 fn every_entry_imports_its_handles_and_chats_as_the_model_says() {
     for entry in ENTRIES {
@@ -70,6 +129,21 @@ fn every_entry_imports_its_handles_and_chats_as_the_model_says() {
             entry,
         );
         assert_eq!(unkeyed > 0, *entry == "imp-keys-hostile-plain", "{entry}");
+        let (messages, _) = assert_messages(
+            &db,
+            &manifest_of(&format!("{entry}.expected/content.json")),
+            entry,
+        );
+        assert!(messages > 0, "{entry}");
+        assert_eq!(
+            s.counts.recently_deleted.not_updated, 0,
+            "{entry}: nothing is re-observed in an empty archive"
+        );
+        assert_eq!(
+            s.counts.messages.inserted,
+            u64::try_from(messages).expect("n"),
+            "{entry}"
+        );
         let want = manifest_of(&format!("{entry}.expected/import.json"));
         assert_eq!(want["entry"], *entry);
         assert_eq!(
@@ -82,27 +156,8 @@ fn every_entry_imports_its_handles_and_chats_as_the_model_says() {
             want["counts"]["chats"],
             "{entry}: chat counts"
         );
-        assert_eq!(s.counts.batches, 2, "{entry}: one batch per pass");
+        assert_eq!(s.counts.batches, 3, "{entry}: one batch per pass");
     }
-}
-
-/// Stand in for finalize (slice 4j), which does not exist yet: mark the
-/// running session completed and empty its session-local tables, so the
-/// next import of the same content starts a **fresh** session instead of
-/// continuing this one (spec §8.2 step 1 resumes only unfinished ones).
-fn finish_sessions(db: &std::path::Path) {
-    let c = raw(db);
-    c.execute_batch(
-        "DELETE FROM import_rowid_map WHERE session_id IN \
-             (SELECT id FROM import_session WHERE state = 0); \
-         DELETE FROM import_occurrence WHERE session_id IN \
-             (SELECT id FROM import_session WHERE state = 0); \
-         DELETE FROM import_dup_key WHERE session_id IN \
-             (SELECT id FROM import_session WHERE state = 0); \
-         UPDATE import_session SET state = 1, ended_at_ns = started_at_ns, \
-             full_observation = (qualifiers & 2) = 0 WHERE state = 0;",
-    )
-    .expect("finish");
 }
 
 /// Every scenario's content, in every order it lists; the orders give equal
@@ -125,6 +180,7 @@ fn every_scenario_holds_in_every_order() {
     assert_eq!(names.len(), 10);
     let mut history_values = 0;
     let mut repeated_steps = 0;
+    let mut body_versions = 0;
     for name in &names {
         let m = manifest_of(&format!("scenarios/{name}.content.json"));
         let counts = manifest_of(&format!("scenarios/{name}.counts.json"));
@@ -169,6 +225,8 @@ fn every_scenario_holds_in_every_order() {
             }
             assert_consistent(&db);
             history_values += assert_view(&db, &m, &format!("{name} order {oi}")).0;
+            let (_, bodies) = assert_messages(&db, &m, &format!("{name} order {oi}"));
+            body_versions = body_versions.max(bodies);
             snapshots.push(logical_snapshot(&db, Scope::Content));
         }
         // Order independence (spec §8.7): equal content snapshots.
@@ -181,6 +239,7 @@ fn every_scenario_holds_in_every_order() {
     // keys-hostile-twice, dev1-v1-undated, dev1-v1-baddate and
     // dev1-v2-plain-enc each repeat a digest.
     assert!(repeated_steps >= 4, "{repeated_steps}");
+    assert!(body_versions > 0);
 }
 
 /// Unkeyed rows are idempotent across sessions: the hostile entry imported

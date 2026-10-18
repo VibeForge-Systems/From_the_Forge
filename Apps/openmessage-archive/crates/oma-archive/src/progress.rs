@@ -38,8 +38,8 @@ impl Clock for FixedClock {
     }
 }
 
-/// A phase of an import (spec §8.12). Slice 4f has the phases up to the
-/// chat pass; the others arrive with their passes.
+/// A phase of an import (spec §8.12). Slices 4f and 4g have the phases up
+/// to the message pass; the others arrive with their passes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ImportPhase {
@@ -47,6 +47,8 @@ pub enum ImportPhase {
     StagingMessagesDb,
     /// Scanning the schema, `quick_check` and the probe.
     ReadingSchema,
+    /// P0: the Recently Deleted scan.
+    ScanningRecentlyDeleted,
     /// The duplicate-key scan.
     ScanningKeys,
     /// The session bookkeeping after the archive's first write.
@@ -55,6 +57,8 @@ pub enum ImportPhase {
     ImportingHandles,
     /// P2.
     ImportingChats,
+    /// P3.
+    ImportingMessages,
 }
 
 /// A progress event. Content-free.

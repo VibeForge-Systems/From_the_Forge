@@ -1,4 +1,4 @@
-//! The import core (spec §8; slice 4f).
+//! The import core (spec §8; slices 4f and 4g).
 //!
 //! [`Archive::import_core`] runs the parts of the import that exist so
 //! far, in the order of spec §2:
@@ -6,15 +6,18 @@
 //! 1. stage sms.db (and its `-wal`, best effort) and probe it;
 //! 2. compute the session's facts: the content digest and its framing, the
 //!    read profile, the rank (§8.7), the qualifiers;
-//! 3. the duplicate-key scan (§8.2 step 3), which always runs, then the
-//!    resume decision (step 1);
+//! 3. P0, the Recently Deleted scan (§8.2 step 2), then the duplicate-key
+//!    scan with the Recently Deleted classification (step 3), which always
+//!    run, then the resume decision (step 1);
 //! 4. the archive's first write ([`Archive::begin_write`] with recovery),
 //!    then the session bookkeeping transaction (§8.3);
-//! 5. **P1 handles and P2 chats**, in batches (§8.5), each committing its
-//!    cursor, counts and issues with its rows.
+//! 5. **P1 handles, P2 chats and P3 messages** (with their body versions,
+//!    the FTS index through its triggers, and the Recently Deleted
+//!    policy), in batches (§8.5), each committing its cursor, counts and
+//!    issues with its rows.
 //!
-//! **What is not here yet.** The Recently Deleted and attachment
-//! preflight, the gate, P3–P8 and finalize arrive in slices 4g–4j. Until
+//! **What is not here yet.** The attachment preflight, the gate, P4–P8
+//! and finalize arrive in slices 4h–4j. Until
 //! finalize exists, a session whose passes all ran is left **running**
 //! (state 0) and the outcome is [`CoreOutcome::PassesDone`]: it is never
 //! marked completed or a full observation. The next write open marks it
@@ -32,6 +35,7 @@ mod handles;
 mod keys;
 mod map;
 mod merge;
+mod messages;
 mod preflight;
 mod session;
 
@@ -42,8 +46,8 @@ use oma_messages::{
 };
 
 pub use batch::BatchBudget;
-pub use counts::{EntityCounts, ImportCounts};
-pub use preflight::KEY_SCAN_CAP;
+pub use counts::{BodyCounts, EntityCounts, ImportCounts, RecentlyDeletedCounts};
+pub use preflight::{KEY_SCAN_CAP, RECOVERABLE_SCAN_CAP};
 pub(crate) use session::{supersede_sessions, unfinished_sessions};
 pub use session::{ORDER_KEY_FLOOR_NS, ORDER_KEY_SLACK_NS};
 
@@ -54,7 +58,9 @@ use crate::progress::{ArchiveCtx, ArchiveEvent, ImportPhase};
 use crate::schema::codes::{Entity, IssueCode, Pass, ServiceClassCode, SessionState};
 use batch::{run_pass, PassEnd, PassError, Run};
 use bind::Cell;
-use preflight::{decide_resume, load_dup_keys, scan_keys, KeyScan};
+use preflight::{
+    decide_resume, load_dup_keys, scan_keys, scan_recoverable, KeyScan, RecoverableScan, ScanError,
+};
 
 /// Options for an import.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,6 +141,9 @@ pub enum NotImportable {
     Incomplete,
     /// A keyed table has more than [`KEY_SCAN_CAP`] rows (§23).
     OverKeyScanCap(KeyScanTable),
+    /// Recently Deleted lists more than [`RECOVERABLE_SCAN_CAP`] rows, so
+    /// the default exclusion could not be applied (§23).
+    OverRecentlyDeletedCap,
 }
 
 /// Why an import stopped in a resumable state (state 6, D88).
@@ -165,7 +174,7 @@ pub struct ImportSummary {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CoreOutcome {
-    /// Every pass this build has (P1, P2) is done. The session stays
+    /// Every pass this build has (P1–P3) is done. The session stays
     /// running (state 0) until finalize exists (slice 4j); see the module
     /// documentation.
     PassesDone(ImportSummary),
@@ -313,17 +322,43 @@ impl Archive {
                 }))
             }
         };
-        // The key scan always runs, before the resume decision: the gate
-        // (slice 4j) shows its evidence before the lineage is chosen. A
-        // continued session keeps its stored duplicate set, which is the
-        // same set, because the binding includes the content digest.
+        // P0 and the key scan always run, before the resume decision: the
+        // gate (slice 4j) shows their evidence before the lineage is
+        // chosen. A continued session keeps its stored duplicate set, which
+        // is the same set, because the binding includes the content digest.
+        ctx.progress.event(ArchiveEvent::Import {
+            phase: ImportPhase::ScanningRecentlyDeleted,
+            done: 0,
+            total: None,
+        });
+        let rd = match scan_recoverable(&db, mctx) {
+            Ok(RecoverableScan::Done(rd)) => rd,
+            Ok(RecoverableScan::OverLimit) => {
+                return Ok(CoreOutcome::NotImportable(
+                    NotImportable::OverRecentlyDeletedCap,
+                ))
+            }
+            Err(MessagesError::Cancelled) => return Ok(CoreOutcome::Cancelled(None)),
+            Err(e) => return Err(messages_err(e)),
+        };
+        let rd_messages = u64::try_from(rd.len()).unwrap_or(u64::MAX);
         ctx.progress.event(ArchiveEvent::Import {
             phase: ImportPhase::ScanningKeys,
             done: 0,
             total: None,
         });
-        let scanned = match scan_keys(&db, mctx) {
-            Ok(KeyScan::Done(d)) => d,
+        // The archive lookup of each Recently Deleted key runs on the
+        // reader, under an op budget that grows with the set (bounded by
+        // the P0 cap).
+        let exclude_rd = !opts.include_recently_deleted;
+        let ops = READ_OP_BUDGET.saturating_add(rd_messages.saturating_mul(256));
+        let scanned = self.reader().budgeted(ops, Stage::Preflight, |c| {
+            let mut stmt = c.prepare("SELECT 1 FROM message WHERE key_kind = 1 AND guid = ?1")?;
+            let mut lookup = |k: &[u8]| stmt.exists([k]);
+            Ok(scan_keys(&db, mctx, rd, exclude_rd, &mut lookup))
+        })?;
+        let (scanned, rd_plan) = match scanned {
+            Ok(KeyScan::Done(d, plan)) => (d, plan),
             Ok(KeyScan::OverLimit(e)) => {
                 let t = match e {
                     Entity::Handle => KeyScanTable::Handles,
@@ -333,8 +368,11 @@ impl Archive {
                 };
                 return Ok(CoreOutcome::NotImportable(NotImportable::OverKeyScanCap(t)));
             }
-            Err(MessagesError::Cancelled) => return Ok(CoreOutcome::Cancelled(None)),
-            Err(e) => return Err(messages_err(e)),
+            Err(ScanError::Read(MessagesError::Cancelled)) => {
+                return Ok(CoreOutcome::Cancelled(None))
+            }
+            Err(ScanError::Read(e)) => return Err(messages_err(e)),
+            Err(ScanError::Archive(e)) => return Err(ArchiveError::sqlite(Stage::Preflight, &e)),
         };
         let decision = self
             .reader()
@@ -388,6 +426,8 @@ impl Archive {
             budget: opts.batch,
         };
         let mut counts = started.counts.clone();
+        // P0 is re-run on every resume and finds the same set.
+        counts.recently_deleted.messages = rd_messages;
         let summary = |counts: &ImportCounts| ImportSummary {
             session: started.session,
             lineage: LineageId(started.lineage),
@@ -396,25 +436,43 @@ impl Archive {
             counts: counts.clone(),
         };
 
-        // The passes.
-        let p1 = run_pass(
-            &handles::Handles::new(),
-            &db,
-            wc,
-            &run,
-            &mut counts,
-            ctx,
-            mctx,
-        );
-        let ended = match p1 {
-            Ok(PassEnd::Done) => {
-                run_pass(&chats::Chats::new(), &db, wc, &run, &mut counts, ctx, mctx)
-                    .map(|e| (e, Pass::Chats))
-                    .map_err(|e| (e, Pass::Chats))
+        // The passes, in order; each stops the chain unless it is done.
+        let ended = (|| {
+            let step = |r: Result<PassEnd, PassError>, pass: Pass| match r {
+                Ok(PassEnd::Done) => Ok(None),
+                Ok(e) => Ok(Some((e, pass))),
+                Err(e) => Err((e, pass)),
+            };
+            let p = run_pass(
+                &handles::Handles::new(),
+                &db,
+                wc,
+                &run,
+                &mut counts,
+                ctx,
+                mctx,
+            );
+            if let Some(end) = step(p, Pass::Handles)? {
+                return Ok(end);
             }
-            Ok(e) => Ok((e, Pass::Handles)),
-            Err(e) => Err((e, Pass::Handles)),
-        };
+            let p = run_pass(&chats::Chats::new(), &db, wc, &run, &mut counts, ctx, mctx);
+            if let Some(end) = step(p, Pass::Chats)? {
+                return Ok(end);
+            }
+            let p = run_pass(
+                &messages::Messages::new(rd_plan),
+                &db,
+                wc,
+                &run,
+                &mut counts,
+                ctx,
+                mctx,
+            );
+            if let Some(end) = step(p, Pass::Messages)? {
+                return Ok(end);
+            }
+            Ok((PassEnd::Done, Pass::Messages))
+        })();
         let end_now = ctx.clock.now_ns();
         match ended {
             Ok((PassEnd::Done, _)) => {
@@ -422,6 +480,9 @@ impl Archive {
                     session = started.session,
                     handles = counts.handles.seen,
                     chats = counts.chats.seen,
+                    messages = counts.messages.seen,
+                    bodies = counts.bodies.added,
+                    rd_excluded = counts.recently_deleted.excluded,
                     batches = counts.batches,
                     "import passes done"
                 );

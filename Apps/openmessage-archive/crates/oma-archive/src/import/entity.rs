@@ -19,7 +19,7 @@ use super::counts::EntityCounts;
 use super::keys::fingerprint;
 use super::map::MapStmts;
 use super::merge::{
-    attach_issues, insert, merge, read_stored, DeriveUpdate, Ident, MergeStmts, TableDef,
+    attach_issues, insert, merge, read_stored, DeriveUpdate, Ident, MergeStmts, Param, TableDef,
 };
 use super::preflight::{guid_digest, handle_digest};
 use crate::schema::codes::IssueCode;
@@ -152,17 +152,23 @@ pub(crate) fn write_records(
                         kind.derive_update,
                     )?
                 }
-                None => insert(
-                    def,
-                    &mut ins,
-                    &mut ms,
-                    tx,
-                    &ident,
-                    &rec.cells,
-                    &(kind.derive_insert)(&rec.cells),
-                    &run.rank,
-                    run.session,
-                )?,
+                None => {
+                    let derived: Vec<Param<'_>> = (kind.derive_insert)(&rec.cells)
+                        .into_iter()
+                        .map(Param::opt_int)
+                        .collect();
+                    insert(
+                        def,
+                        &mut ins,
+                        &mut ms,
+                        tx,
+                        &ident,
+                        &rec.cells,
+                        &derived,
+                        &run.rank,
+                        run.session,
+                    )?
+                }
             };
             maps.map(run.session, def.entity, rec.rowid, applied.id)?;
             if kind.lineage_seen {

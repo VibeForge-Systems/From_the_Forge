@@ -191,6 +191,12 @@ milestone's documentation.
   message's text and a later backup shows the sender unsent it, the
   archive **keeps the earlier text** (it stays searchable) and marks the
   message as unsent by the sender.
+- **The search index (D61, D62).** The archive's full-text index holds
+  the display text of **every** version of a message it has seen: the
+  text before and after an edit, and the text captured before an unsend.
+  Earlier versions stay searchable; nothing is removed from the index.
+  Messages excluded as Recently Deleted are not imported, so they are not
+  indexed.
 - **Raw message data (D59).** The archive keeps the raw `attributedBody`,
   `message_summary_info` and `payload_data` bytes of each message (poll,
   app and link payloads included), within fixed size caps, so a newer

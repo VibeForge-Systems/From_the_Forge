@@ -4,8 +4,9 @@
 //! transaction as every batch, reloaded on resume and added to, never reset.
 //! Nothing here is content: no value, key, digest, date or path.
 //!
-//! Slice 4f counts the handle and chat passes; the message, link,
-//! attachment and Recently Deleted groups arrive with their passes.
+//! Slices 4f and 4g count the handle, chat and message passes, the body
+//! versions and the Recently Deleted policy; the link and attachment groups
+//! arrive with their passes.
 
 use serde::{Deserialize, Serialize};
 
@@ -33,6 +34,56 @@ pub struct EntityCounts {
     pub value_issue_cells: u64,
 }
 
+/// What P3 did with body versions (`message_body`, spec §8.7, D58).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+#[non_exhaustive]
+pub struct BodyCounts {
+    /// New body versions (a raw body state not seen for the message).
+    pub added: u64,
+    /// Observations of a body version already stored.
+    pub unchanged: u64,
+    /// Stored versions re-derived in place by a newer decoder.
+    pub rederived: u64,
+    /// Messages whose current body moved to another version.
+    pub current_moved: u64,
+    /// New versions whose display text is the decoded `attributedBody`.
+    pub display_attributed_body: u64,
+    /// New versions whose display text is the `text` column.
+    pub display_text: u64,
+    /// New versions whose display text is the `text` column, decoded
+    /// lossily (not UTF-8).
+    pub display_text_lossy: u64,
+    /// New versions with no display text: `attributedBody` unusable.
+    pub none_attributed_body_unusable: u64,
+    /// New versions with no display text: `text` is empty.
+    pub none_text_empty: u64,
+    /// New versions with no display text: no source.
+    pub none_no_source: u64,
+    /// New versions whose decoded `attributedBody` and `text` differ.
+    pub sources_differ: u64,
+    /// New versions whose `attributedBody` failed to decode.
+    pub decode_failed: u64,
+    /// New versions whose decoded runs stopped early (a run issue).
+    pub run_issues: u64,
+}
+
+/// What the Recently Deleted policy did (spec §8.8, D60).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+#[non_exhaustive]
+pub struct RecentlyDeletedCounts {
+    /// Distinct message rowids P0 found in Recently Deleted.
+    pub messages: u64,
+    /// Recently Deleted messages not imported (the default exclusion).
+    pub excluded: u64,
+    /// Recently Deleted messages already in the archive: re-observed for
+    /// the lineage only, not updated from the deleted row.
+    pub not_updated: u64,
+    /// Recently Deleted messages imported (the opt-in).
+    pub imported: u64,
+}
+
 /// Everything an import counted.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -42,6 +93,13 @@ pub struct ImportCounts {
     pub handles: EntityCounts,
     /// P2.
     pub chats: EntityCounts,
+    /// P3: message rows. Records the Recently Deleted policy skipped or
+    /// only re-observed are counted in `recently_deleted`, not here.
+    pub messages: EntityCounts,
+    /// P3: body versions.
+    pub bodies: BodyCounts,
+    /// P0 and P3: the Recently Deleted policy.
+    pub recently_deleted: RecentlyDeletedCounts,
     /// Batch transactions committed (depends on the batch budget).
     pub batches: u64,
     /// Times this session was continued after a stop, cancel or crash.

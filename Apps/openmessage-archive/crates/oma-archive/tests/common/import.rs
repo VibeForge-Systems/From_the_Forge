@@ -193,6 +193,25 @@ pub fn lineage_for(labels: &mut BTreeMap<String, LineageId>, label: &str) -> Lin
         .map_or(LineageChoice::New, |id| LineageChoice::Existing(*id))
 }
 
+/// Stand in for finalize (slice 4j), which does not exist yet: mark the
+/// running session completed and empty its session-local tables, so the
+/// next import of the same content starts a **fresh** session instead of
+/// continuing this one (spec §8.2 step 1 resumes only unfinished ones).
+pub fn finish_sessions(db: &Path) {
+    let c = super::raw(db);
+    c.execute_batch(
+        "DELETE FROM import_rowid_map WHERE session_id IN \
+             (SELECT id FROM import_session WHERE state = 0); \
+         DELETE FROM import_occurrence WHERE session_id IN \
+             (SELECT id FROM import_session WHERE state = 0); \
+         DELETE FROM import_dup_key WHERE session_id IN \
+             (SELECT id FROM import_session WHERE state = 0); \
+         UPDATE import_session SET state = 1, ended_at_ns = started_at_ns, \
+             full_observation = (qualifiers & 2) = 0 WHERE state = 0;",
+    )
+    .expect("finish");
+}
+
 /// A read-only connection to a closed archive's database.
 pub fn read_only(db: &Path) -> rusqlite::Connection {
     rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
@@ -323,7 +342,11 @@ pub fn logical_snapshot(db: &Path, scope: Scope) -> Value {
         }
     }
     let mut keys: BTreeMap<(i64, i64), String> = BTreeMap::new();
-    for (entity, table, key) in [(1i64, "handle", "natural_key"), (2, "chat", "guid")] {
+    for (entity, table, key) in [
+        (1i64, "handle", "natural_key"),
+        (2, "chat", "guid"),
+        (3, "message", "guid"),
+    ] {
         let sql = format!("SELECT id, key_kind, {key}, unkeyed_fp, unkeyed_occ FROM {table}");
         let mut s = c.prepare(&sql).expect("prepare");
         let mut q = s.query([]).expect("query");
@@ -340,6 +363,20 @@ pub fn logical_snapshot(db: &Path, scope: Scope) -> Value {
                 )
             };
             keys.insert((entity, id), k);
+        }
+    }
+    // Body versions by (message key, raw_hash), as entity 5.
+    {
+        let mut s = c
+            .prepare("SELECT id, message_id, raw_hash FROM message_body")
+            .expect("prepare");
+        let mut q = s.query([]).expect("query");
+        while let Some(r) = q.next().expect("row") {
+            let id: i64 = r.get(0).expect("id");
+            let m: i64 = r.get(1).expect("message");
+            let h: Vec<u8> = r.get(2).expect("hash");
+            let mk = keys.get(&(3, m)).cloned().unwrap_or_default();
+            keys.insert((5, id), format!("b:{mk}:{}", hex(&h)));
         }
     }
     let session_ref = |v: ValueRef<'_>| match v {
@@ -365,6 +402,32 @@ pub fn logical_snapshot(db: &Path, scope: Scope) -> Value {
         json!(rows(&c, "SELECT * FROM handle", &plain)),
     );
     out.insert("chat".into(), json!(rows(&c, "SELECT * FROM chat", &plain)));
+    // Message tables, with every row reference replaced by its key.
+    let refs = |n: &str, v: ValueRef<'_>| -> Option<Value> {
+        let entity = match n {
+            "handle_ref" | "other_handle_ref" => 1,
+            "message_id" => 3,
+            "current_body_id" | "body_id" => 5,
+            _ => return plain(n, v),
+        };
+        Some(entity_row(entity, v))
+    };
+    for t in [
+        "message",
+        "message_body",
+        "message_body_part",
+        "message_edit_entry",
+        "message_unsent_part",
+    ] {
+        out.insert(
+            t.into(),
+            json!(rows(&c, &format!("SELECT * FROM {t}"), &refs)),
+        );
+    }
+    let fts: i64 = c
+        .query_row("SELECT count(*) FROM message_fts", [], |r| r.get(0))
+        .expect("fts rows");
+    out.insert("message_fts_rows".into(), json!(fts));
     // Rows that name an entity row by (entity, row_id).
     let by_entity = |sql: &str, row_col: &str| -> Vec<Value> {
         let mut stmt = c.prepare(sql).expect(sql);
@@ -458,11 +521,51 @@ pub fn logical_snapshot(db: &Path, scope: Scope) -> Value {
 fn source_name(table: &str, col: &str) -> String {
     match (table, col) {
         ("handle", "address") => "id".into(),
+        ("message", "assoc_type") => "associated_message_type".into(),
+        ("message", "assoc_guid_raw") => "associated_message_guid".into(),
         (_, c) => c.into(),
     }
 }
 
+/// The sampled message columns (archive names) and whether each is a
+/// timestamp quad.
+const MESSAGE_SAMPLED: &[(&str, bool)] = &[
+    ("guid", false),
+    ("is_from_me", false),
+    ("service", false),
+    ("date", true),
+    ("is_read", false),
+    ("is_delivered", false),
+    ("subject", false),
+    ("item_type", false),
+    ("group_action_type", false),
+    ("group_title", false),
+    ("assoc_type", false),
+    ("assoc_guid_raw", false),
+    ("payload_data", false),
+    ("date_edited", true),
+    ("date_retracted", true),
+    ("cache_has_attachments", false),
+    ("destination_caller_id", false),
+];
+
+fn unit_name(u: i64) -> &'static str {
+    match u {
+        0 => "zero",
+        1 => "negative",
+        2 => "seconds",
+        3 => "nanoseconds",
+        _ => "ambiguous",
+    }
+}
+
 const TEXT_COLS: &[(&str, &str)] = &[
+    ("message", "guid"),
+    ("message", "service"),
+    ("message", "subject"),
+    ("message", "group_title"),
+    ("message", "assoc_guid_raw"),
+    ("message", "destination_caller_id"),
     ("handle", "address"),
     ("handle", "service"),
     ("handle", "country"),
@@ -721,6 +824,7 @@ pub fn manifest_expected(m: &Value, plural: &str) -> Vec<Value> {
 fn code_of(table: &str, col: &str) -> i64 {
     let entity = match table {
         "handle" => oma_archive::schema::codes::Entity::Handle,
+        "message" => oma_archive::schema::codes::Entity::Message,
         _ => oma_archive::schema::codes::Entity::Chat,
     };
     oma_archive::schema::codes::ARCHIVE_COLUMNS
@@ -736,6 +840,198 @@ fn name_of(code: i64) -> &'static str {
         .and_then(oma_archive::schema::codes::ArchiveColumn::from_code)
         .map(|c| c.name)
         .expect("column code")
+}
+
+fn issues_of(c: &rusqlite::Connection, table: &str, id: i64, col: &str) -> Vec<(i64, Option<i64>)> {
+    let entity = match table {
+        "handle" => 1,
+        "chat" => 2,
+        _ => 3,
+    };
+    c.prepare("SELECT kind, bytes FROM value_issue WHERE entity = ?1 AND row_id = ?2 AND col = ?3")
+        .expect("prepare")
+        .query_map(rusqlite::params![entity, id, code_of(table, col)], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("issues")
+}
+
+/// A body version's display in the manifest's form.
+fn display_of(source: Option<i64>, reason: Option<i64>, text: Option<String>) -> Value {
+    match (source, text) {
+        (Some(s), Some(t)) => json!({
+            "text": t,
+            "source": match s {
+                1 => "attributedBody",
+                2 => "text",
+                _ => "textLossy",
+            }
+        }),
+        _ => json!({
+            "noneReason": match reason {
+                Some(1) => "attributedBodyUnusable",
+                Some(2) => "textEmpty",
+                _ => "noSource",
+            }
+        }),
+    }
+}
+
+/// id, handle_ref, current_body_id, sort_key, first_rank, first_src_rowid.
+type MessageKeys = (i64, Option<i64>, Option<i64>, Vec<u8>, Vec<u8>, i64);
+/// id, display_source, display_none_reason, display_text.
+type BodyDisplay = (i64, Option<i64>, Option<i64>, Option<String>);
+
+/// The archive's messages in the manifest's form, in archive order
+/// (`sort_key`, then id): `{ref, sort, handle, display, bodies, columns,
+/// history}`, with unkeyed refs (message and handle) as `"unkeyed"`. The
+/// joins, Recently Deleted markers and lineage labels are slice 4h's.
+pub fn message_view(db: &Path) -> Vec<Value> {
+    let c = read_only(db);
+    let ids: Vec<MessageKeys> = c
+        .prepare(
+            "SELECT id, handle_ref, current_body_id, sort_key, first_rank, first_src_rowid              FROM message ORDER BY sort_key, id",
+        )
+        .expect("prepare")
+        .query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
+        })
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("ids");
+    let mut out = Vec::new();
+    for (id, handle, current, sort_key, first_rank, first_src) in ids {
+        let mut columns = Map::new();
+        for (col, quad) in MESSAGE_SAMPLED {
+            let issues = issues_of(&c, "message", id, col);
+            let v = if *quad {
+                c.query_row(
+                    &format!(
+                        "SELECT {col}_raw, {col}_st, {col}_unit, {col}_utc_ns FROM message WHERE id = ?1"
+                    ),
+                    [id],
+                    |r| {
+                        let st: Option<i64> = r.get(1)?;
+                        Ok(match st {
+                            None => json!({
+                                "raw": r.get::<_, i64>(0)?,
+                                "unit": unit_name(r.get(2)?),
+                                "utcNs": r.get::<_, Option<i64>>(3)?,
+                            }),
+                            st => cell_json("message", col, ValueRef::Null, st, &issues),
+                        })
+                    },
+                )
+                .expect("quad")
+            } else {
+                c.query_row(
+                    &format!("SELECT {col}, {col}_st FROM message WHERE id = ?1"),
+                    [id],
+                    |r| Ok(cell_json("message", col, r.get_ref(0)?, r.get(1)?, &issues)),
+                )
+                .expect("cell")
+            };
+            columns.insert(source_name("message", col), v);
+        }
+        let mut history: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+        let mut stmt = c
+            .prepare("SELECT col, value FROM value_history WHERE entity = 3 AND row_id = ?1")
+            .expect("prepare");
+        let mut q = stmt.query([id]).expect("query");
+        while let Some(r) = q.next().expect("row") {
+            let code: i64 = r.get(0).expect("col");
+            let col = name_of(code);
+            history
+                .entry(source_name("message", col))
+                .or_default()
+                .push(history_json("message", col, r.get_ref(1).expect("value")));
+        }
+        for v in history.values_mut() {
+            v.sort_by_key(|x| x.to_string());
+        }
+        let bodies: Vec<BodyDisplay> = c
+            .prepare(
+                "SELECT id, display_source, display_none_reason, display_text                  FROM message_body WHERE message_id = ?1",
+            )
+            .expect("prepare")
+            .query_map([id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .expect("query")
+            .collect::<Result<_, _>>()
+            .expect("bodies");
+        let mut display = Value::Null;
+        let mut list: Vec<Value> = Vec::new();
+        for (bid, source, reason, text) in bodies {
+            let d = display_of(source, reason, text);
+            if Some(bid) == current {
+                display = d.clone();
+            }
+            let mut b = d;
+            b["current"] = json!(Some(bid) == current);
+            list.push(b);
+        }
+        list.sort_by_key(|b| (b["current"] != true, b.to_string()));
+        let sort = if sort_key.first() == Some(&0) {
+            let ns: i64 = c
+                .query_row("SELECT date_utc_ns FROM message WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })
+                .expect("utc");
+            json!({ "utcNs": ns })
+        } else {
+            json!({ "undated": { "firstRank": hex(&first_rank), "firstSrcRowid": first_src } })
+        };
+        let handle = handle.map(|h| {
+            let r = manifest_ref("handle", &c, h);
+            Value::String(r)
+        });
+        out.push(json!({
+            "ref": manifest_ref("message", &c, id),
+            "sort": sort,
+            "handle": handle,
+            "display": display,
+            "bodies": list,
+            "columns": Value::Object(columns),
+            "history": history,
+        }));
+    }
+    out
+}
+
+/// A manifest's messages in [`message_view`]'s form, in the manifest's
+/// order.
+pub fn message_expected(m: &Value) -> Vec<Value> {
+    let unkeyed = |v: &Value| match v.as_str() {
+        Some(r) if r.starts_with("unkeyed:") => json!("unkeyed"),
+        _ => v.clone(),
+    };
+    m["content"]["messages"]
+        .as_array()
+        .expect("messages")
+        .iter()
+        .map(|r| {
+            let mut history = r["history"].clone();
+            if let Some(h) = history.as_object_mut() {
+                for v in h.values_mut() {
+                    if let Some(a) = v.as_array_mut() {
+                        a.sort_by_key(|x| x.to_string());
+                    }
+                }
+            }
+            let mut bodies: Vec<Value> = r["bodies"].as_array().expect("bodies").clone();
+            bodies.sort_by_key(|b| (b["current"] != true, b.to_string()));
+            json!({
+                "ref": unkeyed(&r["ref"]),
+                "sort": r["sort"],
+                "handle": unkeyed(&r["handle"]),
+                "display": r["display"],
+                "bodies": bodies,
+                "columns": r["columns"],
+                "history": history,
+            })
+        })
+        .collect()
 }
 
 /// The counts of one entity in an `import.json`-style object, as
@@ -790,7 +1086,7 @@ fn declared(kind: Option<oma_messages::ColumnKind>) -> &'static str {
 
 /// Every known table with every known column, built from the reader's own
 /// static list (a synthetic stand-in, not any real schema).
-fn full_schema() -> String {
+pub fn full_schema() -> String {
     use oma_messages::KnownTable;
     let mut s = String::new();
     for t in KnownTable::ALL {
@@ -817,12 +1113,20 @@ fn full_schema() -> String {
     s
 }
 
-/// A synthetic sms.db: `handles` handle rows and `chats` chat rows with
-/// shuffled rowids that include `i64::MIN` and `i64::MAX`, duplicated keys
-/// (every occurrence must be unkeyed), identical keyless rows (same
-/// fingerprint, counted occurrences), empty identifiers and NULLs. Every
-/// value is synthetic.
-pub fn synthetic_sms(seed: u64, handles: usize, chats: usize) -> Vec<u8> {
+/// Which of [`synthetic_sms`]'s message rows it lists in Recently Deleted:
+/// positions among the rows with a rowid other than `i64::MIN` and
+/// `i64::MAX`, in insertion order.
+pub const SYNTHETIC_RD_POSITIONS: [usize; 3] = [5, 17, 29];
+
+/// A synthetic sms.db: `handles` handle rows, `chats` chat rows and
+/// `messages` message rows with shuffled rowids that include `i64::MIN` and
+/// `i64::MAX`, duplicated keys (every occurrence must be unkeyed),
+/// identical keyless rows (same fingerprint, counted occurrences), empty
+/// identifiers and NULLs. Messages also carry undecodable
+/// `attributedBody` and `message_summary_info` bytes, invalid UTF-8,
+/// tapbacks, out-of-range booleans and undated rows, and three of them are
+/// in Recently Deleted. Every value is synthetic.
+pub fn synthetic_sms(seed: u64, handles: usize, chats: usize, messages: usize) -> Vec<u8> {
     let mut rng = Rng::new(seed);
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().join("sms.db");
@@ -885,6 +1189,88 @@ pub fn synthetic_sms(seed: u64, handles: usize, chats: usize) -> Vec<u8> {
             ],
         )
         .expect("chat");
+    }
+    let mids = rowids(&mut rng, messages);
+    for (i, rowid) in mids.iter().enumerate() {
+        // Every 8th row has no GUID and identical content (same
+        // fingerprint); every 9th repeats an earlier GUID; every 10th has an
+        // empty one.
+        let keyless = i % 8 == 7;
+        let guid: Option<String> = if keyless {
+            None
+        } else if i % 9 == 8 {
+            Some(format!("SYNTH-MSG-GUID-{:04}", i % 5))
+        } else if i % 10 == 3 {
+            Some(String::new())
+        } else {
+            Some(format!("SYNTH-MSG-GUID-{i:04}"))
+        };
+        let text: Option<Vec<u8>> = if keyless {
+            Some(b"SYNTH-SAME".to_vec())
+        } else if i % 11 == 4 {
+            Some(b"SYNTH-\xff\xfe".to_vec())
+        } else if i % 13 == 2 {
+            None
+        } else {
+            Some(format!("SYNTH-BODY-{i} caf\u{e9}").into_bytes())
+        };
+        let handle = if keyless || hids.is_empty() {
+            0
+        } else {
+            hids[usize::try_from(rng.below(hids.len() as u64)).expect("i")]
+        };
+        let date: i64 = if keyless || i % 12 == 1 {
+            0
+        } else if i % 17 == 3 {
+            -5
+        } else {
+            790_000_000_000_000_000 + i64::try_from(i).expect("i") * 60_000_000_000
+        };
+        let attributed: Option<Vec<u8>> = (i % 6 == 2 && !keyless).then(|| vec![0x04, 0x0b, 0x01]);
+        let summary: Option<Vec<u8>> = (i % 7 == 3 && !keyless).then(|| b"not a plist".to_vec());
+        let (atype, aguid) = if i % 5 == 4 && !keyless {
+            (2001i64, Some(format!("p:0/SYNTH-MSG-GUID-{:04}", i - 1)))
+        } else {
+            (0, None)
+        };
+        let is_read: i64 = if i % 14 == 9 {
+            7
+        } else {
+            i64::try_from(i % 2).expect("b")
+        };
+        c.execute(
+            "INSERT INTO message (ROWID, guid, text, attributedBody, message_summary_info,                  handle_id, date, is_from_me, is_read, service, associated_message_type,                  associated_message_guid, item_type, subject)              VALUES (?1, ?2, CAST(?3 AS TEXT), ?4, ?5, ?6, ?7, ?8, ?9, 'iMessage', ?10, ?11, 0, ?12)",
+            rusqlite::params![
+                rowid,
+                guid,
+                text,
+                attributed,
+                summary,
+                handle,
+                date,
+                i64::from(!keyless && i % 3 == 0),
+                if keyless { 0 } else { is_read },
+                atype,
+                aguid,
+                (i % 15 == 0 && !keyless).then(|| format!("SYNTH-SUBJECT-{i}")),
+            ],
+        )
+        .expect("message");
+    }
+    // Never an extreme rowid (the tests check those are imported).
+    let plain: Vec<i64> = mids
+        .iter()
+        .copied()
+        .filter(|r| *r != i64::MIN && *r != i64::MAX)
+        .collect();
+    for (n, at) in SYNTHETIC_RD_POSITIONS.iter().enumerate() {
+        if let Some(m) = plain.get(*at) {
+            c.execute(
+                "INSERT INTO chat_recoverable_message_join (chat_id, message_id, delete_date)                  VALUES (?1, ?2, ?3)",
+                rusqlite::params![cids.first().copied().unwrap_or(1), m, i64::try_from(n).expect("n")],
+            )
+            .expect("recoverable");
+        }
     }
     drop(c);
     fs::read(&path).expect("read")

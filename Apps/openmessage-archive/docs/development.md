@@ -294,6 +294,17 @@ and 8 minutes on Windows. Measured on 2026-10-18 in a Linux container
 | of which `resume.rs` | 2.5 s |
 | of which `import_core.rs` | 1.4 s |
 
+Slice 4g (same container, same method):
+
+| What | Time |
+|---|---|
+| `cargo test --workspace`, wall clock (including compilation of the changed crates) | 3 min 46 s |
+| `oma-archive`, all binaries | 25 s |
+| of which `crash.rs` (30 child processes) | 10.4 s |
+| of which `resume.rs` | 5.2 s |
+| of which `import_core.rs` | 2.5 s |
+| of which `messages.rs` | 1.6 s |
+
 All of `oma-archive` is M4 test time, so slice 4f is well inside the
 budget on Linux. CI runners and Windows have not been measured; the
 Windows crash plan is smaller on purpose (§18.12). Later slices add their

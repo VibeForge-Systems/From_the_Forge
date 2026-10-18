@@ -317,6 +317,163 @@ closed_code! {
 }
 
 closed_code! {
+    /// `message.item_kind`: the kind `oma-messages` derives from
+    /// `item_type` and `group_action_type` (M3 §11.4). `Unknown` keeps the
+    /// raw pair in the row's own columns.
+    ItemKindCode {
+        Unknown = 0,
+        Message = 1,
+        ParticipantAdded = 2,
+        OwnNumberChanged = 3,
+        ParticipantRemoved = 4,
+        GroupRenamed = 5,
+        ParticipantLeft = 6,
+        GroupPhotoChanged = 7,
+        GroupPhotoRemoved = 8,
+        BackgroundChanged = 9,
+        BackgroundRemoved = 10,
+        LegacySharedLocation = 11,
+        AudioKept = 12,
+        SharePlay = 13,
+    }
+}
+
+closed_code! {
+    /// `message.assoc_kind`: the mapped `associated_message_type` (M3
+    /// §11.1). The raw integer is in `assoc_type`.
+    AssocKindCode {
+        NoAssociation = 0,
+        StickerLegacy = 1,
+        PollVote = 2,
+        /// A raw value with no documented meaning.
+        Unknown = 3,
+        TapbackLove = 10,
+        TapbackLike = 11,
+        TapbackDislike = 12,
+        TapbackLaugh = 13,
+        TapbackEmphasize = 14,
+        TapbackQuestion = 15,
+        TapbackEmoji = 16,
+        TapbackSticker = 17,
+        RemovedLove = 20,
+        RemovedLike = 21,
+        RemovedDislike = 22,
+        RemovedLaugh = 23,
+        RemovedEmphasize = 24,
+        RemovedQuestion = 25,
+        RemovedEmoji = 26,
+        RemovedSticker = 27,
+    }
+}
+
+closed_code! {
+    /// `message_body.display_none_reason`: why a body version has no
+    /// `display_text` (D58).
+    DisplayNoneReason {
+        /// `attributedBody` holds a value (or one over its cap, or an
+        /// unreadable one) that gave no text, and `text` gave none either.
+        AttributedBodyUnusable = 1,
+        /// `text` is the empty string and there is no `attributedBody`.
+        TextEmpty = 2,
+        /// Neither source holds a usable value: both absent or NULL, or
+        /// `text` over its cap or unreadable with no `attributedBody`.
+        NoSource = 3,
+    }
+}
+
+closed_code! {
+    /// `message_body.edit_label`: the `oma-messages` `EditLabel` (M3
+    /// §11.3). `edit_label_a` and `edit_label_b` hold its numbers.
+    EditLabelCode {
+        /// A label this build does not know (a newer reader).
+        Undeterminable = 0,
+        NotRecorded = 1,
+        SummaryUnreadable = 2,
+        /// `a` = unsent parts, `b` = edited parts.
+        UnsentPartsAndEditHistory = 3,
+        /// `a` = unsent parts.
+        UnsentParts = 4,
+        /// `a` = edited parts, `b` = the most entries of one part.
+        EditHistory = 5,
+        DateEditedNoBody = 6,
+        DateEditedOnly = 7,
+        NoEditRecorded = 8,
+        Undetermined = 9,
+    }
+}
+
+closed_code! {
+    /// `message_body.attributed_error` and `run_issue`: the typedstream
+    /// decoder's `TsErrorKind` (fatal kinds 1–11, run issues 12–15).
+    TsErrorCode {
+        UnsupportedHeader = 1,
+        Truncated = 2,
+        UnexpectedTag = 3,
+        BadReference = 4,
+        UnsupportedType = 5,
+        TooDeep = 6,
+        Budget = 7,
+        MaterialisationBudget = 8,
+        TrailingBytes = 9,
+        NotAttributedString = 10,
+        InvalidUtf8 = 11,
+        RunLengthMismatch = 12,
+        RunOverflow = 13,
+        RunSplitsSurrogate = 14,
+        BadRunIndex = 15,
+        /// A kind this build does not know.
+        Unrecognised = 31,
+    }
+}
+
+closed_code! {
+    /// `message_edit_entry.at_kind`: how an edit entry's `d` was stored.
+    SummaryTimeKind {
+        Integer = 1,
+        Real = 2,
+        /// A plist date (Cocoa seconds by definition); `at_raw` is NULL.
+        Date = 3,
+    }
+}
+
+/// The bit of each `oma-messages` `AttrFlag` in `message_body_part.flags`:
+/// its position in this list. Pinned by name; never reordered.
+pub const ATTR_FLAG_BITS: [&str; 7] = [
+    "bold",
+    "italic",
+    "underline",
+    "strikethrough",
+    "one_time_code",
+    "inline_emoji",
+    "audio_transcription",
+];
+
+/// The bit of each known attribute key in
+/// `message_body_part.keys_present`: its position in this list. Pinned by
+/// name; never reordered.
+pub const ATTR_KEY_BITS: [&str; 19] = [
+    "__kIMMessagePartAttributeName",
+    "__kIMFileTransferGUIDAttributeName",
+    "__kIMFilenameAttributeName",
+    "__kIMInlineMediaWidthAttributeName",
+    "__kIMInlineMediaHeightAttributeName",
+    "IMAudioTranscription",
+    "__kIMMentionConfirmedMention",
+    "__kIMLinkAttributeName",
+    "__kIMEmojiImageAttributeName",
+    "__kIMTextEffectAttributeName",
+    "__kIMTextBoldAttributeName",
+    "__kIMTextItalicAttributeName",
+    "__kIMTextUnderlineAttributeName",
+    "__kIMTextStrikethroughAttributeName",
+    "__kIMOneTimeCodeAttributeName",
+    "__kIMCalendarEventAttributeName",
+    "__kIMDataDetectedAttributeName",
+    "__kIMMoneyAttributeName",
+    "__kIMAddressAttributeName",
+];
+
+closed_code! {
     /// Bits of `import_session.qualifiers`: the closed qualifier kinds a
     /// session carries. Each value is a bit position.
     QualifierBit {
@@ -743,6 +900,78 @@ mod tests {
         }
         assert_eq!(ArchiveColumn::from_code(100), None);
         assert_eq!(ArchiveColumn::from_code(342), None);
+    }
+
+    /// The codes added with the message pass (slice 4g).
+    #[test]
+    fn message_codes_are_pinned() {
+        let got: [(&str, Vec<i64>); 6] = [
+            (
+                "ItemKindCode",
+                ItemKindCode::ALL.iter().map(|v| v.code()).collect(),
+            ),
+            (
+                "AssocKindCode",
+                AssocKindCode::ALL.iter().map(|v| v.code()).collect(),
+            ),
+            (
+                "DisplayNoneReason",
+                DisplayNoneReason::ALL.iter().map(|v| v.code()).collect(),
+            ),
+            (
+                "EditLabelCode",
+                EditLabelCode::ALL.iter().map(|v| v.code()).collect(),
+            ),
+            (
+                "TsErrorCode",
+                TsErrorCode::ALL.iter().map(|v| v.code()).collect(),
+            ),
+            (
+                "SummaryTimeKind",
+                SummaryTimeKind::ALL.iter().map(|v| v.code()).collect(),
+            ),
+        ];
+        let want: [(&str, &[i64]); 6] = [
+            (
+                "ItemKindCode",
+                &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+            ),
+            (
+                "AssocKindCode",
+                &[
+                    0, 1, 2, 3, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 25, 26, 27,
+                ],
+            ),
+            ("DisplayNoneReason", &[1, 2, 3]),
+            ("EditLabelCode", &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
+            (
+                "TsErrorCode",
+                &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 31],
+            ),
+            ("SummaryTimeKind", &[1, 2, 3]),
+        ];
+        for ((name, got), (wname, want)) in got.iter().zip(want.iter()) {
+            assert_eq!(name, wname);
+            assert_eq!(got.as_slice(), *want, "{name}");
+        }
+        // The bit tables follow the reader's own order today; the archive
+        // pins its own copy by name.
+        let flags: Vec<&str> = oma_messages::AttrFlag::ALL
+            .iter()
+            .map(|f| f.name())
+            .collect();
+        assert_eq!(flags, ATTR_FLAG_BITS);
+        let keys: Vec<&str> = oma_messages::AttrKey::ALL
+            .iter()
+            .map(|k| k.name())
+            .collect();
+        assert_eq!(keys, ATTR_KEY_BITS);
+        // Every decoder error kind has its own code.
+        let names: Vec<&str> = oma_messages::TsErrorKind::ALL
+            .iter()
+            .map(|k| k.name())
+            .collect();
+        assert_eq!(names.len(), 15);
     }
 
     #[test]

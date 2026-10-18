@@ -355,6 +355,41 @@ there is the batch commit points and the creation rename.
 (synthetic fixtures only)" means the automated tests pass against
 generated stand-ins.
 
+
+### Milestone 4 messages, bodies and FTS (slice 4g)
+
+Run in the same Linux container on 2026-10-18 (bundled SQLite 3.53.2);
+not CI, not a desktop, synthetic data only. The catalogue was not
+regenerated: `SHA256SUMS` and `EXPECTED.SHA256SUMS` are unchanged.
+
+- **Messages against the model.** Each of the 12 entries alone, and all
+  ten scenarios in every order, gave exactly the messages of their
+  manifests: sampled columns and `Col` states, history, the handle
+  reference, the current display text and source or none-reason, every
+  body version, and the `sort_key` order; excluded Recently Deleted
+  messages were absent. Content snapshots (now including the message,
+  body, part, edit-entry and unsent-part tables) were equal in both orders.
+- **Idempotency.** Every entry imported again in a second session
+  inserted no message or body and left the content snapshot unchanged.
+- **Versions and search.** After v1 then v2 of device 1, the edited
+  message had two versions and the unsent one an empty current version;
+  the earlier texts still matched in `message_fts`, filtered out by the
+  join to `current_body_id`. v2 then v1 left the newer bodies current. A
+  body marked as written by an older decoder was re-derived in place.
+- **Tokenizer** on `imp-fts-plain`: `cafe`, `CAFE` and `café` matched the
+  NFC, NFD and upper-case rows; `naive` matched `naïve`; parts of unspaced
+  CJK and Thai runs, a single emoji and `strasse` did not match.
+- **Recently Deleted**: excluded by default (4 of `imp-rd-plain`), only
+  re-observed when already archived (2 after v1, row and bodies
+  unchanged), imported with the opt-in (4).
+- **Crash, cancel and resume** now run through P3 (40 to 60 synthetic
+  messages with undecodable bodies, duplicated GUIDs, identical keyless
+  rows and three Recently Deleted rows); every result equalled the
+  uninterrupted import. `integrity_check`, `foreign_key_check` and the FTS
+  rank-1 check were clean after every import.
+
+**Not yet observed:** any of this on Windows.
+
 ### Synthetic fixtures
 
 Every M2 cell in this table passed in CI on Ubuntu 22.04 and Windows

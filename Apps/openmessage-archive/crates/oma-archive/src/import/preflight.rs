@@ -12,12 +12,25 @@
 //!   options and lineage all equal this import's; every other unfinished
 //!   session is superseded.
 //!
-//! The Recently Deleted scans, the attachment estimate and the gate come
-//! with the passes that need them (slices 4g–4j).
+//! - **P0, the recoverable scan** (step 2, D60): the message rowids that
+//!   `chat_recoverable_message_join` lists, sorted, capped at
+//!   [`RECOVERABLE_SCAN_CAP`] join rows. It is re-run on every resume.
+//! - **The Recently Deleted classification** (step 3, during the message
+//!   key scan): with the default exclusion, a Recently Deleted row whose
+//!   key is unique in this source and already archived is only re-observed
+//!   ([`RdPlan::archived`]); every other Recently Deleted row, an unkeyed
+//!   one included, is excluded ([`RdPlan::excluded`]). The archive lookup
+//!   runs for Recently Deleted rows only, one at a time; no key outlives
+//!   its row.
+//!
+//! The attachment scans, the estimate and the gate come with the passes
+//! that need them (slices 4h–4j).
 
 use std::ops::ControlFlow;
 
-use oma_messages::{Cursor, HandleKeyRow, KeyRow, MessagesCtx, MessagesError, SmsDb};
+use oma_messages::{
+    Col, Cursor, HandleKeyRow, KeyRow, MessagesCtx, MessagesError, RecoverableLink, SmsDb,
+};
 use rusqlite::Connection;
 
 use super::bind::Cell;
@@ -26,6 +39,88 @@ use crate::schema::codes::{Entity, SessionState};
 
 /// The most rows of one keyed table the key scan reads (the D46 cap).
 pub const KEY_SCAN_CAP: u64 = 4_194_304;
+
+/// The most `chat_recoverable_message_join` rows P0 reads (the D46 cap).
+/// Over it the backup is not importable: the exclusion could not be
+/// applied (spec §23).
+pub const RECOVERABLE_SCAN_CAP: u64 = 4_194_304;
+
+/// What P0 found.
+pub(crate) enum RecoverableScan {
+    /// The distinct message rowids in Recently Deleted, sorted.
+    Done(Vec<i64>),
+    /// More than [`RECOVERABLE_SCAN_CAP`] join rows.
+    OverLimit,
+}
+
+/// P0 (spec §8.2 step 2): the message rowids in Recently Deleted. A join
+/// row whose `message_id` is not a readable integer names no message and
+/// is not counted here (P8 counts it). `part_text` is never read: the
+/// reader's authorizer denies it.
+pub(crate) fn scan_recoverable(
+    db: &SmsDb<'_>,
+    ctx: &mut MessagesCtx<'_>,
+) -> Result<RecoverableScan, MessagesError> {
+    let mut rows: Vec<i64> = Vec::new();
+    let mut seen = 0u64;
+    let mut over = false;
+    db.for_each_recoverable(Cursor::Start, ctx, |r: RecoverableLink| {
+        seen = seen.saturating_add(1);
+        if seen > RECOVERABLE_SCAN_CAP {
+            over = true;
+            return ControlFlow::Break(());
+        }
+        if let Col::Value(m) = r.message_id {
+            rows.push(m);
+        }
+        ControlFlow::Continue(())
+    })?;
+    if over {
+        return Ok(RecoverableScan::OverLimit);
+    }
+    rows.sort_unstable();
+    rows.dedup();
+    Ok(RecoverableScan::Done(rows))
+}
+
+/// How P3 treats the Recently Deleted rows of this source (spec §8.8).
+/// Every list is sorted. Its `Debug` prints sizes only.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub(crate) struct RdPlan {
+    /// P0: the message rowids in Recently Deleted.
+    pub(crate) rd: Vec<i64>,
+    /// Not imported (default exclusion): no row, no map, no join.
+    pub(crate) excluded: Vec<i64>,
+    /// Already archived (default exclusion): mapped and re-observed for
+    /// the lineage only; no column, body or rank changes.
+    pub(crate) archived: Vec<i64>,
+}
+
+impl std::fmt::Debug for RdPlan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "RdPlan(rd {}, excluded {}, archived {})",
+            self.rd.len(),
+            self.excluded.len(),
+            self.archived.len()
+        )
+    }
+}
+
+impl RdPlan {
+    pub(crate) fn is_rd(&self, rowid: i64) -> bool {
+        self.rd.binary_search(&rowid).is_ok()
+    }
+
+    pub(crate) fn is_excluded(&self, rowid: i64) -> bool {
+        self.excluded.binary_search(&rowid).is_ok()
+    }
+
+    pub(crate) fn is_archived(&self, rowid: i64) -> bool {
+        self.archived.binary_search(&rowid).is_ok()
+    }
+}
 
 /// The key digests that occur more than once in this source, per entity.
 #[derive(Clone, Default, PartialEq, Eq)]
@@ -129,17 +224,48 @@ pub(crate) fn handle_digest(address: &Cell, service: &Cell) -> Option<([u8; 16],
 
 /// What the key scan found.
 pub(crate) enum KeyScan {
-    Done(DupSet),
+    /// The duplicate set, and the Recently Deleted plan.
+    Done(DupSet, RdPlan),
     /// More than [`KEY_SCAN_CAP`] rows in this entity's table.
     OverLimit(Entity),
 }
 
-/// The key scan of §8.2 step 3.
+/// Why the key scan stopped.
+pub(crate) enum ScanError {
+    /// Reading the source.
+    Read(MessagesError),
+    /// The archive lookup of a Recently Deleted row's key.
+    Archive(rusqlite::Error),
+}
+
+impl From<MessagesError> for ScanError {
+    fn from(e: MessagesError) -> Self {
+        ScanError::Read(e)
+    }
+}
+
+/// One Recently Deleted message row, as the key scan saw it.
+struct RdRow {
+    rowid: i64,
+    /// The key digest, when the GUID is a usable key.
+    digest: Option<[u8; 16]>,
+    /// The key is already archived as a keyed message.
+    archived: bool,
+}
+
+/// The key scan of §8.2 step 3. `rd` is P0's set; for each of its rows
+/// with a usable key, `is_archived` is asked whether that key is already
+/// a keyed message in the archive (only when `exclude_rd`).
 pub(crate) fn scan_keys(
     db: &SmsDb<'_>,
     ctx: &mut MessagesCtx<'_>,
-) -> Result<KeyScan, MessagesError> {
+    rd: Vec<i64>,
+    exclude_rd: bool,
+    is_archived: &mut dyn FnMut(&[u8]) -> rusqlite::Result<bool>,
+) -> Result<KeyScan, ScanError> {
     let mut out = DupSet::default();
+    let mut rd_rows: Vec<RdRow> = Vec::new();
+    let mut lookup_err: Option<rusqlite::Error> = None;
     for entity in KEYED {
         let mut digests: Vec<[u8; 16]> = Vec::new();
         let mut rows = 0u64;
@@ -171,8 +297,29 @@ pub(crate) fn scan_keys(
                 }
                 Entity::Message => {
                     db.for_each_message_key(Cursor::Start, ctx, |r: KeyRow| {
-                        push(guid_digest(&Cell::text(&r.guid)).map(|(d, _)| d))
+                        let key = guid_digest(&Cell::text(&r.guid));
+                        if exclude_rd && rd.binary_search(&r.rowid).is_ok() {
+                            let archived = match &key {
+                                Some((_, k)) => match is_archived(k) {
+                                    Ok(a) => a,
+                                    Err(e) => {
+                                        lookup_err = Some(e);
+                                        return ControlFlow::Break(());
+                                    }
+                                },
+                                None => false,
+                            };
+                            rd_rows.push(RdRow {
+                                rowid: r.rowid,
+                                digest: key.as_ref().map(|(d, _)| *d),
+                                archived,
+                            });
+                        }
+                        push(key.map(|(d, _)| d))
                     })?;
+                    if let Some(e) = lookup_err.take() {
+                        return Err(ScanError::Archive(e));
+                    }
                 }
                 _ => {
                     db.for_each_attachment_key(Cursor::Start, ctx, |r: KeyRow| {
@@ -189,7 +336,24 @@ pub(crate) fn scan_keys(
             *s = dups;
         }
     }
-    Ok(KeyScan::Done(out))
+    // A Recently Deleted row is only re-observed when its key is unique in
+    // this source and archived; every other one is excluded (spec §8.2
+    // step 3: an unkeyed row counts as excluded).
+    let mut plan = RdPlan {
+        rd,
+        ..RdPlan::default()
+    };
+    for r in rd_rows {
+        let keyed = r.digest.is_some_and(|d| !out.contains(Entity::Message, &d));
+        if keyed && r.archived {
+            plan.archived.push(r.rowid);
+        } else {
+            plan.excluded.push(r.rowid);
+        }
+    }
+    plan.archived.sort_unstable();
+    plan.excluded.sort_unstable();
+    Ok(KeyScan::Done(out, plan))
 }
 
 /// The stored `import_dup_key` rows of a session being continued.

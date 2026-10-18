@@ -43,6 +43,8 @@ pub(crate) enum Param<'a> {
     Null,
     Int(i64),
     Bytes(&'a [u8]),
+    /// A derived `TEXT` column (`message_body.display_text`).
+    Text(&'a str),
     Val(&'a Val),
     Raw(&'a Raw),
 }
@@ -53,6 +55,7 @@ impl ToSql for Param<'_> {
             Param::Null => Ok(ToSqlOutput::Borrowed(ValueRef::Null)),
             Param::Int(i) => Ok(ToSqlOutput::Borrowed(ValueRef::Integer(*i))),
             Param::Bytes(b) => Ok(ToSqlOutput::Borrowed(ValueRef::Blob(b))),
+            Param::Text(t) => Ok(ToSqlOutput::Borrowed(ValueRef::Text(t.as_bytes()))),
             Param::Val(v) => v.to_sql(),
             Param::Raw(r) => r.to_sql(),
         }
@@ -62,6 +65,18 @@ impl ToSql for Param<'_> {
 impl Param<'_> {
     pub(crate) fn opt_int(v: Option<i64>) -> Param<'static> {
         v.map_or(Param::Null, Param::Int)
+    }
+
+    /// The same parameter, reborrowed.
+    pub(crate) fn borrow(&self) -> Param<'_> {
+        match self {
+            Param::Null => Param::Null,
+            Param::Int(i) => Param::Int(*i),
+            Param::Bytes(b) => Param::Bytes(b),
+            Param::Text(t) => Param::Text(t),
+            Param::Val(v) => Param::Val(v),
+            Param::Raw(r) => Param::Raw(r),
+        }
     }
 }
 
@@ -341,7 +356,8 @@ impl<'c> MergeStmts<'c> {
         })
     }
 
-    fn write_issues(
+    /// Write a cell's `value_issue` rows (the caller deleted the old ones).
+    pub(crate) fn write_issues(
         &mut self,
         entity: Entity,
         row: i64,
@@ -441,7 +457,8 @@ fn push_cell<'a>(c: &ArchiveColumn, cell: &'a Cell, out: &mut Vec<Param<'a>>) {
 }
 
 /// Insert a new row for `cells` (one per [`TableDef::cols`]) with the
-/// derived values `derived` (one per [`TableDef::derived`]).
+/// derived values `derived` (one per [`TableDef::derived`]). Returns the
+/// new row's id.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn insert(
     def: &TableDef,
@@ -450,7 +467,7 @@ pub(crate) fn insert(
     conn: &Connection,
     ident: &Ident,
     cells: &[Cell],
-    derived: &[Option<i64>],
+    derived: &[Param<'_>],
     rank: &Rank,
     session: i64,
 ) -> rusqlite::Result<Applied> {
@@ -477,7 +494,7 @@ pub(crate) fn insert(
     for (c, cell) in def.cols.iter().zip(cells) {
         push_cell(c, cell, &mut p);
     }
-    p.extend(derived.iter().map(|d| Param::opt_int(*d)));
+    p.extend(derived.iter().map(Param::borrow));
     p.push(Param::Int(session));
     p.push(Param::Bytes(rank.as_bytes()));
     p.push(Param::Int(session));

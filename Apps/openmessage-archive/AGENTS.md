@@ -115,8 +115,9 @@ Each one is enforced in code. Keep it that way.
   IPC commands and state. `oma-fs`, `oma-backup` (M2) and `oma-messages`
   (M3) are implemented; `oma-archive` (M4) is in progress (its skeleton:
   create, open, lock, schema v1, fingerprint, migrations; and the import
-  core: sessions, the duplicate-key scan, the merge engine and the handle
-  and chat passes, `Archive::import_core`); the planned
+  core: sessions, the Recently Deleted and duplicate-key scans, the merge
+  engine, and the handle, chat and message passes with body versions and
+  the FTS index, `Archive::import_core`); the planned
   crates are `oma-export` (M6) and `oma-device` (M7). Each must build and test without
   Tauri. The shell's `src-tauri/src/backups/` (registry, job table, worker,
   DTOs, messages) has no Tauri types either, so it is tested without a
@@ -263,7 +264,9 @@ Never hand-edit generated files.
   `INSERT OR REPLACE`, never `RETURNING` (`tests/source_rules.rs`). A
   record's `UPDATE` sets only the columns that changed, so the guarded
   triggers fire only on real changes. A batch never commits after a
-  statement error. Until finalize exists (slice 4j) a session whose passes
+  statement error. Derived columns (`item_kind`, `assoc_*`, `sort_key`,
+  a body's `display_text`) are computed in Rust from the stored raw cells;
+  the FTS index is written **only** by the `message_body` triggers. Until finalize exists (slice 4j) a session whose passes
   all ran stays **running**: `CoreOutcome::PassesDone` is not "completed".
 - **Crash points are `fault::point(FaultPoint::…)` calls.** They compile
   to nothing without the feature. `tests/crash.rs` re-runs its own binary
