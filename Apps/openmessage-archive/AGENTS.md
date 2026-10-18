@@ -16,8 +16,11 @@ Messages database and attachments into a searchable SQLite archive.
 
 Work proceeds in milestones; the table and current state are in
 [`README.md`](README.md#roadmap). **Milestone 1 (the shell, settings and
-archive location) is done.** Milestone 2 (backup discovery and import) is
-next.
+archive location) is done.** **Milestone 2 (backup discovery and
+validation) is implemented**: `crates/oma-backup`, the Backups page, six IPC
+commands and a channel-based job model. Its sign-off is pending the Windows
+CI run, the recorded review of the fixture generator, and the manual tests
+in `docs/compatibility.md`. Milestone 3 (extraction) is next.
 
 Read these before designing anything:
 
@@ -71,7 +74,8 @@ Then run the root gate. Note that the root gate does **not** build this app.
 Each one is enforced in code. Keep it that way.
 
 1. **Source backups are read-only.**
-   - Never write inside a backup or inside `MobileSync/Backup`.
+   - Never write inside a backup, inside `MobileSync/Backup`, or inside
+     iMazing's default store `iMazing/Backups`.
    - Open source databases read-only, from copies.
    - `crates/oma-fs` guards location choice.
 2. **Paths from the outside go through `oma-fs`.** Any path built from
@@ -99,9 +103,12 @@ Each one is enforced in code. Keep it that way.
 ## Where code goes
 
 - **Domain logic belongs in `crates/`.** `src-tauri/` stays a thin layer of
-  IPC commands and state. The planned crates are `oma-backup` (M2),
-  `oma-messages` (M3), `oma-archive` (M4), `oma-export` (M6) and
-  `oma-device` (M7). Each must build and test without Tauri.
+  IPC commands and state. `oma-fs` and `oma-backup` (M2) are implemented;
+  the planned crates are `oma-messages` (M3), `oma-archive` (M4),
+  `oma-export` (M6) and `oma-device` (M7). Each must build and test without
+  Tauri. The shell's `src-tauri/src/backups/` (registry, job table, worker,
+  DTOs, messages) has no Tauri types either, so it is tested without a
+  window.
 - **Frontend:**
   - Views live in `src/views/`, components in `src/components/`, and Pinia
     stores in `src/stores/`.
@@ -141,10 +148,12 @@ Never hand-edit generated files.
 - **Use permissive licenses only**, per `deny.toml`. Five MPL-2.0 crates that
   come in through Tauri are allowed **by name**. Never add MPL, or any other
   copyleft license, to the global allowlist.
-- **Never copy code from the GPL or CC BY-SA references:** imessage-exporter,
-  imessage-database, crabstep, crabapple, pymobiledevice3, and StackOverflow
-  answer 13793043. They are behavioural references only. MIT
-  `iphone_backup_decrypt` may be ported with attribution.
+- **Never copy code from the GPL, LGPL or CC BY-SA references:**
+  imessage-exporter, imessage-database, crabstep, crabapple,
+  pymobiledevice3, pyiosbackup (GPL-3.0), libimobiledevice including
+  `idevicebackup2` (LGPL-2.1+), and StackOverflow answer 13793043. They are
+  behavioural references only. MIT `iphone_backup_decrypt` may be ported
+  with attribution.
 
 ## Testing
 
@@ -169,6 +178,26 @@ Never hand-edit generated files.
   `npm install`.
 - **`npm ci` fails with `EPERM` or symlink errors on VM shared folders**
   (vboxsf, 9p). Build from a local disk.
+- **Job progress uses a `tauri::ipc::Channel`, which needs no `core:*`
+  permission.** That relies on a Tauri special case marked "remove in v3"
+  (large payloads are fetched through an ACL-exempt internal command).
+  Re-verify by hand on every Tauri upgrade that a `finished` event over
+  8 KiB still arrives.
+- **Crypto crates run at `opt-level = 3` in dev and test builds** (see the
+  root `Cargo.toml`); otherwise the key-derivation tests are slow.
+- **Fixtures are regenerated only with
+  `scripts/fixtures/make_synthetic_backups.py`,** and
+  `tests/fixtures/backups/SHA256SUMS` must be committed with them. Any change
+  invalidates the oracle run recorded in `docs/compatibility.md`.
+- **`tests/fixtures/**` is binary in `.gitattributes`,** so Git for Windows
+  never converts line endings in the fixtures.
+- **Never open the research scratch directory's GPL sources** (the
+  downloaded reference implementations) while writing code. Facts already
+  recorded in `docs/supported-formats.md` are fine to use.
+- **The native `<dialog>` close event is asynchronous.** `ModalDialog` only
+  reports it when the dialog was meant to be open, so a stale event cannot
+  close a dialog that was reopened in the meantime (the password dialog
+  reopens immediately on a wrong password).
 - **Headless smoke testing works**, using `xvfb-run` with
   `WEBKIT_DISABLE_DMABUF_RENDERER=1` and `XDG_CONFIG_HOME` pointed at a
   scratch directory. However, the GTK folder picker cannot list directories

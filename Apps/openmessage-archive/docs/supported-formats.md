@@ -107,8 +107,12 @@ The format used since iOS 10 is called "3.x". The older "2.4" format, with
   ([MVT manifest.py](https://github.com/mvt-project/mvt/blob/main/src/mvt/ios/modules/backup/manifest.py))
 - `file` is an NSKeyedArchiver `MBFile` containing `Size`,
   `ProtectionClass`, `EncryptionKey`, `Birth`, `LastModified`, `Mode` and
-  `Target`. Permissive parsers exist: `ns-keyed-archive` and
-  `nskeyedunarchiver`, both MIT/Apache-2.0.
+  `Target`. **Correction (M2):** the permissive parsers named here
+  earlier, `ns-keyed-archive` and `nskeyedunarchiver`, were judged not
+  suitable: both depend on `plist` and bring dependencies the crate does not
+  need, and neither reads under the budgets milestone 2 requires.
+  `oma-backup` uses a hand-written resolver of about 150 lines over its own
+  budgeted plist value (`mbfile.rs`).
 - Whether WAL files for sms.db appear in backups is **UNVERIFIED**. The
   importer will look for `-wal` and `-shm` fileIDs and apply them to a copy
   if they are present.
@@ -122,11 +126,17 @@ is never partially read.
 The steps below follow [iphone_backup_decrypt](https://github.com/jsharkey13/iphone_backup_decrypt)
 (MIT, 0.11.2), which may be ported with attribution. The
 [andrewdotn StackOverflow answer](https://stackoverflow.com/a/13793043) is
-CC BY-SA 4.0. It is a reference only; do not copy its code.
+CC BY-SA (the version depends on the revision date; not checked). It is a
+reference only; do not copy its code. Milestone 2's Rust code was written
+from this description, RFC 3394 and RFC 8018, not translated from any
+Python; iphone_backup_decrypt was used only as a black-box oracle.
 
 1. The keybag in `BackupKeyBag` is a TLV stream: a 4-byte tag, a 4-byte
    big-endian length, then the value. Tags are TYPE, UUID, WRAP, SALT,
    ITER, DPSL and DPIC, then per class UUID, CLAS, WRAP, KTYP and WPKY.
+   That the header tags always come before the first class record is
+   **UNVERIFIED**: no primary source states the order. The oracle accepts
+   header tags anywhere, and so does the Rust parser (see D18 below).
 2. Derive the passphrase key with PBKDF2-HMAC-SHA256(password, DPSL, DPIC,
    32), then run PBKDF2-HMAC-SHA1(result, SALT, ITER, 32) on that.
    **Iteration counts come from the file and must be capped.** The reference
@@ -148,6 +158,208 @@ CC BY-SA 4.0. It is a reference only; do not copy its code.
 All the primitives come from RustCrypto under MIT OR Apache-2.0: `aes`,
 `cbc`, `aes-kw`, `pbkdf2`, `sha1`, `sha2` and `zeroize`. Before adopting
 them, check that they all resolve to the same `cipher` and `digest` majors.
+
+## Milestone 2 findings and decisions
+
+Everything in this section is implemented in `crates/oma-backup` and tested
+**only against synthetic fixtures** (see [compatibility.md](compatibility.md)).
+
+### Where backups are on Windows
+
+| Root | Source | Status |
+|---|---|---|
+| `<home>\Apple\MobileSync\Backup` (Apple Devices app, iTunes from the Microsoft Store) | Apple's support page ([support.apple.com/en-us/108809](https://support.apple.com/en-us/108809), dated 2026-01-14) names `%USERPROFILE%` only. The subfolder comes from the iphone_backup_decrypt docstring and third-party guides. | Subfolder **UNVERIFIED by Apple** |
+| `<roaming>\Apple Computer\MobileSync\Backup` (iTunes desktop installer) | Apple names `%AppData%` only; the subfolder comes from the same third-party sources | Subfolder **UNVERIFIED by Apple** |
+| `<roaming>\iMazing\Backups` (iMazing's own location) | Observed on a Windows 11 machine running iMazing 3.x, 2026-10-18: iMazing's Backup Location screen offers "iTunes Backup Location" (`C:\Users\<user>\AppData\Roaming\Apple Computer\MobileSync\Backup`) and "iMazing Backup Location" (`C:\Users\<user>\AppData\Roaming\iMazing\Backups`), and the iMazing location was the default there. Note the plural `Backups`: an older iMazing guide spells it `Backup`; the observed screen is taken as authoritative. | Observed on one machine. The location is configurable in iMazing, so other paths exist; those are found only when the user adds the folder. |
+
+- All three roots are always scanned when their base folder is known,
+  because a machine can have several of these apps.
+  The shell passes Tauri's `home_dir()` and `data_dir()`; that `data_dir()`
+  is the roaming AppData folder on Windows is **UNVERIFIED** until checked on
+  Windows 11.
+- MSIX-virtualised locations (`%LOCALAPPDATA%\Packages\AppleInc.iTunes_*`)
+  are not scanned; whether Store iTunes ever writes there is **UNVERIFIED**.
+- Users relocate backups with junctions; links are followed at the root
+  level only. That std's `FileType::is_symlink()` on Windows covers
+  junctions but not cloud-file placeholders is **UNVERIFIED** until the
+  Windows tests run.
+- **Linux has no standard location.** `idevicebackup2` and pymobiledevice3
+  both take a required output directory and write `<dir>/<UDID>/`. Users add
+  that directory with "Add backup folder…".
+- A folder is recognised only by its marker files (at least two of
+  Info.plist, Manifest.plist, Status.plist, Manifest.db), never by its name.
+- **`iMazing.Versions` is never listed.** iMazing keeps archived snapshots
+  of its backups in an `iMazing.Versions` folder at the backup location
+  ([iMazing guide](https://imazing.com/guides/understanding-the-imazingversions-folder-in-imazing-backup-locations)).
+  Its internal layout is **UNVERIFIED**, so a root scan skips a direct child
+  with exactly that name, even if it holds backup marker files. This is the
+  one exception to "never by its name".
+- **The archive folder may not be inside iMazing's default store.** Like
+  `MobileSync/Backup`, a path with consecutive components `iMazing` and
+  `Backups` (case-insensitive) is refused as an archive location and as a
+  staging location (`oma_fs::is_within_imazing_backups`). A store the user
+  moved elsewhere is not recognised by name; the backups inside it are still
+  refused by their marker files.
+
+### Classification rules
+
+`inspect` applies these in order; the first match wins:
+
+1. `Manifest.mbdb` present and `Manifest.db` absent: unsupported (format 2.4).
+2. `Manifest.plist` missing, not a regular file, unreadable, over its cap or
+   over its budget: unreadable.
+3. `Status.plist` missing: incomplete.
+4. `Status.plist` not regular, unreadable or over budget: unreadable.
+5. `SnapshotState` other than exactly `finished`: incomplete. This follows
+   `idevicebackup2`'s `mb2_status_check_snapshot_state`. The other values
+   are **UNVERIFIED** (`uploading` was observed once, below), so the UI
+   shows the raw (sanitised) string.
+6. `IsEncrypted` absent or not a boolean: unsupported.
+7. `Manifest.db` absent or not regular: unreadable.
+8. Encrypted and no `BackupKeyBag`: unsupported. Applies to encrypted
+   backups only; whether unencrypted backups always carry a keybag is
+   **UNVERIFIED** (an unencrypted backup without one gets a note).
+9. Encrypted and no `ManifestKey`: unsupported.
+10. Not encrypted, but Manifest.db lacks the SQLite header: unreadable.
+11. Encrypted, but Manifest.db starts with the SQLite header: unreadable.
+12. Encrypted: needs a password. 13. Otherwise: ready.
+
+A `Snapshot/` folder only adds a note; its meaning is **UNVERIFIED**.
+`Status.plist` `Version` is shown but not used to classify.
+
+**Observed: an interrupted iMazing backup.** On the same Windows 11 machine
+(iMazing 3.x, an iPhone 13 Pro on iOS 26.6.2, 2026-10-18), a backup that did
+not complete left a **binary** `Status.plist` with exactly these keys, and a
+byte-identical `Status.plist.backup` beside it (identifiers and the date are
+not recorded here):
+
+| Key | Type | Value |
+|---|---|---|
+| `IsFullBackup` | boolean | `true` |
+| `Version` | string | `"3.3"` |
+| `UUID` | string | a UUID |
+| `Date` | date | the backup date |
+| `BackupState` | string | `"empty"` |
+| `SnapshotState` | string | `"uploading"` |
+
+Rule 5 classifies it as incomplete, and the UI shows `uploading`.
+`Status.plist.backup` is not read and causes no error. `BackupState` is
+carried as raw text only; what `"empty"` means is **UNVERIFIED**, and
+nothing classifies on it. A synthetic copy of this shape is tested in
+`crates/oma-backup/src/inspect.rs`
+(`an_interrupted_imazing_backup_is_incomplete`).
+
+### Property lists
+
+| File | Keys read | Cap | Over the cap or budget |
+|---|---|---|---|
+| `Info.plist` | `Device Name`, `Display Name`, `Product Type`, `Product Name`, `Product Version`, `Build Version`, `Last Backup Date` | 64 MiB | Not fatal: device details are omitted, with a note |
+| `Status.plist` | `SnapshotState`, `IsFullBackup` (meaning **UNVERIFIED**; shown raw), `Version`, `Date`, `BackupState` | 1 MiB | Unreadable |
+| `Manifest.plist` | `IsEncrypted`, `BackupKeyBag`, `ManifestKey`, and `Lockdown.ProductVersion`, plus `Lockdown.ProductType`, `BuildVersion` and `DeviceName` (those three key names **UNVERIFIED**) | 32 MiB | Unreadable |
+
+The caps are provisional; real file sizes for large backups are
+**UNVERIFIED**. **Never stored:** `Unique Identifier`, `Target Identifier`,
+`Serial Number`, `Phone Number`, `IMEI`, `ICCID`, `MEID`, `GUID`,
+`Installed Applications`, `Applications`, `iTunes Files`, `iTunes
+Settings`. These root keys are skipped while streaming: the stream reader
+still decodes their values, which are counted against the budgets and
+discarded, and no struct has a field for them. Skipping applies to root keys
+only, so Manifest.plist's `Lockdown` dictionary is built whole and only the
+four keys above are kept (whether `Lockdown` holds identifiers is item 14,
+**UNVERIFIED**). A key of the wrong type is ignored with a note, never
+coerced.
+
+**Reference bombs.** plist 1.10.1's binary reader rejects only references
+already on its stack, not a DAG in which one object is referenced many
+times, and building a `plist::Value` deep-copies every reference. So backup
+plists are read with a budgeted event-stream reader: at most `4 × len +
+1024` events, `2 × len` cumulative string and data bytes, and depth 32.
+
+### Keybag (D18: fail closed only on what decryption uses)
+
+- Records are `tag[4] ‖ len[4, big-endian] ‖ value`. The first `UUID` is
+  the header's; every later `UUID` starts a class record. A header-only tag
+  (`VERS`, `TYPE`, `HMCK`, `SALT`, `ITER`, `DPWT`, `DPIC`, `DPSL`) that
+  appears after a class record has started still goes to the header, with
+  a note, as the oracle does; otherwise a keybag with late `DPIC`/`DPSL`
+  would be wrongly called single-stage. Whether real keybags ever do this
+  is **UNVERIFIED**.
+- `TYPE` is masked with `0x3FFF_FFFF`; a value other than 1 is a note (that
+  local backups are TYPE 1 is **UNVERIFIED**). `CLAS` above 0xF is a note.
+  Unknown tags, duplicate tags (last wins) and trailing bytes shorter than a
+  record header are notes. A record that runs past the end is fatal
+  (`Truncated`); two class records with the same `CLAS` are fatal.
+- `DPSL` and `DPIC` absent: unsupported (single-stage KDF). No usable
+  class: unsupported, refused before any derivation. A usable class has a
+  valid `CLAS`, `WRAP & 2`, `KTYP` 0 (or absent) and a 40-byte `WPKY`;
+  without one no key would be unwrapped, so any password would be accepted
+  and the password would go unchecked. An absent `KTYP` is treated
+  as 0 (AES), as the oracle does (**UNVERIFIED**); a class with `KTYP` 1
+  (Curve25519) is unusable, and only files that need it fail.
+- Iteration caps, checked before any derivation: `1 ≤ DPIC ≤ 20,000,000`
+  and `1 ≤ ITER ≤ 1,000,000` (the oracle's caps; advisory
+  GHSA-63p2-3674-32xw). Apple's Platform Security guide (topic
+  sec6483d5760) states 10 million iterations for PBKDF2; `ITER` 10,000
+  comes only from the oracle's README. Real values are **UNVERIFIED**.
+- The password is the UTF-8 encoding exactly as entered (no trimming or
+  normalisation), as the oracle does. Apple's handling of non-ASCII
+  passwords is **UNVERIFIED**.
+
+Where the Rust code deliberately differs from the oracle
+(iphone_backup_decrypt 0.11.2), observed with the committed fixtures:
+
+| Behaviour | Oracle | oma-backup |
+|---|---|---|
+| `TYPE` other than 1 | Accepts 0–3; raises above 3 | Masked; a note |
+| `WPKY` of the wrong length on an unused class (`enc-wpky39-unused`) | Fails to unlock (`IncorrectPassphraseError`) — this contradicts the design's expectation that the oracle checks length only when used | Unlocks, with a note |
+| Trailing bytes under 8 | Stops quietly | A note |
+| A record running past the end (`hostile-keybag-truncated`) | `IncorrectPassphraseError` | `Truncated` (fatal) |
+| Duplicate `CLAS` (`enc-dup-clas`) | Unlocks; sms.db extraction fails | Malformed (fatal) |
+| No passphrase-wrapped class (`hostile-wrap-device-only`) | Raises `ValueError` — the design expected a false success | Unsupported |
+| EncryptionKey shapes | Only UID → `NS.data` | Also UID → raw Data and inline Data (both Rust-only, shape **UNVERIFIED**) |
+| `Size`, `Mode`, `ProtectionClass` missing | Required | Optional; counted |
+
+### ManifestKey and file records
+
+- `ManifestKey` must be 44 bytes: a 4-byte little-endian class, then a
+  40-byte wrapped key. A wrong first class key means a wrong password (or a
+  damaged keybag); a later class failing means a damaged keybag.
+- `MBFile.EncryptionKey` must be 44 bytes; the first 4 are ignored, as the
+  oracle does. That they are the little-endian protection class is
+  **UNVERIFIED**. `$top.root` is followed, never `$objects[1]`; UIDs are
+  bounds-checked and followed at most 4 levels deep; both binary `Uid` and
+  XML `{CF$UID}` forms are accepted (whether MBFile records are ever XML is
+  **UNVERIFIED**).
+- **Output size comes from the padding, never from `Size`.** Decrypted
+  output is never truncated (MVT discussion #316). The oracle's own code
+  notes that `Size` "routinely" differs from the decrypted size
+  (`iphone_backup.py`, `_decrypt_file_to_disk`), so size mismatches are
+  informational.
+- An incomplete backup can list files it failed to copy (MVT
+  `manifest.py`), so a missing blob is counted, not fatal, except for
+  sms.db. A blob or `xx/` folder whose metadata cannot be read (for example
+  permission denied on a backup copied from another account) is counted
+  the same way, as unreadable; only for sms.db is it an error.
+
+### WAL handling
+
+- Unencrypted: Manifest.db and its `-wal` are copied into staging; the
+  backup's `-shm` is never copied. **On Linux, a read-only SQLite connection
+  applies a staged `-wal` without a `-shm`** (the `plain-wal` fixture:
+  opened read-only, all 8 rows counted). Not yet checked on Windows.
+- Encrypted: how `-wal` behaves is **UNVERIFIED**; a `-wal` present in an
+  encrypted backup is not applied, and the check reports a warning when the
+  decrypted header says WAL mode.
+- Whether sms.db `-wal`/`-shm` appear in backups is still **UNVERIFIED**;
+  validation records whether they are listed.
+
+### Measured key-derivation speed
+
+PBKDF2-HMAC-SHA256, 1,000,000 rounds, release build, Linux development
+container (2026-10-18): the crate's own implementation took 0.191 s and the
+`pbkdf2` crate 0.188 s, a ratio of 1.018, inside the 15 % acceptance bar.
+(The crate's first run the same day measured 0.190 s for both, ratio
+0.996.) Real-device derivation times are **UNVERIFIED**.
 
 ## Messages database: sms.db (Milestone 3)
 
@@ -203,7 +415,9 @@ them, check that they all resolve to the same `cipher` and `digest` majors.
 | `crabstep` (typedstream) | GPL-3.0 | Reference only |
 | `crabapple` (backup decryption) | GPL-3.0 | Reference only |
 | pymobiledevice3 | GPL-3.0 | Reference only |
-| andrewdotn's decryption answer | CC BY-SA 4.0 | Reference only |
+| andrewdotn's decryption answer | CC BY-SA (version depends on the revision date; not checked) | Reference only |
+| pyiosbackup | GPL-3.0 | Reference only (file names and keys only) |
+| libimobiledevice (`idevicebackup2`) | LGPL-2.1+ | Reference only (behaviour, such as the SnapshotState check) |
 | `imessage-core` (typedstream) | MIT | Candidate. It is young (0.1.0, 2026) with unstated provenance, so audit it before use. |
 | iphone_backup_decrypt | MIT | May be ported with attribution |
 | libheif / libde265 | LGPL-3.0 | Avoid static linking |
@@ -221,3 +435,31 @@ them, check that they all resolve to the same `cipher` and `digest` majors.
 5. What are the actual DPIC and ITER values, and how long does key
    derivation take on typical hardware? This sets the progress UI.
 6. What does the sms.db schema look like on iOS 27?
+
+Open after milestone 2 (each **UNVERIFIED** above):
+
+7. The Windows subfolders; whether Store iTunes writes under MSIX-virtualised
+   AppData; whether Apple Devices works with junctions.
+8. The full set of `SnapshotState` values, and what a leftover `Snapshot/`
+   folder means.
+9. Whether `-wal` and `-shm` exist for Manifest.db in encrypted backups, and
+   whether an encrypted Manifest.db `-wal` is encrypted with the manifest key.
+10. The meaning of the 4-byte EncryptionKey prefix.
+11. Keybag shapes in local backups: TYPE flag bits or values other than 1,
+    CLAS above 0xF, KTYP 1, duplicate tags, whether KTYP is always present.
+12. Apple's normalisation of non-ASCII passwords, and its maximum password
+    length.
+13. How "Archive" backups are named.
+14. The `Lockdown` key names other than `ProductVersion`; whether
+    unencrypted backups always carry `BackupKeyBag`.
+15. Whether MBFile records are always binary, and which EncryptionKey shapes
+    occur.
+16. Real sizes of sms.db, Info.plist, Manifest.plist and Manifest.db.
+17. Platform behaviour: WebView2 password autosave; Tauri channel delivery
+    above 8 KiB (re-check on every Tauri upgrade); whether bundled SQLite
+    opens staged paths beyond MAX_PATH on Windows; whether `File::try_lock`
+    works on the SMB and NFS shares users choose for archive folders.
+18. The layout of iMazing's `iMazing.Versions` folder; whether iMazing ever
+    uses the singular `iMazing\Backup`; the meaning of `BackupState`
+    (`"empty"` observed in one interrupted backup); and whether a finished
+    iMazing backup reads exactly like one from Apple Devices or iTunes.
