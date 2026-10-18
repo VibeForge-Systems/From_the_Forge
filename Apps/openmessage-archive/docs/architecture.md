@@ -1,9 +1,10 @@
 # Architecture
 
-Status: Milestone 3 (the extraction check) is implemented; its sign-off
-is pending (see the README roadmap). Sections marked *planned* describe the
-intended design for later milestones. They will be revised against evidence
-as each milestone lands. Nothing in them is implemented yet.
+Status: Milestone 4 (the archive database and import) is implemented;
+its sign-off, like that of milestones 2 and 3, is pending (see the README
+roadmap). Sections marked *planned* describe the intended design for later
+milestones. They will be revised against evidence as each milestone lands.
+Nothing in them is implemented yet.
 
 ## Invariants
 
@@ -57,7 +58,7 @@ flowchart LR
     Shell --> FS["oma-fs ✔"]
     Shell --> Backup["oma-backup ✔"]
     Shell --> Messages["oma-messages ✔"]
-    Shell -.-> Archive["oma-archive (M4, in progress)"]
+    Shell --> Archive["oma-archive ✔"]
     Shell -.-> Export["oma-export (M6)"]
     Shell -.-> Device["oma-device (M7)"]
     Backup --> FS
@@ -78,7 +79,7 @@ flowchart LR
 | `crates/oma-fs` | Filesystem safety: filename sanitization, contained path resolution, and guards for backups, MobileSync, iMazing's default store and cloud sync. From M4: volume facts (`volume`: free space, network/virtualised/FAT detection), the Unix private-permission check (`perm::check_private`), and durable placement (`place`: `fsync_dir`, `create_dir_durable`, `place_noreplace`, `open_nofollow`). From slice 4d: `check_owned_unshared` (the library folder), `rename_dir_noreplace`, `create_new_private` and `total_space` | M1, M4 (slices 4a, 4d) |
 | `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them. From M4: `copy_file_to` streams one listed file's plaintext into a caller's writer, hashing it, under `Limits::attachment_bytes` and per-file stamps | ✔ M2, M3, M4 (slice 4b) |
 | `crates/oma-messages` | Scans and probes the sms.db schema by capability, streams typed records (handles, chats, the joins, messages, attachments, Recently Deleted links) as `Col<T>` values, decodes `attributedBody` with a clean-room typedstream decoder, and produces the aggregate `ExtractionReport`. Persists nothing. From M4: stable `KnownColumn` codes, raw values of unreadable cells (`raw_issues`), `payload_data` on request, the raw association columns, key-only passes and the storage class of text cells | ✔ M3, M4 (slice 4c) |
-| `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep; slices 4e–4j the import; slice 4k the report-only verifier and `open_blob`. Used by the shell since slice 4l | M4 (slices 4d–4l) |
+| `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep; slices 4e–4j the import; slice 4k the report-only verifier and `open_blob`. Used by the shell since slice 4l | ✔ M4 (slices 4d–4k) |
 | `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX | planned, M6 |
 | `crates/oma-device` | Detects devices and creates backups behind a platform trait | planned, M7 |
 
@@ -194,6 +195,27 @@ re-checked:
       session-<n>.json            content-free provenance (slice 4j)
 ```
 
+### Threat model for archive files (M4, spec §4.5)
+
+An `a<32hex>` directory may have been planted or altered by another program
+or user. The goals: nothing is written outside the archive directory, no
+code is loaded from it, listing and opening do bounded work, verification
+is cancellable, and no import writes into an archive that failed a check.
+The measures: id parsing; refusal of links and wrong types; owner and mode
+on Unix; a hardened read-only first connection (`DEFENSIVE`,
+`TRUSTED_SCHEMA` off, DQS off, no extensions, limits, an op budget for
+`list` and `open`); the schema fingerprint before any table read; CHECK
+constraints; `storage_name` parsed as `^[0-9a-f]{64}$`; no-follow opens;
+bounded walks; size caps on `imports/*.json`; the label re-validated.
+**Accepted:** SQLite's page parsing and the FTS5 integrity and merge code
+run over archive pages whose content may be anything, because M5 must read
+the index anyway, SQLite documents these settings for untrusted database
+files, verification runs only on request and only reports, and `list`
+never touches FTS. This is narrower than D44 for sms.db: the archive's FTS
+table is our own, and the fingerprint has matched its schema text.
+
+### Archive naming
+
 The directory name is a random id (`a` and 32 lowercase hex characters);
 the user's label lives only in the database (D52). There is no
 `thumbnails/` directory in M4 (D72). Attachments are content-addressed by
@@ -244,14 +266,46 @@ Milestone 3, the extraction check (implemented; one job, `check_extraction`):
   → exactly one terminal event: extractionFinished | failed | cancelled
 ```
 
-Planned (M4–M5):
+Milestone 4, the import (implemented; one job, `start_import`, with the
+gate answered by `confirm_import`):
 
 ```
-  → oma-archive: the same for_each_* passes, cursors bound to the content digest;
-      single write transaction per batch, keyed for idempotent re-import;
-      a changed source aborts the import; FTS5 index updated incrementally
-  → UI: paged queries (keyset pagination by timestamp+id), virtualized thread list,
-        attachments loaded on demand through a scoped asset protocol
+  open → validate (M2) → if not importable: importFinished/notImportable
+  → Archive::import(&open_backup, options, gate, ctx)   (oma-archive)
+      preflight (reads only; nothing written to the archive):
+        a. stage sms.db[-wal] as M3 does; schema scan, quick_check, probe
+        b. P0: Recently Deleted scan; key scan (sorted 128-bit digests,
+           4,194,304 cap) marks every duplicated key unkeyed (D83)
+        c. resume plan (digest, framing, versions, options, lineage; D64),
+           lineages and boolean device evidence, order facts, space estimate
+        d. the gate: ImportGate::confirm → the shell publishes the preflight,
+           sends importPreflight and waits ≤ 2 min for confirm_import (D65)
+           → Decline / cancel / exit / timeout: nothing written
+      after Proceed: begin_write(Recovery::Run), the session row, then passes,
+        each in IMMEDIATE batches (1,000 rows / 32 MiB / 2 s) with the pass
+        cursor in the same transaction and a savepoint per record (D63):
+        P1 handles → P2 chats → P3 messages, bodies (FTS by triggers only),
+        parts, edits, unsent parts → P4/P5 chat links → P6 attachment rows
+        and files (write → sync_all → intent commit → no-replace rename →
+        directory flush → row commit) → P7 attachment links → P8 Recently
+        Deleted markers; space guards before every transaction and file
+      → staged sms.db removed (D74)
+      P9 finalize: statistics, session-local cleanup, completed, FTS merge,
+        wal_checkpoint(TRUNCATE); imports/session-<n>.json (best effort)
+  → close(): keys zeroized, staging removed
+  → exactly one terminal event: importFinished | failed | cancelled
+```
+
+A verify (`verify_archive`) opens the writer without recovery, runs the
+database, index and file checks of slice 4k, and records one `verify_run`
+row; its terminal event is `verifyFinished`.
+
+Planned (M5):
+
+```
+  → UI: paged queries through ArchiveReader (keyset pagination on
+        (chat_id, sort_key, message_id)), virtualized thread list,
+        attachments loaded on demand through BlobReader and a scoped asset protocol
 ```
 
 Decrypted intermediates are written only inside the archive library's
@@ -1556,7 +1610,7 @@ future network feature must re-examine this.
 | Reference implementations | GPL, LGPL and CC BY-SA projects (imessage-exporter, imessage-database, crabstep, crabapple, pymobiledevice3, pyiosbackup, libimobiledevice including `idevicebackup2`, the andrewdotn answer) are behavioural references only | The project must remain Apache-2.0. Clean-room code, or MIT/BSD sources with attribution. |
 | sms.db parsing | Capability-based: probe columns by name and treat missing ones as absent | The schema changes with every major iOS release. Positional `SELECT *` breaks silently. |
 | Node.js worker | None | Nothing so far needs one. Revisit only with a concrete requirement. |
-| Single instance | Not enforced in M1 or M2 | Atomic settings writes keep two instances safe. Staging sessions are locked, and the sweep skips sessions younger than 5 minutes. The archive database (M4) will take an exclusive lock per archive. |
+| Single instance | Not enforced for the app itself; enforced per archive from M4 | Atomic settings writes keep two instances safe. Staging sessions are locked, and the sweep skips sessions younger than 5 minutes. From M4 each archive has a sidecar `archive.lock` held for every write open, and a lock self-test at open refuses a volume whose locks do not exclude a second handle (`LockUnreliable`); a second instance sees the archive as `inUse` and cannot write to it (D53). The lock-free `ArchiveReader` still reads committed state. |
 
 ### Milestone 2 decisions
 
@@ -1621,45 +1675,54 @@ superseded by D22: sms.db is staged on disk.
 | D49 | Source values | `Col<T>` | `Option<T>` | M4 can tell "not recorded" from "NULL" from "bad" |
 | D50 | Lookup scope | Only `Library/SMS/Attachments/` and `StickerCache/` | Every `~/` and `/var/mobile` class | Never reaches non-Messages files; the other classes stay counts |
 
-### Milestone 4 decisions in force (slices 4d–4l)
+### Milestone 4 decisions
 
-The full M4 decision list (D51–D88) lands with the M4 documentation slice.
-These are the ones the archive skeleton and the import core already
-implement. D51, D59, D60 and D61 are owner-confirmed (2026-10-18); of the
-owner questions, D69, D70, D71, D79 and D82 remain leans awaiting the
-owner's confirmation.
+The full M4 list, D51–D88 (spec §22). **D51, D59, D60 and D61 are
+owner-confirmed (2026-10-18).** Of the other questions put in the spec to
+the owner, **D69, D70, D71, D79 and D82 are leans awaiting the owner's
+confirmation**; the code implements the lean, and each is marked. The rest
+are design decisions of the M4 spec.
 
 | # | Topic | Choice | Main alternative | Trade-off |
 |---|---|---|---|---|
 | D51 | Device identity (**owner-confirmed 2026-10-18**) | The archive is the de-duplication scope; boolean device evidence at the gate and the user picks the lineage (D80); the UDID is never stored or hashed, D14 unchanged | Identify the phone by UDID | No device identifier in the archive, at the cost of the user choosing the lineage |
-| D59 | Raw blobs (**owner-confirmed 2026-10-18**) | Always keep the raw `attributedBody`, `message_summary_info` and `payload_data` bytes within the caps; disclosed in privacy.md | Keep only decoded text | Re-derivation with a newer decoder needs no backup; the archive holds more source bytes |
-| D60 | Recently Deleted (**owner-confirmed 2026-10-18**) | Excluded by default; opt-in per import; attachments included when opted in; already-archived messages are marked but not updated from their deleted state | Import everything | The user decides per import; deleted-state rows never overwrite archived ones |
-| D61 | Text captured before an unsend (**owner-confirmed 2026-10-18**) | Kept; the message is marked unsent by the sender; disclosed in privacy.md | Remove the earlier text | The archive keeps what it already captured, and says so |
 | D52 | Archive naming | `a<32hex>`; label in the database; created through `.oma-new-*` with a no-replace rename | Label as directory name | No untrusted names on disk |
 | D53 | Locking | Sidecar `archive.lock` + `try_lock` + self-test; NORMAL locking with WAL; lock-free `ArchiveReader` | `locking_mode=EXCLUSIVE` | Details can be read during imports; external tools can still read the database |
 | D54 | Volumes | Network and virtualised volumes refused for archives; FAT warned | Warn on virtualised | WAL and locks are unreliable there |
-| D75 | `application_id` | `0x4F4D4131` ("OMA1"), unregistered | Register it | Registration is optional |
-| D76 | Views | None in v1; views are disabled on every connection | Read views | `highlight()` fails in views with `TRUSTED_SCHEMA` off |
-| D78 | Permissions | 0700/0600 on Unix, re-checked at every open; the library itself must be ours and not writable by others | Leave the umask | Plaintext archive; ACL inheritance on Windows is disclosed with the privacy write-up |
-| D84 | Reader | `ArchiveReader`: lock-free, query-only, fingerprint first | Read through the locked `Archive` | Details during imports |
+| D55 | Value model | `STRICT` tables; each source value stored with its `Col` state (`_st`); text stored raw as BLOB with its storage class in `value_issue`; time quads | A single nullable column | Wider tables, versus losing D49's distinctions between absent, NULL and unreadable |
 | D56 | Keys | Exact GUID bytes, or the tagged (address, service); unkeyed rows by fingerprint and durable occurrence | Synthesise keys | No fabrication; unkeyed rows may repeat across changed sources |
 | D57 | Merge | Never delete; rank decides; missing or unreadable values never replace values; only changed columns are updated | Last import wins | Older backups can be imported later without regression |
 | D58 | Body source | Decoded `attributedBody`, else valid `text`, else lossy `text`, else NULL with a reason | Prefer `text` | M3 found `text = ''` next to a body |
+| D59 | Raw blobs (**owner-confirmed 2026-10-18**) | Always keep the raw `attributedBody`, `message_summary_info` and `payload_data` bytes within the caps; disclosed in privacy.md | Keep only decoded text | Re-derivation with a newer decoder needs no backup; the archive holds more source bytes |
+| D60 | Recently Deleted (**owner-confirmed 2026-10-18**) | Excluded by default; opt-in per import; attachments included when opted in; already-archived messages are marked but not updated from their deleted state | Import everything | The user decides per import; deleted-state rows never overwrite archived ones |
+| D61 | Text captured before an unsend (**owner-confirmed 2026-10-18**) | Kept; the message is marked unsent by the sender; disclosed in privacy.md | Remove the earlier text | The archive keeps what it already captured, and says so |
 | D62 | FTS | External content over `message_body.display_text`, unicode61 `remove_diacritics 2`, `detail=full`, guarded triggers, every version indexed, `secure-delete` | Writes from Rust; trigram now | Snippets, rebuild and drift checks; CJK limits stated |
 | D63 | Transactions | `IMMEDIATE` batches (1,000 rows / 32 MiB / 2 s), a savepoint per record, the importer's own cursor, `synchronous=FULL` | Per-row transactions | Durable and resumable at batch granularity |
 | D64 | Resume binding | Digest and framing, versions, read profile, options and lineage; otherwise supersede | Resume across any change | One rule set per session |
 | D65 | Confirmation | A gate inside the import job (`ImportGate`), after every preflight read and before the first write; the shell waits for `confirm_import` at most two minutes; Decline, cancel, exit and the timeout write nothing | Two jobs | One staging and one password, versus a longer plaintext window (disclosed) |
+| D66 | Attachment copy | `copy_file_to(Write)`, hashed while streaming; batched fsyncs; durable intents; no-replace placement; an orphan re-hashed before it is adopted; an archived file with the same length is not re-read | Re-read every file at import | Half the I/O; changed bytes at the same length are found only by a full verify |
+| D67 | Storage names | `blob.storage_name` separate from `sha256`; the v1 CHECK ties them; M8's migration drops the CHECK for keyed names | Path = hash | M8 can switch to keyed names in one module |
+| D68 | Disk space | Warn on the estimate; hard guards before every write transaction and file; `max_page_count` with read-back; the reserve clamped to 1–10 GiB | Refuse on the estimate | An unmeasured `K` never blocks an import that fits, and a wrong one never fills the disk |
 | D69 | Verifier (roadmap: a lean **awaiting the owner's confirmation**) | The library verifier ships in M4, report-only, quick and full (slice 4k); the verify job is the shell's (4l) and its sentence per finding the UI's (4m); repair stays in M8 | All verification in M8 | The M4 brief asks for integrity checks; nothing is repaired before M8 |
 | D70 | Provenance file (product fields: a lean **awaiting the owner's confirmation**) | `imports/session-<n>.json`, content-free, best effort, written at each terminal state; it includes the product type and version | A full copy of the session row | Survives database damage without personal data |
+| D71 | Diagnostic log (a lean **awaiting the owner's confirmation**) | The persistent, redacted log file (D15) is deferred again, to M8 | Ship it in M4 | A new on-disk artifact needs its own review |
+| D72 | Thumbnails | Deferred to M5; no `thumbnails/` directory in v1 | Reserve the directory | No speculative layout |
 | D73 | Jobs | `reserve` by subject (backup, archive or both); `Import` and `Verify` kinds; one job at a time (D7) | Key jobs by backup only | An archive can never be double-booked |
 | D74 | Staged sms.db lifetime | The whole import, the gate and P6 included; removed after P8, before finalize | Re-stage per pass | One copy, versus a longer plaintext window (disclosed) |
+| D75 | `application_id` | `0x4F4D4131` ("OMA1"), unregistered | Register it | Registration is optional |
+| D76 | Views | None in v1; views are disabled on every connection | Read views | `highlight()` fails in views with `TRUSTED_SCHEMA` off |
+| D77 | Unicode normalisation | None in M4: raw bytes are stored and the tokenizer folds diacritics | `unicode-normalization` | No new crate; NFC and NFD forms match in search through `remove_diacritics 2` |
+| D78 | Permissions | 0700/0600 on Unix, re-checked at every open; the library itself must be ours and not writable by others | Leave the umask | Plaintext archive; ACL inheritance on Windows is disclosed with the privacy write-up |
+| D79 | Untested iOS versions (a lean **awaiting the owner's confirmation**; extends D43) | Imports are allowed; raw values are stored as read; derived columns are marked provisional through the session's `ios_version_untested` qualifier, which the gate states | Refuse imports from untested versions | Storing raw values approximates nothing, and derived values can be re-derived when the rules improve |
 | D80 | Lineage | The user picks an existing lineage or a new one at the gate, with a suggestion and boolean device evidence; only the chosen lineage continues an unfinished session | Infer from device fields | No silent identity claim |
 | D81 | Rank | (dated, bounded date, content digest), memcmp-compared; undated below dated | Session id as tie-break | Order independence; no host-clock wins |
 | D82 | Value history (column list: a lean **awaiting the owner's confirmation**) | The closed list of 11 history columns keeps every other observed value | History for every column | Content kept where it matters |
 | D83 | In-source duplicate keys | Every occurrence unkeyed; found by a sorted 128-bit digest scan; persisted per session | Key the first in rowid order | Rowid-order independence; a collision can only demote |
+| D84 | Reader | `ArchiveReader`: lock-free, query-only, fingerprint first | Read through the locked `Archive` | Details during imports |
 | D85 | Fault injection | Non-default `fault-injection` feature, per-thread hooks and fault points; crash by killing a re-executed child | Environment variables in release builds; `abort()` | No test hooks in shipped code; deterministic boundaries |
-| D86 | Windows long paths | `win32-longpath` with a verbatim path; if WAL and `-shm` fail there in CI, refuse library paths whose deepest archive path exceeds 240 characters | `EXCLUSIVE` locking | Keeps D53's reader. **UNVERIFIED** until the Windows run |
+| D86 | Windows long paths | `win32-longpath` with a verbatim path; if WAL and `-shm` fail there in CI, refuse library paths whose deepest archive path exceeds 240 characters | `EXCLUSIVE` locking | Keeps D53's reader. On the `windows-2022` CI runner ([run 39137381988](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39137381988)) WAL and `-shm` worked on `win32-longpath` with a `-shm` path over 260 characters, so the fallback is not applied. Not yet run on Windows 11 |
 | D87 | Migrations | Explicit `migrate()` only; fingerprint first; space checked before anything changes; unfinished sessions superseded; a real migration refused until the pre-migration copy exists | Migrate on open | No surprise writes; reads never migrate |
+| D88 | Stopped state | Session state 6, `stopped`, for resumable stops (space, a changed source, a volume limit) | Reuse cancelled or failed | "Failed" is kept for errors that cannot be continued. A file-size limit hit on the database itself (`EFBIG`) still fails the session; only per-file limits on attachments are handled |
 
 ## Logging
 
@@ -1711,5 +1774,16 @@ text, and its errors carry codes and kinds only.
 `Display` against the label, the id, the library path and any 32-hex run;
 `tests/source_rules.rs` bans `instrument` without `skip_all`.
 
-The persistent, redacted diagnostic log file is deferred to M4 (D15); the
-M4 spec defers it again, to M8 (D71, awaiting the owner).
+The shell (slice 4l) logs archive job ids, kinds, phases and outcomes,
+never an archive id or label; `src-tauri/tests/log_hygiene.rs` imports and
+fully verifies every import catalogue entry through the jobs and checks
+the log for planted sentinels, the password, the UDID, the device name,
+temporary paths, the archive id and the label, and every event, details
+and listing JSON for planted sentinels, the password and the UDID. Together with spec §13.2, M4 never logs natural keys,
+fingerprints, content digests, ranks, attachment hashes or storage names,
+source rowids and cursors, device names or product types, display text,
+values from `value_issue` or `value_history`, or SQLite error text (only
+the primary code).
+
+The persistent, redacted diagnostic log file was deferred to M4 (D15); M4
+defers it again, to M8 (D71, a lean awaiting the owner).

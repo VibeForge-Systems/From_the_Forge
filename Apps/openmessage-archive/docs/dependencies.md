@@ -162,6 +162,11 @@ them locally, is fine. See [supported-formats.md](supported-formats.md).
 
 ## Upgrade log
 
+**Milestone 4 in summary:** one new third-party crate, `fs4` 1.1.0 (MIT OR
+Apache-2.0), and a direct dependency on `rustix` 1.1.5 on Linux, which was
+already in the tree; the new workspace crate `oma-archive`; no JavaScript
+dependency change; `deny.toml` unchanged. Slice 4n changed no dependency.
+
 | Date | Change | Reason |
 |---|---|---|
 | 2026-10-17 | Initial set (Milestone 1) | — |

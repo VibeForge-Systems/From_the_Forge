@@ -27,16 +27,25 @@ clean-room typedstream decoder, the aggregate `ExtractionReport`), the
 counts only and persists nothing. CI passes on `ubuntu-22.04`
 and `windows-2022`. Its sign-off is pending the clean-room review of the typedstream
 decoder and the fixture generators (`scripts/fixtures/PROVENANCE.md`), and
-the manual checklist in `docs/compatibility.md`. Milestone 4 (the archive
-database and import) is next.
+the manual checklist in `docs/compatibility.md`. **Milestone 4 (the archive
+database and import) is implemented**: `crates/oma-archive` (schema v1,
+the import with its gate, the content-addressed attachment store, FTS5,
+the report-only verifier), six archive IPC commands with import and verify
+jobs, and the Archive page. Archives are plaintext at rest (encryption is
+M8). Slices 4a–4f pass CI on `ubuntu-22.04` and `windows-2022`; slices
+4g–4n have run only in a Linux container and a headless smoke test. Its
+sign-off is pending CI for those slices, the manual checklist in
+`docs/compatibility.md`, and the owner's answers on D69, D70, D71, D79 and
+D82 (D51, D59, D60 and D61 are owner-confirmed). Milestone 5 (the rich
+viewer) is next.
 
 Read these before designing anything:
 
 | Doc | Read it for |
 |---|---|
-| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, and the decision records (D1–D50; D43 is how "do not fabricate" is read for the check) |
+| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, the archive (layout, threat model, import data flow, one section per M4 slice), and the decision records (D1–D88; D43 is how "do not fabricate" is read for the check) |
 | [`docs/supported-formats.md`](docs/supported-formats.md) | Sourced research on the backup format, encryption, the sms.db schema (columns with sources, timestamps, codes, typedstream) and device tooling. Items marked **UNVERIFIED** are hypotheses, not facts. |
-| [`docs/privacy.md`](docs/privacy.md) | What is copied, where and for how long, including the extraction check's plaintext copy of sms.db |
+| [`docs/privacy.md`](docs/privacy.md) | What is copied, where and for how long, including the plaintext copies of sms.db, and what an archive holds (plaintext at rest) |
 | [`docs/compatibility.md`](docs/compatibility.md) | What has actually been tested |
 | [`docs/development.md`](docs/development.md) | Setup and every command |
 
@@ -112,8 +121,8 @@ Each one is enforced in code. Keep it that way.
 ## Where code goes
 
 - **Domain logic belongs in `crates/`.** `src-tauri/` stays a thin layer of
-  IPC commands and state. `oma-fs`, `oma-backup` (M2) and `oma-messages`
-  (M3) are implemented; `oma-archive` (M4) is in progress (its skeleton:
+  IPC commands and state. `oma-fs`, `oma-backup` (M2), `oma-messages`
+  (M3) and `oma-archive` (M4) are implemented (`oma-archive`'s skeleton:
   create, open, lock, schema v1, fingerprint, migrations; and the import
   core: sessions, the Recently Deleted and duplicate-key scans, the merge
   engine, the handle, chat and message passes with body versions and the
@@ -292,6 +301,14 @@ Never hand-edit generated files.
   only (device facts are compared inside the crate). Finalize
   (`import/finalize.rs`) completes the session; its terminal update is
   best effort and must never run under the armed interrupt.
+- **`v1.sql` is checked by an exact fingerprint, and freezes at the M4
+  release tag.** Every open compares the database's schema objects with
+  `v1.sql` (plus the migrations up to its version), so any edit to
+  `v1.sql` makes every existing archive `Damaged(SchemaMismatch)`. Until
+  the tag, regenerate the golden archive with such an edit; after it, a
+  schema change is a forward-only migration run only by an explicit
+  `Archive::migrate()` (D87), never on open. `archive.lock` is created once
+  and never deleted, not even by the sweep.
 - **Only `conn::armed` arms the archive interrupt,** around a single long
   statement in its own transaction (the `chat_stats` recompute, an FTS
   merge step); it is removed before any `COMMIT`. Never wrap a batch, a
@@ -351,6 +368,21 @@ Never hand-edit generated files.
   `string` field and on keys such as `guid`, `rank` or `path`. Device
   facts cross as booleans, dates as Unix milliseconds. The shell never
   logs an archive id or a label; `tests/log_hygiene.rs` checks it.
+- **Windows lessons from M2–M4 CI.** Directory handles need
+  `FILE_FLAG_BACKUP_SEMANTICS` (`custom_flags(0x0200_0000)`); SQLite files
+  under long paths are opened through the `win32-longpath` VFS with a
+  verbatim path (`oma-backup`'s `manifest_db.rs` `open_connection`, and
+  `oma-archive`'s `conn.rs`); tests must not assume `/` separators;
+  `CreateFileW` ignores `FILE_ATTRIBUTE_NOT_CONTENT_INDEXED`; fixture file
+  names must be unique ignoring ASCII case; `unsafe_code` is forbidden
+  workspace-wide, so anything that needs a raw Win32 call (FAT detection,
+  ACLs) is not done. The `RECORD` lines of the `windows.rs` tests are
+  captured by the harness and do not reach the CI log; rerun with
+  `--nocapture` to read them.
+- **The space reserve can refuse a smoke test.** Imports keep 5 % of the
+  volume free, clamped to 1–10 GiB, and refuse before the gate below that.
+  On a nearly full development disk, put the smoke test's library on a
+  tmpfs such as `/dev/shm` (classified as local).
 - **Headless smoke testing works**, using `xvfb-run` with
   `WEBKIT_DISABLE_DMABUF_RENDERER=1` and `XDG_CONFIG_HOME` pointed at a
   scratch directory. However, the GTK folder picker cannot list directories

@@ -35,19 +35,26 @@ qualifier "This iOS version has not been tested" (a damaged, unsupported or
 incomplete result does not repeat it). No column profile in the catalogue
 is an iOS version.
 
-Last updated: Milestone 3 (2026-10-18).
+**And for milestone 4.** The import has been run only on the synthetic
+import catalogue in `tests/fixtures/imports/`, on synthetic databases built
+by the tests, and on the M2 and M3 catalogues. No backup made from a real
+iPhone has been imported. **Crash consistency was tested by process kill;
+power loss was not tested.** Slices 4a–4f passed CI on Linux and Windows;
+slices 4g–4n have run only in a Linux container (see "Milestone 4 CI").
+
+Last updated: Milestone 4 (2026-10-18).
 
 ## Operating systems
 
-| Platform | Shell and settings (M1) | Backup discovery and validation (M2) | Extraction check (M3) | Direct device backup (M7) | Notes |
-|---|---|---|---|---|---|
-| Windows 11 x64 | CI | CI (synthetic fixtures only; windows-2022 runner, [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)). Default-location discovery: **Untested** until run on Windows 11. | CI (synthetic fixtures only; windows-2022 runner, [run 39117881774](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39117881774)). Nobody has run it on Windows 11. | Planned | Needs WebView2, which ships with Windows 11. CI builds bundled SQLite with MSVC and runs the Windows-only tests (junctions, a ~200-character library path). That long-path test found that bundled SQLite's default VFS cannot open a staged copy beyond MAX_PATH; staged databases are now opened through the `win32-longpath` VFS. Direct backup will need Apple's Mobile Device Service (Apple Devices app or iTunes). |
-| Windows 11 ARM64 | Untested | Untested | Untested | Planned | Not built in CI yet |
-| Ubuntu 22.04 x64 | CI | CI (synthetic fixtures only; [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)) | CI (synthetic fixtures only; [run 39117881774](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39117881774)) | Planned | CI build baseline, which sets the glibc floor. Needs `libwebkit2gtk-4.1-0`. |
-| Ubuntu 24.04 x64 | Supported (built and unit-tested during M1 development) | Local run only (synthetic fixtures only): `cargo test --workspace` and `npm test` passed in an Ubuntu 24.04.5 LTS container on 2026-10-18. Not CI, not a desktop. | Local run only (synthetic fixtures only): `cargo test --workspace`, `npm test`, `npm run typecheck`, clippy, `cargo deny check` and `npm run licenses` passed in an Ubuntu 24.04.5 LTS container on 2026-10-18, plus the headless smoke test below. Not CI, not a desktop. | Planned | Ships libimobiledevice 1.3.0, which is old. M7 will not depend on it. |
-| Ubuntu 26.04.1 LTS x64 | **Supported** (built from source with `npm run tauri dev`, every M1 check done by hand on a real desktop, a QEMU VM; 2026-10-17/18) | Untested on a real desktop (see the headless smoke test below) | Untested on a real desktop | Planned | First manual run anywhere. The native picker chose an ordinary folder. A folder laid out like a backup (`Manifest.db` + `Info.plist`) was refused with the reason shown, and the previous location was kept. The choice survived a restart. Ships libimobiledevice 1.4.0. |
-| Debian 12, Fedora 40+ | Untested | Untested | Untested | Planned | Need WebKitGTK 4.1 |
-| macOS | Unsupported for now | — | — | — | The architecture keeps platform code behind interfaces so it can be added later |
+| Platform | Shell and settings (M1) | Backup discovery and validation (M2) | Extraction check (M3) | Archive import (M4) | Direct device backup (M7) | Notes |
+|---|---|---|---|---|---|---|
+| Windows 11 x64 | CI | CI (synthetic fixtures only; windows-2022 runner, [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)). Default-location discovery: **Untested** until run on Windows 11. | CI (synthetic fixtures only; windows-2022 runner, [run 39117881774](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39117881774)). Nobody has run it on Windows 11. | Slices 4a–4f: CI (synthetic fixtures only; windows-2022 runner, [run 39137381988](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39137381988)). Slices 4g–4n: **not yet run on Windows**. Nobody has run it on Windows 11. | Planned | Needs WebView2, which ships with Windows 11. CI builds bundled SQLite with MSVC and runs the Windows-only tests (junctions, a ~200-character library path). That long-path test found that bundled SQLite's default VFS cannot open a staged copy beyond MAX_PATH; staged databases are now opened through the `win32-longpath` VFS. Direct backup will need Apple's Mobile Device Service (Apple Devices app or iTunes). |
+| Windows 11 ARM64 | Untested | Untested | Untested | Untested | Planned | Not built in CI yet |
+| Ubuntu 22.04 x64 | CI | CI (synthetic fixtures only; [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)) | CI (synthetic fixtures only; [run 39117881774](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39117881774)) | Slices 4a–4f: CI (synthetic fixtures only; [run 39137381988](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39137381988)). Slices 4g–4n: not yet in CI | Planned | CI build baseline, which sets the glibc floor. Needs `libwebkit2gtk-4.1-0`. |
+| Ubuntu 24.04 x64 | Supported (built and unit-tested during M1 development) | Local run only (synthetic fixtures only): `cargo test --workspace` and `npm test` passed in an Ubuntu 24.04.5 LTS container on 2026-10-18. Not CI, not a desktop. | Local run only (synthetic fixtures only): `cargo test --workspace`, `npm test`, `npm run typecheck`, clippy, `cargo deny check` and `npm run licenses` passed in an Ubuntu 24.04.5 LTS container on 2026-10-18, plus the headless smoke test below. Not CI, not a desktop. | Local run only (synthetic fixtures only): every check in the app's AGENTS.md list passed in an Ubuntu 24.04.5 LTS container on 2026-10-18, plus the headless smoke test below. Not a desktop. | Planned | Ships libimobiledevice 1.3.0, which is old. M7 will not depend on it. |
+| Ubuntu 26.04.1 LTS x64 | **Supported** (built from source with `npm run tauri dev`, every M1 check done by hand on a real desktop, a QEMU VM; 2026-10-17/18) | Untested on a real desktop (see the headless smoke test below) | Untested on a real desktop | Untested on a real desktop | Planned | First manual run anywhere. The native picker chose an ordinary folder. A folder laid out like a backup (`Manifest.db` + `Info.plist`) was refused with the reason shown, and the previous location was kept. The choice survived a restart. Ships libimobiledevice 1.4.0. |
+| Debian 12, Fedora 40+ | Untested | Untested | Untested | Untested | Planned | Need WebKitGTK 4.1 |
+| macOS | Unsupported for now | — | — | — | — | The architecture keeps platform code behind interfaces so it can be added later |
 
 "Supported (built and unit-tested)" on Ubuntu 24.04 means the release build,
 all unit tests, and the `.deb` bundle succeeded.
@@ -349,13 +356,6 @@ SQLite 3.53.2); not CI, not a desktop, synthetic data only:
 tested.** Nothing of this slice has run on Windows yet; its crash plan
 there is the batch commit points and the creation rename.
 
-## iOS versions and backup types
-
-**No row below has been tested with a real device's backup.** "CI
-(synthetic fixtures only)" means the automated tests pass against
-generated stand-ins.
-
-
 ### Milestone 4 messages, bodies and FTS (slice 4g)
 
 Run in the same Linux container on 2026-10-18 (bundled SQLite 3.53.2);
@@ -635,38 +635,177 @@ window; synthetic data only. No fixture changed.
   sentinel, the password or the UDID.
 - **Not tested:** the commands through a real window (no UI until slice
   4m), the channel delivery of the new events, Windows, and the 2-minute
-  timeout in real time.
+  timeout in real time. The headless smoke test below has since exercised
+  the commands and the events in a real webview.
 
 **Not yet observed:** any of this on Windows.
+
+### Milestone 4 Archive page (slice 4m)
+
+Run in the same Linux container on 2026-10-18 through Vitest and jsdom
+(`npm test`, 206 tests), not through a window, except for what the headless
+smoke test below observed. Covered: the archives store (listing, details
+polling every 2 s, the heard job, the gate re-shown from the details after
+a reload), every sentence table in `services/importText.ts`, the create,
+import and confirmation dialogs (Cancel, Escape and a backdrop click
+decline), the progress labels, the Backups page's **Import messages…** and
+the roadmap. **Not tested:** `<dialog>` behaviour in WebKitGTK or WebView2
+beyond the smoke test, a reload while an import waits at the gate, and the
+gate's two-minute timeout in real time.
+
+### Milestone 4 CI
+
+**Slices 4a–4f** (the branch `feat/oma-m4-archive` at `2ae867f`) passed
+the whole workflow in [run 39137381988](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39137381988)
+on 2026-10-18: the Linux `checks` job, and the `build` jobs on
+`ubuntu-22.04` and `windows-2022` (tests and installer builds). After
+they were merged (PR #14), the push run on `main`,
+[run 39138721824](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39138721824),
+passed as well. On `windows-2022` run 39137381988 includes, all passing:
+
+- `crates/oma-archive/tests/windows.rs`: WAL and `-shm` on the
+  `win32-longpath` VFS under a long library path (the test requires a
+  `-shm` path over 260 characters, a checkpoint of `Done` on close and WAL
+  mode persisted), so D86's fallback is not needed on that runner; archive
+  files carry no temporary attribute; a UNC library is `NetworkVolume`; a
+  junction in place of an archive directory is refused; renaming a
+  creation directory with a handle left open inside it.
+- `crates/oma-fs/tests/windows.rs`: `fsync_dir` returned `Synced` or
+  `Unsupported` (the test accepts either; which one is in the run's
+  captured output, not in its log), `create_dir_durable` on NTFS,
+  `place_noreplace` never replacing, a held source reported rather than
+  lost, `open_nofollow` refusing a junction and, when one could be made, a
+  symbolic link. The mapped-drive probe is ignored and was not run.
+- `crates/oma-archive/tests/crash.rs`: the Windows kill subset (the batch
+  commit points and the creation rename) and the kill after the terminal
+  commit, each resumed to the uninterrupted result.
+
+The `RECORD` lines these tests print are captured by the test harness and
+do not appear in the CI log, so only the assertions above are claimed.
+**Slices 4g–4n have not run in CI** (on either OS) at the time of writing;
+their results above and below are from the Linux container only.
+
+### Milestone 4 headless smoke test (Linux container, not a desktop)
+
+On 2026-10-18 the release binary of the milestone 4 branch (slices 4a–4n),
+built with `npx tauri build --no-bundle`, ran under Xvfb (1360×860) in an
+Ubuntu 24.04.5 LTS container (4 CPUs, WebKitGTK 2.52.6), with
+`WEBKIT_DISABLE_DMABUF_RENDERER=1`, `WEBKIT_DISABLE_COMPOSITING_MODE=1`,
+`LIBGL_ALWAYS_SOFTWARE=1` and `OMA_LOG=debug`, driven with `xdotool`.
+`settings.json` was pre-written with an archive folder and three added
+parent folders holding scratch copies of `imp-dev1-v1-plain`,
+`imp-attach-plain` and `imp-dev1-v2-enc`, because the GTK folder picker
+cannot list directories without D-Bus. Observed:
+
+- **The space guard refused the first import.** With the archive folder on
+  the container's root volume (252 GB, about 9.2 GB free), **Prepare
+  import** on `imp-dev1-v1-plain` ended before the confirmation step with
+  "There is not enough free space in your archive folder. Free some space,
+  then continue the import." The reserve is 5 % of the volume clamped to
+  10 GiB, more than was free. `archive.sqlite` kept its new-archive size
+  (290,816 bytes) with a 0-byte `-wal`, and `.oma-staging` was empty.
+  **Observed wording problem:** the sentence says "continue the import"
+  although no import had started. The archive folder was then moved to a
+  16 GB tmpfs (`/dev/shm`, classified as a local volume; reserve 1 GiB)
+  for the rest of the run.
+- **Create archive…** with the name "Smoke label 7731" created an
+  `a<32 hex>` folder (0700; the database, lock, `-wal` and `-shm` 0600),
+  listed as Ready with the name.
+- **First import** (`imp-dev1-v1-plain`): the confirmation step showed
+  "Nothing has been written to the archive yet…", "This is the first import
+  into this archive" with "A different phone or source" suggested, the
+  space estimate (about 1.1 GB needed, about 15.7 GB free, 6 attachment
+  files), "This backup holds 21 messages", no Recently Deleted messages,
+  the backup date's source (Status.plist), "This iOS version has not been
+  tested. Derived details for this import are provisional.", and the two
+  privacy sentences (stored unencrypted; the temporary decrypted copy).
+  While it waited, `.oma-staging/s<id>/db/0/sms.db` existed. At 1360×860
+  the dialog's Cancel and Import buttons were below the fold until the
+  dialog was scrolled. **Import** completed: 21 messages, 21 text versions,
+  3 chats, 4 addresses, 5 chat members, 21 messages in chats, 6 attachments
+  and 6 files copied, "The temporary copy of the Messages database was
+  deleted: yes"; these equal the model in
+  `imp-dev1-v1-plain.expected/content.json`. Six store files existed under
+  `attachments/<hh>/<64 hex>` and `imports/session-1.json`;
+  `.oma-staging` was empty.
+- **Full verify**: "No problems were found. 6 attachment files checked;
+  6 files (0.2 KB) read back and compared with the recorded checksums."
+- **Encrypted backup** (`imp-dev1-v2-enc`): the password dialog's button
+  read "Unlock and prepare import"; a wrong password reopened it with
+  "That password did not unlock the backup…"; the right one reached the
+  confirmation step, which suggested "A newer backup of the same phone as
+  import set 1" with "The phone model matches." and "The device name
+  matches.", said 23 messages, 20 already in the archive, 3 attachment
+  files, and the encrypted-backup privacy sentence. **Cancel** showed "The
+  import was not started. Nothing was written to the archive.";
+  `archive.sqlite`, its `-wal` and `imports/session-1.json` were
+  byte-identical (SHA-256) to before, and `.oma-staging` was empty.
+- **The same import again, confirmed** into import set 1: completed with
+  23 messages read, 3 new, 20 already present, 1 earlier value kept as
+  history; the archive then held 24 messages, 26 text versions, 3 chats,
+  4 addresses, 8 attachments and 8 files, which equals the model of the
+  `dev1-v1-v2` scenario (the encrypted and plain v2 backups share a content
+  digest). A quick verify then ended `Ok` over 8 files (from the log; the
+  page was not captured for it).
+- **From the Backups page** (Ctrl+3): selecting `imp-attach-plain` and
+  **Import messages…** opened the import dialog with that backup selected;
+  the confirmation step appeared over the Backups page, suggested import
+  set 1 (the synthetic fixtures share a device name and model), and said
+  "None of this backup's messages are in this archive yet…". With "A
+  different phone or source" chosen it completed; the archive then held 33
+  messages, 4 chats, 5 addresses, 18 attachments and 12 stored files, and
+  listed sessions 1–3 as completed.
+- **Logs and files.** The debug log held no line with the archive's name,
+  either password, the device name or model, an archive id, a library or
+  backup path, the backup folder name, a 64-hex value, or the fixtures'
+  sentinels (`SYNTH`, `example.invalid`, `+1555`). No `imports/*.json` file
+  held the device name, a sentinel, the name or a path.
+
+This exercises the six archive commands, their capability grants, the
+`importPreflight`, `importFinished` and `verifyFinished` events over the
+channel and the dialogs in the real webview. It is not a manual test on a
+real desktop. The imports took well under a second each, so **cancel and
+continue were not exercised** in the window, nor was a crash during an
+import, the gate's timeout, or a reload while an import waited. The
+manual checklist for milestone 4 below has not been run.
+
+## iOS versions and backup types
+
+**No row below has been tested with a real device's backup.** "CI
+(synthetic fixtures only)" means the automated tests pass against
+generated stand-ins.
+
 
 ### Synthetic fixtures
 
 Every M2 cell in this table passed in CI on Ubuntu 22.04 and Windows
 (windows-2022) in [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524),
 and locally in an Ubuntu 24.04.5 LTS container (2026-10-18). The M3 cells
-passed in CI on both runners in [run 39117881774](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39117881774), and locally in the same container. All of it is against synthetic fixtures; none of it is a
-real-device test.
+passed in CI on both runners in [run 39117881774](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39117881774), and locally in the same container. The M4 cells passed locally in the same container
+(slices 4a–4f also in CI, run 39137381988). All of it is against synthetic
+fixtures; none of it is a real-device test.
 
-| Backup kind | Backup discovery and validation (M2) | Extraction check (M3) |
-|---|---|---|
-| Format 3.x, unencrypted (binary and XML plists; WAL-mode Manifest.db) | CI (synthetic fixtures only, not real-device tested) | Local run only (synthetic messages catalogue: five column profiles, scrambled, minimal, resume, WAL, hostile, damaged and unsupported entries; see "Messages catalogue" below) |
-| Format 3.x, encrypted (two-stage PBKDF2 keybag; three EncryptionKey shapes, two of them Rust-only and UNVERIFIED) | CI (synthetic fixtures only, not real-device tested) | Local run only (synthetic: `msgs-full-enc`, `msgs-attachments-enc`, `msgs-wal-enc`; decryption cross-checked by oracle run 1) |
-| Format 2.4 (`Manifest.mbdb`) | Detected and reported as unsupported (CI, synthetic stub) | — |
-| Incomplete (`SnapshotState` ≠ `finished`, or no Status.plist) | Detected and reported (CI, synthetic stub) | — |
-| Hostile inputs (plist reference bombs, oversized records, hostile iteration counts, truncated keybags, bad padding, symlinked blobs, hostile path names) | Refused or counted as specified (CI, synthetic fixtures) | — |
+| Backup kind | Backup discovery and validation (M2) | Extraction check (M3) | Archive import (M4) |
+|---|---|---|---|
+| Format 3.x, unencrypted (binary and XML plists; WAL-mode Manifest.db) | CI (synthetic fixtures only, not real-device tested) | Local run only (synthetic messages catalogue: five column profiles, scrambled, minimal, resume, WAL, hostile, damaged and unsupported entries; see "Messages catalogue" below) | Local run only (synthetic import catalogue: 11 unencrypted entries, ten scenarios; see the slice sections above) |
+| Format 3.x, encrypted (two-stage PBKDF2 keybag; three EncryptionKey shapes, two of them Rust-only and UNVERIFIED) | CI (synthetic fixtures only, not real-device tested) | Local run only (synthetic: `msgs-full-enc`, `msgs-attachments-enc`, `msgs-wal-enc`; decryption cross-checked by oracle run 1) | Local run only (synthetic: `imp-dev1-v2-enc`, whose stored attachment files equal the generator's plaintexts) |
+| Format 2.4 (`Manifest.mbdb`) | Detected and reported as unsupported (CI, synthetic stub) | — | — |
+| Incomplete (`SnapshotState` ≠ `finished`, or no Status.plist) | Detected and reported (CI, synthetic stub) | — | — |
+| Hostile inputs (plist reference bombs, oversized records, hostile iteration counts, truncated keybags, bad padding, symlinked blobs, hostile path names) | Refused or counted as specified (CI, synthetic fixtures) | — | Local run only (`imp-keys-hostile-plain`: duplicated and empty keys, orphan joins, extreme rowids; refused names and links in the store) |
 
 ### Real backup (manual)
 
-| iOS | Backup format | Unencrypted | Encrypted | Extraction check (M3) |
-|---|---|---|---|---|
-| ≤ 9 | 2.4 (`Manifest.mbdb`) | Unsupported (detection tested on a synthetic stub only) | Unsupported | — |
-| 10 – 16 | 3.x (`Manifest.db`) | Untested | Untested | Untested |
-| 17 – 18 | 3.x | Untested | Untested | Untested; RCS service from iOS 18 |
-| 26 – 27 | 3.x | Untested | Untested | Untested; schema to be verified against real data |
+| iOS | Backup format | Unencrypted | Encrypted | Extraction check (M3) | Archive import (M4) |
+|---|---|---|---|---|---|
+| ≤ 9 | 2.4 (`Manifest.mbdb`) | Unsupported (detection tested on a synthetic stub only) | Unsupported | — | — |
+| 10 – 16 | 3.x (`Manifest.db`) | Untested | Untested | Untested | Untested |
+| 17 – 18 | 3.x | Untested | Untested | Untested; RCS service from iOS 18 | Untested |
+| 26 – 27 | 3.x | Untested | Untested | Untested; schema to be verified against real data | Untested |
 
-The extraction check is implemented, but it has not been run on any real
-backup, so every cell in the last column is Untested. Importing messages
-into an archive is milestone 4.
+The extraction check and the import are implemented, but neither has been
+run on any real backup, so every cell in the last two columns is Untested.
+Every import of a real backup would carry "This iOS version has not been
+tested", and its derived values are marked provisional (D79).
 
 A row changes only when a manual run is recorded here with the iOS version,
 the device model, how the backup was made, and the operating system.
@@ -805,6 +944,110 @@ data; real-backup timing, memory and sizes remain UNVERIFIED.**
 No aggregate went over its op budget. Peak RSS is the whole test process,
 including building the database. Release-mode and Windows runs are not yet
 recorded.
+
+## Synthetic performance (M4)
+
+`measure_growth_factor_k` (`crates/oma-archive/tests/perf.rs`, ignored by
+default) on the synthetic sms.db of the crash tests' generator with 100,000
+messages, 2,000 handles, 1,000 chats and 33,333 attachment rows (whose
+files are not in the backup, so **no attachment file was copied or
+re-hashed**). Run once, 2026-10-18, in the **release** profile, in the
+Ubuntu 24.04.5 LTS container with 4 CPUs (ext4 on virtio), while a release
+build of the app had just finished. **Synthetic data, one host; real-backup
+timing, memory and sizes remain UNVERIFIED.**
+
+| Measure | Result |
+|---|---|
+| Staged sms.db | 20,967,424 bytes |
+| Archive database after the import (checkpointed, `-wal` 0 bytes) | 110,034,944 bytes |
+| Growth factor `K` (archive growth ÷ staged sms.db) | **5.23** (the code assumes 3.0) |
+| FTS data blocks (`message_fts_data`) | 1,443,817 bytes |
+| Import, wall clock (278 batches) | 22.6 s |
+| of which the message pass (P3) | 13.6 s |
+| of which the chat links (P4, P5) | 5.1 s |
+| of which the attachment rows (P6, no files) | 1.6 s |
+| of which the attachment links (P7) | 0.8 s |
+| of which the preflight (staging, schema, scans, estimate) | 0.9 s |
+| of which finalize, FTS merge and checkpoint | 0.5 s |
+| Quick verify (database 0.64 s, index 0.33 s) | 0.97 s |
+| Full verify (database 1.18 s, index 0.25 s) | 1.43 s |
+| Peak RSS (`VmHWM`, the whole test process including the generator) | 38 MiB |
+
+The phase times are the wall-clock gaps between the import's progress
+events. Generating the 100,000-message database took 261 s, which is why
+the spec's 1,000,000-message run (§18.11) was not made. **Not measured:**
+attachment copy times and fsyncs per file on a large set, the cost of
+`secure_delete`, `synchronous` FULL against NORMAL, a 1,000,000-message
+import, a debug build, Windows.
+
+## Manual checklist for milestone 4 (not yet run)
+
+Record each run here only once it has actually been done, with the date,
+the operating system and, for a real backup, the iOS version, the device
+model and how the backup was made. The milestone 2 and 3 checklists below
+are still open as well.
+
+**Linux (Ubuntu 26.04.1, real desktop):**
+
+1. Choose an archive folder with the native picker on a local drive with
+   more than 10 GiB free (or less than 5 % of the drive's size, which
+   lowers the reserve). Add parent folders holding copies of
+   `imp-dev1-v1-plain`, `imp-dev1-v2-enc`, `imp-attach-plain`,
+   `imp-rd-plain` and `imp-keys-hostile-plain`, taken out of the repository
+   (each entry folder holds one backup folder, so add each entry as a
+   parent folder).
+2. **Create** an archive with a name. Confirm the folder is `a<32 hex>`,
+   0700, with the database and lock 0600, and that the name is not in any
+   folder or file name.
+3. **Import** `imp-dev1-v1-plain`. At the confirmation step, confirm every
+   sentence is its own line, the buttons can be reached (the headless run
+   had to scroll), and that waiting two minutes without answering ends with
+   "…not confirmed within two minutes…" and writes nothing. Import again
+   and confirm. Compare the counts with
+   `imp-dev1-v1-plain.expected/content.json`.
+4. **Encrypted**: a wrong then the right password on `imp-dev1-v2-enc`;
+   decline once (check `archive.sqlite` and `-wal` are byte-identical),
+   then import into the suggested import set.
+5. **Cancel and continue**: on a large synthetic backup (the perf test's
+   generator wrapped in a backup), cancel during the message pass and the
+   attachment copy, confirm the summary says what was kept, then
+   **Continue importing…** and confirm the result equals an uninterrupted
+   import.
+6. **Crash by kill**: `kill -9` the app during an import of a large
+   backup. Restart, confirm the archive opens, the import shows as
+   resumable, the staged sms.db is removed by the sweep after 5 minutes,
+   and continuing completes it.
+7. **Recently Deleted**: import `imp-rd-plain` without and with the
+   opt-in into two archives; compare the counts with the model.
+8. **Verify** quick and full on each archive; then delete one store file
+   and truncate another (app closed), and confirm a full verify reports a
+   missing and a damaged file and changes nothing.
+9. **Reload** the window in `npm run tauri dev` while an import waits at
+   the confirmation step, and confirm the step is shown again.
+10. Confirm that no message text, address, chat name or file name appears
+    in the window, and none in the log with `OMA_LOG=debug`.
+
+**Windows 11:** the same steps, plus:
+
+- A library path of about 230 characters (long paths through
+  `win32-longpath`), and a junction in place of an archive folder.
+- With Defender real-time protection on, an import of
+  `imp-dev1-v1-plain`: record any retry or failure placing store files
+  or removing partial files.
+- The archive's permissions (inherited from the library folder; the
+  confirmation step says so) and whether Windows Search indexes it.
+- A library on a mapped network drive: refused or not (the
+  `mapped_drive_canonicalize_probe` test, run by hand).
+- The release build: `npm run tauri build`, install the NSIS package, and
+  run one import.
+
+**Real backups** (one unencrypted, one encrypted; from a current iOS),
+**run in the app**: record the iOS version, the model, how the backup was
+made, the outcome, each qualifier, the counts by kind (never content), the
+import's duration, the archive's size against the staged sms.db (`K`), and
+answers to hardware questions 29–34 in supported-formats.md where the
+import gives them. **Never commit anything from a real backup**, and never
+record message text, addresses or names.
 
 ## Manual checklist for milestone 3 (not yet run)
 

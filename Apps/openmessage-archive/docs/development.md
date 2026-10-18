@@ -384,10 +384,37 @@ Slice 4l (same container and method):
 
 `tests/perf.rs` is ignored and not counted.
 
-All of `oma-archive` is M4 test time, so slice 4f is well inside the
-budget on Linux. CI runners and Windows have not been measured; the
-Windows crash plan is smaller on purpose (§18.12). Later slices add their
-times here. The
+Milestone 4 as a whole, slice 4n (same container and method; 879 Rust
+tests passed, 7 ignored):
+
+| What | Time |
+|---|---|
+| `cargo test --workspace`, wall clock | 60 s |
+| Sum of all test binaries' run times | 57.2 s |
+| `oma-archive`, all binaries (all of it M4 test time) | 38.7 s |
+| of which `crash.rs` | 16.9 s |
+| of which `resume.rs` | 5.9 s |
+| of which `import_core.rs` | 3.1 s |
+| `npm test` (206 frontend tests), wall clock | 8 s |
+
+**On CI** (slices 4a–4f only, [run 39137381988](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39137381988);
+sums of the test binaries' own times, after compiling):
+
+| Job | All Rust tests | `oma-archive` |
+|---|---|---|
+| `checks` (ubuntu-22.04) | 26.8 s | 12.1 s |
+| `build` (ubuntu-22.04) | 28.7 s | 14.3 s |
+| `build` (windows-2022) | 232.1 s | 56.3 s |
+
+On Windows the largest binaries were `oma-messages`' `resume.rs` (75.3 s),
+`parser_mutation.rs` (42.1 s) and `oma-archive`'s `crash.rs` (20.0 s), so
+most of the Windows test time predates M4. Slices 4g–4n have not run on CI;
+locally they took `oma-archive` from 13.3 s (slice 4f) to 38.7 s, so the
+M4 total stays inside the budget of 4 minutes per Linux job and 8 minutes
+on Windows if CI scales as it did for slices 4a–4f (about 1× on Linux and
+4× on Windows). That is an extrapolation until a CI run of the whole
+milestone is recorded. The Windows crash plan is smaller on purpose
+(§18.12). The
 catalogue's `README.md` is generated and documents the manifest format and
 the readings the model makes.
 
@@ -415,7 +442,7 @@ No GPL or LGPL tool or wrapper is committed.
 |---|---|
 | Typedstream mutations, one million iterations (20,000 by default) | `OMA_TS_MUTATIONS=1000000 cargo test -p oma-messages --release --test typedstream_mutation` |
 | Synthetic performance: 1,000,000 messages, 2,000 chats, 50,000 attachments | `cargo test -p oma-messages --release -- --ignored perf_synthetic_large --nocapture` |
-| The archive's growth factor `K` on a synthetic import (`OMA_PERF_MESSAGES` messages, default 20,000) | `OMA_PERF_MESSAGES=100000 cargo test -p oma-archive --release --test perf -- --ignored --nocapture` |
+| The archive's growth factor `K`, the time of each import phase, the FTS size and the time of a quick and a full verify, on a synthetic import (`OMA_PERF_MESSAGES` messages, default 20,000; generating 100,000 takes about 4 minutes) | `OMA_PERF_MESSAGES=100000 cargo test -p oma-archive --release --test perf -- --ignored --nocapture` |
 | The check on a backup outside the repository (oracle run 4) | `OMA_EXTERNAL_BACKUP=<backup dir> cargo test -p oma-messages --test external_sample -- --ignored --nocapture` |
 
 Record performance results in `docs/compatibility.md` as **synthetic**,
@@ -438,7 +465,7 @@ OMA_EXTERNAL_PASSWORD` in bash; `$env:OMA_EXTERNAL_PASSWORD = Read-Host
 `cancel.rs` and `typedstream_mutation.rs` within 120 s. These targets are
 not enforced by a timer; review them when a run exceeds them.
 
-### Headless smoke test of the Backups page
+### Headless smoke test of the Backups and Archive pages
 
 The GTK folder picker cannot list directories without D-Bus, so pre-write
 `settings.json` with an archive folder and an added parent folder that
@@ -449,6 +476,16 @@ check: each entry is a folder holding one backup folder
 (`SYNTHETIC0-0000000000000000`), so either add each entry as a parent
 folder, or move each backup folder up into one parent. Encrypted entries
 use the password `synthetic-test-password`.
+
+For the Archive page (`ctrl+1`), add entries of the import catalogue
+(`tests/fixtures/imports/`) the same way: each entry folder holds one
+backup folder, so add each entry as a parent folder. Put the archive
+folder on a volume with more free space than the import's reserve (5 % of
+the volume, clamped to 1–10 GiB); a 16 GB tmpfs such as `/dev/shm` works.
+Start `Xvfb :99` once and run the binary with `DISPLAY=:99` in the
+background, so the window can be driven step by step with `xdotool` and
+`import -window root`; the confirmation step waits two minutes for an
+answer. The milestone 4 run is recorded in `docs/compatibility.md`.
 
 ## Repository conventions
 
