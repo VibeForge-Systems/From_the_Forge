@@ -12,7 +12,10 @@
 //!   it through `OpenBackup::copy_file_to` (hashed as it streams, decrypted
 //!   for an encrypted backup); `sync_all`; check the length. A failed copy
 //!   removes its partial file and is counted; a changed source, a cancel or
-//!   too little space ends the batch at the record before.
+//!   too little space ends the batch at the record before. A copied record
+//!   that is never committed (a cancel before it is buffered, a failed
+//!   phase B) has its partial file removed at once, and counted if it
+//!   cannot be.
 //! - **Phase B, the intents.** One transaction records a `blob_intent` for
 //!   each copied digest that has no `blob` row, and commits.
 //! - **Phase C, placement** ([`crate::blobs::Placer`]): no-replace renames,
@@ -31,10 +34,14 @@
 //! **`current_blob_id` follows rank:** the blob of the highest-ranked
 //! session that read bytes for the attachment. A session that read none
 //! (the file was already archived, or missing from its backup) never moves
-//! it, so the result does not depend on import order.
+//! it, so the result does not depend on import order, with one exception
+//! that follows from the length-only check below: when two backups hold
+//! **different bytes of the same length** under one GUID, the first
+//! imported is stored and stays current, and the other is never read
+//! (`docs/architecture.md`, "An exception to §8.7's order independence").
 //!
 //! **"Already archived"** compares presence and length only, never the
-//! bytes (spec §9.2): the current blob's store file is a regular file of
+//! bytes (spec §9.2; hence the exception above): the current blob's store file is a regular file of
 //! `byte_len`, and the backup's file has that plaintext length. For an
 //! encrypted backup the plaintext length is the Manifest `Size`, which the
 //! probe checked against the padded blob; without a usable `Size` the file
@@ -536,6 +543,122 @@ impl<'a> Attachments<'a> {
         }
     }
 
+    /// Phases B and C for one batch.
+    fn place_batch(
+        &self,
+        conn: &mut Connection,
+        run: &Run,
+        records: &mut [Item],
+    ) -> Result<(), PassError> {
+        let digests: BTreeSet<[u8; 32]> = records
+            .iter()
+            .filter_map(|it| it.obs.file.as_ref().map(|f| f.sha))
+            .collect();
+        if digests.is_empty() {
+            return Ok(());
+        }
+        // Phase B: the intents, committed before any rename.
+        run.guard(conn)?;
+        let tx = rusqlite::Transaction::new(&mut *conn, TransactionBehavior::Immediate)
+            .map_err(PassError::Batch)?;
+        for sha in &digests {
+            tx.execute(
+                "INSERT INTO blob_intent (sha256, session_id) \
+                 SELECT ?1, ?2 WHERE NOT EXISTS (SELECT 1 FROM blob WHERE sha256 = ?1) \
+                 ON CONFLICT (sha256, session_id) DO NOTHING",
+                rusqlite::params![sha.as_slice(), run.session],
+            )
+            .map_err(PassError::Batch)?;
+        }
+        if let Some(e) = crate::fault::intent_error() {
+            return Err(PassError::Batch(e));
+        }
+        tx.commit().map_err(PassError::Batch)?;
+        point(FaultPoint::AttachmentIntentCommitted);
+
+        // Phase C: placement.
+        let mut stored_len: BTreeMap<[u8; 32], Option<u64>> = BTreeMap::new();
+        {
+            let mut stmt = conn
+                .prepare("SELECT byte_len FROM blob WHERE sha256 = ?1")
+                .map_err(PassError::Batch)?;
+            for sha in &digests {
+                let len: Option<i64> = stmt
+                    .query_row([sha.as_slice()], |r| r.get(0))
+                    .optional()
+                    .map_err(PassError::Batch)?;
+                stored_len.insert(*sha, len.and_then(|l| u64::try_from(l).ok()));
+            }
+        }
+        let store = Arc::clone(&self.store.store);
+        let mut placer = Placer::new(&self.store.dir, store.as_ref());
+        let mut placed: BTreeMap<[u8; 32], u64> = BTreeMap::new();
+        for it in records.iter_mut() {
+            let Some(f) = it.obs.file.as_mut() else {
+                continue;
+            };
+            let Some(partial) = f.partial.take() else {
+                continue;
+            };
+            let Some(name) = StorageName::of_sha256(&f.sha) else {
+                continue;
+            };
+            let referenced = stored_len.get(&f.sha).copied().flatten();
+            let known = placed.get(&f.sha).copied().or(referenced);
+            let (copy, stored) = match placer.place(partial, &name, known) {
+                Placement::Placed => {
+                    placed.insert(f.sha, f.len);
+                    let again = f.replacing == Some(f.sha);
+                    (
+                        if again {
+                            CopyCode::Replaced
+                        } else {
+                            CopyCode::Copied
+                        },
+                        true,
+                    )
+                }
+                Placement::Deduplicated => (CopyCode::Deduplicated, true),
+                Placement::Adopted => {
+                    placed.insert(f.sha, f.len);
+                    (CopyCode::Adopted, true)
+                }
+                Placement::OrphanReplaced => {
+                    placed.insert(f.sha, f.len);
+                    (CopyCode::OrphanReplaced, true)
+                }
+                // The bytes read hash to a stored blob whose file is
+                // unusable: the observation still names that blob.
+                Placement::Conflict => (CopyCode::StoreConflict, known.is_some()),
+                Placement::Failed(_) => (CopyCode::WriteFailed, false),
+            };
+            it.obs.copy = copy;
+            f.stored = stored;
+        }
+        let flushes = placer.sync().map_err(|e| PassError::Store(e.kind()))?;
+        {
+            let mut st = self.state.borrow_mut();
+            st.pending.fsyncs = st.pending.fsyncs.saturating_add(flushes);
+            st.pending.partials_left = st
+                .pending
+                .partials_left
+                .saturating_add(placer.partials_left);
+        }
+        point(FaultPoint::AttachmentDirSynced);
+        Ok(())
+    }
+
+    /// Remove a record's copied file if it is still a partial file (it was
+    /// not placed), counting one that cannot be removed.
+    fn drop_file(&self, it: &mut Item) {
+        let partial = it.obs.file.as_mut().and_then(|f| f.partial.take());
+        if let Some(p) = partial {
+            if !p.remove(self.store.store.as_ref()) {
+                self.left_partial();
+            }
+        }
+    }
+
     /// Steps 4 and 5 of phase A: the copy, the flush and the checks.
     fn copy_into(&self, partial: &mut Partial, key: &AttachmentKey) -> Result<CopiedFile, CopyEnd> {
         let io_end = |e: &io::Error| {
@@ -564,7 +687,9 @@ impl<'a> Attachments<'a> {
             sink.inner.into_inner().map_err(|e| io_end(e.error()))?;
             copied
         };
-        partial.finish(copied.len).map_err(|e| io_end(&e))?;
+        partial
+            .finish(self.store.store.as_ref(), copied.len)
+            .map_err(|e| io_end(&e))?;
         Ok(copied)
     }
 
@@ -792,106 +917,36 @@ impl PassWriter for Attachments<'_> {
         files >= BATCH_FILES || bytes >= BATCH_FILE_BYTES || last_large
     }
 
-    /// Phases B and C.
+    /// Phases B and C. When either fails before a record's file is placed,
+    /// that file is removed (and counted if it cannot be): a decrypted copy
+    /// is never left in `.incoming` for a later import to sweep, and a
+    /// space stop gives its space back.
     fn before_batch(
         &self,
         conn: &mut Connection,
         run: &Run,
         records: &mut [Item],
     ) -> Result<(), PassError> {
-        let digests: BTreeSet<[u8; 32]> = records
-            .iter()
-            .filter_map(|it| it.obs.file.as_ref().map(|f| f.sha))
-            .collect();
-        if digests.is_empty() {
-            return Ok(());
-        }
-        // Phase B: the intents, committed before any rename.
-        run.guard(conn)?;
-        let tx = rusqlite::Transaction::new(&mut *conn, TransactionBehavior::Immediate)
-            .map_err(PassError::Batch)?;
-        for sha in &digests {
-            tx.execute(
-                "INSERT INTO blob_intent (sha256, session_id) \
-                 SELECT ?1, ?2 WHERE NOT EXISTS (SELECT 1 FROM blob WHERE sha256 = ?1) \
-                 ON CONFLICT (sha256, session_id) DO NOTHING",
-                rusqlite::params![sha.as_slice(), run.session],
-            )
-            .map_err(PassError::Batch)?;
-        }
-        tx.commit().map_err(PassError::Batch)?;
-        point(FaultPoint::AttachmentIntentCommitted);
-
-        // Phase C: placement.
-        let mut stored_len: BTreeMap<[u8; 32], Option<u64>> = BTreeMap::new();
-        {
-            let mut stmt = conn
-                .prepare("SELECT byte_len FROM blob WHERE sha256 = ?1")
-                .map_err(PassError::Batch)?;
-            for sha in &digests {
-                let len: Option<i64> = stmt
-                    .query_row([sha.as_slice()], |r| r.get(0))
-                    .optional()
-                    .map_err(PassError::Batch)?;
-                stored_len.insert(*sha, len.and_then(|l| u64::try_from(l).ok()));
+        let placed = self.place_batch(conn, run, records);
+        if placed.is_err() {
+            for it in records.iter_mut() {
+                self.drop_file(it);
             }
         }
-        let store = Arc::clone(&self.store.store);
-        let mut placer = Placer::new(&self.store.dir, store.as_ref());
-        let mut placed: BTreeMap<[u8; 32], u64> = BTreeMap::new();
-        for it in records.iter_mut() {
-            let Some(f) = it.obs.file.as_mut() else {
-                continue;
-            };
-            let Some(partial) = f.partial.take() else {
-                continue;
-            };
-            let Some(name) = StorageName::of_sha256(&f.sha) else {
-                continue;
-            };
-            let referenced = stored_len.get(&f.sha).copied().flatten();
-            let known = placed.get(&f.sha).copied().or(referenced);
-            let (copy, stored) = match placer.place(partial, &name, known) {
-                Placement::Placed => {
-                    placed.insert(f.sha, f.len);
-                    let again = f.replacing == Some(f.sha);
-                    (
-                        if again {
-                            CopyCode::Replaced
-                        } else {
-                            CopyCode::Copied
-                        },
-                        true,
-                    )
-                }
-                Placement::Deduplicated => (CopyCode::Deduplicated, true),
-                Placement::Adopted => {
-                    placed.insert(f.sha, f.len);
-                    (CopyCode::Adopted, true)
-                }
-                Placement::OrphanReplaced => {
-                    placed.insert(f.sha, f.len);
-                    (CopyCode::OrphanReplaced, true)
-                }
-                // The bytes read hash to a stored blob whose file is
-                // unusable: the observation still names that blob.
-                Placement::Conflict => (CopyCode::StoreConflict, known.is_some()),
-                Placement::Failed(_) => (CopyCode::WriteFailed, false),
-            };
-            it.obs.copy = copy;
-            f.stored = stored;
-        }
-        let flushes = placer.sync().map_err(|e| PassError::Store(e.kind()))?;
-        {
-            let mut st = self.state.borrow_mut();
-            st.pending.fsyncs = st.pending.fsyncs.saturating_add(flushes);
-            st.pending.partials_left = st
-                .pending
-                .partials_left
-                .saturating_add(placer.partials_left);
-        }
-        point(FaultPoint::AttachmentDirSynced);
-        Ok(())
+        placed
+    }
+
+    fn discard(&self, mut record: Item) {
+        self.drop_file(&mut record);
+    }
+
+    fn committed(&self) {
+        self.state.borrow_mut().pending = AttachmentFileCounts::default();
+    }
+
+    fn settle(&self, counts: &mut ImportCounts) {
+        let pending = std::mem::take(&mut self.state.borrow_mut().pending);
+        counts.attachment_files.add(&pending);
     }
 
     /// Phase D (with the cursor and counts written by the batch).
@@ -950,9 +1005,10 @@ impl PassWriter for Attachments<'_> {
         for sha in &digests {
             del.execute(rusqlite::params![run.session, sha.as_slice()])?;
         }
-        // Counted outside the records since the last batch. A batch that
-        // rolls back loses them; its session fails anyway.
-        files.add(&std::mem::take(&mut self.state.borrow_mut().pending));
+        // Counted outside the records since the last batch. They stay
+        // pending until the batch commits (`committed`): a batch that rolls
+        // back may end in a resumable stop, whose counts `settle` keeps.
+        files.add(&self.state.borrow().pending);
         counts.attachment_files.add(&files);
         let rd = &mut counts.recently_deleted;
         rd.attachments_excluded = rd.attachments_excluded.saturating_add(excluded);

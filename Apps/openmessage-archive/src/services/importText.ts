@@ -181,6 +181,8 @@ const FRESH: Record<FreshReasonDto, string> = {
   nothingToContinue: 'This starts a new import.',
   sourceOrBuildChanged:
     'The backup has changed since the interrupted import (or the app was updated); that import will be set aside and everything re-read.',
+  optionsDiffer:
+    'The import options differ from those of the interrupted import; that import will be set aside and everything re-read with these options.',
 };
 
 /** Continue or start over (C3.18). */

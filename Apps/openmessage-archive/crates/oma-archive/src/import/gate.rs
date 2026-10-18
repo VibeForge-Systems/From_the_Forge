@@ -88,9 +88,12 @@ pub enum ResumePlan {
 pub enum FreshReason {
     /// No unfinished session.
     NothingToContinue,
-    /// The unfinished sessions were made from different content, framing,
-    /// options or code (the backup changed, or the app was updated).
+    /// The unfinished sessions were made from different content, framing
+    /// or code (the backup changed, or the app was updated).
     SourceOrBuildChanged,
+    /// An unfinished session was made from this backup with this build,
+    /// but with other import options (Recently Deleted, attachments; D64).
+    OptionsDiffer,
 }
 
 /// Whether there is anything to compare the device with.
@@ -308,6 +311,8 @@ pub(crate) fn archive_side(
             supersedes: u32::try_from(decision.supersede.len()).unwrap_or(u32::MAX),
             reason: if decision.supersede.is_empty() {
                 FreshReason::NothingToContinue
+            } else if decision.options_differ {
+                FreshReason::OptionsDiffer
             } else {
                 FreshReason::SourceOrBuildChanged
             },

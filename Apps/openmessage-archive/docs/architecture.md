@@ -1135,6 +1135,28 @@ import its space rules (`space.rs`).
   session that read none never moves it. This is the catalogue model's
   reading, and it keeps the result order-independent when a newer backup
   lost a file.
+- **An exception to §8.7's order independence: same GUID, same length,
+  different bytes.** "Already archived" compares presence and length only
+  (D66, §9.1, §9.2), so when two backups hold different bytes of the same
+  length under one attachment GUID, whichever is imported first is
+  stored and becomes `current_blob_id`; the second finds a file of that
+  length, reads nothing, and its bytes are never stored. Imported in the
+  other order, the other version is kept. This is the cost of not
+  re-reading every archived attachment on every import; it is pinned by
+  `store.rs` (`same_length_different_bytes_keep_the_first_imported_version`).
+  Re-copying when a higher-ranked session meets a lower-ranked blob would
+  close it, at the price of re-reading every attachment of every newer
+  backup; that change is left for the v1 freeze review.
+- **Partial files are never left to the next import.** A copied file
+  whose record is not committed is removed at once and counted
+  (`partialsLeft`) if it cannot be: when the intent transaction or the
+  space guard before it fails (phase B), when the placement's `blob`
+  lookup fails, and when a cancel lands after the copy but before its
+  record was buffered. The counts kept outside the records (partial files
+  left, directory flushes) stay pending until a batch commits, so a batch
+  that rolls back into a resumable stop still records them. A `Partial`
+  that is dropped unplaced (a panic) makes one uncounted removal attempt;
+  the next write open's sweep remains the backstop for a process kill.
 - **The preflight estimates** (§8.2 step 5, §12): every attachment is
   looked up and probed once more; the plaintext lengths of the files still
   to copy are summed (Recently Deleted-only and already-archived files left
@@ -1429,7 +1451,7 @@ The shell side of M4 (spec §15) lives in `src-tauri/src/archives/`
 |---|---|---|
 | `list_archives` | — | `ArchiveListingDto { entries, libraryState, libraryError }` |
 | `create_archive` | `{ label? }` (≤ 200 UTF-8 bytes, no control or bidi characters; empty means none), else `invalidInput` | `ArchiveSummaryDto` |
-| `get_archive_details` | `{ archiveId }` | `ArchiveDetailsDto`: summary, sessions, last import (state, stop reason, counts), last verify, active job, the preflight while the job waits, `resumable`, `matchingBackupIds` |
+| `get_archive_details` | `{ archiveId }` | `ArchiveDetailsDto`: summary, sessions, last import (state, stop reason, counts), last verify, active job, the preflight while the job waits, `resumable`, `matchingBackupIds`, `resumeOptions` (the unfinished session's two options) |
 | `start_import` | `{ backupId, archiveId, password?, options: { includeRecentlyDeleted, copyAttachments } }` and the channel | `JobStarted` |
 | `confirm_import` | `{ jobId, proceed, lineage?: { kind: "existing", lineageId } \| { kind: "new" } }` | `()`; `jobNotWaiting` when the job is not at the gate, `invalidInput` without a lineage or with one the preflight does not list |
 | `verify_archive` | `{ archiveId, depth: "quick" \| "full" }` and the channel | `JobStarted` |
@@ -1538,7 +1560,11 @@ label only; no message content, address, chat name or file name.
   (`ArchiveDialogs.vue`), so the gate appears on whatever page is open.
 - **Pages.** The Archive page lists the archives with their status
   badges and shows the selected one: actions (Import from a backup…,
-  Continue importing… when `resumable`, quick and full verify, Cancel
+  Continue importing… when `resumable` (its import dialog starts from the
+  unfinished session's `resumeOptions`, because a continue must use the
+  same options, D64; a preflight with other options says
+  `optionsDiffer`, not that the backup or the app changed), quick and
+  full verify, Cancel
   through the progress card), the last import (`ImportSummary.vue`), the
   last verify (`VerifySummary.vue`, one sentence per finding kind), the
   archive's counts and its sessions. The Backups page's **Import

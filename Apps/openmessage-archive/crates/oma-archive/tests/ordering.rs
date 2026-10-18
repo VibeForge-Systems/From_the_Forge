@@ -9,10 +9,12 @@
 //! file write → `sync_all` → intent `COMMIT` → rename → directory fsync →
 //! row `COMMIT`
 //!
-//! that is: the last `sync_all` before the rename precedes an intent
-//! commit that precedes the rename; the rename's `<hh>` directory is
-//! flushed before any later commit; and the next commit after the rename
-//! is the batch's row commit. For creation it asserts that the database is
+//! that is: the `sync_all` of **that same** `.partial` file (the store's
+//! `StoreFs::sync_file`, logged with the file's name and its length at the
+//! flush, which must be the blob's full length, so the write came first)
+//! precedes an intent commit that precedes the rename; the rename's `<hh>`
+//! directory is flushed before any later commit; and the next commit after
+//! the rename is the batch's row commit. For creation it asserts that the database is
 //! committed and the `.oma-new-*` directory flushed before the no-replace
 //! rename, and the library flushed after it.
 //!
@@ -22,6 +24,7 @@
 
 mod common;
 
+use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -37,9 +40,20 @@ enum Ev {
     Commit,
     Mkdir(String),
     Fsync(String),
-    Place { from: String, to: String },
-    RenameDir { from: String, to: String },
+    Place {
+        from: String,
+        to: String,
+    },
+    RenameDir {
+        from: String,
+        to: String,
+    },
     Remove(String),
+    /// A file's `sync_all`: its name and its length when flushed.
+    SyncFile {
+        name: String,
+        len: u64,
+    },
 }
 
 type Log = Arc<Mutex<Vec<Ev>>>;
@@ -108,6 +122,16 @@ impl StoreFs for Recording {
         self.push(Ev::Remove(name(path)));
         RealFs.remove_file(path)
     }
+
+    fn sync_file(&self, file: &std::fs::File, path: &Path) -> io::Result<()> {
+        let len = file.metadata()?.len();
+        let out = RealFs.sync_file(file, path);
+        self.push(Ev::SyncFile {
+            name: name(path),
+            len,
+        });
+        out
+    }
 }
 
 fn position(log: &[Ev], from: usize, f: impl Fn(&Ev) -> bool) -> Option<usize> {
@@ -119,7 +143,8 @@ fn position(log: &[Ev], from: usize, f: impl Fn(&Ev) -> bool) -> Option<usize> {
 }
 
 /// Check the §9.1 order for every placement in `log`; returns how many.
-fn assert_store_order(log: &[Ev]) -> usize {
+/// `lens` gives each placed digest's `byte_len`.
+fn assert_store_order(log: &[Ev], lens: &BTreeMap<String, u64>) -> usize {
     let mut placed = 0;
     for (p, e) in log.iter().enumerate() {
         let Ev::Place { from, to } = e else { continue };
@@ -127,16 +152,20 @@ fn assert_store_order(log: &[Ev]) -> usize {
         assert!(from.ends_with(".partial"), "{from}");
         assert_eq!(to.len(), 64, "{to}");
         let before = log.get(..p).expect("prefix");
-        // write → sync_all → intent COMMIT → rename.
+        // write → sync_all → intent COMMIT → rename, for this very file:
+        // its own flush, with all of its bytes already written.
         let synced = before
             .iter()
-            .rposition(|e| *e == Ev::Point(FaultPoint::AttachmentSynced))
-            .unwrap_or_else(|| panic!("{to}: placed without a sync"));
-        let copying = before
-            .iter()
-            .rposition(|e| *e == Ev::Point(FaultPoint::AttachmentCopying))
-            .unwrap_or_else(|| panic!("{to}: placed without a write"));
-        assert!(copying < synced, "{to}: write after sync");
+            .rposition(|e| matches!(e, Ev::SyncFile { name, .. } if name == from))
+            .unwrap_or_else(|| panic!("{to}: {from} placed without its sync_all"));
+        let Some(Ev::SyncFile { len, .. }) = before.get(synced) else {
+            unreachable!()
+        };
+        assert_eq!(
+            Some(len),
+            lens.get(to),
+            "{to}: {from} was flushed before all of it was written"
+        );
         let intent = position(log, synced, |e| {
             *e == Ev::Point(FaultPoint::AttachmentIntentCommitted)
         })
@@ -166,6 +195,23 @@ fn assert_store_order(log: &[Ev]) -> usize {
         );
     }
     placed
+}
+
+/// Each blob's `byte_len`, by lowercase hex digest.
+fn blob_lens(db: &Path) -> BTreeMap<String, u64> {
+    let c = read_only(db);
+    let mut stmt = c
+        .prepare("SELECT lower(hex(sha256)), byte_len FROM blob")
+        .expect("prepare");
+    stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            u64::try_from(r.get::<_, i64>(1)?).unwrap_or(0),
+        ))
+    })
+    .expect("query")
+    .collect::<Result<_, _>>()
+    .expect("rows")
 }
 
 #[test]
@@ -231,7 +277,8 @@ fn every_store_file_follows_the_write_sync_intent_rename_flush_commit_order() {
         drop(a);
         src.ob.close();
         let l = log.lock().expect("lock").clone();
-        let n = assert_store_order(&l);
+        let lens = blob_lens(&db_path(&tmp, &id));
+        let n = assert_store_order(&l, &lens);
         assert_eq!(
             u64::try_from(n).expect("n"),
             s.counts.attachment_files.copied,

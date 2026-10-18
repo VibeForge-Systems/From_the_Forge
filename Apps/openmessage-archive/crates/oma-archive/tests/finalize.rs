@@ -297,6 +297,60 @@ fn only_the_chosen_lineage_continues_an_unfinished_session() {
     assert_completed(&db_path(&tmp, &id), third.session);
 }
 
+/// A continue must use the unfinished session's options (D64): the
+/// listing gives them, a preflight with them continues, and one with other
+/// options says so (not that the backup or the app changed).
+#[test]
+fn other_options_set_an_unfinished_session_aside_and_say_so() {
+    let (_tmp, lib) = library();
+    let id = lib.create(None).expect("create");
+    let mut with_rd = opts(16);
+    with_rd.include_recently_deleted = true;
+    with_rd.copy_attachments = false;
+    let mut a = lib.open(&id).expect("open");
+    let src = open_entry("imp-dev1-v1-plain");
+    let first = cancelled_at_chats(&mut a, &src, &with_rd, LineageChoice::New);
+    drop(a);
+    src.ob.close();
+
+    let r = lib
+        .open_read(&id)
+        .expect("reader")
+        .info()
+        .expect("info")
+        .resumable
+        .expect("resumable");
+    assert_eq!(r.session, first.session);
+    assert!(r.include_recently_deleted && !r.copy_attachments);
+
+    let preflight_with = |o: &ImportOptions| {
+        let mut a = lib.open(&id).expect("open");
+        let src = open_entry("imp-dev1-v1-plain");
+        let mut gate = Recorder::new(Answer::Decline);
+        assert_eq!(
+            run(&mut a, &src, o, &mut gate, &CancelToken::new()),
+            ImportOutcome::Declined
+        );
+        src.ob.close();
+        gate.only().resume
+    };
+    assert_eq!(
+        preflight_with(&with_rd),
+        ResumePlan::Continue {
+            session: first.session,
+            lineage: first.lineage,
+            from: oma_archive::schema::codes::Pass::Chats,
+        }
+    );
+    assert_eq!(
+        preflight_with(&opts(16)),
+        ResumePlan::Fresh {
+            supersedes: 1,
+            reason: FreshReason::OptionsDiffer
+        }
+    );
+}
+
 fn wal_len(db: &Path) -> u64 {
     std::fs::metadata(db.with_file_name("archive.sqlite-wal")).map_or(0, |m| m.len())
 }
@@ -425,15 +479,47 @@ fn the_provenance_file_follows_the_session_and_holds_no_content() {
     .expect("text");
     let m = catalogue_json("imp-dev1-v1-plain.expected/content.json");
     let sess = &m["sessions"]["imp-dev1-v1-plain"];
-    for banned in [
+    // The library path in its raw form, as JSON escapes it (backslashes
+    // doubled on Windows), and its last component, which needs no escaping.
+    let lib_root = root(&tmp).to_string_lossy().into_owned();
+    let escaped = serde_json::to_string(&lib_root).expect("escape");
+    let escaped = escaped.trim_matches('"').to_owned();
+    let last = root(&tmp)
+        .file_name()
+        .expect("a last component")
+        .to_string_lossy()
+        .into_owned();
+    let banned = [
         "Synthetic Test Phone",
         "SYNTH",
         sess["contentDigest"].as_str().expect("digest"),
         sess["rank"].as_str().expect("rank"),
         id.as_str(),
-        &root(&tmp).to_string_lossy(),
-    ] {
-        assert!(!text.contains(banned), "the provenance file holds {banned}");
+        &lib_root,
+        &escaped,
+        &last,
+    ];
+    for b in banned {
+        assert!(!text.contains(b), "the provenance file holds {b}");
+    }
+    // And no string value anywhere in the document holds one, unescaped.
+    fn strings<'v>(v: &'v Value, out: &mut Vec<&'v str>) {
+        match v {
+            Value::String(s) => out.push(s),
+            Value::Array(a) => a.iter().for_each(|x| strings(x, out)),
+            Value::Object(o) => o.iter().for_each(|(k, x)| {
+                out.push(k);
+                strings(x, out);
+            }),
+            _ => {}
+        }
+    }
+    let mut all = Vec::new();
+    strings(&p, &mut all);
+    for s in all {
+        for b in banned {
+            assert!(!s.contains(b), "a provenance value holds {b}");
+        }
     }
     #[cfg(unix)]
     assert_eq!(

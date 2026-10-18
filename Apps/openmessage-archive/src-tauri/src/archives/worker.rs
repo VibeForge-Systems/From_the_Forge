@@ -371,10 +371,11 @@ fn import_event(job_id: &str, ending: ImportEnding, staging_removed: bool) -> Jo
                 staging_removed,
                 plaintext_removed: None,
             },
-            ImportOutcome::InsufficientSpace(_) => failed(IpcError::new(
-                crate::error::ErrorCode::InsufficientSpace,
-                messages::INSUFFICIENT_SPACE,
-            )),
+            // Refused before the gate: nothing started, so nothing to
+            // continue (unlike a stop's INSUFFICIENT_SPACE).
+            ImportOutcome::InsufficientSpace(estimate) => {
+                failed(messages::start_space_notice(&estimate))
+            }
             ImportOutcome::Cancelled(_) => cancelled(),
             // `ImportOutcome` is non-exhaustive.
             _ => failed(IpcError::internal("unknown import outcome")),

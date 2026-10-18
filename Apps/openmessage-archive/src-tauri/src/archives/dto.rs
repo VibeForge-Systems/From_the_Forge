@@ -866,6 +866,19 @@ pub struct ArchiveDetailsDto {
     /// Listed backups that look like the unfinished session's source,
     /// computed in Rust (C2.13). Pre-selection only.
     pub matching_backup_ids: Vec<String>,
+    /// The unfinished session's import options, when `resumable`: a
+    /// continue must use the same ones (D64), so "Continue importing…"
+    /// starts from them.
+    pub resume_options: Option<ResumeOptionsDto>,
+}
+
+/// The two import options an unfinished session was started with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ResumeOptionsDto {
+    pub include_recently_deleted: bool,
+    pub copy_attachments: bool,
 }
 
 // ---------------------------------------------------------------- the gate
@@ -910,6 +923,9 @@ pub enum FreshReasonDto {
     /// The backup changed since the interrupted import, or the app was
     /// updated: that import is set aside and everything re-read (C3.18).
     SourceOrBuildChanged,
+    /// The same backup and app, but other import options than the
+    /// interrupted import's: that import is set aside (D64).
+    OptionsDiffer,
 }
 
 /// Continue or start over.
@@ -1135,6 +1151,7 @@ pub fn preflight_dto(p: &oa::Preflight) -> ImportPreflightDto {
             supersedes,
             reason: match reason {
                 oa::FreshReason::NothingToContinue => FreshReasonDto::NothingToContinue,
+                oa::FreshReason::OptionsDiffer => FreshReasonDto::OptionsDiffer,
                 _ => FreshReasonDto::SourceOrBuildChanged,
             },
         },

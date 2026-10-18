@@ -82,7 +82,9 @@ TypeScript, Bootstrap 5 and SQLite. Licensed **Apache-2.0**.
   - The import then copies messages, chats, addresses, the links between
     them, and attachment files (stored once each, named by their SHA-256)
     into the archive, with progress. **Cancel** keeps what was committed;
-    **Continue importing…** picks up from there with the same backup.
+    **Continue importing…** picks up from there with the same backup and
+    the same options (the dialog starts from them; changing them starts
+    over, and the confirmation step says so).
     Importing the same backup again adds nothing; an older backup imported
     later never overwrites newer values, and earlier versions of edited
     text are kept.
@@ -146,7 +148,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 1 Foundation | Shell, settings, archive location, CI for Windows and Linux | **Done** |
 | 2 Backup discovery and validation | Find backups, read their manifests, detect encryption, unlock, validate | Implemented; sign-off pending (fixture-generator review, manual tests) |
 | 3 Extraction check | Locate sms.db, probe the schema, and check that messages, chats, handles and attachment references can be read (counts only) | Implemented; sign-off pending (Windows CI, the clean-room review of the typedstream decoder and the fixture generators, the manual tests) |
-| 4 Archive database | Extract messages and copy attachments into the archive; versioned SQLite schema, transactional and resumable imports, FTS5, integrity verification | Implemented; sign-off pending (CI of slices 4g–4n, the manual tests, the owner's answers on D69, D70, D71, D79 and D82) |
+| 4 Archive database | Extract messages and copy attachments into the archive; versioned SQLite schema, transactional and resumable imports, FTS5, integrity verification | Implemented; sign-off pending (CI of slices 4g–4n, two §18.8 Windows tests that are not written yet (a held partial file, a killed lock holder; see `docs/compatibility.md`), the manual tests, the owner's answers on D69, D70, D71, D79 and D82) |
 | 5 Rich viewer | Conversation list, threads, inline media, search, date navigation | Planned |
 | 6 Exports | TXT, CSV, JSON, HTML, PDF, XLSX, and attachments | Planned |
 | 7 Direct device backup | USB device detection and local backup creation | Planned |

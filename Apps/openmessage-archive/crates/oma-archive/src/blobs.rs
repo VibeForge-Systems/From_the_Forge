@@ -351,16 +351,30 @@ fn remove_with_retries(store: &dyn StoreFs, path: &Path) -> bool {
 }
 
 /// One attachment copy in flight: `attachments/.incoming/<n>.partial`.
-/// Dropping it closes the file and leaves it for the next sweep; callers
-/// remove or place it explicitly.
+/// Callers place it ([`Placer::place`]) or remove it ([`Partial::remove`],
+/// which counts a file it cannot remove). Dropping one that was neither
+/// (an early return, a panic) closes the file and makes one best-effort
+/// attempt to remove it, so a decrypted copy is not left behind until the
+/// next sweep (spec §9.1 step 5); a file that attempt cannot remove is
+/// still swept by the next write open.
 pub(crate) struct Partial {
-    path: PathBuf,
+    /// `None` once the file was placed or a removal was attempted.
+    path: Option<PathBuf>,
     file: Option<fs::File>,
 }
 
 impl std::fmt::Debug for Partial {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Partial(<path>)")
+    }
+}
+
+impl Drop for Partial {
+    fn drop(&mut self) {
+        self.file = None;
+        if let Some(path) = self.path.take() {
+            let _ = fs::remove_file(path);
+        }
     }
 }
 
@@ -374,7 +388,7 @@ impl Partial {
             match oma_fs::create_new_private(&path) {
                 Ok(file) => {
                     return Ok(Partial {
-                        path,
+                        path: Some(path),
                         file: Some(file),
                     })
                 }
@@ -388,6 +402,13 @@ impl Partial {
         ))
     }
 
+    /// The partial file's path, while it is still in `.incoming`.
+    fn path(&self) -> io::Result<&Path> {
+        self.path
+            .as_deref()
+            .ok_or_else(|| io::Error::other("the partial file is gone"))
+    }
+
     /// The open file to write the copy into.
     pub(crate) fn file(&mut self) -> io::Result<&mut fs::File> {
         self.file
@@ -395,11 +416,13 @@ impl Partial {
             .ok_or_else(|| io::Error::other("the partial file is closed"))
     }
 
-    /// Flush the file to the device (`sync_all`), check that it holds
-    /// `len` bytes, and close it (spec §9.1 step 4).
-    pub(crate) fn finish(&mut self, len: u64) -> io::Result<()> {
+    /// Flush the file to the device (`sync_all`, through `store` so a test
+    /// sees it), check that it holds `len` bytes, and close it (spec §9.1
+    /// step 4).
+    pub(crate) fn finish(&mut self, store: &dyn StoreFs, len: u64) -> io::Result<()> {
+        let path = self.path()?.to_path_buf();
         let file = self.file()?;
-        file.sync_all()?;
+        store.sync_file(file, &path)?;
         let on_disk = file.metadata()?.len();
         self.file = None;
         if on_disk != len {
@@ -408,11 +431,20 @@ impl Partial {
         Ok(())
     }
 
+    /// The file was moved into the store: nothing is left to remove.
+    fn placed(mut self) {
+        self.file = None;
+        self.path = None;
+    }
+
     /// Remove the partial file (retried on Windows). `false` when it is
     /// still there; the next write open sweeps it.
     pub(crate) fn remove(mut self, store: &dyn StoreFs) -> bool {
         self.file = None;
-        remove_with_retries(store, &self.path)
+        match self.path.take() {
+            Some(path) => remove_with_retries(store, &path),
+            None => true,
+        }
     }
 }
 
@@ -622,7 +654,7 @@ fn is_fan_out_name(name: &str) -> bool {
 
 /// The walk's state: the limit and the counts.
 struct Walker<'a> {
-    referenced: &'a BTreeSet<[u8; 32]>,
+    referenced: Option<&'a BTreeSet<[u8; 32]>>,
     limit: u64,
     check_modes: bool,
     cancel: &'a oma_backup::CancelToken,
@@ -710,7 +742,11 @@ impl Walker<'_> {
             match (entry_kind(&path), name) {
                 (EntryKind::Link, _) => self.out.links = self.out.links.saturating_add(1),
                 (EntryKind::File, Some(name)) => {
-                    let known = name.sha256().is_some_and(|s| self.referenced.contains(&s));
+                    // Without the full set of referenced digests no file
+                    // is called an orphan.
+                    let known = self
+                        .referenced
+                        .is_none_or(|r| name.sha256().is_some_and(|s| r.contains(&s)));
                     if !known {
                         self.out.orphans = self.out.orphans.saturating_add(1);
                     }
@@ -725,11 +761,12 @@ impl Walker<'_> {
 
 /// Walk `attachments/` (spec §11): at most two levels, no link followed,
 /// at most `limit` entries (then `truncated`). `referenced` holds the
-/// digests the `blob` rows name. With `check_modes`, every directory and
+/// digests the `blob` rows name; `None` when they could not all be read,
+/// and then no file is counted as an orphan. With `check_modes`, every directory and
 /// file found is also checked with [`check_private`].
 pub(crate) fn walk_store(
     dir: &ArchiveDir,
-    referenced: &BTreeSet<[u8; 32]>,
+    referenced: Option<&BTreeSet<[u8; 32]>>,
     limit: u64,
     check_modes: bool,
     cancel: &oma_backup::CancelToken,
@@ -909,7 +946,11 @@ impl<'a> Placer<'a> {
     }
 
     fn rename(&mut self, partial: Partial, target: &Path, hh: PathBuf, ok: Placement) -> Placement {
-        match self.store.place_noreplace(&partial.path, target) {
+        let placed = match partial.path() {
+            Ok(from) => self.store.place_noreplace(from, target),
+            Err(e) => Err(e),
+        };
+        match placed {
             Ok(placed) => {
                 self.touched.insert(hh);
                 if matches!(
@@ -919,6 +960,8 @@ impl<'a> Placer<'a> {
                     }
                 ) {
                     self.drop_partial(partial);
+                } else {
+                    partial.placed();
                 }
                 point(FaultPoint::AttachmentPlaced);
                 ok
@@ -1026,8 +1069,11 @@ mod tests {
         use std::io::Write;
         let mut p = Partial::create(dir, next).expect("partial");
         p.file().expect("file").write_all(bytes).expect("write");
-        p.finish(u64::try_from(bytes.len()).expect("len"))
-            .expect("finish");
+        p.finish(
+            &crate::store_fs::RealFs,
+            u64::try_from(bytes.len()).expect("len"),
+        )
+        .expect("finish");
         p
     }
 

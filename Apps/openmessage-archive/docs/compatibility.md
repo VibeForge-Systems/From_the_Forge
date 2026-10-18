@@ -680,6 +680,26 @@ passed as well. On `windows-2022` run 39137381988 includes, all passing:
   commit points and the creation rename) and the kill after the terminal
   commit, each resumed to the uninterrupted result.
 
+**Windows tests for slices 4g–4n (spec §18.8): written, partly missing.**
+None of these has run on Windows yet.
+
+- `crates/oma-archive/tests/long_paths.rs` runs on every platform: under a
+  library path of about 230 characters it imports `imp-dev1-v1-plain` (6
+  files placed), runs a full verify (Ok, 6 files re-hashed, the provenance
+  file read), reads every file back through `open_blob` after a reopen,
+  and checks that the store paths exceed 300 characters and `.incoming` is
+  empty. It passed in the Linux container (store file paths of 360
+  characters); on `windows-2022` it is the long-path import, placement,
+  re-hash and verify test, not yet run.
+- `crates/oma-archive/tests/windows.rs`, `a_junction_in_the_store_is_never_followed`:
+  a `<hh>` directory replaced by a junction is never written through.
+  Not yet run (its logic was checked on Linux with a symbolic link).
+- **Missing:** a partial file held by a `share_mode(0)` handle (the
+  removal retries and `partialsLeft`), and a killed lock holder released
+  within the retry window. The pending CI run does **not** cover them;
+  the retry path is exercised only through a `StoreFs` whose removals
+  fail (`store.rs`), on Linux.
+
 The `RECORD` lines these tests print are captured by the test harness and
 do not appear in the CI log, so only the assertions above are claimed.
 **Slices 4g–4n have not run in CI** (on either OS) at the time of writing;
@@ -705,7 +725,13 @@ cannot list directories without D-Bus. Observed:
   10 GiB, more than was free. `archive.sqlite` kept its new-archive size
   (290,816 bytes) with a 0-byte `-wal`, and `.oma-staging` was empty.
   **Observed wording problem:** the sentence says "continue the import"
-  although no import had started. The archive folder was then moved to a
+  although no import had started. *Fixed after this run:* the refusal
+  before the gate now has its own sentence, with the amounts ("There is
+  not enough free space in your archive folder to start an import: at
+  least … must stay free, and … is free. The whole import needs about ….
+  Nothing was written. Free some space, then try again."), unit-tested in
+  `src-tauri/src/archives/messages.rs`; it has not been re-observed in the
+  app. The archive folder was then moved to a
   16 GB tmpfs (`/dev/shm`, classified as a local volume; reserve 1 GiB)
   for the rest of the run.
 - **Create archive…** with the name "Smoke label 7731" created an

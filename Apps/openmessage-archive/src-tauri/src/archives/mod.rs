@@ -28,7 +28,8 @@ use crate::backups::Jobs;
 use crate::error::{ErrorCode, IpcError, IpcResult};
 use dto::{
     summary_dto, ArchiveDetailsDto, ArchiveEntryDto, ArchiveListingDto, ArchiveStatusDto,
-    ArchiveSummaryDto, LastImportDto, LibraryStateDto, SessionDto, VerifySummaryDto,
+    ArchiveSummaryDto, LastImportDto, LibraryStateDto, ResumeOptionsDto, SessionDto,
+    VerifySummaryDto,
 };
 
 /// How the shell builds a [`Library`]. Production uses the real free-space
@@ -255,6 +256,10 @@ pub fn details(
         preflight,
         resumable,
         matching_backup_ids,
+        resume_options: info.resumable.map(|r| ResumeOptionsDto {
+            include_recently_deleted: r.include_recently_deleted,
+            copy_attachments: r.copy_attachments,
+        }),
     })
 }
 

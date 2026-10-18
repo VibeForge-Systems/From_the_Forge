@@ -22,8 +22,9 @@
 //! issued if the connection is somehow still in a transaction): nothing is
 //! ever committed after a statement error. The caller classifies the error.
 //!
-//! Cancellation: the callback checks the token at the start of each record,
-//! and the engine checks it every 128 rows. Either way the records already
+//! Cancellation: the callback checks the token at the start of each record
+//! (a record it then drops goes to [`PassWriter::discard`], so P6 removes
+//! a file it had already copied), and the engine checks it every 128 rows. Either way the records already
 //! read are complete, so the batch **commits** them with the cursor, and
 //! the pass reports [`PassEnd::Cancelled`]. A pass's reader can also stop
 //! the pass in a resumable state (P6: the source changed, or no space for
@@ -190,7 +191,8 @@ pub(crate) trait PassWriter {
     /// P6 commits its blob intents and places the files here, so that the
     /// batch then commits the blob rows after the placement (spec §9.1). An
     /// error fails the pass like a batch error; nothing of the batch has
-    /// been written.
+    /// been written, and the pass must not leave behind what it made for
+    /// the records (P6 removes its unplaced partial files).
     fn before_batch(
         &self,
         _conn: &mut Connection,
@@ -199,7 +201,23 @@ pub(crate) trait PassWriter {
     ) -> Result<(), PassError> {
         Ok(())
     }
-    /// Write the records, one savepoint each, inside the open batch.
+    /// A record the reader produced but the pass does not buffer, because
+    /// the job was cancelled before it was added. The default drops it;
+    /// P6 removes the record's copied partial file and counts one it
+    /// cannot remove.
+    fn discard(&self, _record: Self::Record) {}
+    /// The batch that [`PassWriter::write`] wrote has committed. P6 clears
+    /// the counts it kept outside its records, which that batch recorded.
+    fn committed(&self) {}
+    /// The pass is ending: add to `counts` what the pass counted outside
+    /// its records and no batch committed (the session's end records
+    /// `counts`). P6: the partial files left and the flushes since the last
+    /// commit, for a pass that stopped, failed or was cancelled.
+    fn settle(&self, _counts: &mut ImportCounts) {}
+    /// Write the records, one savepoint each, inside the open batch. What a
+    /// pass hands over from outside the records must stay with it until
+    /// [`PassWriter::committed`]: a batch that rolls back may end in a
+    /// resumable stop.
     fn write(
         &self,
         tx: &Connection,
@@ -342,8 +360,24 @@ fn commit_batch<W: PassWriter>(
 }
 
 /// Run one pass from its stored cursor to the end, batch by batch.
-/// `counts` holds the committed counts and is updated after each commit.
+/// `counts` holds the committed counts and is updated after each commit;
+/// when the pass ends, what it counted outside its records and did not
+/// commit is added ([`PassWriter::settle`]).
 pub(crate) fn run_pass<W: PassWriter>(
+    w: &W,
+    db: &SmsDb<'_>,
+    conn: &mut Connection,
+    run: &Run,
+    counts: &mut ImportCounts,
+    ctx: &mut ArchiveCtx<'_>,
+    mctx: &mut MessagesCtx<'_>,
+) -> Result<PassEnd, PassError> {
+    let end = run_batches(w, db, conn, run, counts, ctx, mctx);
+    w.settle(counts);
+    end
+}
+
+fn run_batches<W: PassWriter>(
     w: &W,
     db: &SmsDb<'_>,
     conn: &mut Connection,
@@ -379,6 +413,7 @@ pub(crate) fn run_pass<W: PassWriter>(
         let read = w.read(db, &*conn, run, from, mctx, &mut |rec| {
             point(FaultPoint::Record);
             if cancel.is_cancelled() {
+                w.discard(rec);
                 return ControlFlow::Break(Brk::Cancelled);
             }
             bytes = bytes.saturating_add(W::size(&rec));
@@ -422,6 +457,7 @@ pub(crate) fn run_pass<W: PassWriter>(
             run.guard(conn)?;
             commit_batch(w, conn, run, &buf, last, new_rows, done, counts)
                 .map_err(PassError::Batch)?;
+            w.committed();
             cursor = last;
             rows_done = new_rows;
             ctx.progress.event(ArchiveEvent::Import {

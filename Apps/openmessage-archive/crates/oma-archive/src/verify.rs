@@ -40,7 +40,9 @@ use rusqlite::types::ValueRef;
 use serde::{Deserialize, Serialize};
 
 use crate::archive::{Archive, Recovery};
-use crate::blobs::{open_checked, store_file_state, walk_store, StorageName, StoreFileState};
+use crate::blobs::{
+    open_checked, store_file_state, walk_store, StorageName, StoreFileState, StoreWalk,
+};
 use crate::conn::{armed, WriteConn};
 use crate::error::{primary_code, ArchiveError, BlobProblem, DamageKind, Stage, SQLITE_INTERRUPT};
 use crate::id::LabelState;
@@ -420,6 +422,16 @@ struct Bookkeeping {
     sessions: i64,
 }
 
+/// What the `blob` read found for the store walk.
+struct BlobsRead {
+    /// The digests the valid names spell.
+    referenced: BTreeSet<[u8; 32]>,
+    /// The rows' `count(*)`.
+    rows: u64,
+    /// Every page was read.
+    complete: bool,
+}
+
 /// One `blob` row as read, with crafted storage classes tolerated.
 struct BlobRow {
     id: i64,
@@ -605,11 +617,12 @@ impl Verifier<'_, '_, '_> {
         Ok(())
     }
 
-    fn blob_page(&mut self, after: i64) -> Result<Option<Vec<BlobRow>>, Cancelled> {
+    fn blob_page(&mut self, page: u32, after: i64) -> Result<Option<Vec<BlobRow>>, Cancelled> {
         let r = self
             .reader
             .conn()
             .cancellable(self.ctx.cancel, Stage::Verify, |c| {
+                crate::fault::verify_blob_error(page)?;
                 let mut stmt = c.prepare(
                     "SELECT id, sha256, byte_len, storage_name FROM blob \
                      WHERE id > ?1 ORDER BY id LIMIT ?2",
@@ -726,14 +739,15 @@ impl Verifier<'_, '_, '_> {
         }
     }
 
-    /// The `blob` rows and their files; returns the digests the valid
-    /// names spell.
-    fn blobs(&mut self) -> Result<BTreeSet<[u8; 32]>, Cancelled> {
+    /// The `blob` rows and their files. `None` when the rows could not be
+    /// counted (the check is counted as not run).
+    fn blobs(&mut self) -> Result<Option<BlobsRead>, Cancelled> {
         let mut referenced = BTreeSet::new();
         let totals = self
             .reader
             .conn()
             .cancellable(self.ctx.cancel, Stage::Verify, |c| {
+                crate::fault::verify_blob_error(0)?;
                 c.query_row(
                     "SELECT count(*), total(CASE WHEN byte_len > 0 THEN byte_len ELSE 0 END) \
                      FROM blob",
@@ -742,8 +756,10 @@ impl Verifier<'_, '_, '_> {
                 )
             });
         let Some((rows, bytes)) = cancelled_or_not_run(totals, &mut self.c)? else {
-            return Ok(referenced);
+            return Ok(None);
         };
+        let mut complete = true;
+        let mut page_no = 0u32;
         let full = self.depth == VerifyDepth::Full;
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let total = if full {
@@ -755,7 +771,10 @@ impl Verifier<'_, '_, '_> {
         let mut after = i64::MIN;
         loop {
             self.check_cancel()?;
-            let Some(page) = self.blob_page(after)? else {
+            page_no = page_no.saturating_add(1);
+            let Some(page) = self.blob_page(page_no, after)? else {
+                // Counted as not run; the digests read so far are not all.
+                complete = false;
                 break;
             };
             if page.is_empty() {
@@ -808,15 +827,31 @@ impl Verifier<'_, '_, '_> {
                 self.event(VerifyPhase::CheckingFiles, done, Some(total));
             }
         }
-        Ok(referenced)
+        Ok(Some(BlobsRead {
+            referenced,
+            rows: u64::try_from(rows).unwrap_or(0),
+            complete,
+        }))
     }
 
     fn files(&mut self) -> Step {
-        let referenced = self.blobs()?;
+        let read = self.blobs()?;
         let full = self.depth == VerifyDepth::Full;
-        let limit = self.c.blobs.saturating_add(STORE_WALK_SLACK);
-        let walk = walk_store(self.dir, &referenced, limit, full, self.ctx.cancel)
-            .map_err(|_| Cancelled)?;
+        // The walk's orphans and its limit depend on the `blob` rows. When
+        // they could not be counted the walk is not run (and counted so);
+        // when only some were read, no store file is called an orphan.
+        let walk = match &read {
+            None => {
+                self.c.not_run();
+                StoreWalk::default()
+            }
+            Some(b) => {
+                let limit = b.rows.saturating_add(STORE_WALK_SLACK);
+                let referenced = b.complete.then_some(&b.referenced);
+                walk_store(self.dir, referenced, limit, full, self.ctx.cancel)
+                    .map_err(|_| Cancelled)?
+            }
+        };
         self.c.store_entries = walk.entries;
         self.c.store_unexpected = walk.unexpected;
         self.c.store_orphans = walk.orphans;

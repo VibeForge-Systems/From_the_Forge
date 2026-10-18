@@ -279,10 +279,13 @@ without the backup.
 - **A crash leaves the copy** on disk until the staging sweep removes it
   (at the next start or check, after the 5-minute rule above).
 - **Attachment copies in flight.** Each file is first written to
-  `attachments/.incoming/<n>.partial` (0600 on Unix). A failed copy
-  deletes it; a partial file that could not be deleted is counted in the
-  import's counts and removed the next time the archive is opened for
-  writing, as is one left by a crash.
+  `attachments/.incoming/<n>.partial` (0600 on Unix); for an encrypted
+  backup it holds the decrypted bytes. A failed copy deletes it, and so
+  does an import that stops, fails or is cancelled before the copied file
+  is placed in the store (including a stop for lack of space). A partial
+  file that could not be deleted is counted in the import's counts and
+  removed the next time the archive is opened for writing, as is one left
+  by a crash.
 - **The password** (`start_import`) travels exactly as for the backup
   checks ("Backup passwords" above): zeroized in Rust, used once, never
   stored. It is asked for again to continue an import.

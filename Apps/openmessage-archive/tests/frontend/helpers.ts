@@ -341,6 +341,7 @@ export function archiveDetails(overrides: Partial<ArchiveDetailsDto> = {}): Arch
     preflight: null,
     resumable: false,
     matchingBackupIds: [],
+    resumeOptions: null,
     ...overrides,
   };
 }

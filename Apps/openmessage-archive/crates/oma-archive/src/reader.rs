@@ -89,6 +89,10 @@ impl SessionCounts {
 pub struct ResumableSession {
     pub session: i64,
     pub state: SessionState,
+    /// The session's import options. A continue must use the same ones
+    /// (D64), so "Continue importing…" starts from them.
+    pub include_recently_deleted: bool,
+    pub copy_attachments: bool,
 }
 
 /// What listing and details show about an archive. Content-free, except
@@ -423,17 +427,20 @@ impl ArchiveReader {
             };
             *slot = n;
         }
-        let newest: Option<(i64, i64)> = self.conn.budgeted(READ_OP_BUDGET, Stage::Read, |c| {
-            let mut stmt =
-                c.prepare("SELECT id, state FROM import_session ORDER BY id DESC LIMIT 1")?;
+        type Newest = (i64, i64, i64, i64);
+        let newest: Option<Newest> = self.conn.budgeted(READ_OP_BUDGET, Stage::Read, |c| {
+            let mut stmt = c.prepare(
+                "SELECT id, state, include_recently_deleted, copy_attachments \
+                 FROM import_session ORDER BY id DESC LIMIT 1",
+            )?;
             let mut rows = stmt.query([])?;
             match rows.next()? {
-                Some(r) => Ok(Some((r.get(0)?, r.get(1)?))),
+                Some(r) => Ok(Some((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))),
                 None => Ok(None),
             }
         })?;
         let resumable = match newest {
-            Some((session, state)) => {
+            Some((session, state, rd, copy)) => {
                 let state = SessionState::from_code(state).ok_or_else(unreadable)?;
                 matches!(
                     state,
@@ -442,7 +449,12 @@ impl ArchiveReader {
                         | SessionState::Interrupted
                         | SessionState::Stopped
                 )
-                .then_some(ResumableSession { session, state })
+                .then_some(ResumableSession {
+                    session,
+                    state,
+                    include_recently_deleted: rd == 1,
+                    copy_attachments: copy == 1,
+                })
             }
             None => None,
         };

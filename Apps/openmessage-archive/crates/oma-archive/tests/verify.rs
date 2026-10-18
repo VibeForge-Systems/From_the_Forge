@@ -283,6 +283,14 @@ fn store_damage_and_leftovers_are_reported_by_kind_and_left_alone() {
     fs::write(imports.join("session-99.json"), b"{not json").expect("bad provenance");
     fs::write(imports.join("session-1.json.tmp"), b"{}").expect("tmp");
     fs::write(imports.join("README"), b"x").expect("misnamed provenance");
+    // A valid provenance file's bytes under a non-canonical spelling of its
+    // number: an entry the store never writes, so it is not readable
+    // provenance (it is not read as `session-1.json`).
+    fs::copy(
+        imports.join("session-1.json"),
+        imports.join("session-0001.json"),
+    )
+    .expect("planted provenance");
     #[cfg(unix)]
     for p in [&orphan_path, &partial, &deep.join("hidden")] {
         chmod(p, 0o600);
@@ -328,7 +336,7 @@ fn store_damage_and_leftovers_are_reported_by_kind_and_left_alone() {
             c.provenance_unreadable,
             c.provenance_tmp_files
         ),
-        (1, 2, 1)
+        (1, 3, 1)
     );
     assert!(!c.store_walk_truncated);
     assert_eq!(
@@ -722,4 +730,30 @@ fn a_damaged_page_is_reported_by_both_sqlite_checks() {
         assert!(r.counts.sqlite_check_messages >= 1);
         assert_eq!(r.outcome, VerifyOutcome::Problems);
     }
+}
+
+/// A `blob` read that fails is a check not run, never a store full of
+/// orphans: with no row count the walk is not run either; with a page
+/// missing, the walk calls no file an orphan (and its limit comes from the
+/// row count).
+#[test]
+fn a_failed_blob_read_reports_no_orphans() {
+    let at = imported("imp-dev1-v1-plain");
+    for (step, not_run, entries) in [(0u32, 2u64, false), (1, 1, true)] {
+        let r = {
+            let _g = install(Faults {
+                verify_blob_error: Some(step),
+                ..Faults::default()
+            });
+            verify(&at, VerifyDepth::Quick)
+        };
+        let c = &r.counts;
+        assert_eq!(r.outcome, VerifyOutcome::Incomplete, "step {step}: {c:?}");
+        assert_eq!(c.checks_not_run, not_run, "step {step}");
+        assert_eq!(c.store_orphans, 0, "step {step}");
+        assert!(!c.store_walk_truncated, "step {step}");
+        assert_eq!(c.store_entries > 0, entries, "step {step}");
+    }
+    // Without the fault the same archive is clean.
+    assert_eq!(verify(&at, VerifyDepth::Quick).outcome, VerifyOutcome::Ok);
 }

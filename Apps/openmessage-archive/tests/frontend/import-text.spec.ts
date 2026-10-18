@@ -52,6 +52,14 @@ describe('import text: continue or start over', () => {
     ]);
   });
 
+  it('says that other options set the interrupted import aside, without blaming the backup', () => {
+    const s = resumeSentences(preflight({ resume: { kind: 'fresh', supersedes: 1, reason: 'optionsDiffer' } }));
+    expect(s).toEqual([
+      'The import options differ from those of the interrupted import; that import will be set aside and everything re-read with these options.',
+    ]);
+    expect(s.join(' ')).not.toContain('backup has changed');
+  });
+
   it('starts a new import, counting unfinished ones that will be set aside', () => {
     expect(resumeSentences(preflight())).toEqual(['This starts a new import.']);
     expect(

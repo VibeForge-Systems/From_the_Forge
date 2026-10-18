@@ -21,13 +21,17 @@ const includeRecentlyDeleted = ref(DEFAULT_IMPORT_OPTIONS.includeRecentlyDeleted
 const open = computed(() => archives.importDialog !== null);
 const continuing = computed(() => archives.importDialog?.continuing ?? false);
 
+// A continue must use the unfinished import's options (D64), so "Continue
+// importing…" starts from them; any other import starts from the defaults.
 watch(
   () => archives.importDialog,
   (d) => {
     archiveId.value = d?.archiveId ?? null;
     backupId.value = d?.backupId ?? null;
-    copyAttachments.value = DEFAULT_IMPORT_OPTIONS.copyAttachments;
-    includeRecentlyDeleted.value = DEFAULT_IMPORT_OPTIONS.includeRecentlyDeleted;
+    const resume = d?.continuing && d.archiveId ? archives.details[d.archiveId]?.resumeOptions : null;
+    const start = resume ?? DEFAULT_IMPORT_OPTIONS;
+    copyAttachments.value = start.copyAttachments;
+    includeRecentlyDeleted.value = start.includeRecentlyDeleted;
   },
 );
 
@@ -93,8 +97,9 @@ function submit(): void {
   <ModalDialog :open="open" :title="continuing ? 'Continue importing' : 'Import from a backup'" @close="archives.closeImport()">
     <form id="import-form" novalidate @submit.prevent="submit">
       <p v-if="continuing" class="small">
-        To continue an unfinished import, choose the same backup again. If the backup has changed
-        since, or the app was updated, the import starts over; the next step says which.
+        To continue an unfinished import, choose the same backup again and keep its options, which
+        are set as they were. If the backup has changed since, the app was updated or the options
+        differ, the import starts over; the next step says which.
       </p>
 
       <fieldset class="mb-3">

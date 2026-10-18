@@ -7,7 +7,7 @@
 
 use std::io;
 
-use oma_archive::{ArchiveError, LocationRefusal, NotImportable, StopReason};
+use oma_archive::{ArchiveError, LocationRefusal, NotImportable, SpaceEstimate, StopReason};
 use oma_backup::Limits;
 
 use crate::backups::messages as bm;
@@ -158,6 +158,38 @@ pub fn to_ipc(e: &ArchiveError, limits: &Limits) -> IpcError {
         _ => return IpcError::internal("unknown archive error"),
     };
     IpcError::new(code, msg)
+}
+
+/// A byte count as "9.2 GB" or "512.0 MB" (binary units, as the guards
+/// and the Archive page use).
+fn approx_size(bytes: u64) -> String {
+    const UNITS: [(u32, &str); 3] = [(30, "GB"), (20, "MB"), (10, "KB")];
+    for (shift, unit) in UNITS {
+        if bytes >= 1u64 << shift {
+            let tenths = u128::from(bytes) * 10 / (1u128 << shift);
+            return format!("{}.{} {unit}", tenths / 10, tenths % 10);
+        }
+    }
+    format!("{bytes} bytes")
+}
+
+/// The refusal before the gate (spec §12): the free space is below the
+/// floor, so no import was started and nothing was written. Unlike a
+/// stopped import's [`INSUFFICIENT_SPACE`], there is nothing to continue;
+/// the sentence gives the amounts so the user knows how much to free.
+pub fn start_space_notice(e: &SpaceEstimate) -> IpcError {
+    let free = match e.available {
+        Some(a) => format!("{} is free", approx_size(a)),
+        None => "the free space could not be read".to_owned(),
+    };
+    IpcError::new(
+        ErrorCode::InsufficientSpace,
+        format!(
+            "There is not enough free space in your archive folder to start an import: at least {} must stay free, and {free}. The whole import needs about {}. Nothing was written. Free some space, then try again.",
+            approx_size(e.floor()),
+            approx_size(e.needed),
+        ),
+    )
 }
 
 /// The sentence of a stop (state 6): resumable, never "failed".
@@ -345,6 +377,28 @@ mod tests {
             C::InsufficientSpace
         );
         assert_eq!(backup_not_importable_notice().code, C::UnsupportedBackup);
+    }
+
+    /// The refusal before the gate names the amounts and never offers to
+    /// continue an import that was never started.
+    #[test]
+    fn the_start_refusal_gives_the_amounts_and_no_continue() {
+        let mut e = SpaceEstimate::default();
+        e.reserve = 10 << 30;
+        e.wal_allowance = 128 << 20;
+        e.needed = (10 << 30) + (300 << 20);
+        e.available = Some(9_200_000_000);
+        let n = start_space_notice(&e);
+        assert_eq!(n.code, ErrorCode::InsufficientSpace);
+        assert_eq!(
+            n.message,
+            "There is not enough free space in your archive folder to start an import: at least 10.1 GB must stay free, and 8.5 GB is free. The whole import needs about 10.2 GB. Nothing was written. Free some space, then try again."
+        );
+        assert!(!n.message.contains("continue"));
+        assert_ne!(n.message, INSUFFICIENT_SPACE);
+        assert_eq!(approx_size(512), "512 bytes");
+        assert_eq!(approx_size(1536), "1.5 KB");
+        assert_eq!(approx_size(5 << 20), "5.0 MB");
     }
 
     /// Each new code has its fixed sentence, and the sentences are

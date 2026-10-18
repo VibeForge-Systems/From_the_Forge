@@ -608,3 +608,284 @@ fn a_cancel_inside_the_copy_commits_the_records_before_it() {
         logical_snapshot(&fresh_at.db(), Scope::Content)
     );
 }
+
+/// The newest session's state and stored `attachmentFiles.partialsLeft`.
+fn stored_partials_left(db: &Path) -> (i64, u64) {
+    let (state, counts): (i64, String) = read_only(db)
+        .query_row(
+            "SELECT state, counts FROM import_session ORDER BY id DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .expect("session");
+    let v: serde_json::Value = serde_json::from_str(&counts).expect("counts");
+    let left = v["attachmentFiles"]["partialsLeft"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("no partialsLeft in {v}"));
+    (state, left)
+}
+
+/// Continue the newest session of `at` and compare with the uninterrupted
+/// import of `imp-dev1-v1-plain`.
+fn resume_to_uninterrupted(at: &Imported, lineage: oma_archive::LineageId) {
+    let mut a = at.lib.open(&at.id).expect("open");
+    let src = open_entry("imp-dev1-v1-plain");
+    let s = import(&mut a, &src, &opts(1000), LineageChoice::Existing(lineage));
+    drop(a);
+    assert!(s.resumed);
+    assert_store_consistent(&at.db(), true);
+    let fresh_at = fresh();
+    import_entry(&fresh_at, "imp-dev1-v1-plain");
+    assert_eq!(
+        logical_snapshot(&at.db(), Scope::Content),
+        logical_snapshot(&fresh_at.db(), Scope::Content)
+    );
+}
+
+/// A cancel that lands after a file was copied and synced but before the
+/// pass buffered its record: the record is not committed, and its partial
+/// file is removed at once rather than left for the next import's sweep.
+#[test]
+fn a_cancel_after_a_copy_removes_its_partial_file() {
+    let at = fresh();
+    let token = CancelToken::new();
+    let outcome = {
+        let t = token.clone();
+        let _trip = arm(
+            FaultPoint::AttachmentSynced,
+            2,
+            Box::new(move |_, _| t.cancel()),
+        );
+        let mut a = at.lib.open(&at.id).expect("open");
+        let src = open_entry("imp-dev1-v1-plain");
+        let o = import_with(&mut a, &src, &opts(1000), LineageChoice::New, &token).expect("import");
+        drop(a);
+        o
+    };
+    let ImportOutcome::Cancelled(Some(summary)) = outcome else {
+        panic!("not cancelled: {outcome:?}");
+    };
+    assert_eq!(summary.counts.attachment_files.blobs_added, 1);
+    assert_eq!(summary.counts.attachment_files.partials_left, 0);
+    assert_eq!(partial_files(&at.db()), 0, "the copied file was left");
+    assert_store_consistent(&at.db(), true);
+    resume_to_uninterrupted(&at, summary.lineage);
+}
+
+/// Free space that reads low once a flag is set.
+struct LowAfter {
+    low: std::sync::atomic::AtomicBool,
+}
+
+impl oma_archive::space::SpaceProbe for LowAfter {
+    fn available(&self, _path: &Path) -> io::Result<u64> {
+        let floor = oma_archive::space::reserve_for(None)
+            + oma_archive::space::wal_allowance(32 << 20, 64 << 20);
+        Ok(if self.low.load(std::sync::atomic::Ordering::SeqCst) {
+            floor - 1
+        } else {
+            TEST_AVAILABLE
+        })
+    }
+    fn total(&self, _path: &Path) -> io::Result<u64> {
+        Err(io::Error::other("unknown"))
+    }
+}
+
+/// The space guard that runs before the intent transaction (phase B)
+/// stops the import with a copied file buffered: that file is removed, so
+/// the stop gives the space back and leaves no plaintext in `.incoming`.
+#[test]
+fn a_space_stop_before_the_intents_removes_the_batch_partial_files() {
+    let probe = Arc::new(LowAfter {
+        low: std::sync::atomic::AtomicBool::new(false),
+    });
+    let (tmp, lib) = library();
+    let lib = lib.with_space_probe(probe.clone());
+    let id = lib.create(None).expect("create");
+    let outcome = {
+        let p = probe.clone();
+        let _trip = arm(
+            FaultPoint::AttachmentSynced,
+            1,
+            Box::new(move |_, _| p.low.store(true, std::sync::atomic::Ordering::SeqCst)),
+        );
+        let mut a = lib.open(&id).expect("open");
+        let src = open_entry("imp-dev1-v1-plain");
+        let o = import_with(
+            &mut a,
+            &src,
+            &opts(1000),
+            LineageChoice::New,
+            &CancelToken::new(),
+        )
+        .expect("import");
+        drop(a);
+        o
+    };
+    let ImportOutcome::Stopped { reason, summary } = outcome else {
+        panic!("not stopped: {outcome:?}");
+    };
+    assert_eq!(reason, StopReason::InsufficientSpace);
+    let db = db_path(&tmp, &id);
+    assert_eq!(partial_files(&db), 0, "the batch's partial file was left");
+    assert_eq!(summary.counts.attachment_files.partials_left, 0);
+    assert_eq!(stored_partials_left(&db), (6, 0));
+    probe.low.store(false, std::sync::atomic::Ordering::SeqCst);
+    let at = Imported { tmp, lib, id };
+    resume_to_uninterrupted(&at, summary.lineage);
+}
+
+/// A failed intent commit (`SQLITE_FULL`, a resumable stop) removes the
+/// batch's partial files; with a store that cannot remove them, they are
+/// counted in the stopped session's stored counts.
+#[test]
+fn a_failed_intent_commit_removes_or_counts_the_batch_partial_files() {
+    for stuck in [false, true] {
+        let (tmp, lib) = library();
+        let lib = if stuck {
+            lib.with_store_fs(Arc::new(StuckPartials))
+        } else {
+            lib
+        };
+        let id = lib.create(None).expect("create");
+        let outcome = {
+            let _g = install(Faults {
+                intent_error: Some(13),
+                ..Faults::default()
+            });
+            let mut a = lib.open(&id).expect("open");
+            let src = open_entry("imp-dev1-v1-plain");
+            let o = import_with(
+                &mut a,
+                &src,
+                &opts(1000),
+                LineageChoice::New,
+                &CancelToken::new(),
+            )
+            .expect("import");
+            drop(a);
+            o
+        };
+        let ImportOutcome::Stopped { reason, summary } = outcome else {
+            panic!("stuck {stuck}: not stopped: {outcome:?}");
+        };
+        assert_eq!(reason, StopReason::InsufficientSpace);
+        let db = db_path(&tmp, &id);
+        let left = if stuck { 6 } else { 0 };
+        assert_eq!(partial_files(&db), usize::try_from(left).expect("n"));
+        assert_eq!(summary.counts.attachment_files.partials_left, left);
+        assert_eq!(stored_partials_left(&db), (6, left), "stuck {stuck}");
+        if !stuck {
+            let at = Imported { tmp, lib, id };
+            resume_to_uninterrupted(&at, summary.lineage);
+        }
+    }
+}
+
+/// Counts kept outside the records (here, partial files a failed copy
+/// could not remove) survive a batch that rolls back into a resumable stop:
+/// the stopped session records them.
+#[test]
+fn pending_attachment_counts_survive_a_rolled_back_batch() {
+    let _g = install(Faults {
+        copy_write_error: Some(5),
+        ..Faults::default()
+    });
+    let (tmp, lib) = library();
+    let lib = lib.with_store_fs(Arc::new(StuckPartials));
+    let id = lib.create(None).expect("create");
+    let outcome = {
+        // Every batch from the first attachment copy on fails its COMMIT
+        // with `SQLITE_FULL`.
+        let _trip = arm(
+            FaultPoint::AttachmentPartialCreated,
+            1,
+            Box::new(|_, _| {
+                std::mem::forget(install(Faults {
+                    copy_write_error: Some(5),
+                    batch_error: Some(13),
+                    ..Faults::default()
+                }));
+            }),
+        );
+        let mut a = lib.open(&id).expect("open");
+        let src = open_entry("imp-dev1-v1-plain");
+        let o = import_with(
+            &mut a,
+            &src,
+            &opts(1000),
+            LineageChoice::New,
+            &CancelToken::new(),
+        )
+        .expect("import");
+        drop(a);
+        o
+    };
+    let ImportOutcome::Stopped { reason, summary } = outcome else {
+        panic!("not stopped: {outcome:?}");
+    };
+    assert_eq!(reason, StopReason::InsufficientSpace);
+    let db = db_path(&tmp, &id);
+    assert_eq!(partial_files(&db), 6);
+    assert_eq!(summary.counts.attachment_files.partials_left, 6);
+    // The rolled-back records' own counts are not kept.
+    assert_eq!(summary.counts.attachment_files.write_failed, 0);
+    assert_eq!(stored_partials_left(&db), (6, 6));
+}
+
+/// The stated exception to order independence (`docs/architecture.md`):
+/// "already archived" compares presence and length only, so two backups
+/// with **different bytes of the same length** under one attachment GUID
+/// keep whichever was imported first; the other version is never read.
+/// Here v2's copy of `SYNTH-ATT-GUID-0001` (shared with v1) is replaced by
+/// other bytes of the same length.
+#[test]
+fn same_length_different_bytes_keep_the_first_imported_version() {
+    let shared = "eb89532441a7d5bc2410cb1d8412a35c9ea1b688ab1b80c22c2a50dbeb4a35cb";
+    let src_dir = tempfile::tempdir().expect("backup");
+    let v2 = copy_entry("imp-dev1-v2-plain", src_dir.path());
+    let mut other = None;
+    for d in fs::read_dir(&v2).expect("udid").flatten() {
+        if !d.file_type().expect("type").is_dir() {
+            continue;
+        }
+        for f in fs::read_dir(d.path()).expect("dir").flatten() {
+            let bytes = fs::read(f.path()).expect("read");
+            if hex(&Sha256::digest(&bytes)) == shared {
+                let flipped: Vec<u8> = bytes.iter().map(|b| b ^ 0x5a).collect();
+                other = Some(hex(&Sha256::digest(&flipped)));
+                fs::write(f.path(), &flipped).expect("rewrite");
+            }
+        }
+    }
+    let other = other.expect("v2 holds the shared attachment");
+    let blobs = |at: &Imported| -> BTreeSet<String> {
+        blob_list(&at.db())
+            .as_array()
+            .expect("blobs")
+            .iter()
+            .map(|b| b["sha256"].as_str().expect("sha").to_owned())
+            .collect()
+    };
+    let import_v2 = |at: &Imported| {
+        let mut a = at.lib.open(&at.id).expect("open");
+        let src = open_dir(&v2, None);
+        let s = import(&mut a, &src, &opts(1000), LineageChoice::New);
+        drop(a);
+        src.ob.close();
+        s
+    };
+    // v1 then v2: v1's bytes are stored; v2's are never read.
+    let at = fresh();
+    import_entry(&at, "imp-dev1-v1-plain");
+    import_v2(&at);
+    let b = blobs(&at);
+    assert!(b.contains(shared) && !b.contains(&other), "{b:?}");
+    // v2 then v1: v2's bytes are stored; v1's are never read.
+    let at = fresh();
+    import_v2(&at);
+    import_entry(&at, "imp-dev1-v1-plain");
+    let b = blobs(&at);
+    assert!(b.contains(&other) && !b.contains(shared), "{b:?}");
+}

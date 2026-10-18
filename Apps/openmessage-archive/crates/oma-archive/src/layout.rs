@@ -210,8 +210,10 @@ impl ArchiveDir {
 }
 
 /// `session-<n>.json`, or with `.tmp` appended. A session id is a
-/// positive integer from the database, never a string from outside.
-fn provenance_name(session: i64, tmp: bool) -> String {
+/// positive integer from the database, never a string from outside. This
+/// is the only spelling the store writes (the provenance reader accepts no
+/// other).
+pub(crate) fn provenance_name(session: i64, tmp: bool) -> String {
     let mut name = String::from("session-");
     name.push_str(&session.to_string());
     name.push_str(if tmp { ".json.tmp" } else { ".json" });

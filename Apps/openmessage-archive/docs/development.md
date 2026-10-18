@@ -295,9 +295,18 @@ it is frozen, and a build that cannot read it is wrong).
 `OMA_TEST_*` variables). The child test `crash_child` does nothing when the
 variable is unset. At the n-th hit of the point the child prints
 `FAULT <point> <n>` and blocks; the parent kills it, checks the archive and
-continues the import. On Windows the plan is the subset of spec §18.12 (the
-batch commit points and the creation rename). A child that neither reaches
-its point nor finishes within 120 s fails the test.
+continues the import. On Windows the plan is a subset (spec §18.12): the
+batch commit points (`batch-before-commit` and `batch-after-commit`, at
+their first and last hit), the P6 intent-commit and placement points
+(`attachment-intent-committed`, `attachment-placed`, first and last hit),
+the terminal commit of a cancelled session, the three kills in a row
+(including one during recovery) and both creation points. The record,
+session and recovery points of the import plan, the other store points,
+and the gate, finalize, after-completion and migration kill tests are
+skipped on Windows (those four tests return early there);
+`every_fault_point_has_a_kill` checks the full union off Windows and only
+records the points left out on Windows. A child that neither reaches its
+point nor finishes within 120 s fails the test.
 
 ### Test time (spec §0.1)
 

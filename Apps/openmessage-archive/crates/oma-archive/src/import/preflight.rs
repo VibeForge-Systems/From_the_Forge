@@ -466,6 +466,9 @@ pub(crate) struct ResumeDecision {
     pub(crate) resume: Option<Resume>,
     /// Unfinished sessions to supersede.
     pub(crate) supersede: Vec<i64>,
+    /// Nothing continues, but an unfinished session matches in everything
+    /// except the two import options (D64): the user changed them.
+    pub(crate) options_differ: bool,
 }
 
 /// Decide whether an unfinished session continues (§8.2 step 1). The
@@ -496,6 +499,7 @@ pub(crate) fn decide_resume(
     let mut out = ResumeDecision {
         resume: None,
         supersede: Vec::new(),
+        options_differ: false,
     };
     while let Some(r) = rows.next()? {
         let id: i64 = r.get(0)?;
@@ -504,7 +508,7 @@ pub(crate) fn decide_resume(
         let app: String = r.get(6)?;
         let profile: Vec<u8> = r.get(10)?;
         let rank: Option<Rank> = Rank::from_slice(&r.get::<_, Vec<u8>>(14)?);
-        let matches = out.resume.is_none()
+        let same_source = out.resume.is_none()
             && rank.is_some()
             && (any_lineage || want.lineage == Some(lineage))
             && digest.as_slice() == want.digest.as_slice()
@@ -515,9 +519,13 @@ pub(crate) fn decide_resume(
             && r.get::<_, i64>(7)? == want.schema_version
             && r.get::<_, i64>(8)? == want.deriver_version
             && r.get::<_, i64>(9)? == want.decoder_version
-            && profile.as_slice() == want.read_profile.as_slice()
-            && r.get::<_, i64>(11)? == i64::from(want.include_recently_deleted)
+            && profile.as_slice() == want.read_profile.as_slice();
+        let same_options = r.get::<_, i64>(11)? == i64::from(want.include_recently_deleted)
             && r.get::<_, i64>(12)? == i64::from(want.copy_attachments);
+        let matches = same_source && same_options;
+        if same_source && !same_options {
+            out.options_differ = true;
+        }
         match (matches, rank) {
             (true, Some(rank)) => {
                 out.resume = Some(Resume {
@@ -529,6 +537,9 @@ pub(crate) fn decide_resume(
             }
             _ => out.supersede.push(id),
         }
+    }
+    if out.resume.is_some() {
+        out.options_differ = false;
     }
     Ok(out)
 }

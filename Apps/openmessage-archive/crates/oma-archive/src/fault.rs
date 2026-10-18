@@ -210,6 +210,12 @@ pub mod hooks {
         /// Fail every import batch just before its `COMMIT` with this
         /// SQLite primary result code (the batch then rolls back).
         pub batch_error: Option<i32>,
+        /// Fail every attachment intent transaction (spec §9.1 phase B)
+        /// just before its `COMMIT` with this SQLite primary result code.
+        pub intent_error: Option<i32>,
+        /// Fail the verifier's read of the `blob` table with
+        /// `SQLITE_CORRUPT`: `0` its row count, `n` its n-th page.
+        pub verify_blob_error: Option<u32>,
         /// Fail every attachment copy's first write to its partial file with
         /// this raw OS error code (for example `EFBIG`).
         pub copy_write_error: Option<i32>,
@@ -522,6 +528,43 @@ pub(crate) fn batch_error() -> Option<rusqlite::Error> {
     #[cfg(not(feature = "fault-injection"))]
     {
         None
+    }
+}
+
+/// The error an attachment intent transaction must fail with, if a test
+/// set one.
+#[inline]
+pub(crate) fn intent_error() -> Option<rusqlite::Error> {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current()
+            .intent_error
+            .map(|code| rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None))
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        None
+    }
+}
+
+/// Whether the verifier's `blob` read must fail at `step` (0: the row
+/// count; n: the n-th page), if a test set it.
+#[inline]
+pub(crate) fn verify_blob_error(step: u32) -> rusqlite::Result<()> {
+    #[cfg(feature = "fault-injection")]
+    {
+        if hooks::current().verify_blob_error == Some(step) {
+            return Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),
+                None,
+            ));
+        }
+        Ok(())
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        let _ = step;
+        Ok(())
     }
 }
 

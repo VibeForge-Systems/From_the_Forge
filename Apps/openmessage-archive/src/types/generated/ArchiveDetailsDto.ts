@@ -3,6 +3,7 @@ import type { ArchiveJobDto } from "./ArchiveJobDto";
 import type { ArchiveSummaryDto } from "./ArchiveSummaryDto";
 import type { ImportPreflightDto } from "./ImportPreflightDto";
 import type { LastImportDto } from "./LastImportDto";
+import type { ResumeOptionsDto } from "./ResumeOptionsDto";
 import type { SessionDto } from "./SessionDto";
 import type { VerifySummaryDto } from "./VerifySummaryDto";
 
@@ -28,4 +29,10 @@ resumable: boolean,
  * Listed backups that look like the unfinished session's source,
  * computed in Rust (C2.13). Pre-selection only.
  */
-matchingBackupIds: Array<string>, };
+matchingBackupIds: Array<string>, 
+/**
+ * The unfinished session's import options, when `resumable`: a
+ * continue must use the same ones (D64), so "Continue importing…"
+ * starts from them.
+ */
+resumeOptions: ResumeOptionsDto | null, };

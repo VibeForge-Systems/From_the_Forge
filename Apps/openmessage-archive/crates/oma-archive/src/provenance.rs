@@ -46,13 +46,20 @@ fn is_provenance_tmp(name: &str) -> bool {
         .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
-/// The session number of a name matching `^session-[0-9]+\.json$`.
+/// The session number of a name matching `^session-(0|[1-9][0-9]*)\.json$`:
+/// only the spelling the store writes, so the name and the file
+/// [`ArchiveDir::provenance_file`] gives for its number are one entry (a
+/// planted `session-0042.json` is not read as `session-42.json`).
 pub(crate) fn provenance_session(name: &str) -> Option<i64> {
     let digits = name.strip_prefix("session-")?.strip_suffix(".json")?;
     if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
-    digits.parse().ok()
+    if digits.len() > 1 && digits.starts_with('0') {
+        return None;
+    }
+    let session: i64 = digits.parse().ok()?;
+    (crate::layout::provenance_name(session, false) == name).then_some(session)
 }
 
 /// Remove `imports/session-<n>.json.tmp` files.
@@ -243,7 +250,7 @@ pub(crate) fn write(dir: &ArchiveDir, conn: &Connection, session: i64) -> bool {
 /// Why a provenance file was not read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReadProblem {
-    /// The name does not match `^session-[0-9]+\.json$`.
+    /// The name does not match `^session-(0|[1-9][0-9]*)\.json$`.
     Name,
     /// Over [`MAX_BYTES`].
     TooLarge,
@@ -375,8 +382,12 @@ mod tests {
     #[test]
     fn provenance_names() {
         assert_eq!(provenance_session("session-1.json"), Some(1));
-        assert_eq!(provenance_session("session-0042.json"), Some(42));
+        assert_eq!(provenance_session("session-42.json"), Some(42));
+        assert_eq!(provenance_session("session-0.json"), Some(0));
         for bad in [
+            "session-0042.json",
+            "session-01.json",
+            "session-00.json",
             "session-.json",
             "session-1.json.tmp",
             "session-1a.json",
@@ -399,6 +410,9 @@ mod tests {
         let good = json!({ "format": FORMAT, "formatVersion": 1, "session": 2 });
         std::fs::write(dir.provenance_file(2), good.to_string()).expect("write");
         assert_eq!(read(&dir, "session-2.json"), Ok(good.clone()));
+        // A non-canonical spelling of a valid file's number is refused by
+        // name, never read as that file.
+        assert_eq!(read(&dir, "session-02.json"), Err(ReadProblem::Name));
         // The wrong session number for the name.
         std::fs::write(dir.provenance_file(3), good.to_string()).expect("write");
         assert_eq!(

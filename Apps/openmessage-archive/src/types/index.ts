@@ -112,6 +112,7 @@ export type { QualifierCodeDto } from './generated/QualifierCodeDto';
 export type { RdFactsDto } from './generated/RdFactsDto';
 export type { RecentlyDeletedCountsDto } from './generated/RecentlyDeletedCountsDto';
 export type { RefusalDto } from './generated/RefusalDto';
+export type { ResumeOptionsDto } from './generated/ResumeOptionsDto';
 export type { ResumePlanDto } from './generated/ResumePlanDto';
 export type { SchemaCheckDto } from './generated/SchemaCheckDto';
 export type { SessionCountsDto } from './generated/SessionCountsDto';

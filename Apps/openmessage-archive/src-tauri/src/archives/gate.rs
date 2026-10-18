@@ -72,6 +72,9 @@ pub enum NotWaiting {
 struct State {
     waiting: bool,
     answer: Option<GateAnswer>,
+    /// Set by [`Gate::open`], so the timeout runs from the moment the gate
+    /// can be answered, not from whenever [`Gate::wait`] gets to run.
+    deadline: Option<Duration>,
 }
 
 /// One import job's gate.
@@ -112,18 +115,24 @@ impl Gate {
     }
 
     /// Start accepting an answer, before the preflight is announced, so an
-    /// answer that arrives before [`Gate::wait`] runs is kept.
+    /// answer that arrives before [`Gate::wait`] runs is kept. The timeout
+    /// starts here: whoever sees the gate open (a test advancing its clock
+    /// included) sees a deadline already fixed.
     pub fn open(&self) {
         let mut s = self.lock();
         s.waiting = true;
         s.answer = None;
+        s.deadline = Some(self.clock.now().saturating_add(self.timeout));
     }
 
     /// Block until an answer, a cancel or the timeout. Opens the gate if
     /// [`Gate::open`] was not called.
     pub fn wait(&self, cancel: &CancelToken) -> GateEnding {
-        let deadline = self.clock.now().saturating_add(self.timeout);
         let mut s = self.lock();
+        let deadline = match s.deadline {
+            Some(d) => d,
+            None => self.clock.now().saturating_add(self.timeout),
+        };
         s.waiting = true;
         let ending = loop {
             if cancel.is_cancelled() {
@@ -144,6 +153,7 @@ impl Gate {
         };
         s.waiting = false;
         s.answer = None;
+        s.deadline = None;
         ending
     }
 
@@ -236,6 +246,24 @@ pub(crate) mod tests {
             g.wait(&CancelToken::new()),
             GateEnding::Answered(GateAnswer::Decline)
         );
+    }
+
+    /// The deadline is fixed when the gate opens: a clock that moves past
+    /// it before the wait runs times the wait out at once, instead of
+    /// starting a new two minutes the clock may never cover.
+    #[test]
+    fn the_timeout_runs_from_the_open() {
+        let (clock, g) = gate();
+        g.open();
+        clock.advance(GATE_TIMEOUT);
+        assert_eq!(g.wait(&CancelToken::new()), GateEnding::TimedOut);
+        // The next wait without an open starts its own timeout.
+        let w = g.clone();
+        let h = std::thread::spawn(move || w.wait(&CancelToken::new()));
+        until_waiting(&g);
+        clock.advance(GATE_TIMEOUT);
+        g.wake();
+        assert_eq!(h.join().expect("join"), GateEnding::TimedOut);
     }
 
     #[test]

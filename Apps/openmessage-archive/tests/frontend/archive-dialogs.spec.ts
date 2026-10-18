@@ -157,6 +157,34 @@ describe('ImportDialog', () => {
     expect(wrapper?.text()).toContain("Looks like the unfinished import's backup");
   });
 
+  it('starts Continue importing from the unfinished import\'s options, and a new import from the defaults', async () => {
+    api.getArchiveDetails.mockResolvedValue(
+      archiveDetails({
+        resumable: true,
+        matchingBackupIds: ['b1'],
+        resumeOptions: { includeRecentlyDeleted: true, copyAttachments: false },
+      }),
+    );
+    await useArchives().select(ARCHIVE_ID);
+    await openImport({ archiveId: ARCHIVE_ID, continuing: true });
+    expect(wrapper?.find<HTMLInputElement>('#import-copy-attachments').element.checked).toBe(false);
+    expect(wrapper?.find<HTMLInputElement>('#import-include-rd').element.checked).toBe(true);
+    await wrapper?.find('form#import-form').trigger('submit');
+    await flushPromises();
+    expect(api.startImport).toHaveBeenCalledWith(
+      'b1',
+      ARCHIVE_ID,
+      null,
+      { copyAttachments: false, includeRecentlyDeleted: true },
+      expect.any(Function),
+    );
+    // Not continuing: the defaults, whatever the unfinished import used.
+    useArchives().openImport({ archiveId: ARCHIVE_ID, backupId: 'b1' });
+    await flushPromises();
+    expect(wrapper?.find<HTMLInputElement>('#import-copy-attachments').element.checked).toBe(true);
+    expect(wrapper?.find<HTMLInputElement>('#import-include-rd').element.checked).toBe(false);
+  });
+
   it('offers to create an archive first when there is none', async () => {
     api.listArchives.mockResolvedValue(archiveListing([]));
     await openImport({ backupId: 'b1' });

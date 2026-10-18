@@ -15,7 +15,7 @@ use oma_backup::{inspect, Candidate, Limits};
 
 use super::dto::{
     ArchiveStatusDto, GateEndingDto, ImportOptionsInput, ImportOutcomeDto, NotImportableDto,
-    SessionStateDto, VerifyOutcomeDto,
+    ResumeOptionsDto, SessionStateDto, VerifyOutcomeDto,
 };
 use super::gate::tests::FakeClock;
 use super::gate::{GateAnswer, GATE_TIMEOUT};
@@ -280,6 +280,7 @@ fn an_import_waits_at_the_gate_then_completes() {
     assert!(d.summary.stats.is_some_and(|s| s.messages > 0));
     assert_eq!(d.sessions.len(), 1);
     assert!(!d.resumable && d.matching_backup_ids.is_empty());
+    assert_eq!(d.resume_options, None);
     let json = serde_json::to_string(&d).expect("json");
     assert!(!json.contains(UDID), "no device identifier in the details");
     let l = listing(Some(&fx.library), &env(), &jobs);
@@ -305,10 +306,21 @@ fn decline_cancel_and_timeout_at_the_gate_write_nothing() {
                 .expect("decline"),
             GateEndingDto::Cancelled => assert!(jobs.cancel(&run.job_id)),
             GateEndingDto::TimedOut => {
+                // The deadline was fixed when the gate opened, before the
+                // preflight was published; the waiting thread re-reads the
+                // clock at least every GATE_POLL.
                 clock.advance(GATE_TIMEOUT);
-                // The waiting thread re-reads the clock at least every
-                // GATE_POLL.
             }
+        }
+        // Bounded in real time, so a gate that never times out fails the
+        // test instead of hanging the binary.
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while !run.handle.is_finished() {
+            assert!(
+                Instant::now() < deadline,
+                "{ending:?}: the job never left the gate"
+            );
+            std::thread::sleep(Duration::from_millis(10));
         }
         run.handle.join().expect("join");
         match terminal(&run.rec.events()) {
@@ -423,6 +435,14 @@ fn a_cancel_during_the_passes_ends_cancelled_and_preselects_the_backup() {
     assert!(d.resumable);
     assert_eq!(d.summary.resumable_state, Some(SessionStateDto::Cancelled));
     assert_eq!(d.matching_backup_ids, vec![summary.id]);
+    // "Continue importing…" starts from the session's own options (D64).
+    assert_eq!(
+        d.resume_options,
+        Some(ResumeOptionsDto {
+            include_recently_deleted: options().include_recently_deleted,
+            copy_attachments: options().copy_attachments,
+        })
+    );
     assert_eq!(
         d.last_import.map(|l| l.state),
         Some(SessionStateDto::Cancelled)

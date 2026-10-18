@@ -34,6 +34,13 @@ pub trait StoreFs: Send + Sync {
     fn remove_file(&self, path: &Path) -> io::Result<()> {
         std::fs::remove_file(path)
     }
+    /// Flush a partial copy's data to the device (`sync_all`) before it is
+    /// placed (spec §9.1 step 4). `path` names the open `file`, so a test
+    /// can tie the flush to the placement of that same file.
+    fn sync_file(&self, file: &std::fs::File, path: &Path) -> io::Result<()> {
+        let _ = path;
+        file.sync_all()
+    }
 }
 
 /// The real file system, through `oma-fs`.
