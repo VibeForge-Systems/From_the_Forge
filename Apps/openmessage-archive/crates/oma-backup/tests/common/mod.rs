@@ -279,7 +279,16 @@ pub fn snapshot(dir: &Path) -> Vec<(String, String)> {
                 out.push((rel, "dir".into()));
                 rec(base, &p, out);
             } else {
-                let bytes = fs::read(&p).expect("read");
+                let bytes = match fs::read(&p) {
+                    Ok(bytes) => bytes,
+                    // A live session's `.lock` is byte-range locked, and on
+                    // Windows that makes it unreadable (ERROR_LOCK_VIOLATION).
+                    Err(e) if cfg!(windows) && e.raw_os_error() == Some(33) => {
+                        out.push((rel, "<locked>".into()));
+                        continue;
+                    }
+                    Err(e) => panic!("read: {e:?}"),
+                };
                 let digest = Sha256::digest(&bytes);
                 let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
                 out.push((rel, hex));
