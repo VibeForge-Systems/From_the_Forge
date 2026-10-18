@@ -14,20 +14,30 @@ Ubuntu 22.04+ / Debian 12+:
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y build-essential curl file \
+sudo apt-get install -y build-essential curl file pkg-config \
   libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
   libayatana-appindicator3-dev librsvg2-dev
 ```
 
+Check that the install worked before building. The command should print two
+version numbers:
+
+```sh
+pkg-config --modversion gtk+-3.0 webkit2gtk-4.1
+```
+
+If a Rust build fails in `glib-sys`, `gobject-sys`, `gio-sys` or `gdk-sys` with
+"The pkg-config command could not be found", these packages are not installed.
+
 Fedora 40+:
 
 ```sh
-sudo dnf install -y webkit2gtk4.1-devel openssl-devel libxdo-devel \
+sudo dnf install -y pkgconf-pkg-config webkit2gtk4.1-devel openssl-devel libxdo-devel \
   libappindicator-gtk3-devel librsvg2-devel
 sudo dnf group install -y "c-development"
 ```
 
-Arch: `sudo pacman -S --needed webkit2gtk-4.1 base-devel openssl xdotool libappindicator-gtk3 librsvg`
+Arch: `sudo pacman -S --needed pkgconf webkit2gtk-4.1 base-devel openssl xdotool libappindicator-gtk3 librsvg`
 
 ### Windows 11
 
@@ -63,6 +73,16 @@ Run them from `Apps/openmessage-archive/`.
 Installers are written to `target/release/bundle/`. On Linux these are
 `deb/`, `rpm/` and `appimage/`. On Windows they are `nsis/` and `msi/`.
 Installers are unsigned until Milestone 8.
+
+**On a VM shared folder** (vboxsf, 9p, virtiofs), keep the build output on
+local disk. Cargo writes several gigabytes, and some shared-folder drivers
+mishandle its file locking. Set the target directory before building:
+
+```sh
+export CARGO_TARGET_DIR="$HOME/.cache/oma-target"
+```
+
+Installers then land in `$CARGO_TARGET_DIR/release/bundle/` instead.
 
 **Build through the Tauri CLI, not plain `cargo build --release`.** The CLI
 enables the `custom-protocol` feature that embeds the frontend. A binary

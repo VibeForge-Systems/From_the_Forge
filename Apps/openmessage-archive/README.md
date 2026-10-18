@@ -93,13 +93,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 These apply to Milestone 1.
 
 - **No import yet.** Nothing in this build reads an iPhone backup.
-- **Not yet hand-tested on Windows 11.** CI builds and unit-tests it on
-  `windows-2022`; nobody has driven the UI by hand there yet.
-- **The folder picker is not fully hand-tested on Linux.** Under the
-  headless test environment, the native picker opened and accepted input,
-  but a selection could not be completed. The validation behind it is
-  covered by unit tests. A manual test on a real Linux desktop is still
-  needed.
+- **Not yet run by hand on Windows 11.** Every M1 check has been run by hand
+  on Ubuntu 26.04.1: the folder picker, the backup refusal, and the setting
+  surviving a restart. On Windows, CI builds the app and runs its tests,
+  but nobody has used the UI there yet. The installer packages, on either
+  platform, have not been installed and run by hand. See
+  [compatibility.md](docs/compatibility.md).
 - **Archives are not encrypted yet.** Archive encryption is planned for M8.
   Until then, rely on full-disk encryption. See
   [privacy.md](docs/privacy.md).

@@ -46,7 +46,9 @@ npx tauri build --no-bundle                             # release binary
 ```
 
 Linux system packages are listed in `docs/development.md`, starting with
-`libwebkit2gtk-4.1-dev`.
+`pkg-config` and `libwebkit2gtk-4.1-dev`. If a build fails in `glib-sys`,
+`gobject-sys`, `gio-sys` or `gdk-sys` with "pkg-config could not be found",
+those packages are missing; this is not a code problem.
 
 ### Before opening a PR
 
