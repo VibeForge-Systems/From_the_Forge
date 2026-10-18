@@ -235,6 +235,13 @@ Never hand-edit generated files.
   `tests/fixtures/backups/` (its `SHA256SUMS` must stay
   `c8e3d0bf…a0ae3`). The messages catalogue's `README.md` is generated;
   do not edit it by hand.
+- **The import catalogue has two pins.** `tests/fixtures/imports/` is
+  written only by `scripts/fixtures/make_synthetic_imports.py`. Its inputs
+  (`SHA256SUMS`, hash pinned in `crates/oma-archive/tests/import_fixtures.rs`)
+  are frozen. Its model expectations (`content.json`, `scenarios/`,
+  `EXPECTED.SHA256SUMS`) may be regenerated when an import slice settles a
+  rule; say which rule changed. The manifest format and the model's
+  readings are in that catalogue's generated `README.md`.
 - **No `#[tracing::instrument]` without `skip_all`** in `oma-messages` or
   `src-tauri`: it formats every argument with `Debug`.
   `crates/oma-messages/tests/source_rules.rs` enforces this for that crate.

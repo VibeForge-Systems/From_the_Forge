@@ -246,6 +246,32 @@ attributes, UNC refusal, a junction in place of an archive directory, and
 renaming a creation directory with a handle left open. Their `RECORD` lines
 go here once that run exists.
 
+### Milestone 4 import catalogue (slice 4e)
+
+Generated and checked in the same Linux container on 2026-10-18; not CI,
+not a desktop, synthetic fixtures only:
+
+- `make_synthetic_imports.py` ran under Python 3.13.16 with `sqlite3`
+  3.45.1 and cryptography 50.0.1. Two runs into empty directories gave
+  byte-identical trees: `SHA256SUMS` hashes to
+  `74a82a95bc1580864d8dd09c72e7223196fe1e4586decf048be6cb564a1ed113` and
+  `EXPECTED.SHA256SUMS` to
+  `258ac5c472796873151546de2efa12f1c1eb19b50425cfe93790c13e1f6ea547`. The
+  generator's own assertions held: every scenario that lists two orders
+  gave equal content, and the two Recently Deleted orders differed only
+  in markers and in "not in the latest import".
+- `crates/oma-archive/tests/import_fixtures.rs` passed (6 tests). All 12
+  entries opened; the M3 check read every one as readable, with
+  `WalSkipped` only for `imp-wal-missing-plain`. The key passes found
+  exactly the keyed rows and row counts the model lists. Staging gave the
+  model's content digest for every entry, including equal digests for
+  `imp-dev1-v2-plain` and `imp-dev1-v2-enc`. `oma-backup` read the plist
+  dates the model ranks by, including the year-9999 Status.plist Date.
+  `copy_file_to` produced every attachment hash the model lists.
+
+**Not yet observed:** any of this on Windows, and any import: the content
+manifests have not yet been compared with an archive (from slice 4f on).
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI

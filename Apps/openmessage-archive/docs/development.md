@@ -232,6 +232,33 @@ sha256sum tests/fixtures/backups/SHA256SUMS tests/fixtures/messages/SHA256SUMS t
 A change to either M3 catalogue invalidates the oracle runs recorded for it
 in `docs/compatibility.md` until they are repeated with the new checksum.
 
+### Synthetic import fixtures (M4)
+
+`tests/fixtures/imports/` is written by
+`scripts/fixtures/make_synthetic_imports.py`, in the same reference
+environment, and refuses any other SQLite in the same way. It imports the
+M2 and M3 generators as modules and changes neither. It writes twelve backups,
+one content manifest per entry (`<entry>.expected/content.json`, the
+model's expectation for that entry imported alone), ten
+`scenarios/<name>.content.json` (sequences of imports), and two sums files:
+
+| File | Covers | Pinned |
+|---|---|---|
+| `SHA256SUMS` | Every file of every backup (the inputs) | Its SHA-256 is pinned in `crates/oma-archive/tests/import_fixtures.rs`; the inputs are frozen |
+| `EXPECTED.SHA256SUMS` | Every file under `*.expected/` and `scenarios/` | Checked file by file; its own hash is pinned with `ImportCounts` in slice 4f, and may be re-pinned while the import is built |
+
+```sh
+.venv-fixtures/bin/python -I scripts/fixtures/make_synthetic_imports.py tests/fixtures/imports --seed 1
+sha256sum tests/fixtures/imports/SHA256SUMS tests/fixtures/imports/EXPECTED.SHA256SUMS
+cargo test -p oma-archive --test import_fixtures
+```
+
+A model change that leaves the inputs alone changes only
+`EXPECTED.SHA256SUMS`; if `SHA256SUMS` changes, the generator changed an
+input, and the pin in `import_fixtures.rs` fails on purpose. The
+catalogue's `README.md` is generated and documents the manifest format and
+the readings the model makes.
+
 **Optional oracles** (manual; nothing enters the repository or CI; each
 run is recorded in `docs/compatibility.md` with the checksum it tested):
 

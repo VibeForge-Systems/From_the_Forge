@@ -631,6 +631,66 @@ D61 (text captured before an unsend is kept), D69, D70, D71, D79 and D82
 (4k), the `StoreFs` trait, the `max_page_count` guard during a migration
 step, provenance files, and any use from the shell.
 
+### The import catalogue and its content model (M4 slice 4e)
+
+`tests/fixtures/imports/` holds the synthetic backups the import is tested
+on (spec §19.1), written by `scripts/fixtures/make_synthetic_imports.py`.
+That generator imports the M2 and M3 generators as modules and leaves them
+untouched, so the frozen catalogues cannot change by accident.
+
+- **Twelve entries.** Device 1 as v1, as v2 (rowids shuffled, an edit, an
+  unsend, a deleted message, new bytes for one attachment GUID, a lost blob,
+  a dropped column, a later date), as v2 encrypted with the same sms.db
+  bytes (equal rank), and as undated and out-of-range-date copies of v1's
+  sms.db. Then a second device, hostile keys and values, attachment
+  outcomes, Recently Deleted, full-text search text, and a `-wal` that is
+  staged or missing.
+- **Two pins.** `SHA256SUMS` covers the inputs and its own hash is pinned
+  in `crates/oma-archive/tests/import_fixtures.rs`: the inputs are frozen.
+  `EXPECTED.SHA256SUMS` covers `*.expected/` and `scenarios/`. Its own hash
+  is pinned in slice 4f, together with `ImportCounts` and `import.json`.
+- **The content manifest** (`content.json`) is the generator's model of
+  what an import must leave in the archive. It covers each row's key or
+  unkeyed occurrence, a sample of `Col` states, history values,
+  `display_text` or its none-reason, every body version, joins, the
+  attachment order, the current blob and every blob read, Recently Deleted
+  markers, "not in the latest import" per lineage, and the rows the
+  Recently Deleted policy excluded. It also states each session's rank. It
+  restates §6.2, §6.5, §8.7, §8.8, §9 and D58; it does not run the Rust
+  code. There is one manifest per entry (imported alone) and ten
+  `scenarios/` (sequences). Where a scenario lists two orders, the
+  generator asserts that the model gives the same content for both.
+- **What is checked now.** `import_fixtures.rs` checks both sum files. It
+  also checks that every entry opens and that the M3 check reads it as
+  readable (`WalSkipped` only for the missing `-wal`). Against the Rust
+  readers it checks the model's keyed rows and row counts per entity (the
+  R6 key passes), every content digest (staging), the order key, its
+  source, the out-of-range qualifier and the 41-byte rank (the plist dates
+  read by `oma-backup`), and every attachment hash (`copy_file_to`). The
+  manifests themselves are asserted against archives from slice 4f on.
+- **Readings the model makes,** for the import slices to confirm or change
+  (they re-pin `EXPECTED.SHA256SUMS`, never the inputs):
+  - an empty GUID or handle address is not a usable key, so such a row is
+    unkeyed;
+  - `current_blob_id` is the blob of the highest-ranked session that read
+    bytes. A session that read none never moves it, which keeps the result
+    order-independent when a newer backup has lost a file;
+  - a Recently Deleted message already in the archive is re-observed for
+    its lineage and its marker only;
+  - under the default exclusion, importing v1 then the Recently Deleted
+    backup differs from the reverse order in the markers, which §8.7 states.
+    **It also differs in "not in the latest import"**: in the reverse order
+    the deleted messages were never seen by the newer session, so they are
+    labelled. §8.7's list of exceptions does not name this case yet;
+  - the display none-reasons are named (`attributedBodyUnusable`,
+    `textEmpty`, `noSource`); their codes are fixed in slice 4g.
+- **Owner decisions.** `owner-decisions.md` did not exist when this slice
+  was written. The model applies the spec's leans, which still await the
+  owner: D60 (Recently Deleted excluded by default, its attachments
+  included), D61 (text from before an unsend stays as an earlier body
+  version), D59 (raw values kept within caps) and D82 (the history
+  columns).
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`

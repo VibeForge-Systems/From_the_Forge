@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Build Version</key>
+	<string>00A000</string>
+	<key>Device Name</key>
+	<string>Synthetic Test Phone</string>
+	<key>Display Name</key>
+	<string>Synthetic Test Phone</string>
+	<key>Last Backup Date</key>
+	<date>2026-03-01T10:00:00Z</date>
+	<key>Product Name</key>
+	<string>Synthetic iPhone</string>
+	<key>Product Type</key>
+	<string>iPhone0,0</string>
+	<key>Product Version</key>
+	<string>18.0</string>
+	<key>Unique Identifier</key>
+	<string>SYNTHETIC0-0000000000000000</string>
+</dict>
+</plist>

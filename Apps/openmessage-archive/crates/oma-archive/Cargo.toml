@@ -27,6 +27,8 @@ tracing.workspace = true
 
 [dev-dependencies]
 oma-archive = { path = ".", features = ["fault-injection"] }
+oma-messages.workspace = true # the import catalogue's key, digest and check tests
+serde_json.workspace = true   # reads the catalogue's content manifests
 tempfile.workspace = true
 tracing-subscriber.workspace = true # log-hygiene test
 
