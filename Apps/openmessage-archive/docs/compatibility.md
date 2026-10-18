@@ -138,6 +138,217 @@ not a manual test on a real desktop, it did not observe the staged sms.db
 while it existed (each check took a few milliseconds), and it does not
 replace the manual checklist for milestone 3 below, which has not been run.
 
+### Milestone 4 file-system primitives (slice 4a)
+
+Observed by the `oma-fs` tests in a Linux container (ext4, running as root)
+on 2026-10-18; not CI, not a desktop:
+
+- `fsync_dir` on a directory returned `Synced`.
+- `place_noreplace` placed with `renameat2(RENAME_NOREPLACE)` (`Renamed`).
+  The hard-link and checked-rename fallbacks were exercised directly; none
+  replaced an existing file, directory or link.
+- `open_nofollow` refused a symbolic link, a directory and a FIFO.
+- `volume_kind` classified the temp volume (ext4) as `Local`. The
+  `local-volume` check's levels for every kind are unit-tested; no non-local
+  volume was mounted.
+
+**Behaviour change for existing users.** From M4, a library folder on a
+network volume is **refused**: NFS, SMB/CIFS, AFS, Ceph and Coda on Linux,
+and a UNC path (or one that `canonicalize` reveals as `\\?\UNC\…`) on
+Windows. Someone who chose such a folder before M4 must choose a local one
+after upgrading. Folders on FUSE, 9P and VirtualBox shared folders, and on
+FAT or exFAT (Linux only), are warned about: backup checks keep working
+there, but archives refuse the virtualised ones, and an archive cannot be
+created on a FAT or exFAT drive whose mount does not keep private modes.
+The release notes must say this when they exist.
+
+**Not yet observed:** the Windows results that `crates/oma-fs/tests/windows.rs`
+prints (lines starting `RECORD`): whether `fsync_dir` returns `Synced` or
+`Unsupported` on NTFS, `CreateHardLinkW` refusing an existing target,
+`open_nofollow` and `check_private` on a junction, and what std's
+`is_symlink` says about a junction. The mapped-drive `canonicalize` probe is
+an ignored test, not run anywhere yet. No network, FUSE, 9P, VirtualBox or
+FAT volume has been tried; their detection rests on the `statfs` magic table
+and its unit test.
+
+### Milestone 4 attachment copy (slice 4b)
+
+Observed by `crates/oma-backup/tests/copy.rs` in the same Linux container
+on 2026-10-18; not CI, not a desktop, synthetic fixtures only:
+
+- `copy_file_to` wrote exactly the bytes in `<fixture>.expected/` for the
+  attachment and for sms.db, and its SHA-256 equalled theirs, for the
+  `plain`, `plain-xml`, `enc`, `enc-xml`, `enc-key-uid-data`,
+  `enc-key-inline` and `enc-unicode-pw` fixtures. Nothing was written to
+  staging and the read-only fixture copies were untouched.
+- The `hostile-size-max` attachment (declared `Size` 2^64 − 1) copied its
+  87 bytes with `size_matches = false`.
+- `attachment_bytes` refused a blob one byte over the cap before reading it,
+  and allowed one exactly at the cap (87 bytes plain, 96 bytes encrypted).
+- Appending to a blob during its copy gave `SourceChanged`; cancellation,
+  a full or size-limited writer (`Io { side: Sink }`), a missing blob, bad
+  padding and (Unix only) a blob replaced by a symbolic link gave the
+  expected errors.
+
+**Not yet observed:** any of this on Windows, and any attachment larger
+than the 87-byte fixture file or sms.db; the multi-chunk (over 1 MiB) and
+mid-file cancellation paths are covered by unit tests on in-memory data
+only.
+
+### Milestone 4 reader additions (slice 4c)
+
+Observed by `crates/oma-messages/tests/m4_readers.rs`, `resume.rs`,
+`sql_guards.rs`, `redaction.rs` and `log_hygiene.rs` in the same Linux
+container on 2026-10-18; not CI, not a desktop, synthetic databases and
+the M3 catalogue only:
+
+- The four key passes returned exactly the (rowid, key) sequence of the
+  full passes on `msgs-full-plain` and `msgs-full-enc`, and on a built
+  database with an oversized `guid` and `id`, a NULL key and a
+  BLOB-stored key; they broke and resumed exactly at and around 16-row
+  page boundaries, including rows keyed `i64::MIN` and `i64::MAX`.
+- `payload_data` was `None` without raw values; with them, a 1 MiB value
+  was read, one byte more was `Oversized`, an integer was unreadable with
+  its raw value kept, and the pass's issue counts were the same in both
+  modes.
+- Raw values were kept for text, real, out-of-range integer and blob cells
+  in integer, boolean, time and text columns, not for text over 4 KiB, and not
+  for the presence-only `chat.properties`; none appeared in any `Debug`
+  output or log line.
+- Every query form fit the `sql_length` and `vdbe_op` limits with a 2x
+  margin and tripped no guard of the read-only connection.
+
+**Not yet observed:** any of this on Windows, or on a real sms.db.
+
+### Milestone 4 archive skeleton (slice 4d)
+
+Observed by the `crates/oma-archive` tests in the same Linux container
+(ext4, running as root) on 2026-10-18, with the bundled SQLite 3.53.2; not
+CI, not a desktop, synthetic archives only:
+
+- `v1.sql` loads under the hardening of spec §5.5 (`DEFENSIVE`,
+  `TRUSTED_SCHEMA` off, DQS off, `SQLITE_LIMIT_ATTACHED` 0), with the FTS
+  `secure-delete` option readable as `1` in `message_fts_config`. A new,
+  empty archive's database is 290,816 bytes.
+- Creation used `renameat2(RENAME_NOREPLACE)` for the `.oma-new-*`
+  directory. Directories were 0700, and `archive.sqlite`, `archive.lock`,
+  `-wal` and `-shm` were 0600.
+- The `flock` lock self-test passed (a second handle in the same process
+  was refused); a lock held by a child process gave `Locked` and listing
+  gave `InUse` without waiting.
+- A read-only open of a closed archive left `archive.sqlite` byte-identical
+  but created an empty `-wal` and a 32 KiB `-shm`, which stay after the
+  connection closes. A read-only open of a crash-left WAL database showed
+  every committed row and left the main file and the `-wal`
+  byte-identical (re-checking the scratch observation on 3.53.2).
+- Extra triggers, views, indexes and tables, a dropped index and a changed
+  trigger were all `Damaged(SchemaMismatch)` with the files untouched;
+  `sqlite_stat1` was tolerated and reported.
+- The test-only v1 → v2 migration applied and recorded itself; a failure
+  mid-step, a foreign-key violation, an FTS rank-1 integrity failure and a
+  wrong target schema each rolled back to version 1.
+
+**Not yet observed:** anything on Windows. `crates/oma-archive/tests/windows.rs`
+must run first on the `windows-2022` runner: whether WAL and `-shm` work on
+the `win32-longpath` VFS under a library path of about 230 characters
+(decision D86 names the fallback if they do not), the archive files'
+attributes, UNC refusal, a junction in place of an archive directory, and
+renaming a creation directory with a handle left open. Their `RECORD` lines
+go here once that run exists.
+
+### Milestone 4 import catalogue (slice 4e)
+
+Generated and checked in the same Linux container on 2026-10-18; not CI,
+not a desktop, synthetic fixtures only:
+
+- `make_synthetic_imports.py` ran under Python 3.13.16 with `sqlite3`
+  3.45.1 and cryptography 50.0.1. Two runs into empty directories gave
+  byte-identical trees: `SHA256SUMS` hashes to
+  `74a82a95bc1580864d8dd09c72e7223196fe1e4586decf048be6cb564a1ed113` and
+  `EXPECTED.SHA256SUMS` to
+  `258ac5c472796873151546de2efa12f1c1eb19b50425cfe93790c13e1f6ea547`
+  (**superseded** by slice 4f's regeneration, below: the inputs are
+  unchanged, the expectations gained `import.json` and the scenario
+  counts). The
+  generator's own assertions held: every scenario that lists two orders
+  gave equal content, and the two Recently Deleted orders differed only
+  in markers and in "not in the latest import".
+- `crates/oma-archive/tests/import_fixtures.rs` passed (6 tests). All 12
+  entries opened; the M3 check read every one as readable, with
+  `WalSkipped` only for `imp-wal-missing-plain`. The key passes found
+  exactly the keyed rows and row counts the model lists. Staging gave the
+  model's content digest for every entry, including equal digests for
+  `imp-dev1-v2-plain` and `imp-dev1-v2-enc`. `oma-backup` read the plist
+  dates the model ranks by, including the year-9999 Status.plist Date.
+  `copy_file_to` produced every attachment hash the model lists.
+
+**Not yet observed:** any of this on Windows, and any import: the content
+manifests have not yet been compared with an archive (from slice 4f on).
+
+### Milestone 4 import core (slice 4f)
+
+Run in the same Linux container on 2026-10-18 (ext4 on virtio, bundled
+SQLite 3.53.2); not CI, not a desktop, synthetic data only:
+
+- **The catalogue's expectations were regenerated** for this slice (it
+  added `import.json` and the per-step scenario counts). Re-running
+  `make_synthetic_imports.py --seed 1` (Python 3.13.16, `sqlite3` 3.45.1,
+  cryptography 50.0.1) into an empty scratch directory gave a tree
+  byte-identical to the committed one: `SHA256SUMS` still hashes to
+  `74a82a95bc1580864d8dd09c72e7223196fe1e4586decf048be6cb564a1ed113`, and
+  `EXPECTED.SHA256SUMS` now hashes to
+  `7c3d549bb6b2f6181e877bbc559a19df6e186f3ad533ae32a812ac3202e78dfd`, the
+  value pinned in `tests/import_fixtures.rs`.
+
+- **Handles and chats against the model.** Each of the 12 catalogue
+  entries, imported alone into a new archive, gave exactly the handles and
+  chats of its `content.json` (keys, sampled columns, `Col` states, BLOB
+  storage class, history) and the counts of its `import.json`. All ten
+  scenarios, in every order they list, gave their manifest's handles and
+  chats, equal content snapshots in both orders, and the per-step counts
+  of `scenarios/*.counts.json`. Between steps the test stands in for
+  finalize (it marks the session completed), so the four scenarios that
+  repeat a content digest re-import it in a fresh session; the hostile
+  entry imported twice in two sessions inserted nothing and found every
+  handle and chat already present. `integrity_check`, `foreign_key_check` and the
+  FTS rank-1 check were clean after every import.
+- **Crash by kill.** `tests/crash.rs` killed a child import (16-row
+  batches, 70 handles and 45 chats) at every batch commit point (before and
+  after `COMMIT`), at four record positions, after the session
+  transaction, and at each recovery step of `begin_write`, plus once at
+  three points in a row; then reopened read-only, checked the file and
+  continued. Every result equalled the uninterrupted import, including
+  cursors, maps, occurrence counters and duplicate keys. A kill before the
+  creation rename left only a `.oma-new-*` directory, which the sweep
+  removed; a kill after it left a complete archive.
+- **Cancel and in-process crashes.** A cancel at each of the 12 records of
+  `imp-keys-hostile-plain` committed exactly the records before it, with
+  the cursor at the last of them, and continuing gave the uninterrupted
+  result. Twelve runs with panics at random batch boundaries (rowids
+  `i64::MIN` and `i64::MAX`, duplicated keys and identical keyless rows on
+  both sides of boundaries) all ended equal to one uninterrupted run.
+
+- **Review fixes (same container, same day).** A session cancelled with
+  the clock years behind its backup date (stored undated) and continued at
+  the model's clock wrote every handle, chat and `lineage_seen` row at its
+  stored rank. A failed session and sessions superseded by `migrate()`
+  kept no map, occurrence or duplicate-key rows. A kill right after a
+  cancelled session's terminal commit continued to the uninterrupted
+  result; after every kill the `-wal` was still present and unchanged when
+  the resume started (the checks ran on a copy). The intent reconcile
+  flushed each store directory after its file was gone and before the
+  intents' deletion committed (a recording `StoreFs`), and left a planted
+  `attachments/<hh>` symbolic link and a 0755 `<hh>` alone with their
+  intents. Creation with directories forced to 0755 (standing in for a
+  vfat or exFAT mount, which was not tried) failed and left nothing; a
+  failed library flush after the rename returned the archive, which
+  listed as ready. The log-hygiene capture covered all 12 entries, the
+  Recently Deleted option and a supersede.
+
+**Crash consistency was tested by process kill only; power loss was not
+tested.** Nothing of this slice has run on Windows yet; its crash plan
+there is the batch commit points and the creation rename.
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI

@@ -108,6 +108,51 @@ fn part_index(b: &[u8]) -> Option<u32> {
     })
 }
 
+/// The five association columns of one `message` row, exactly as read
+/// (M4 R4). Always filled, whether or not the row has an [`Association`]:
+/// `associated_message_guid = ''` stays `Value("")` here, where
+/// [`Association`] maps it to NULL, and a row with no association still
+/// shows which columns were absent, NULL or unreadable.
+#[derive(Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct AssocRaw {
+    /// `associated_message_type`.
+    pub raw_type: Col<i64>,
+    /// `associated_message_guid`, unparsed.
+    pub raw_guid: Col<Redacted<SqlText>>,
+    /// `associated_message_emoji`.
+    pub emoji: Col<Redacted<SqlText>>,
+    /// `associated_message_range_location`.
+    pub range_location: Col<i64>,
+    /// `associated_message_range_length`.
+    pub range_length: Col<i64>,
+}
+
+impl std::fmt::Debug for AssocRaw {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AssocRaw")
+            .field("raw_type", &self.raw_type.shape())
+            .field("raw_guid", &self.raw_guid.shape())
+            .field("emoji", &self.emoji.shape())
+            .field("range_location", &self.range_location.shape())
+            .field("range_length", &self.range_length.shape())
+            .finish_non_exhaustive()
+    }
+}
+
+impl AssocRaw {
+    /// The association these columns describe, or `None` (§11.1).
+    pub fn association(&self) -> Option<Association> {
+        Association::from_columns(
+            self.raw_type.clone(),
+            self.raw_guid.clone(),
+            self.emoji.clone(),
+            self.range_location.clone(),
+            self.range_length.clone(),
+        )
+    }
+}
+
 /// The association of one `message` row (§11.1).
 ///
 /// A record has one when `associated_message_type` holds a non-zero value,
@@ -230,6 +275,46 @@ mod tests {
 
     fn text(s: &str) -> Col<Redacted<SqlText>> {
         Col::Value(Redacted::new(SqlText::from_bytes(s.as_bytes())))
+    }
+
+    /// R4: the raw columns keep what `Association` folds together.
+    #[test]
+    fn raw_columns_keep_the_states_association_folds() {
+        let raw = |t: Col<i64>, g: Col<Redacted<SqlText>>| AssocRaw {
+            raw_type: t,
+            raw_guid: g,
+            emoji: Col::Absent,
+            range_location: Col::Null,
+            range_length: Col::Value(3),
+        };
+        // '' and NULL both give no association, but stay apart raw.
+        let empty = raw(Col::Value(0), text(""));
+        let null = raw(Col::Value(0), Col::Null);
+        assert!(empty.association().is_none() && null.association().is_none());
+        assert_ne!(empty, null);
+        assert_eq!(
+            empty.raw_guid.value().map(|g| g.expose().as_bytes()),
+            Some(&b""[..])
+        );
+        // An absent type column and a type 0 also stay apart.
+        assert_ne!(raw(Col::Absent, Col::Null), null);
+        // With a target, the association is the one from_columns builds.
+        let tapback = raw(Col::Value(2001), text("p:0/SYNTH-MSG-GUID-1"));
+        let a = tapback.association().expect("tapback");
+        assert!(matches!(
+            a.target,
+            Col::Value(AssocTarget::Part { part: 0, .. })
+        ));
+        assert_eq!(a.range_length, Col::Value(3));
+        let shown = format!("{tapback:?}");
+        assert!(
+            !shown.contains("SYNTH") && !shown.contains("2001"),
+            "{shown}"
+        );
+        assert!(
+            shown.starts_with("AssocRaw { raw_type: Value, raw_guid: Value"),
+            "{shown}"
+        );
     }
 
     #[test]

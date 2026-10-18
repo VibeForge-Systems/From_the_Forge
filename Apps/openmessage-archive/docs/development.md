@@ -232,6 +232,75 @@ sha256sum tests/fixtures/backups/SHA256SUMS tests/fixtures/messages/SHA256SUMS t
 A change to either M3 catalogue invalidates the oracle runs recorded for it
 in `docs/compatibility.md` until they are repeated with the new checksum.
 
+### Synthetic import fixtures (M4)
+
+`tests/fixtures/imports/` is written by
+`scripts/fixtures/make_synthetic_imports.py`, in the same reference
+environment, and refuses any other SQLite in the same way. It imports the
+M2 and M3 generators as modules and changes neither. It writes twelve backups,
+one content manifest and one counts file per entry
+(`<entry>.expected/content.json` and `import.json`, the model's expectation
+for that entry imported alone), ten `scenarios/<name>.content.json`
+(sequences of imports) with their per-step `scenarios/<name>.counts.json`,
+and two sums files:
+
+| File | Covers | Pinned |
+|---|---|---|
+| `SHA256SUMS` | Every file of every backup (the inputs) | Its SHA-256 is pinned in `crates/oma-archive/tests/import_fixtures.rs`; the inputs are frozen |
+| `EXPECTED.SHA256SUMS` | Every file under `*.expected/` and `scenarios/` | Checked file by file; its own hash is pinned in the same test (since slice 4f) and is re-pinned when an import slice regenerates the expectations |
+
+```sh
+.venv-fixtures/bin/python -I scripts/fixtures/make_synthetic_imports.py tests/fixtures/imports --seed 1
+sha256sum tests/fixtures/imports/SHA256SUMS tests/fixtures/imports/EXPECTED.SHA256SUMS
+cargo test -p oma-archive --test import_fixtures
+```
+
+A model change that leaves the inputs alone changes only
+`EXPECTED.SHA256SUMS` (re-pin it in `import_fixtures.rs` and say which rule
+changed); if `SHA256SUMS` changes, the generator changed an input, and the
+pin in `import_fixtures.rs` fails on purpose.
+
+### Import core tests (M4)
+
+The import tests run in `cargo test --workspace`; these run them alone:
+
+```sh
+cargo test -p oma-archive --test import_core   # catalogue entries and scenarios against the model
+cargo test -p oma-archive --test resume        # cancel at every record; random in-process crashes
+cargo test -p oma-archive --test crash         # crash by kill at every fault point, then resume
+```
+
+`tests/crash.rs` re-runs its own test binary as a child with
+`OMA_TEST_FAULT=<point>:<n>` (and the library, archive and backup in
+`OMA_TEST_*` variables). The child test `crash_child` does nothing when the
+variable is unset. At the n-th hit of the point the child prints
+`FAULT <point> <n>` and blocks; the parent kills it, checks the archive and
+continues the import. On Windows the plan is the subset of spec §18.12 (the
+batch commit points and the creation rename). A child that neither reaches
+its point nor finishes within 120 s fails the test.
+
+### Test time (spec §0.1)
+
+The M4 budget is at most 4 minutes of added Rust test time per Linux job
+and 8 minutes on Windows. Measured on 2026-10-18 in a Linux container
+(4 CPUs, debug build, after compiling; synthetic fixtures), slice 4f:
+
+| What | Time |
+|---|---|
+| `cargo test --workspace`, wall clock | 32 s |
+| Sum of all test binaries' run times | 30.1 s |
+| `oma-archive`, all binaries | 13.3 s |
+| of which `crash.rs` (29 child processes) | 4.2 s |
+| of which `resume.rs` | 2.5 s |
+| of which `import_core.rs` | 1.4 s |
+
+All of `oma-archive` is M4 test time, so slice 4f is well inside the
+budget on Linux. CI runners and Windows have not been measured; the
+Windows crash plan is smaller on purpose (§18.12). Later slices add their
+times here. The
+catalogue's `README.md` is generated and documents the manifest format and
+the readings the model makes.
+
 **Optional oracles** (manual; nothing enters the repository or CI; each
 run is recorded in `docs/compatibility.md` with the checksum it tested):
 

@@ -42,6 +42,8 @@ pub const PASSWORD_TOO_LONG: &str = "Passwords longer than 1,024 bytes are not a
 pub const WRONG_PASSWORD: &str = "That password did not unlock the backup. Check it and try again. If you are sure it is right, the backup's key data may be damaged.";
 pub const DISK_FULL: &str =
     "There is not enough free space in your archive folder to check this backup.";
+pub const DISK_FULL_ARCHIVE: &str =
+    "There is not enough free space in your archive folder to copy this attachment.";
 pub const BACKUP_IN_USE: &str = "The backup is in use by another program, such as Apple Devices or iTunes. Wait for it to finish, then check again.";
 pub const STAGING_NOT_SAFE: &str = "The temporary folder inside your archive folder is not safe to use (it is a link, or belongs to another user). Remove `.oma-staging` from your archive folder, then try again.";
 pub const STAGING_NOT_PRIVATE: &str = "The temporary folder inside your archive folder can be read by other users of this computer. If the archive folder is on a drive that does not keep Linux file permissions (for example a FAT, exFAT or NTFS drive, or a network share), choose an archive folder on another drive. Otherwise remove `.oma-staging` from your archive folder, then try again.";
@@ -255,6 +257,10 @@ fn limit_message(what: LimitKind, value: u64, cap: u64) -> String {
         LimitKind::SummaryArray => {
             "A value in the backup's Messages database exceeds safe processing limits.".into()
         }
+        LimitKind::AttachmentBytes => format!(
+            "An attachment in the backup is larger than {}, the current limit.",
+            mib(cap)
+        ),
     }
 }
 
@@ -283,6 +289,12 @@ fn io_message(side: IoSide, kind: io::ErrorKind, os_code: Option<i32>) -> String
         ),
         IoSide::Source if sharing => BACKUP_IN_USE.into(),
         IoSide::Source => format!("The backup could not be read ({kind})."),
+        // The archive's attachment copy (M4). Its import job words its own
+        // outcomes; this is the fallback sentence.
+        IoSide::Sink if kind == io::ErrorKind::StorageFull => DISK_FULL_ARCHIVE.into(),
+        IoSide::Sink => {
+            format!("An attachment could not be written to your archive folder ({kind}).")
+        }
     }
 }
 
@@ -761,6 +773,15 @@ mod tests {
                 ErrorCode::Io,
             ),
             (
+                BackupError::Io {
+                    op: oma_backup::IoOp::Write,
+                    side: IoSide::Sink,
+                    kind: K::StorageFull,
+                    os_code: None,
+                },
+                ErrorCode::Io,
+            ),
+            (
                 BackupError::StagingRefused(StagingRefusal::Guard),
                 ErrorCode::Internal,
             ),
@@ -818,6 +839,7 @@ mod tests {
             LimitKind::RootEntries,
             LimitKind::SmsDbBytes,
             LimitKind::SummaryArray,
+            LimitKind::AttachmentBytes,
         ] {
             v.push((
                 BackupError::LimitExceeded {

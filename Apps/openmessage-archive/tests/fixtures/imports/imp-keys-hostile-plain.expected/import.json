@@ -1,0 +1,27 @@
+{
+ "counts": {
+  "chats": {
+   "alreadyPresent": 0,
+   "cellsReplaced": 0,
+   "historyAdded": 0,
+   "inserted": 5,
+   "notApplied": 0,
+   "seen": 5,
+   "unkeyed": 3,
+   "valueIssueCells": 2
+  },
+  "handles": {
+   "alreadyPresent": 0,
+   "cellsReplaced": 0,
+   "historyAdded": 0,
+   "inserted": 7,
+   "notApplied": 0,
+   "seen": 7,
+   "unkeyed": 5,
+   "valueIssueCells": 1
+  }
+ },
+ "entry": "imp-keys-hostile-plain",
+ "format": "oma-import-counts",
+ "formatVersion": 1
+}

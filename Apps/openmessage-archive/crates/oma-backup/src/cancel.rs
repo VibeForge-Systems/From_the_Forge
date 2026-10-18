@@ -56,6 +56,10 @@ pub enum Phase {
     /// Extracting a file into staging (the M3 extraction API; not used by
     /// validation).
     Extracting,
+    /// Copying one listed file into a caller's writer
+    /// ([`crate::OpenBackup::copy_file_to`]; the M4 attachment copy).
+    /// `done` and `total` are bytes of the stored blob.
+    Copying,
 }
 
 /// One progress report.

@@ -1,0 +1,387 @@
+//! Test hooks (spec D85).
+//!
+//! Without the non-default `fault-injection` feature, every hook below is a
+//! constant (`false` or `None`) that the compiler folds away, and the
+//! public [`hooks`] module does not exist. Only this crate's own tests turn
+//! the feature on.
+//!
+//! The hooks are per thread, so parallel tests do not see each other's
+//! faults: [`hooks::install`] sets them for the calling thread until the
+//! returned guard is dropped.
+//!
+//! **Fault points** (spec §18.4, D85) mark the moments a crash test kills
+//! the process at: [`point`] is called there. With the feature, each hit is
+//! counted per thread, and [`hooks::arm`] runs an action at the n-th hit of
+//! one point (the crash harness prints `FAULT <point> <n>` and blocks until
+//! the parent kills it; other tests cancel or panic). Without the feature,
+//! [`point`] is an empty inline function.
+
+use crate::schema::SchemaPlan;
+
+/// A moment a crash test can stop the process at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[non_exhaustive]
+pub enum FaultPoint {
+    /// The start of one source record in a pass callback, before the
+    /// cancellation check.
+    Record,
+    /// A batch's rows, cursor and counts are written; `COMMIT` is next.
+    BatchBeforeCommit,
+    /// Right after a batch's `COMMIT`.
+    BatchAfterCommit,
+    /// The supersede and new-session (or resume) transaction committed.
+    SessionCommitted,
+    /// A cancelled, stopped or failed session's terminal state committed.
+    TerminalCommitted,
+    /// `begin_write`: partial files and provenance temporaries swept.
+    RecoverySwept,
+    /// `begin_write`: blob intents reconciled.
+    RecoveryReconciled,
+    /// `begin_write`: running sessions marked interrupted.
+    RecoveryMarked,
+    /// Archive creation: the `.oma-new-*` directory is complete and synced;
+    /// the rename is next.
+    CreateBeforeRename,
+    /// Archive creation: renamed into place; the library directory's fsync
+    /// is next.
+    CreateAfterRename,
+}
+
+#[cfg_attr(not(feature = "fault-injection"), allow(dead_code))]
+impl FaultPoint {
+    /// Every point, in a fixed order.
+    pub const ALL: [FaultPoint; 10] = [
+        FaultPoint::Record,
+        FaultPoint::BatchBeforeCommit,
+        FaultPoint::BatchAfterCommit,
+        FaultPoint::SessionCommitted,
+        FaultPoint::TerminalCommitted,
+        FaultPoint::RecoverySwept,
+        FaultPoint::RecoveryReconciled,
+        FaultPoint::RecoveryMarked,
+        FaultPoint::CreateBeforeRename,
+        FaultPoint::CreateAfterRename,
+    ];
+
+    /// The point's name in `OMA_TEST_FAULT` and in `FAULT` lines.
+    pub fn name(self) -> &'static str {
+        match self {
+            FaultPoint::Record => "record",
+            FaultPoint::BatchBeforeCommit => "batch-before-commit",
+            FaultPoint::BatchAfterCommit => "batch-after-commit",
+            FaultPoint::SessionCommitted => "session-committed",
+            FaultPoint::TerminalCommitted => "terminal-committed",
+            FaultPoint::RecoverySwept => "recovery-swept",
+            FaultPoint::RecoveryReconciled => "recovery-reconciled",
+            FaultPoint::RecoveryMarked => "recovery-marked",
+            FaultPoint::CreateBeforeRename => "create-before-rename",
+            FaultPoint::CreateAfterRename => "create-after-rename",
+        }
+    }
+
+    /// The point with this name.
+    pub fn from_name(name: &str) -> Option<FaultPoint> {
+        FaultPoint::ALL.into_iter().find(|p| p.name() == name)
+    }
+}
+
+/// A fault point: a hit is counted, and an armed action may run, with the
+/// `fault-injection` feature; nothing happens without it.
+#[inline]
+pub(crate) fn point(p: FaultPoint) {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::hit(p);
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        let _ = p;
+    }
+}
+
+#[cfg(feature = "fault-injection")]
+pub mod hooks {
+    //! Per-thread faults for tests.
+    use std::cell::RefCell;
+
+    use rusqlite::Transaction;
+
+    use crate::schema::migrate::{no_data, Migration};
+    use crate::schema::SchemaPlan;
+
+    /// A test-only schema plan: a v2 that adds one table and one index.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum TestSchema {
+        /// The v1 → v2 step succeeds.
+        V2,
+        /// The step's data change fails after its DDL ran.
+        V2FailsMidStep,
+        /// The step leaves a row that `foreign_key_check` reports.
+        V2ForeignKeyViolation,
+        /// The step leaves an FTS index entry with no content row, so the
+        /// rank-1 integrity check fails.
+        V2FtsCorruption,
+        /// The step's DDL differs from the DDL the fingerprint expects.
+        V2WrongDdl,
+        /// The step is not marked test-only, so it needs the
+        /// pre-migration copy and is refused.
+        V2NeedsCopy,
+    }
+
+    /// The faults in force on this thread.
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct Faults {
+        /// The lock self-test reports that a second handle got the lock.
+        pub lock_self_test_fails: bool,
+        /// Use a test-only schema plan instead of the build's.
+        pub schema: Option<TestSchema>,
+        /// Alter the expected FTS5 shadow-table DDL text, as a different
+        /// SQLite release might write it.
+        pub skew_shadow_ddl: bool,
+        /// Replace the read op budget (VM operations per statement group).
+        pub read_op_budget: Option<u64>,
+        /// Fail every import batch just before its `COMMIT` with this
+        /// SQLite primary result code (the batch then rolls back).
+        pub batch_error: Option<i32>,
+    }
+
+    thread_local! {
+        static FAULTS: RefCell<Faults> = RefCell::new(Faults::default());
+    }
+
+    /// Restores the previous faults when dropped.
+    pub struct FaultGuard {
+        previous: Faults,
+    }
+
+    impl Drop for FaultGuard {
+        fn drop(&mut self) {
+            let previous = self.previous;
+            FAULTS.with(|f| *f.borrow_mut() = previous);
+        }
+    }
+
+    /// Install `faults` for this thread until the guard is dropped.
+    #[must_use]
+    pub fn install(faults: Faults) -> FaultGuard {
+        let previous = FAULTS.with(|f| std::mem::replace(&mut *f.borrow_mut(), faults));
+        FaultGuard { previous }
+    }
+
+    pub(crate) fn current() -> Faults {
+        FAULTS.with(|f| *f.borrow())
+    }
+
+    pub use super::FaultPoint;
+
+    /// An action run at the n-th hit of a fault point.
+    pub type FaultAction = Box<dyn FnMut(FaultPoint, u32)>;
+
+    struct Trip {
+        point: FaultPoint,
+        nth: u32,
+        action: Option<FaultAction>,
+    }
+
+    thread_local! {
+        static HITS: RefCell<std::collections::BTreeMap<FaultPoint, u32>> =
+            const { RefCell::new(std::collections::BTreeMap::new()) };
+        static TRIP: RefCell<Option<Trip>> = const { RefCell::new(None) };
+    }
+
+    /// Disarms the trip (and clears the hit counts) when dropped.
+    pub struct TripGuard(());
+
+    impl Drop for TripGuard {
+        fn drop(&mut self) {
+            TRIP.with(|t| *t.borrow_mut() = None);
+            HITS.with(|h| h.borrow_mut().clear());
+        }
+    }
+
+    /// Run `action` at the `nth` hit (1-based) of `point` on this thread,
+    /// counting from now. Hit counts restart at zero.
+    #[must_use]
+    pub fn arm(point: FaultPoint, nth: u32, action: FaultAction) -> TripGuard {
+        HITS.with(|h| h.borrow_mut().clear());
+        TRIP.with(|t| {
+            *t.borrow_mut() = Some(Trip {
+                point,
+                nth,
+                action: Some(action),
+            });
+        });
+        TripGuard(())
+    }
+
+    /// Count hits from zero without an action (to learn how many hits a
+    /// run has).
+    #[must_use]
+    pub fn count() -> TripGuard {
+        HITS.with(|h| h.borrow_mut().clear());
+        TRIP.with(|t| *t.borrow_mut() = None);
+        TripGuard(())
+    }
+
+    /// The hits of `point` on this thread since the last [`arm`] or
+    /// [`count`].
+    pub fn hits(point: FaultPoint) -> u32 {
+        HITS.with(|h| h.borrow().get(&point).copied().unwrap_or(0))
+    }
+
+    pub(crate) fn hit(p: FaultPoint) {
+        let n = HITS.with(|h| {
+            let mut h = h.borrow_mut();
+            let n = h.entry(p).or_insert(0);
+            *n = n.saturating_add(1);
+            *n
+        });
+        // Take the action out while it runs, so it may itself reach a
+        // fault point without a re-entrant borrow.
+        let action = TRIP.with(|t| {
+            let mut t = t.borrow_mut();
+            match t.as_mut() {
+                Some(trip) if trip.point == p && trip.nth == n => trip.action.take(),
+                _ => None,
+            }
+        });
+        if let Some(mut a) = action {
+            a(p, n);
+            TRIP.with(|t| {
+                if let Some(trip) = t.borrow_mut().as_mut() {
+                    trip.action = Some(a);
+                }
+            });
+        }
+    }
+
+    const V2_DDL: &str = "CREATE TABLE test_v2_note (\n  id INTEGER PRIMARY KEY,\n  note TEXT NOT NULL\n) STRICT;\nCREATE INDEX test_v2_note_by_note ON test_v2_note(note);";
+
+    fn fail_mid_step(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+        tx.execute("INSERT INTO test_v2_note (note) VALUES ('half done')", [])?;
+        Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ABORT),
+            None,
+        ))
+    }
+
+    fn fk_violation(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+        tx.execute(
+            "INSERT INTO import_cursor (session_id, pass, last_rowid, rows_done, done) \
+             VALUES (424242, 1, NULL, 0, 0)",
+            [],
+        )?;
+        Ok(())
+    }
+
+    fn fts_corruption(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+        tx.execute(
+            "INSERT INTO message_fts (rowid, display_text) VALUES (424242, 'ghost entry')",
+            [],
+        )?;
+        Ok(())
+    }
+
+    fn wrong_ddl(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+        tx.execute_batch("CREATE INDEX test_v2_unexpected ON test_v2_note(id, note);")
+    }
+
+    const fn v2(data: fn(&Transaction<'_>) -> rusqlite::Result<()>, test_only: bool) -> Migration {
+        Migration {
+            from: 1,
+            to: 2,
+            ddl: V2_DDL,
+            data,
+            test_only,
+        }
+    }
+
+    static V2_OK: [Migration; 1] = [v2(no_data, true)];
+    static V2_FAILS: [Migration; 1] = [v2(fail_mid_step, true)];
+    static V2_FK: [Migration; 1] = [v2(fk_violation, true)];
+    static V2_FTS: [Migration; 1] = [v2(fts_corruption, true)];
+    static V2_WRONG: [Migration; 1] = [v2(wrong_ddl, true)];
+    static V2_COPY: [Migration; 1] = [v2(no_data, false)];
+
+    pub(crate) fn plan(schema: TestSchema) -> SchemaPlan {
+        let migrations: &'static [Migration] = match schema {
+            TestSchema::V2 => &V2_OK,
+            TestSchema::V2FailsMidStep => &V2_FAILS,
+            TestSchema::V2ForeignKeyViolation => &V2_FK,
+            TestSchema::V2FtsCorruption => &V2_FTS,
+            TestSchema::V2WrongDdl => &V2_WRONG,
+            TestSchema::V2NeedsCopy => &V2_COPY,
+        };
+        SchemaPlan {
+            version: 2,
+            migrations,
+        }
+    }
+}
+
+/// The lock self-test must report failure.
+#[inline]
+pub(crate) fn lock_self_test_fails() -> bool {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current().lock_self_test_fails
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        false
+    }
+}
+
+/// A test-only schema plan, if one is installed.
+#[inline]
+pub(crate) fn schema_plan() -> Option<SchemaPlan> {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current().schema.map(hooks::plan)
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        None
+    }
+}
+
+/// Alter the expected shadow-table DDL.
+#[inline]
+pub(crate) fn skew_shadow_ddl() -> bool {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current().skew_shadow_ddl
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        false
+    }
+}
+
+/// The read op budget to use instead of `ops`, if a test set one.
+#[inline]
+pub(crate) fn read_op_budget(ops: u64) -> u64 {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current().read_op_budget.unwrap_or(ops)
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        ops
+    }
+}
+
+/// The error an import batch must fail with, if a test set one.
+#[inline]
+pub(crate) fn batch_error() -> Option<rusqlite::Error> {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current()
+            .batch_error
+            .map(|code| rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None))
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        None
+    }
+}

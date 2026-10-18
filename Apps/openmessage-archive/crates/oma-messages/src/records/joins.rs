@@ -7,6 +7,7 @@ use crate::col::Col;
 use crate::db::{FromRow, RowReader};
 use crate::error::{MessagesError, Stage};
 use crate::progress::MessagesPhase;
+use crate::raw::RawIssue;
 use crate::schema::known::{chat_handle_join, chat_message_join, message_attachment_join};
 use crate::schema::KnownTable;
 use crate::time::CocoaTime;
@@ -23,9 +24,11 @@ pub struct ChatHandleLink {
     pub chat_id: Col<i64>,
     /// `handle_id`.
     pub handle_id: Col<i64>,
+    /// The raw values of unreadable cells, when kept (M4 R2).
+    pub raw_issues: Vec<RawIssue>,
 }
 
-shape_debug!(ChatHandleLink { chat_id, handle_id });
+shape_debug!(ChatHandleLink { chat_id, handle_id } kinds { raw_issues });
 
 impl FromRow for ChatHandleLink {
     const TABLE: KnownTable = KnownTable::ChatHandleJoin;
@@ -37,6 +40,7 @@ impl FromRow for ChatHandleLink {
             rowid,
             chat_id: r.integer(chat_handle_join::CHAT_ID)?,
             handle_id: r.integer(chat_handle_join::HANDLE_ID)?,
+            raw_issues: r.take_raw_issues(),
         })
     }
 }
@@ -54,13 +58,15 @@ pub struct ChatMessageLink {
     /// `message_date`; its unit is **UNVERIFIED**, so it is classified per
     /// value.
     pub message_date: Col<CocoaTime>,
+    /// The raw values of unreadable cells, when kept (M4 R2).
+    pub raw_issues: Vec<RawIssue>,
 }
 
 shape_debug!(ChatMessageLink {
     chat_id,
     message_id,
     message_date
-});
+} kinds { raw_issues });
 
 impl FromRow for ChatMessageLink {
     const TABLE: KnownTable = KnownTable::ChatMessageJoin;
@@ -73,6 +79,7 @@ impl FromRow for ChatMessageLink {
             chat_id: r.integer(chat_message_join::CHAT_ID)?,
             message_id: r.integer(chat_message_join::MESSAGE_ID)?,
             message_date: r.time(chat_message_join::MESSAGE_DATE)?,
+            raw_issues: r.take_raw_issues(),
         })
     }
 }
@@ -87,12 +94,14 @@ pub struct MessageAttachmentLink {
     pub message_id: Col<i64>,
     /// `attachment_id`.
     pub attachment_id: Col<i64>,
+    /// The raw values of unreadable cells, when kept (M4 R2).
+    pub raw_issues: Vec<RawIssue>,
 }
 
 shape_debug!(MessageAttachmentLink {
     message_id,
     attachment_id
-});
+} kinds { raw_issues });
 
 impl FromRow for MessageAttachmentLink {
     const TABLE: KnownTable = KnownTable::MessageAttachmentJoin;
@@ -104,6 +113,7 @@ impl FromRow for MessageAttachmentLink {
             rowid,
             message_id: r.integer(message_attachment_join::MESSAGE_ID)?,
             attachment_id: r.integer(message_attachment_join::ATTACHMENT_ID)?,
+            raw_issues: r.take_raw_issues(),
         })
     }
 }

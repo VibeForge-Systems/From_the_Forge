@@ -8,6 +8,7 @@ use crate::attachments::{AttachmentLocation, AttachmentLocator};
 use crate::col::Col;
 use crate::db::RowReader;
 use crate::error::MessagesError;
+use crate::raw::RawIssue;
 use crate::redact::{Redacted, SqlText};
 use crate::schema::known::attachment as c;
 use crate::time::CocoaTime;
@@ -51,13 +52,15 @@ pub struct AttachmentRecord {
     pub original_guid: Col<Redacted<SqlText>>,
     /// Where the file is; `None` when the pass was given no locator.
     pub location: Option<AttachmentLocation>,
+    /// The raw values of unreadable cells, when kept (M4 R2).
+    pub raw_issues: Vec<RawIssue>,
 }
 
 shape_debug!(AttachmentRecord {
     guid, filename, uti, mime_type, transfer_name, total_bytes, is_sticker,
     hide_attachment, is_outgoing, transfer_state, created_date, start_date,
     emoji_image_short_description, original_guid,
-} kinds { location });
+} kinds { location, raw_issues });
 
 impl AttachmentRecord {
     pub(crate) fn from_row(
@@ -87,6 +90,7 @@ impl AttachmentRecord {
             emoji_image_short_description: r.text(c::EMOJI_IMAGE_SHORT_DESCRIPTION)?,
             original_guid: r.text(c::ORIGINAL_GUID)?,
             location,
+            raw_issues: r.take_raw_issues(),
         })
     }
 }

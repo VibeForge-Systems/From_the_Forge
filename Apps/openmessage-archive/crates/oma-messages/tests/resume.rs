@@ -1,5 +1,6 @@
 //! Break and resume for every `for_each_*` pass (M3 §4.4,
-//! §19.3 `resume.rs`).
+//! §19.3 `resume.rs`), including the M4 key passes (R6) and the message
+//! pass with raw values kept (R2, R3).
 //!
 //! The fixture has rowid gaps, deleted rows, and rows keyed `i64::MIN` and
 //! `i64::MAX`, in the rowid tables and in the join tables keyed by their
@@ -218,6 +219,47 @@ fn every_pass_breaks_and_resumes_exactly() {
                     .expect("pass")
             },
         );
+        let raw = MessageReadOptions::default().with_keep_raw_blobs(true);
+        check_resume(
+            "message raw",
+            9,
+            rows(KnownTable::Message),
+            &mut |from, f| {
+                db.for_each_message(from, &raw, None, ctx, |r| f(r.rowid))
+                    .expect("pass")
+            },
+        );
+        check_resume(
+            "message key",
+            10,
+            rows(KnownTable::Message),
+            &mut |from, f| {
+                db.for_each_message_key(from, ctx, |r| f(r.rowid))
+                    .expect("pass")
+            },
+        );
+        check_resume("chat key", 11, rows(KnownTable::Chat), &mut |from, f| {
+            db.for_each_chat_key(from, ctx, |r| f(r.rowid))
+                .expect("pass")
+        });
+        check_resume(
+            "attachment key",
+            12,
+            rows(KnownTable::Attachment),
+            &mut |from, f| {
+                db.for_each_attachment_key(from, ctx, |r| f(r.rowid))
+                    .expect("pass")
+            },
+        );
+        check_resume(
+            "handle key",
+            13,
+            rows(KnownTable::Handle),
+            &mut |from, f| {
+                db.for_each_handle_key(from, ctx, |r| f(r.rowid))
+                    .expect("pass")
+            },
+        );
     })
     .expect("connected");
 }
@@ -275,6 +317,10 @@ fn absent_optional_tables_give_empty_passes() {
         assert_eq!((out.rows, out.last), (0, None));
         let out = db
             .for_each_recoverable::<()>(Cursor::Start, ctx, |_| ControlFlow::Continue(()))
+            .expect("pass");
+        assert_eq!((out.rows, out.last), (0, None));
+        let out = db
+            .for_each_attachment_key::<()>(Cursor::Start, ctx, |_| ControlFlow::Continue(()))
             .expect("pass");
         assert_eq!((out.rows, out.last), (0, None));
     })

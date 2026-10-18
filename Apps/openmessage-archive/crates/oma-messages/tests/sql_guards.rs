@@ -14,7 +14,7 @@ use std::ops::ControlFlow;
 
 use common::*;
 use oma_backup::OpenMode;
-use oma_messages::{Cursor, Probe, ProbeOptions, SMS_DB_LIMITS};
+use oma_messages::{Cursor, MessageReadOptions, Probe, ProbeOptions, SMS_DB_LIMITS};
 use rusqlite::Connection;
 
 const DENIED: [&str; 8] = [
@@ -89,7 +89,8 @@ fn triggers_and_views_load_but_views_are_unusable() {
     .expect("connected");
 }
 
-/// A whole probe and every pass of this slice leave the guards untouched.
+/// A whole probe and every pass leave the guards untouched, including the
+/// raw and key forms (M4 R2, R3, R6).
 #[test]
 fn the_passes_trip_no_guard() {
     let mut sql = full_schema();
@@ -99,10 +100,14 @@ fn the_passes_trip_no_guard() {
          INSERT INTO chat_handle_join VALUES (1, 1);
          INSERT INTO chat_message_join VALUES (1, 1, 0);
          INSERT INTO message_attachment_join VALUES (1, 1);
-         INSERT INTO chat_recoverable_message_join VALUES (1, 1, 0, 0);",
+         INSERT INTO chat_recoverable_message_join VALUES (1, 1, 0, 0);
+         INSERT INTO message (guid, date, is_from_me, payload_data, item_type)
+             VALUES ('SYNTH-MSG-GUID-1', 0, 0, X'0102', 'x');
+         INSERT INTO attachment (guid) VALUES ('SYNTH-ATT-GUID-1');",
     );
     let fx = Fixture::with_sms(&build(&sql));
-    with_probe(&fx, None, &ProbeOptions::default(), |p, ctx| {
+    let opts = ProbeOptions::default().with_keep_raw_values(true);
+    with_probe(&fx, None, &opts, |p, ctx| {
         let Probe::Supported(db) = p.expect("probe") else {
             panic!("not supported");
         };
@@ -142,6 +147,26 @@ fn the_passes_trip_no_guard() {
                 .rows,
             1
         );
+        let raw = MessageReadOptions::default().with_keep_raw_blobs(true);
+        for opts in [MessageReadOptions::default(), raw] {
+            let out = db
+                .for_each_message(Cursor::Start, &opts, None, ctx, go::<_>)
+                .expect("pass");
+            assert_eq!(out.rows, 1);
+        }
+        for out in [
+            db.for_each_message_key(Cursor::Start, ctx, go::<_>),
+            db.for_each_chat_key(Cursor::Start, ctx, go::<_>),
+            db.for_each_attachment_key(Cursor::Start, ctx, go::<_>),
+        ] {
+            assert_eq!(out.expect("pass").rows, 1);
+        }
+        assert_eq!(
+            db.for_each_handle_key(Cursor::Start, ctx, go::<_>)
+                .expect("pass")
+                .rows,
+            1
+        );
         let conn = db.connection();
         assert!(conn.query_only().expect("query_only"));
         assert_eq!(conn.authorizer_denials(), 0);
@@ -163,9 +188,10 @@ fn record_statements_fit_the_limits() {
         db.record_queries().map(str::to_owned).collect()
     })
     .expect("connected");
-    // Two forms for each of message, handle, chat, attachment and the four
-    // join tables.
-    assert_eq!(queries.len(), 16);
+    // Two cursor forms for: the record query of message, handle, chat,
+    // attachment and the four join tables; the raw form of message (R3);
+    // and the key form of message, chat, attachment and handle (R6).
+    assert_eq!(queries.len(), 2 * (8 + 1 + 4));
     let [_, sql_length, _, _, vdbe_op, _, _, _] = SMS_DB_LIMITS.values();
     let longest = queries.iter().map(String::len).max().expect("queries");
     assert!(

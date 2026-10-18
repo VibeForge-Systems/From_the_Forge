@@ -46,10 +46,20 @@ pub struct Limits {
     /// (32 GiB), checked before anything is copied. Real sms.db sizes are
     /// **UNVERIFIED**; the cap protects the archive volume (D40).
     pub sms_db_bytes: u64,
+    /// Cap on one attachment blob copied by
+    /// [`crate::OpenBackup::copy_file_to`], in bytes (8 GiB), checked against
+    /// the blob's stored length before any byte is read. For an encrypted
+    /// backup that length is the ciphertext, which is up to 16 bytes longer
+    /// than the plaintext. Fixed like [`Limits::sms_db_bytes`] (M4 §3.2);
+    /// real attachment sizes are **UNVERIFIED**.
+    pub attachment_bytes: u64,
 }
 
 /// The production value of [`Limits::sms_db_bytes`]: 32 GiB (D40).
 pub const SMS_DB_BYTES_DEFAULT: u64 = 32 << 30;
+
+/// The production value of [`Limits::attachment_bytes`]: 8 GiB (M4 §3.2).
+pub const ATTACHMENT_BYTES_DEFAULT: u64 = 8 << 30;
 
 impl Default for Limits {
     fn default() -> Self {
@@ -72,6 +82,7 @@ impl Default for Limits {
             list_plist_bytes_total: 256 << 20,
             password_bytes: 1024,
             sms_db_bytes: SMS_DB_BYTES_DEFAULT,
+            attachment_bytes: ATTACHMENT_BYTES_DEFAULT,
         }
     }
 }
@@ -107,6 +118,8 @@ pub enum LimitKind {
     PasswordBytes,
     /// A staged database and its `-wal` together larger than `sms_db_bytes`.
     SmsDbBytes,
+    /// An attachment blob larger than `attachment_bytes`.
+    AttachmentBytes,
     /// A `message_summary_info` array longer than its cap. Reported by
     /// `oma-messages` through [`crate::bplist::ReadOpts::array_cap`].
     SummaryArray,
@@ -137,5 +150,6 @@ mod tests {
         assert_eq!(l.list_plist_bytes_total, 268_435_456);
         assert_eq!(l.password_bytes, 1024);
         assert_eq!(l.sms_db_bytes, 34_359_738_368);
+        assert_eq!(l.attachment_bytes, 8_589_934_592);
     }
 }

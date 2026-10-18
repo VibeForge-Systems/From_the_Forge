@@ -4,7 +4,9 @@
 //! filenames, mentions, GUIDs, or the names of sentinel tables, views,
 //! triggers, indexes and columns (including the table `quick_check` would
 //! name in `msgs-corrupt-plain`). The failure paths run too, and every
-//! error's `Display` and `Debug` is checked as well.
+//! error's `Display` and `Debug` is checked as well. The M4 readers run too:
+//! every key pass (R6), and every record pass with raw values kept (R2,
+//! R3), over the hostile and full fixtures.
 //!
 //! Its own test binary, with one global capturing subscriber at TRACE: a
 //! thread-local subscriber would miss events from other threads. (The panic
@@ -16,9 +18,12 @@ use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
 
 use common::*;
-use oma_backup::CancelToken;
+use std::ops::ControlFlow;
+
+use oma_backup::{CancelToken, WalPolicy};
 use oma_messages::{
-    check, CheckOptions, MessagesCtx, MessagesError, MessagesPhase, MessagesProgress,
+    check, connect, stage, CheckOptions, Connect, Cursor, MessageReadOptions, MessagesCtx,
+    MessagesError, MessagesPhase, MessagesProgress, Probe, ProbeOptions, SmsDb,
 };
 use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
@@ -48,6 +53,60 @@ impl<S: Subscriber> Layer<S> for Capture {
         event.record(&mut fields);
         self.0.lock().expect("lock").push(fields.0);
     }
+}
+
+/// Every M4 reader over one fixture, with raw values kept. Only counts are
+/// pushed to `texts`; the records themselves go to `redaction.rs`. Returns
+/// how many raw issues the record passes kept.
+fn m4_readers(name: &str, password: Option<&str>, texts: &mut Vec<String>) -> usize {
+    let fx = Fixture::messages(name);
+    let ob = fx.open(password);
+    let token = CancelToken::new();
+    let mut sink = |_: MessagesProgress| {};
+    let mut ctx = MessagesCtx::new(&token, &mut sink);
+    let staged = stage(&ob, WalPolicy::BestEffort, &mut ctx).expect("stage");
+    let Connect::Ready(conn) = connect(&staged, &ctx).expect("connect") else {
+        panic!("limits");
+    };
+    let opts = ProbeOptions::default().with_keep_raw_values(true);
+    let Probe::Supported(db) = SmsDb::open_with(&conn, &opts, &mut ctx).expect("probe") else {
+        panic!("not supported");
+    };
+    let raw = MessageReadOptions::default().with_keep_raw_blobs(true);
+    let mut raw_issues = 0;
+    let rows = [
+        db.for_each_message(Cursor::Start, &raw, None, &mut ctx, |r| {
+            raw_issues += r.raw_issues.len();
+            ControlFlow::<()>::Continue(())
+        }),
+        db.for_each_handle(Cursor::Start, &mut ctx, |r| {
+            raw_issues += r.raw_issues.len();
+            ControlFlow::<()>::Continue(())
+        }),
+        db.for_each_chat(Cursor::Start, &mut ctx, |r| {
+            raw_issues += r.raw_issues.len();
+            ControlFlow::<()>::Continue(())
+        }),
+        db.for_each_attachment(Cursor::Start, None, &mut ctx, |r| {
+            raw_issues += r.raw_issues.len();
+            ControlFlow::<()>::Continue(())
+        }),
+        db.for_each_message_key(Cursor::Start, &mut ctx, go),
+        db.for_each_chat_key(Cursor::Start, &mut ctx, go),
+        db.for_each_attachment_key(Cursor::Start, &mut ctx, go),
+        db.for_each_handle_key(Cursor::Start, &mut ctx, go),
+    ]
+    .map(|o| o.expect("pass").rows);
+    texts.push(format!("{name}: rows {rows:?}, raw issues {raw_issues}"));
+    drop(db);
+    drop(conn);
+    staged.remove().expect("remove");
+    let _ = ob.close();
+    raw_issues
+}
+
+fn go<T>(_: T) -> ControlFlow<()> {
+    ControlFlow::Continue(())
 }
 
 fn record_error(e: &MessagesError, texts: &mut Vec<String>) {
@@ -93,6 +152,10 @@ fn nothing_sensitive_is_logged() {
         check(&ob, &CheckOptions::default().with_page_rows(16), &mut ctx).expect_err("cancelled");
     record_error(&e, &mut texts);
     let _ = ob.close();
+    // The M4 readers, with raw values kept.
+    let kept = m4_readers("msgs-hostile-plain", None, &mut texts);
+    assert!(kept > 0, "the hostile fixture has unreadable cells");
+    m4_readers("msgs-full-enc", Some(PASSWORD), &mut texts);
     // A backup whose sms.db blob is missing: a staging error.
     let fx = Fixture::m2("missing-sms-blob");
     let (result, _) = run_check(&fx, None, &CheckOptions::default());

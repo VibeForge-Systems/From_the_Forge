@@ -147,10 +147,12 @@ antivirus) applies to it as well. In addition:
 - **What is never read.** The text of Recently Deleted messages
   (`recoverable_message_part.part_text`) is refused by an SQLite authorizer
   on the connection, so no query can read it. Poll and app payloads
-  (`payload_data`) are read only as "present or not". The check counts
-  Recently Deleted entries and nothing more; whether milestone 4 imports
-  them is still to be decided, and the current lean is to exclude them by
-  default.
+  (`payload_data`) are read only as "present or not". (From milestone 4
+  the reader can also return their bytes, up to 1 MiB, but only when the
+  caller asks for raw values; the extraction check never does.) The check counts
+  Recently Deleted entries and nothing more. How milestone 4 imports them
+  is decided (D60, owner-confirmed on 2026-10-18; see "The archive (M4)"
+  below).
 - **What the report contains.** Counts, closed kinds (such as "damaged" or
   "unsupported" and their reasons), raw numeric codes in capped histograms,
   and the date range of your messages. It contains no message text, no
@@ -170,6 +172,34 @@ antivirus) applies to it as well. In addition:
   included), any GUID, timestamp or date range, attachment paths, or the
   text of an internal error (panic). Automated tests check this over every
   synthetic fixture, including the failure paths and a forced panic.
+
+## The archive (M4): decisions already taken
+
+Milestone 4 is in progress: the import is not reachable from the app yet,
+and this section lists only the decisions the owner has confirmed (on
+2026-10-18). The full write-up of what an archive holds comes with the
+milestone's documentation.
+
+- **Recently Deleted (D60).** Messages that are only in Recently Deleted
+  are **excluded by default**. Including them is an opt-in for each import,
+  with a warning. When you opt in, their attachments are included too. A
+  message that is already in the archive and later appears in Recently
+  Deleted is **marked** as recently deleted, but its archived content is
+  not updated from the deleted copy. The text of Recently Deleted message
+  parts (`recoverable_message_part.part_text`) is never read either way.
+- **Text captured before an unsend (D61).** If the archive already holds a
+  message's text and a later backup shows the sender unsent it, the
+  archive **keeps the earlier text** (it stays searchable) and marks the
+  message as unsent by the sender.
+- **Raw message data (D59).** The archive keeps the raw `attributedBody`,
+  `message_summary_info` and `payload_data` bytes of each message (poll,
+  app and link payloads included), within fixed size caps, so a newer
+  version of the app can decode them again without the backup.
+- **Device identity (D51).** The archive does not identify your phone. It
+  never stores or hashes the UDID; when a backup is imported, the app
+  shows which device facts match earlier imports and you choose whether it
+  is the same phone. The device name, model, iOS version and build are
+  stored exactly as the backup records them.
 
 ## Device identifiers (M2)
 

@@ -70,6 +70,11 @@ fn exercise(name: &str, roots: &mut Vec<String>) {
         let _ = ob.extract_database(SMS_DB_DOMAIN, SMS_DB_PATH, &mut ctx);
         if let Ok(Some(entry)) = ob.find_file(ATTACHMENT_DOMAIN, ATTACHMENT_PATH) {
             let _ = ob.extract_file(&entry, &mut ctx);
+            // The M4 attachment copy: its digest must not reach a log either.
+            let _ = ob.copy_file_to(&entry, &mut Vec::new(), &mut ctx);
+        }
+        if let Ok(Some(entry)) = ob.find_file(SMS_DB_DOMAIN, SMS_DB_PATH) {
+            let _ = ob.copy_file_to(&entry, &mut Vec::new(), &mut ctx);
         }
         let _ = ob.close();
     }
@@ -122,6 +127,7 @@ fn nothing_sensitive_is_logged() {
         SNAPSHOT_SENTINEL,
         "MediaDomain",
         "HomeDomain",
+        "synthetic attachment payload",
     ];
     for e in &events {
         for f in forbidden {
@@ -130,6 +136,6 @@ fn nothing_sensitive_is_logged() {
         for root in &roots {
             assert!(!e.contains(root.as_str()), "a path was logged: {e}");
         }
-        assert!(!has_40_hex(e), "a fileID was logged: {e}");
+        assert!(!has_40_hex(e), "a fileID or digest was logged: {e}");
     }
 }

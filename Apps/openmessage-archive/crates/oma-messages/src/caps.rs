@@ -24,6 +24,14 @@ pub const CAP_TEXT: u32 = 16 * MIB;
 pub const CAP_SUMMARY: u32 = MIB;
 /// `chat.properties`.
 pub const CAP_PROPERTIES: u32 = 256 * KIB;
+/// `message.payload_data`, read only when raw blobs are kept (M4 R3). A
+/// larger value is [`crate::Col::Oversized`] and is never read.
+pub const CAP_PAYLOAD_DATA: u32 = MIB;
+/// The raw value of an unreadable cell in a column without a byte cap (an
+/// integer, boolean or time column holding text or a blob), kept in
+/// [`crate::RawIssue`] only up to this size (M4 R2). Columns with a cap use
+/// their own.
+pub const CAP_RAW_UNREADABLE: u32 = 4 * KIB;
 /// Every `guid` column, `associated_message_guid`, `thread_originator_guid`
 /// and `reply_to_guid`.
 pub const CAP_GUID: u32 = 256;

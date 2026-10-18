@@ -16,6 +16,8 @@ const LABEL: Record<JobPhase, string> = {
   checkingFiles: 'Checking file records',
   checkingMessagesDb: 'Checking the Messages database',
   extracting: 'Extracting a file',
+  // The archive import (M4); counted in bytes.
+  copyingAttachments: 'Copying attachments',
   // The extraction check (M3 §17.3).
   stagingMessagesDb: 'Copying the Messages database',
   scanningSchema: 'Checking the database layout',

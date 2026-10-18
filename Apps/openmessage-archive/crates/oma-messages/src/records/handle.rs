@@ -6,6 +6,7 @@ use crate::col::Col;
 use crate::db::{FromRow, RowReader};
 use crate::error::{MessagesError, Stage};
 use crate::progress::MessagesPhase;
+use crate::raw::RawIssue;
 use crate::redact::{Redacted, SqlText};
 use crate::schema::known::handle as c;
 use crate::schema::KnownTable;
@@ -30,9 +31,11 @@ pub struct HandleRecord {
     pub uncanonicalized_id: Col<Redacted<SqlText>>,
     /// `person_centric_id`.
     pub person_centric_id: Col<Redacted<SqlText>>,
+    /// The raw values of unreadable cells, when kept (M4 R2).
+    pub raw_issues: Vec<RawIssue>,
 }
 
-shape_debug!(HandleRecord { id, service, country, uncanonicalized_id, person_centric_id } kinds { service_class });
+shape_debug!(HandleRecord { id, service, country, uncanonicalized_id, person_centric_id } kinds { service_class, raw_issues });
 
 /// The class of a readable service column.
 pub(crate) fn service_class(col: &Col<Redacted<SqlText>>) -> Option<ServiceClass> {
@@ -55,6 +58,7 @@ impl FromRow for HandleRecord {
             country: r.text(c::COUNTRY)?,
             uncanonicalized_id: r.text(c::UNCANONICALIZED_ID)?,
             person_centric_id: r.text(c::PERSON_CENTRIC_ID)?,
+            raw_issues: r.take_raw_issues(),
         })
     }
 }

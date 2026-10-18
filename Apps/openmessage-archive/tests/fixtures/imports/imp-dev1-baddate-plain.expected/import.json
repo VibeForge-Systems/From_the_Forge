@@ -1,0 +1,27 @@
+{
+ "counts": {
+  "chats": {
+   "alreadyPresent": 0,
+   "cellsReplaced": 0,
+   "historyAdded": 0,
+   "inserted": 3,
+   "notApplied": 0,
+   "seen": 3,
+   "unkeyed": 0,
+   "valueIssueCells": 0
+  },
+  "handles": {
+   "alreadyPresent": 0,
+   "cellsReplaced": 0,
+   "historyAdded": 0,
+   "inserted": 4,
+   "notApplied": 0,
+   "seen": 4,
+   "unkeyed": 0,
+   "valueIssueCells": 0
+  }
+ },
+ "entry": "imp-dev1-baddate-plain",
+ "format": "oma-import-counts",
+ "formatVersion": 1
+}

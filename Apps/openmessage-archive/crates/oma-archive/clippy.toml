@@ -1,0 +1,22 @@
+# Clippy configuration for oma-archive (spec §4.1, §5.5).
+#
+# No code may open, copy or map `archive.sqlite`, its `-wal` or its `-shm`
+# while a connection is open: on Unix, closing any descriptor to the
+# database drops SQLite's POSIX locks. Files are created and opened through
+# oma-fs (`create_new_private`, `open_nofollow`), and connections only in
+# `conn.rs`, which allows these methods for itself.
+#
+# Integration tests build hostile files directly; each test file that does
+# allows `disallowed_methods` explicitly.
+
+disallowed-methods = [
+    { path = "std::fs::File::open", reason = "open files through oma_fs::open_nofollow" },
+    { path = "std::fs::File::create", reason = "create files through oma_fs::create_new_private" },
+    { path = "std::fs::File::create_new", reason = "create files through oma_fs::create_new_private" },
+    { path = "std::fs::OpenOptions::new", reason = "open files through oma-fs" },
+    { path = "std::fs::copy", reason = "never copy an open database" },
+    { path = "rusqlite::Connection::open", reason = "connections are opened in conn.rs only" },
+    { path = "rusqlite::Connection::open_with_flags", reason = "connections are opened in conn.rs only" },
+    { path = "rusqlite::Connection::open_with_flags_and_vfs", reason = "connections are opened in conn.rs only" },
+    { path = "rusqlite::Connection::open_in_memory", reason = "connections are opened in conn.rs only" },
+]

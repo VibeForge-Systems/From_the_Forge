@@ -1,6 +1,6 @@
 [package]
 name = "oma-fs"
-description = "Filesystem safety primitives for OpenMessage Archive: filename sanitization, contained path resolution, and iPhone backup location guards."
+description = "Filesystem safety primitives for OpenMessage Archive: filename sanitization, contained path resolution, iPhone backup location guards, volume facts, permission checks and durable no-replace placement."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,7 +11,11 @@ publish = false
 
 [dependencies]
 dunce.workspace = true
+fs4.workspace = true
 thiserror.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

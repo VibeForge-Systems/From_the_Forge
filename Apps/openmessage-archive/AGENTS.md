@@ -113,8 +113,11 @@ Each one is enforced in code. Keep it that way.
 
 - **Domain logic belongs in `crates/`.** `src-tauri/` stays a thin layer of
   IPC commands and state. `oma-fs`, `oma-backup` (M2) and `oma-messages`
-  (M3) are implemented; the planned crates are `oma-archive` (M4),
-  `oma-export` (M6) and `oma-device` (M7). Each must build and test without
+  (M3) are implemented; `oma-archive` (M4) is in progress (its skeleton:
+  create, open, lock, schema v1, fingerprint, migrations; and the import
+  core: sessions, the duplicate-key scan, the merge engine and the handle
+  and chat passes, `Archive::import_core`); the planned
+  crates are `oma-export` (M6) and `oma-device` (M7). Each must build and test without
   Tauri. The shell's `src-tauri/src/backups/` (registry, job table, worker,
   DTOs, messages) has no Tauri types either, so it is tested without a
   window.
@@ -234,9 +237,41 @@ Never hand-edit generated files.
   `tests/fixtures/backups/` (its `SHA256SUMS` must stay
   `c8e3d0bf…a0ae3`). The messages catalogue's `README.md` is generated;
   do not edit it by hand.
+- **The import catalogue has two pins.** `tests/fixtures/imports/` is
+  written only by `scripts/fixtures/make_synthetic_imports.py`. Its inputs
+  (`SHA256SUMS`, hash pinned in `crates/oma-archive/tests/import_fixtures.rs`)
+  are frozen. Its model expectations (`content.json`, `import.json`,
+  `scenarios/`, `EXPECTED.SHA256SUMS`, whose hash is pinned in the same
+  file) may be regenerated when an import slice settles a rule or adds
+  counts; say which rule changed and re-pin. The manifest format and the
+  model's readings are in that catalogue's generated `README.md`.
 - **No `#[tracing::instrument]` without `skip_all`** in `oma-messages` or
   `src-tauri`: it formats every argument with `Debug`.
   `crates/oma-messages/tests/source_rules.rs` enforces this for that crate.
+- **`oma-archive`'s `conn.rs` is the only opener of `archive.sqlite`.**
+  Nothing else may open, copy, hash or map the database or its `-wal` or
+  `-shm` while a connection is open: on Unix, closing any descriptor to the
+  file drops SQLite's POSIX locks. `crates/oma-archive/clippy.toml` bans
+  `File::open`, `OpenOptions`, `fs::copy` and the other connection openers;
+  `tests/source_rules.rs` also bans computed `Path::join` arguments outside
+  `layout.rs` and `blobs.rs`. Opening an archive writes nothing; only
+  `Archive::begin_write` and `Archive::migrate` write. Test hooks live behind
+  the non-default `fault-injection` feature, which only the crate's own
+  tests enable (a self dev-dependency).
+- **The import merges in Rust, one savepoint per record, in batches.**
+  Every insert keyed on source data is an upsert or `DO NOTHING`; never
+  `INSERT OR REPLACE`, never `RETURNING` (`tests/source_rules.rs`). A
+  record's `UPDATE` sets only the columns that changed, so the guarded
+  triggers fire only on real changes. A batch never commits after a
+  statement error. Until finalize exists (slice 4j) a session whose passes
+  all ran stays **running**: `CoreOutcome::PassesDone` is not "completed".
+- **Crash points are `fault::point(FaultPoint::…)` calls.** They compile
+  to nothing without the feature. `tests/crash.rs` re-runs its own binary
+  with `OMA_TEST_FAULT=<point>:<n>` and kills the child there; add a point
+  to `FaultPoint::ALL` and a kill at it in that test together. Its checks
+  after a kill run on a copy of the database files: a read-write
+  connection closing on the original would checkpoint and delete the
+  `-wal` the resume must see.
 - **Headless smoke testing works**, using `xvfb-run` with
   `WEBKIT_DISABLE_DMABUF_RENDERER=1` and `XDG_CONFIG_HOME` pointed at a
   scratch directory. However, the GTK folder picker cannot list directories

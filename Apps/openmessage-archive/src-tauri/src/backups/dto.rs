@@ -386,6 +386,9 @@ pub enum JobPhase {
     /// Extracting a file (the M3 extraction API). Validation never reports
     /// it; it exists so the crate's phase set maps one to one.
     Extracting,
+    /// Copying an attachment into the archive (M4); `done` and `total` are
+    /// bytes.
+    CopyingAttachments,
     // The extraction check (M3), one to one with `MessagesPhase`.
     StagingMessagesDb,
     ScanningSchema,
@@ -442,6 +445,7 @@ impl From<oma_backup::Phase> for JobPhase {
             P::CheckingFiles => JobPhase::CheckingFiles,
             P::CheckingMessagesDb => JobPhase::CheckingMessagesDb,
             P::Extracting => JobPhase::Extracting,
+            P::Copying => JobPhase::CopyingAttachments,
         }
     }
 }

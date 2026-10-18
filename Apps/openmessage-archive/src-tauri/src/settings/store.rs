@@ -224,8 +224,19 @@ fn write_atomically(path: &Path, settings: &Settings) -> std::io::Result<()> {
     })();
     if result.is_err() {
         let _ = fs::remove_file(&tmp);
+        return result;
     }
-    result
+    // The rename is durable only once the directory entry is flushed. The
+    // new settings are already in place, so a failed flush is logged and
+    // does not turn a saved change into an error (memory and disk agree).
+    match oma_fs::fsync_dir(dir) {
+        Ok(oma_fs::DirSync::Synced) => {}
+        Ok(oma_fs::DirSync::Unsupported) => {
+            tracing::debug!("settings directory flush is not supported here");
+        }
+        Err(e) => tracing::warn!(kind = ?e.kind(), "settings directory flush failed"),
+    }
+    Ok(())
 }
 
 #[cfg(test)]

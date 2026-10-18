@@ -69,6 +69,95 @@ pub(crate) const INFO_SKIPPED_KEYS: &[&str] = &[
 /// `Manifest.plist` keys that are consumed but never kept.
 pub(crate) const MANIFEST_SKIPPED_KEYS: &[&str] = &["Applications"];
 
+/// The most bytes a [`RawText`] keeps.
+pub const RAW_TEXT_MAX_BYTES: usize = 4096;
+
+/// A plist string key as the backup recorded it: **not** sanitised, and
+/// bounded by [`RAW_TEXT_MAX_BYTES`] instead of truncated. For a record of
+/// the source only (the archive's `source_backup`); anything shown goes
+/// through the [`DisplayText`] field next to it.
+///
+/// `Debug` prints the variant and a length only.
+#[derive(Clone, PartialEq, Eq, Hash, Default)]
+pub enum RawText {
+    /// The key is absent (or its plist is).
+    #[default]
+    Absent,
+    /// The key is present but not a string.
+    WrongType,
+    /// The string is longer than [`RAW_TEXT_MAX_BYTES`]; it is not kept.
+    Oversized {
+        /// Its length in bytes.
+        bytes: u64,
+    },
+    /// The string, exactly as stored.
+    Value(String),
+}
+
+impl RawText {
+    /// The string, when one is kept.
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            RawText::Value(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn of(dict: &PValue, key: &str) -> RawText {
+        match dict.get(key) {
+            None => RawText::Absent,
+            Some(PValue::String(s)) if s.len() > RAW_TEXT_MAX_BYTES => RawText::Oversized {
+                bytes: u64::try_from(s.len()).unwrap_or(u64::MAX),
+            },
+            Some(PValue::String(s)) => RawText::Value(s.clone()),
+            Some(_) => RawText::WrongType,
+        }
+    }
+}
+
+impl fmt::Debug for RawText {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RawText::Absent => f.write_str("RawText::Absent"),
+            RawText::WrongType => f.write_str("RawText::WrongType"),
+            RawText::Oversized { bytes } => write!(f, "RawText::Oversized({bytes} bytes)"),
+            RawText::Value(s) => write!(f, "RawText::Value(<{} bytes>)", s.len()),
+        }
+    }
+}
+
+/// The raw `Info.plist` strings and date-key types, for a record of the
+/// source (`InfoPlist`'s display fields are sanitised and truncated).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InfoRaw {
+    /// `Device Name`.
+    pub device_name: RawText,
+    /// `Product Type`.
+    pub product_type: RawText,
+    /// `Product Version`.
+    pub product_version: RawText,
+    /// `Build Version`.
+    pub build_version: RawText,
+    /// `Last Backup Date` is present but not a date.
+    pub last_backup_date_wrong_type: bool,
+}
+
+/// The raw `Status.plist` values, for a record of the source.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StatusRaw {
+    /// `SnapshotState`.
+    pub snapshot_state: RawText,
+    /// `Date` is present but not a date.
+    pub date_wrong_type: bool,
+    /// `IsFullBackup` is present but not a boolean.
+    pub is_full_backup_wrong_type: bool,
+}
+
+/// Whether `key` is present with a type other than the one `ok` accepts.
+fn wrong_type(dict: &PValue, key: &str, ok: fn(&PValue) -> bool) -> bool {
+    dict.get(key).is_some_and(|v| !ok(v))
+}
+
 /// Device facts from `Info.plist`. No identifier fields exist (D14).
 #[derive(Clone, Default)]
 pub struct InfoPlist {
@@ -86,6 +175,9 @@ pub struct InfoPlist {
     pub build_version: Option<DisplayText>,
     /// `Last Backup Date`.
     pub last_backup_date: Option<plist::Date>,
+    /// The raw strings, unsanitised and bounded (for the archive's record
+    /// of the source; never displayed or logged).
+    pub raw: InfoRaw,
 }
 
 /// Field names and presence only.
@@ -133,6 +225,9 @@ pub struct StatusPlist {
     pub date: Option<plist::Date>,
     /// `BackupState`.
     pub backup_state: Option<DisplayText>,
+    /// The raw values, unsanitised and bounded (for the archive's record
+    /// of the source; never displayed or logged).
+    pub raw: StatusRaw,
 }
 
 impl fmt::Debug for StatusPlist {
@@ -326,6 +421,15 @@ impl InfoPlist {
             product_version: text(v, "Product Version", f, notes),
             build_version: text(v, "Build Version", f, notes),
             last_backup_date: date(v, "Last Backup Date", f, notes),
+            raw: InfoRaw {
+                device_name: RawText::of(v, "Device Name"),
+                product_type: RawText::of(v, "Product Type"),
+                product_version: RawText::of(v, "Product Version"),
+                build_version: RawText::of(v, "Build Version"),
+                last_backup_date_wrong_type: wrong_type(v, "Last Backup Date", |x| {
+                    matches!(x, PValue::Date(_))
+                }),
+            },
         }
     }
 }
@@ -359,6 +463,13 @@ impl StatusPlist {
             version: text(v, "Version", f, notes),
             date: date(v, "Date", f, notes),
             backup_state: text(v, "BackupState", f, notes),
+            raw: StatusRaw {
+                snapshot_state: RawText::of(v, "SnapshotState"),
+                date_wrong_type: wrong_type(v, "Date", |x| matches!(x, PValue::Date(_))),
+                is_full_backup_wrong_type: wrong_type(v, "IsFullBackup", |x| {
+                    matches!(x, PValue::Bool(_))
+                }),
+            },
         }
     }
 }
@@ -420,6 +531,56 @@ mod tests {
         assert_eq!(notes.len(), 2);
         assert!(notes.iter().all(|n| n.kind == NoteKind::UnexpectedType));
         assert!(notes.iter().any(|n| n.key == "IsEncrypted"));
+    }
+
+    #[test]
+    fn raw_text_keeps_the_exact_string_bounded_and_marks_wrong_types() {
+        let long = "n".repeat(200);
+        let marked = "Pho\u{202E}ne\u{7}";
+        let huge = "x".repeat(RAW_TEXT_MAX_BYTES + 1);
+        let v = dict(vec![
+            ("Device Name", PValue::String(long.clone())),
+            ("Product Type", PValue::String(marked.into())),
+            ("Product Version", PValue::Bool(true)),
+            ("Build Version", PValue::String(huge)),
+            ("Last Backup Date", PValue::String("yesterday".into())),
+        ]);
+        let mut notes = Vec::new();
+        let info = InfoPlist::from_value(&v, &mut notes);
+        // The display copy is truncated and sanitised; the raw one is not.
+        let shown = info.device_name.as_ref().map(DisplayText::as_str);
+        assert_eq!(shown.map(|s| s.chars().count()), Some(128));
+        assert_eq!(info.raw.device_name.as_str(), Some(long.as_str()));
+        assert_eq!(info.raw.product_type.as_str(), Some(marked));
+        assert_ne!(
+            info.product_type.as_ref().map(DisplayText::as_str),
+            Some(marked)
+        );
+        assert_eq!(info.product_version, None);
+        assert_eq!(info.raw.product_version, RawText::WrongType);
+        assert_eq!(
+            info.raw.build_version,
+            RawText::Oversized {
+                bytes: u64::try_from(RAW_TEXT_MAX_BYTES + 1).expect("n")
+            }
+        );
+        assert!(info.raw.last_backup_date_wrong_type);
+        let none = InfoPlist::from_value(&dict(vec![]), &mut notes);
+        assert_eq!(none.raw, InfoRaw::default());
+        assert_eq!(none.raw.device_name, RawText::Absent);
+        // Debug shows lengths only.
+        let d = format!("{:?}", info.raw);
+        assert!(!d.contains("nnn") && !d.contains("Pho"), "{d}");
+        let st = StatusPlist::from_value(
+            &dict(vec![
+                ("SnapshotState", PValue::String("finished".into())),
+                ("Date", PValue::Bool(false)),
+                ("IsFullBackup", PValue::String("yes".into())),
+            ]),
+            &mut notes,
+        );
+        assert_eq!(st.raw.snapshot_state.as_str(), Some("finished"));
+        assert!(st.raw.date_wrong_type && st.raw.is_full_backup_wrong_type);
     }
 
     #[test]

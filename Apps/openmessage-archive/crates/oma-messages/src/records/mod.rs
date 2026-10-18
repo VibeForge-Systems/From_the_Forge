@@ -4,11 +4,18 @@
 //! `#[non_exhaustive]`, so fields added later do not break callers, and every
 //! `Debug` impl is hand-written to print the rowid and each field's shape
 //! (absent, NULL, value, unreadable or oversized), never a value.
+//!
+//! Every record also has `raw_issues` (M4 R2): the raw value of each of its
+//! unreadable cells, filled only when raw values are kept
+//! ([`crate::ProbeOptions::with_keep_raw_values`], or
+//! [`MessageReadOptions::keep_raw_blobs`] for messages), and empty
+//! otherwise.
 
 mod attachment;
 mod chat;
 mod handle;
 mod joins;
+mod keys;
 mod message;
 mod recoverable;
 
@@ -16,6 +23,7 @@ pub use attachment::AttachmentRecord;
 pub use chat::ChatRecord;
 pub use handle::HandleRecord;
 pub use joins::{ChatHandleLink, ChatMessageLink, MessageAttachmentLink};
+pub use keys::{HandleKeyRow, KeyRow};
 pub use message::{
     AttributedOutcome, Body, EditLabel, MessageReadOptions, MessageRecord, ReplyInfo,
 };

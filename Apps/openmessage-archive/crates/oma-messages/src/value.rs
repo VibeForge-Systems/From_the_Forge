@@ -27,7 +27,7 @@ use std::collections::BTreeMap;
 use rusqlite::types::ValueRef;
 
 use crate::col::{Col, IssueKind};
-use crate::redact::{RawBlob, Redacted, SqlText};
+use crate::redact::{RawBlob, Redacted, SqlText, TextClass};
 use crate::schema::KnownColumn;
 use crate::time::CocoaTime;
 
@@ -216,7 +216,10 @@ pub(crate) fn text(
         }
         ValueRef::Blob(b) => {
             bump(&mut issues.blob_in_text_column);
-            Col::Value(Redacted::new(SqlText::from_bytes(b)))
+            Col::Value(Redacted::new(SqlText::from_bytes_with_class(
+                b,
+                TextClass::Blob,
+            )))
         }
         ValueRef::Integer(_) | ValueRef::Real(_) => issues.unreadable(IssueKind::TypeMismatch),
     }
@@ -372,7 +375,9 @@ mod tests {
         assert_eq!(v.value().map(|t| t.expose().to_str()), Some(None));
         assert_eq!(is.invalid_utf8_text, 1);
         let v = text(ValueRef::Blob(b"xy"), ValueRef::Integer(2), c, &mut is);
-        assert!(v.value().is_some());
+        assert_eq!(v.value().map(|t| t.expose().class()), Some(TextClass::Blob));
+        let v = text(ValueRef::Text(b"xy"), ValueRef::Integer(2), c, &mut is);
+        assert_eq!(v.value().map(|t| t.expose().class()), Some(TextClass::Text));
         assert_eq!(is.blob_in_text_column, 1);
         assert_eq!(
             text(ValueRef::Null, ValueRef::Integer(4097), c, &mut is),
