@@ -953,7 +953,9 @@ mod tests {
         for sentinel in [
             "SENTINEL",
             "Synthetic",
-            "555",
+            // Not a bare "555": the BackupId hex derives from a random temp
+            // path and can contain it.
+            "+1 555",
             "KEYBAG",
             "AAAA",
             "SYNTHETIC0",
