@@ -14,8 +14,10 @@ edit by hand.
 ```text
 <entry>/SYNTHETIC0-0000000000000000/  one backup (the import input)
 <entry>.expected/content.json         the content manifest after importing <entry> alone
+<entry>.expected/import.json          the counts after importing <entry> alone
 <entry>.expected/attachments/<fileID> attachment plaintexts (encrypted entries)
 scenarios/<name>.content.json         the content manifest after a sequence of imports
+scenarios/<name>.counts.json          the counts of each step of each order
 SHA256SUMS                            the inputs: every file of every backup
 EXPECTED.SHA256SUMS                   every file under *.expected/ and scenarios/
 ```
@@ -24,9 +26,22 @@ There are two pins (M4 spec §19.1). `SHA256SUMS` covers the inputs, and the
 SHA-256 of `SHA256SUMS` itself is pinned in
 `crates/oma-archive/tests/import_fixtures.rs`; the inputs never change after
 that. `EXPECTED.SHA256SUMS` covers the model's expectations, which may be
-regenerated (and re-pinned) while the import is built in slices 4f to 4j.
-The per-entry counts file `import.json` is added with `ImportCounts` in
-slice 4f.
+regenerated (and re-pinned) while the import is built in slices 4f to 4j;
+its SHA-256 is pinned in the same test file.
+
+## The counts
+
+Each `import.json` holds the counts the import must report after importing
+that entry alone into an empty archive, for the passes the Rust import has
+so far (`handles` and `chats`; slice 4f). The fields are the camelCase names
+of `ImportCounts`: `seen`, `inserted`, `alreadyPresent`, `unkeyed`,
+`cellsReplaced` (stored cells an observation changed), `notApplied`
+(observations in states 2 to 4 that did not replace a value),
+`historyAdded` (values that entered `value_history`) and `valueIssueCells`
+(cells written with a `value_issue` row: oversized, unreadable, or text
+SQLite returned as a BLOB). Later slices add the other passes' groups.
+`scenarios/<name>.counts.json` gives the same counts for every step of every
+order of a scenario.
 
 ## The content manifest
 

@@ -26,6 +26,7 @@ use crate::progress::{Clock, SystemClock};
 use crate::reader::{ArchiveInfo, ArchiveReader};
 use crate::schema::{build_schema, SchemaPlan, APPLICATION_ID, FORMAT, FTS_TOKENIZER};
 use crate::space::{FsSpace, SpaceProbe, CREATE_MIN_AVAILABLE};
+use crate::store_fs::{RealFs, StoreFs};
 use crate::APP_VERSION;
 
 /// The most archive directories [`Library::list`] reports.
@@ -93,6 +94,7 @@ pub struct Library {
     volume: VolumeKind,
     space: Arc<dyn SpaceProbe>,
     clock: Arc<dyn Clock>,
+    store: Arc<dyn StoreFs>,
 }
 
 impl std::fmt::Debug for Library {
@@ -143,10 +145,10 @@ fn check_root(root: &Path) -> Result<(PathBuf, VolumeKind), ArchiveError> {
 }
 
 /// Rename the finished creation directory into place, never replacing.
-fn rename_into_place(from: &Path, to: &Path) -> io::Result<Placed> {
+fn rename_into_place(store: &dyn StoreFs, from: &Path, to: &Path) -> io::Result<Placed> {
     let mut attempt = 1u32;
     loop {
-        match oma_fs::rename_dir_noreplace(from, to) {
+        match store.rename_dir_noreplace(from, to) {
             Ok(p) => return Ok(p),
             Err(e)
                 if cfg!(windows)
@@ -186,6 +188,7 @@ impl Library {
             volume,
             space: Arc::new(FsSpace),
             clock: Arc::new(SystemClock),
+            store: Arc::new(RealFs),
         })
     }
 
@@ -198,6 +201,13 @@ impl Library {
     /// Use another clock.
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Library {
         self.clock = clock;
+        self
+    }
+
+    /// Make creation's ordered file-system calls through `store` (a test
+    /// records them; production uses [`RealFs`]).
+    pub fn with_store_fs(mut self, store: Arc<dyn StoreFs>) -> Library {
+        self.store = store;
         self
     }
 
@@ -444,17 +454,26 @@ impl Library {
             creating.incoming(),
             creating.imports(),
         ] {
-            oma_fs::create_dir_durable(&d).map_err(|e| ArchiveError::io(IoOp::CreateDir, &e))?;
+            self.store
+                .create_dir_durable(&d)
+                .map_err(|e| ArchiveError::io(IoOp::CreateDir, &e))?;
         }
         // SQLite flushes the directory only when it creates a journal or
         // WAL, not for the main file (C1.11).
-        oma_fs::fsync_dir(creating.root()).map_err(|e| ArchiveError::io(IoOp::Sync, &e))?;
+        self.store
+            .fsync_dir(creating.root())
+            .map_err(|e| ArchiveError::io(IoOp::Sync, &e))?;
         drop(lock);
 
-        let placed = rename_into_place(creating.root(), target.root())
+        crate::fault::point(crate::fault::FaultPoint::CreateBeforeRename);
+        let placed = rename_into_place(self.store.as_ref(), creating.root(), target.root())
             .map_err(|e| ArchiveError::io(IoOp::Rename, &e))?;
         cleanup.0 = None;
-        let synced = oma_fs::fsync_dir(&self.root).map_err(|e| ArchiveError::io(IoOp::Sync, &e))?;
+        crate::fault::point(crate::fault::FaultPoint::CreateAfterRename);
+        let synced = self
+            .store
+            .fsync_dir(&self.root)
+            .map_err(|e| ArchiveError::io(IoOp::Sync, &e))?;
         tracing::info!(?placed, ?synced, "archive created");
         Ok(id)
     }

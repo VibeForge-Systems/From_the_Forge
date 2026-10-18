@@ -103,6 +103,16 @@ SAMPLED = {
 
 ENTITY = {"handle": "handle", "chat": "chat", "message": "message", "attachment": "attachment"}
 
+# The key columns (spec 8.7: immutable), by source name.
+KEY_COLS = {"handle": {"id", "service"}, "chat": {"guid"}, "message": {"guid"},
+            "attachment": {"guid"}}
+
+# The entities whose counts import.json holds: the passes the Rust import has
+# so far (slice 4f: P1 and P2). Later slices add theirs.
+COUNTED = ("handle", "chat")
+COUNT_FIELDS = ("seen", "inserted", "alreadyPresent", "unkeyed", "cellsReplaced", "notApplied",
+                "historyAdded", "valueIssueCells")
+
 
 def dt_utc(y, mo, d, h=0, mi=0, s=0):
     """A naive datetime, which plistlib writes as UTC."""
@@ -854,6 +864,16 @@ def read_obs(table, col, row, prof):
     return (VALUE, ("bytes", b, cls))
 
 
+def has_issue(table, col, o):
+    """Whether a cell gets value_issue rows: oversized, unreadable, or text
+    SQLite returned as a BLOB (R7)."""
+    if o[0] in (OVERSIZED, UNREADABLE):
+        return True
+    if o[0] == VALUE and o[1][0] == "bytes" and o[1][2] == "blob":
+        return kind_of(table, col)[0] == "text"
+    return False
+
+
 def obs_key(o):
     """A hashable, order-free form of an observation."""
     return json.dumps(o, sort_keys=True, default=lambda x: x.hex() if isinstance(x, bytes) else str(x))
@@ -978,6 +998,7 @@ class Session:
         self.rank = model.rank
         self.info = model.info
         self.full = model.full
+        self.counts = {}
 
 
 class EntryModel:
@@ -1093,12 +1114,34 @@ def run_import(arch, em, entry_name, lineage, include_rd=False, copy=True):
     def upsert(entity, ref, unk, cols, src_rowid):
         store = arch.rows[entity]
         row = store.get(ref)
+        n = s.counts.setdefault(entity, {f: 0 for f in COUNT_FIELDS})
+        n["seen"] += 1
+        if unk is not None:
+            n["unkeyed"] += 1
         if row is None:
             row = Row(entity, ref, cols, s.rank, src_rowid, unk)
             store[ref] = row
+            n["inserted"] += 1
+            n["valueIssueCells"] += sum(1 for c, o in cols.items() if has_issue(entity, c, o))
             return row, set(cols), True, None
+        n["alreadyPresent"] += 1
+        for c, o in cols.items():
+            if c in KEY_COLS[entity]:
+                continue
+            cur = row.cols.get(c, (ABSENT, None))
+            if replaces(cur, o, s.rank, row.last_rank):
+                if obs_key(cur) != obs_key(o):
+                    n["cellsReplaced"] += 1
+                    n["valueIssueCells"] += int(has_issue(entity, c, o))
+            elif not strong(o):
+                n["notApplied"] += 1
+        hist = lambda: {c: {obs_key(o) for o in row.history(c)} for c in HISTORY.get(entity, ())}
+        before = hist()
         prev_last = row.last_rank
-        return row, row.merge(cols, s.rank, src_rowid), False, prev_last
+        replaced = row.merge(cols, s.rank, src_rowid)
+        after = hist()
+        n["historyAdded"] += sum(len(after[c] - before[c]) for c in after)
+        return row, replaced, False, prev_last
 
     # Key scans (preflight).
     hkeys = scan_keys(em, "handle", lambda r: (lambda a: None if a is None else
@@ -1358,6 +1401,31 @@ def manifest(arch):
     return out
 
 
+def entry_counts(name, models):
+    """import.json: the counts after importing one entry alone, for the
+    entities in COUNTED (camelCase field names, as ImportCounts serialises)."""
+    arch = Archive()
+    run_import(arch, models[name], name, "L1")
+    counts = arch.sessions[0].counts
+    return {"format": "oma-import-counts", "formatVersion": 1, "entry": name,
+            "counts": {e + "s": counts.get(e, {f: 0 for f in COUNT_FIELDS}) for e in COUNTED}}
+
+
+def step_counts(steps, models):
+    """The counts of each step of one import order (as entry_counts)."""
+    arch = Archive()
+    out = []
+    for entry, lineage in steps:
+        include_rd = entry.endswith("+rd")
+        base = entry.split("+")[0]
+        run_import(arch, models[base], base, lineage, include_rd=include_rd)
+        counts = arch.sessions[-1].counts
+        out.append({**step_json(entry, lineage),
+                    "counts": {e + "s": counts.get(e, {f: 0 for f in COUNT_FIELDS})
+                               for e in COUNTED}})
+    return out
+
+
 def run_steps(steps, models):
     arch = Archive()
     for entry, lineage in steps:
@@ -1450,8 +1518,10 @@ edit by hand.
 ```text
 <entry>/SYNTHETIC0-0000000000000000/  one backup (the import input)
 <entry>.expected/content.json         the content manifest after importing <entry> alone
+<entry>.expected/import.json          the counts after importing <entry> alone
 <entry>.expected/attachments/<fileID> attachment plaintexts (encrypted entries)
 scenarios/<name>.content.json         the content manifest after a sequence of imports
+scenarios/<name>.counts.json          the counts of each step of each order
 SHA256SUMS                            the inputs: every file of every backup
 EXPECTED.SHA256SUMS                   every file under *.expected/ and scenarios/
 ```
@@ -1460,9 +1530,22 @@ There are two pins (M4 spec §19.1). `SHA256SUMS` covers the inputs, and the
 SHA-256 of `SHA256SUMS` itself is pinned in
 `crates/oma-archive/tests/import_fixtures.rs`; the inputs never change after
 that. `EXPECTED.SHA256SUMS` covers the model's expectations, which may be
-regenerated (and re-pinned) while the import is built in slices 4f to 4j.
-The per-entry counts file `import.json` is added with `ImportCounts` in
-slice 4f.
+regenerated (and re-pinned) while the import is built in slices 4f to 4j;
+its SHA-256 is pinned in the same test file.
+
+## The counts
+
+Each `import.json` holds the counts the import must report after importing
+that entry alone into an empty archive, for the passes the Rust import has
+so far (`handles` and `chats`; slice 4f). The fields are the camelCase names
+of `ImportCounts`: `seen`, `inserted`, `alreadyPresent`, `unkeyed`,
+`cellsReplaced` (stored cells an observation changed), `notApplied`
+(observations in states 2 to 4 that did not replace a value),
+`historyAdded` (values that entered `value_history`) and `valueIssueCells`
+(cells written with a `value_issue` row: oversized, unreadable, or text
+SQLite returned as a BLOB). Later slices add the other passes' groups.
+`scenarios/<name>.counts.json` gives the same counts for every step of every
+order of a scenario.
 
 ## The content manifest
 
@@ -1602,6 +1685,8 @@ def main():
         content = run_steps([(e.name, "L1")], models)
         write_json(os.path.join(out, e.name + ".expected", "content.json"),
                    document([[(e.name, "L1")]], models, content))
+        write_json(os.path.join(out, e.name + ".expected", "import.json"),
+                   entry_counts(e.name, models))
         size = sum(os.path.getsize(os.path.join(dp, n))
                    for d in (os.path.join(out, e.name), os.path.join(out, e.name + ".expected"))
                    for dp, _, ns in os.walk(d) for n in ns)
@@ -1622,6 +1707,9 @@ def main():
         results[name] = contents[0]
         write_json(os.path.join(out, "scenarios", f"{name}.content.json"),
                    document(orders, models, contents[0]))
+        write_json(os.path.join(out, "scenarios", f"{name}.counts.json"),
+                   {"format": "oma-import-counts", "formatVersion": 1, "scenario": name,
+                    "orders": [step_counts(steps, models) for steps in orders]})
         print(f"wrote scenario {name}")
     for (x, y), allowed in ASYMMETRIC.items():
         d = diff_paths(results[x], results[y])

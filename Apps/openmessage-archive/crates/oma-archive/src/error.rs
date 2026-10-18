@@ -85,6 +85,12 @@ pub enum Stage {
     Read,
     /// The checkpoint at close.
     Checkpoint,
+    /// The import's read-only preflight (resume decision, stored keys).
+    Preflight,
+    /// The import's session bookkeeping (§8.3) and terminal state.
+    Session,
+    /// An import batch.
+    Batch,
 }
 
 /// Which file-system operation an I/O error came from.
@@ -142,6 +148,13 @@ pub enum ArchiveError {
     /// The location was refused.
     #[error("location refused")]
     Location(LocationRefusal),
+    /// Reading the backup or its staged sms.db failed. The error carries
+    /// kinds and codes only.
+    #[error("messages")]
+    Messages(#[source] oma_messages::MessagesError),
+    /// An import named a lineage this archive does not have.
+    #[error("unknown lineage")]
+    UnknownLineage,
     /// A SQLite error. `code` is the primary result code only; the error
     /// text is never kept.
     #[error("SQLite error")]

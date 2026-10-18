@@ -38,12 +38,38 @@ impl Clock for FixedClock {
     }
 }
 
+/// A phase of an import (spec §8.12). Slice 4f has the phases up to the
+/// chat pass; the others arrive with their passes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ImportPhase {
+    /// Copying sms.db (and its `-wal`) into staging.
+    StagingMessagesDb,
+    /// Scanning the schema, `quick_check` and the probe.
+    ReadingSchema,
+    /// The duplicate-key scan.
+    ScanningKeys,
+    /// The session bookkeeping after the archive's first write.
+    PreparingArchive,
+    /// P1.
+    ImportingHandles,
+    /// P2.
+    ImportingChats,
+}
+
 /// A progress event. Content-free.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ArchiveEvent {
     /// A migration step is starting.
     MigrationStep { from: u32, to: u32 },
+    /// An import phase started or advanced: `done` of `total` source rows
+    /// (`None` when unknown).
+    Import {
+        phase: ImportPhase,
+        done: u64,
+        total: Option<u64>,
+    },
 }
 
 /// Receives progress events.

@@ -2,9 +2,9 @@
 //!
 //! - The inputs match `SHA256SUMS`, and the SHA-256 of `SHA256SUMS` itself is
 //!   pinned here: the inputs never change once committed.
-//! - The model's expectations match `EXPECTED.SHA256SUMS`. That file is
-//!   pinned separately (with `ImportCounts`, in slice 4f), because the
-//!   expectations may be regenerated while the import is built.
+//! - The model's expectations match `EXPECTED.SHA256SUMS`, whose own
+//!   SHA-256 is pinned separately: the expectations may be regenerated
+//!   (and re-pinned) while the import is built, the inputs never.
 //! - Every entry opens, and the M3 check reads it as importable.
 //! - The generator's model agrees with the Rust readers on what it can be
 //!   checked against before the import exists: which rows are keyed (the R6
@@ -12,8 +12,8 @@
 //!   plist dates the rank is built from, and each attachment's SHA-256
 //!   (`copy_file_to`).
 //!
-//! The content manifests themselves are asserted against archives by the
-//! import tests (slices 4f to 4j). Opening a backup here writes only to a
+//! The content manifests and counts themselves are asserted against
+//! archives by the import tests (`import_core.rs` from slice 4f). Opening a backup here writes only to a
 //! temporary staging directory; the committed fixtures are never written.
 #![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
@@ -37,6 +37,13 @@ use sha2::{Digest, Sha256};
 /// The SHA-256 of `tests/fixtures/imports/SHA256SUMS`. The inputs are
 /// frozen: regenerating them invalidates every recorded run.
 const INPUT_SUMS_SHA256: &str = "74a82a95bc1580864d8dd09c72e7223196fe1e4586decf048be6cb564a1ed113";
+
+/// The SHA-256 of `tests/fixtures/imports/EXPECTED.SHA256SUMS`. Re-pinned
+/// when an import slice settles a rule and regenerates the expectations
+/// (slice 4f: `import.json` and `scenarios/*.counts.json`, the counts of
+/// the handle and chat passes).
+const EXPECTED_SUMS_SHA256: &str =
+    "7c3d549bb6b2f6181e877bbc559a19df6e186f3ad533ae32a812ac3202e78dfd";
 
 const UDID: &str = "SYNTHETIC0-0000000000000000";
 const PASSWORD: &str = "synthetic-test-password";
@@ -135,6 +142,12 @@ fn inputs_and_expectations_match_their_sums() {
         INPUT_SUMS_SHA256,
         "the import inputs changed: they are frozen once committed (spec §19.1)"
     );
+    let expected_sums = fs::read(root().join("EXPECTED.SHA256SUMS")).expect("EXPECTED.SHA256SUMS");
+    assert_eq!(
+        sha256_hex(&expected_sums),
+        EXPECTED_SUMS_SHA256,
+        "the model's expectations changed: regenerate them, say which rule changed, and re-pin"
+    );
     let inputs = check_sums("SHA256SUMS");
     let expected = check_sums("EXPECTED.SHA256SUMS");
 
@@ -160,6 +173,10 @@ fn inputs_and_expectations_match_their_sums() {
             expected.contains(&format!("{entry}.expected/content.json")),
             "{entry} has no content manifest"
         );
+        assert!(
+            expected.contains(&format!("{entry}.expected/import.json")),
+            "{entry} has no counts"
+        );
     }
     let mut entries: Vec<String> = fs::read_dir(root())
         .expect("dir")
@@ -170,13 +187,20 @@ fn inputs_and_expectations_match_their_sums() {
         .collect();
     entries.sort();
     assert_eq!(entries, ENTRIES);
-    assert!(
-        expected
-            .iter()
-            .filter(|p| p.starts_with("scenarios/"))
-            .count()
-            >= 10
+    let scenarios: Vec<&String> = expected
+        .iter()
+        .filter(|p| p.starts_with("scenarios/"))
+        .collect();
+    assert_eq!(
+        scenarios.len(),
+        20,
+        "a content manifest and counts per scenario"
     );
+    for s in scenarios {
+        if let Some(name) = s.strip_suffix(".content.json") {
+            assert!(expected.contains(&format!("{name}.counts.json")), "{name}");
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

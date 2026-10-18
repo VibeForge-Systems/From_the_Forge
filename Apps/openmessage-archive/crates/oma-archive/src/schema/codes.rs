@@ -228,6 +228,137 @@ closed_code! {
     }
 }
 
+closed_code! {
+    /// `import_cursor.pass`: the import passes of spec §8.4 that write a
+    /// cursor (P0 and P5b read only; P9 is the finalize step).
+    Pass {
+        Handles = 1,
+        Chats = 2,
+        Messages = 3,
+        ChatHandles = 4,
+        ChatMessages = 5,
+        Attachments = 6,
+        MessageAttachments = 7,
+        RecentlyDeleted = 8,
+    }
+}
+
+closed_code! {
+    /// `import_session.wal_outcome`: what happened to sms.db's `-wal`.
+    WalOutcomeCode {
+        /// The backup lists no `-wal`.
+        NotListed = 0,
+        /// The `-wal` was staged; `wal_len` holds its length.
+        Staged = 1,
+        /// Listed but not provided (best effort): not a full observation.
+        Skipped = 2,
+    }
+}
+
+closed_code! {
+    /// `import_session.source_text_encoding`: sms.db's `PRAGMA encoding`.
+    TextEncodingCode {
+        Utf8 = 1,
+        Utf16le = 2,
+        Utf16be = 3,
+    }
+}
+
+closed_code! {
+    /// `handle.service_class`, `chat.service_class` and
+    /// `message.service_class`: the class of the raw service text.
+    ServiceClassCode {
+        IMessage = 1,
+        Sms = 2,
+        Rcs = 3,
+        IMessageLite = 4,
+        Empty = 5,
+        Other = 6,
+    }
+}
+
+closed_code! {
+    /// `value_issue.kind` from [`ISSUE_KIND_BASE`] up: why a value is
+    /// unreadable (the `oma-messages` `IssueKind`).
+    UnreadableKind {
+        TypeMismatch = 16,
+        BoolOutOfRange = 17,
+        PlistInvalid = 18,
+        PlistOverBudget = 19,
+        PlistNotDictionary = 20,
+        /// A reason this build does not know (a newer reader). Never
+        /// produced by a known reason; a test checks that.
+        Unrecognised = 31,
+    }
+}
+
+closed_code! {
+    /// `import_issue.kind`: what an import counted per pass, including the
+    /// reasons a session stopped.
+    IssueCode {
+        /// An observation in state 2, 3 or 4 that did not replace the
+        /// stored value (spec §8.7).
+        ObservationNotApplied = 1,
+        /// The session stopped: not enough space (state 6).
+        InsufficientSpace = 2,
+        /// The session stopped: the source changed (state 6).
+        SourceChanged = 3,
+        /// The session stopped: a file was too large for the volume
+        /// (state 6).
+        VolumeFileLimit = 4,
+        /// The session failed on an archive constraint: a bug (state 3).
+        ConstraintFailed = 5,
+        /// The session failed on an archive I/O or other SQLite error
+        /// (state 3).
+        ArchiveError = 6,
+        /// The session failed reading the source (state 3).
+        SourceReadFailed = 7,
+    }
+}
+
+closed_code! {
+    /// Bits of `import_session.qualifiers`: the closed qualifier kinds a
+    /// session carries. Each value is a bit position.
+    QualifierBit {
+        /// A plist backup date was outside 2007-01-01 .. import start + 48 h
+        /// and was ignored for the rank (spec §8.7).
+        BackupDateOutOfRange = 0,
+        /// A listed `-wal` could not be staged.
+        WalSkipped = 1,
+        /// No `-wal` is listed but the header says WAL mode.
+        WalStateUnknown = 2,
+        /// The staged `-wal` has frames that failed validation.
+        WalFramesInvalid = 3,
+        /// sms.db is not UTF-8; SQLite converted its text.
+        NonUtf8Encoding = 4,
+        /// The staged size differs from Manifest's `Size`.
+        SizeMismatch = 5,
+        /// The iOS version is not one the app was tested with (D79).
+        IosVersionUntested = 6,
+        /// Ordinary tables the reader does not know.
+        UnknownTables = 7,
+        /// Columns of known tables the reader does not know.
+        UnknownColumns = 8,
+        /// Known columns whose name differs only in case.
+        WrongCaseColumns = 9,
+    }
+}
+
+impl QualifierBit {
+    /// The bit in `import_session.qualifiers`.
+    pub const fn mask(self) -> i64 {
+        1i64 << self.code()
+    }
+
+    /// The qualifiers that make a session not a full observation (spec
+    /// §8.7): the WAL-related ones.
+    pub const WAL_RELATED: [QualifierBit; 3] = [
+        QualifierBit::WalSkipped,
+        QualifierBit::WalStateUnknown,
+        QualifierBit::WalFramesInvalid,
+    ];
+}
+
 /// The merge rule of a source-value column (spec §8.7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ColumnRule {
@@ -527,6 +658,53 @@ mod tests {
         for e in Entity::ALL {
             assert_eq!(Entity::from_code(e.code()), Some(*e));
         }
+    }
+
+    /// The codes added with the import core (slice 4f).
+    #[test]
+    fn import_codes_are_pinned() {
+        let got: [(&str, Vec<i64>); 7] = [
+            ("Pass", Pass::ALL.iter().map(|v| v.code()).collect()),
+            (
+                "WalOutcomeCode",
+                WalOutcomeCode::ALL.iter().map(|v| v.code()).collect(),
+            ),
+            (
+                "TextEncodingCode",
+                TextEncodingCode::ALL.iter().map(|v| v.code()).collect(),
+            ),
+            (
+                "ServiceClassCode",
+                ServiceClassCode::ALL.iter().map(|v| v.code()).collect(),
+            ),
+            (
+                "UnreadableKind",
+                UnreadableKind::ALL.iter().map(|v| v.code()).collect(),
+            ),
+            (
+                "IssueCode",
+                IssueCode::ALL.iter().map(|v| v.code()).collect(),
+            ),
+            (
+                "QualifierBit",
+                QualifierBit::ALL.iter().map(|v| v.code()).collect(),
+            ),
+        ];
+        let want: [(&str, &[i64]); 7] = [
+            ("Pass", &[1, 2, 3, 4, 5, 6, 7, 8]),
+            ("WalOutcomeCode", &[0, 1, 2]),
+            ("TextEncodingCode", &[1, 2, 3]),
+            ("ServiceClassCode", &[1, 2, 3, 4, 5, 6]),
+            ("UnreadableKind", &[16, 17, 18, 19, 20, 31]),
+            ("IssueCode", &[1, 2, 3, 4, 5, 6, 7]),
+            ("QualifierBit", &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
+        ];
+        for ((name, got), (wname, want)) in got.iter().zip(want.iter()) {
+            assert_eq!(name, wname);
+            assert_eq!(got.as_slice(), *want, "{name}");
+        }
+        assert_eq!(UnreadableKind::TypeMismatch.code(), ISSUE_KIND_BASE);
+        assert_eq!(QualifierBit::WalFramesInvalid.mask(), 8);
     }
 
     /// The (entity, code, name, rule) list, pinned: renumbering any column

@@ -6,7 +6,9 @@
 //!   clippy's `disallowed-methods` enforces the same for calls.
 //! - No `Path::join` with an argument other than a string literal or a
 //!   constant outside `layout.rs` and `blobs.rs`.
-//! - No `INSERT OR REPLACE`.
+//! - No `INSERT OR REPLACE` (it deletes the row and changes its id), and no
+//!   `RETURNING` (with `ON CONFLICT … DO UPDATE … WHERE` it returns no row
+//!   when the WHERE is false; spec §8.5).
 //! - No `interrupt()` (the armed interrupt guard arrives with the import).
 //! - The fault-injection hooks are compiled only with their feature.
 #![allow(clippy::disallowed_methods)]
@@ -56,7 +58,7 @@ fn source_rules() {
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
         &mut files,
     );
-    assert!(files.len() >= 15, "{}", files.len());
+    assert!(files.len() >= 28, "{}", files.len());
     for f in &files {
         let name = file_name(f);
         let text = fs::read_to_string(f).expect("read");
@@ -77,6 +79,7 @@ fn source_rules() {
                 !code.to_ascii_uppercase().contains("INSERT OR REPLACE"),
                 "{at}: INSERT OR REPLACE"
             );
+            assert!(!code.contains("RETURNING"), "{at}: RETURNING");
             assert!(!code.contains("interrupt()"), "{at}: interrupt()");
             if in_tests {
                 continue;

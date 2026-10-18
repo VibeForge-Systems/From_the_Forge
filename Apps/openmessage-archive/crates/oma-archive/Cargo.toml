@@ -1,6 +1,6 @@
 [package]
 name = "oma-archive"
-description = "The archive library of OpenMessage Archive: archive creation, locking, a hardened SQLite opener, schema v1 with a fingerprint check, and forward-only migrations."
+description = "The archive library of OpenMessage Archive: archive creation, locking, a hardened SQLite opener, schema v1 with a fingerprint check, forward-only migrations, and the transactional, resumable import."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,7 +11,8 @@ publish = false
 
 [features]
 # Test hooks (spec D85): a simulated lock self-test failure, test-only schema
-# plans with a v1 -> v2 migration, and a skewed expected shadow-table DDL.
+# plans with a v1 -> v2 migration, a skewed expected shadow-table DDL, and the
+# crash harness's fault points (counted hits and an action at the n-th one).
 # Never enabled by a shipped build; only this crate's own tests turn it on,
 # through the self dev-dependency below.
 fault-injection = []
@@ -19,16 +20,18 @@ fault-injection = []
 [dependencies]
 oma-backup.workspace = true
 oma-fs.workspace = true
+oma-messages.workspace = true # the import reads sms.db through its passes
 rusqlite.workspace = true
+serde.workspace = true        # ImportCounts, stored as JSON
+serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 dunce.workspace = true
 tracing.workspace = true
+zeroize.workspace = true      # source values held during a batch
 
 [dev-dependencies]
 oma-archive = { path = ".", features = ["fault-injection"] }
-oma-messages.workspace = true # the import catalogue's key, digest and check tests
-serde_json.workspace = true   # reads the catalogue's content manifests
 tempfile.workspace = true
 tracing-subscriber.workspace = true # log-hygiene test
 

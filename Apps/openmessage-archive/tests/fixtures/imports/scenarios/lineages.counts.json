@@ -1,0 +1,93 @@
+{
+ "format": "oma-import-counts",
+ "formatVersion": 1,
+ "orders": [
+  [
+   {
+    "copyAttachments": true,
+    "counts": {
+     "chats": {
+      "alreadyPresent": 0,
+      "cellsReplaced": 0,
+      "historyAdded": 0,
+      "inserted": 3,
+      "notApplied": 0,
+      "seen": 3,
+      "unkeyed": 0,
+      "valueIssueCells": 0
+     },
+     "handles": {
+      "alreadyPresent": 0,
+      "cellsReplaced": 0,
+      "historyAdded": 0,
+      "inserted": 4,
+      "notApplied": 0,
+      "seen": 4,
+      "unkeyed": 0,
+      "valueIssueCells": 0
+     }
+    },
+    "entry": "imp-dev1-v1-plain",
+    "includeRecentlyDeleted": false,
+    "lineage": "L1"
+   },
+   {
+    "copyAttachments": true,
+    "counts": {
+     "chats": {
+      "alreadyPresent": 0,
+      "cellsReplaced": 0,
+      "historyAdded": 0,
+      "inserted": 2,
+      "notApplied": 0,
+      "seen": 2,
+      "unkeyed": 0,
+      "valueIssueCells": 0
+     },
+     "handles": {
+      "alreadyPresent": 1,
+      "cellsReplaced": 0,
+      "historyAdded": 0,
+      "inserted": 1,
+      "notApplied": 0,
+      "seen": 2,
+      "unkeyed": 0,
+      "valueIssueCells": 0
+     }
+    },
+    "entry": "imp-dev2-plain",
+    "includeRecentlyDeleted": false,
+    "lineage": "L2"
+   },
+   {
+    "copyAttachments": true,
+    "counts": {
+     "chats": {
+      "alreadyPresent": 3,
+      "cellsReplaced": 0,
+      "historyAdded": 0,
+      "inserted": 0,
+      "notApplied": 3,
+      "seen": 3,
+      "unkeyed": 0,
+      "valueIssueCells": 0
+     },
+     "handles": {
+      "alreadyPresent": 4,
+      "cellsReplaced": 1,
+      "historyAdded": 1,
+      "inserted": 0,
+      "notApplied": 0,
+      "seen": 4,
+      "unkeyed": 0,
+      "valueIssueCells": 0
+     }
+    },
+    "entry": "imp-dev1-v2-plain",
+    "includeRecentlyDeleted": false,
+    "lineage": "L1"
+   }
+  ]
+ ],
+ "scenario": "lineages"
+}

@@ -1,0 +1,123 @@
+{
+ "format": "oma-import-counts",
+ "formatVersion": 1,
+ "orders": [
+  [
+   {
+    "copyAttachments": true,
+    "counts": {
+     "chats": {
+      "alreadyPresent": 0,
+      "cellsReplaced": 0,
+      "historyAdded": 0,
+      "inserted": 1,
+      "notApplied": 0,
+      "seen": 1,
+      "unkeyed": 0,
+      "valueIssueCells": 0
+     },
+     "handles": {
+      "alreadyPresent": 0,
+      "cellsReplaced": 0,
+      "historyAdded": 0,
+      "inserted": 1,
+      "notApplied": 0,
+      "seen": 1,
+      "unkeyed": 0,
+      "valueIssueCells": 0
+     }
+    },
+    "entry": "imp-wal-plain",
+    "includeRecentlyDeleted": false,
+    "lineage": "L1"
+   },
+   {
+    "copyAttachments": true,
+    "counts": {
+     "chats": {
+      "alreadyPresent": 1,
+      "cellsReplaced": 0,
+      "historyAdded": 0,
+      "inserted": 0,
+      "notApplied": 0,
+      "seen": 1,
+      "unkeyed": 0,
+      "valueIssueCells": 0
+     },
+     "handles": {
+      "alreadyPresent": 1,
+      "cellsReplaced": 0,
+      "historyAdded": 0,
+      "inserted": 0,
+      "notApplied": 0,
+      "seen": 1,
+      "unkeyed": 0,
+      "valueIssueCells": 0
+     }
+    },
+    "entry": "imp-wal-missing-plain",
+    "includeRecentlyDeleted": false,
+    "lineage": "L1"
+   }
+  ],
+  [
+   {
+    "copyAttachments": true,
+    "counts": {
+     "chats": {
+      "alreadyPresent": 0,
+      "cellsReplaced": 0,
+      "historyAdded": 0,
+      "inserted": 1,
+      "notApplied": 0,
+      "seen": 1,
+      "unkeyed": 0,
+      "valueIssueCells": 0
+     },
+     "handles": {
+      "alreadyPresent": 0,
+      "cellsReplaced": 0,
+      "historyAdded": 0,
+      "inserted": 1,
+      "notApplied": 0,
+      "seen": 1,
+      "unkeyed": 0,
+      "valueIssueCells": 0
+     }
+    },
+    "entry": "imp-wal-missing-plain",
+    "includeRecentlyDeleted": false,
+    "lineage": "L1"
+   },
+   {
+    "copyAttachments": true,
+    "counts": {
+     "chats": {
+      "alreadyPresent": 1,
+      "cellsReplaced": 0,
+      "historyAdded": 0,
+      "inserted": 0,
+      "notApplied": 0,
+      "seen": 1,
+      "unkeyed": 0,
+      "valueIssueCells": 0
+     },
+     "handles": {
+      "alreadyPresent": 1,
+      "cellsReplaced": 0,
+      "historyAdded": 0,
+      "inserted": 0,
+      "notApplied": 0,
+      "seen": 1,
+      "unkeyed": 0,
+      "valueIssueCells": 0
+     }
+    },
+    "entry": "imp-wal-plain",
+    "includeRecentlyDeleted": false,
+    "lineage": "L1"
+   }
+  ]
+ ],
+ "scenario": "wal-missing"
+}

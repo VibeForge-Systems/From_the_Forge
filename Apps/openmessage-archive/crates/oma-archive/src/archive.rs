@@ -145,7 +145,7 @@ impl Archive {
         self.reader.inspected().import_blocked
     }
 
-    fn ensure_writer(&mut self) -> Result<&mut WriteConn, ArchiveError> {
+    pub(crate) fn ensure_writer(&mut self) -> Result<&mut WriteConn, ArchiveError> {
         if self.writer.is_none() {
             self.writer = Some(WriteConn::open(&self.dir)?);
         }
@@ -178,7 +178,9 @@ impl Archive {
         let tmp = provenance::sweep_tmp(&dir)?;
         report.provenance_tmp_removed = tmp.removed;
         report.provenance_tmp_left = tmp.left;
+        crate::fault::point(crate::fault::FaultPoint::RecoverySwept);
         let reconciled = reconcile_intents(w, &dir)?;
+        crate::fault::point(crate::fault::FaultPoint::RecoveryReconciled);
         report.intents_committed = reconciled.committed;
         report.intents_rolled_back = reconciled.rolled_back;
         report.intent_files_left = reconciled.files_left;
@@ -194,6 +196,7 @@ impl Archive {
             )
             .map_err(|e| ArchiveError::sqlite(Stage::Recovery, &e))?;
         report.sessions_interrupted = u32::try_from(interrupted).unwrap_or(u32::MAX);
+        crate::fault::point(crate::fault::FaultPoint::RecoveryMarked);
         self.recovered = true;
         tracing::info!(
             partials_removed = report.partials_removed,

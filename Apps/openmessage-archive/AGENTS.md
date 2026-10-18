@@ -114,7 +114,9 @@ Each one is enforced in code. Keep it that way.
 - **Domain logic belongs in `crates/`.** `src-tauri/` stays a thin layer of
   IPC commands and state. `oma-fs`, `oma-backup` (M2) and `oma-messages`
   (M3) are implemented; `oma-archive` (M4) is in progress (its skeleton:
-  create, open, lock, schema v1, fingerprint, migrations); the planned
+  create, open, lock, schema v1, fingerprint, migrations; and the import
+  core: sessions, the duplicate-key scan, the merge engine and the handle
+  and chat passes, `Archive::import_core`); the planned
   crates are `oma-export` (M6) and `oma-device` (M7). Each must build and test without
   Tauri. The shell's `src-tauri/src/backups/` (registry, job table, worker,
   DTOs, messages) has no Tauri types either, so it is tested without a
@@ -238,10 +240,11 @@ Never hand-edit generated files.
 - **The import catalogue has two pins.** `tests/fixtures/imports/` is
   written only by `scripts/fixtures/make_synthetic_imports.py`. Its inputs
   (`SHA256SUMS`, hash pinned in `crates/oma-archive/tests/import_fixtures.rs`)
-  are frozen. Its model expectations (`content.json`, `scenarios/`,
-  `EXPECTED.SHA256SUMS`) may be regenerated when an import slice settles a
-  rule; say which rule changed. The manifest format and the model's
-  readings are in that catalogue's generated `README.md`.
+  are frozen. Its model expectations (`content.json`, `import.json`,
+  `scenarios/`, `EXPECTED.SHA256SUMS`, whose hash is pinned in the same
+  file) may be regenerated when an import slice settles a rule or adds
+  counts; say which rule changed and re-pin. The manifest format and the
+  model's readings are in that catalogue's generated `README.md`.
 - **No `#[tracing::instrument]` without `skip_all`** in `oma-messages` or
   `src-tauri`: it formats every argument with `Debug`.
   `crates/oma-messages/tests/source_rules.rs` enforces this for that crate.
@@ -255,6 +258,17 @@ Never hand-edit generated files.
   `Archive::begin_write` and `Archive::migrate` write. Test hooks live behind
   the non-default `fault-injection` feature, which only the crate's own
   tests enable (a self dev-dependency).
+- **The import merges in Rust, one savepoint per record, in batches.**
+  Every insert keyed on source data is an upsert or `DO NOTHING`; never
+  `INSERT OR REPLACE`, never `RETURNING` (`tests/source_rules.rs`). A
+  record's `UPDATE` sets only the columns that changed, so the guarded
+  triggers fire only on real changes. A batch never commits after a
+  statement error. Until finalize exists (slice 4j) a session whose passes
+  all ran stays **running**: `CoreOutcome::PassesDone` is not "completed".
+- **Crash points are `fault::point(FaultPoint::…)` calls.** They compile
+  to nothing without the feature. `tests/crash.rs` re-runs its own binary
+  with `OMA_TEST_FAULT=<point>:<n>` and kills the child there; add a point
+  to `FaultPoint::ALL` and to that test's plan together.
 - **Headless smoke testing works**, using `xvfb-run` with
   `WEBKIT_DISABLE_DMABUF_RENDERER=1` and `XDG_CONFIG_HOME` pointed at a
   scratch directory. However, the GTK folder picker cannot list directories

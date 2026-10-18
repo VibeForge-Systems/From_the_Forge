@@ -8,8 +8,96 @@
 //! The hooks are per thread, so parallel tests do not see each other's
 //! faults: [`hooks::install`] sets them for the calling thread until the
 //! returned guard is dropped.
+//!
+//! **Fault points** (spec §18.4, D85) mark the moments a crash test kills
+//! the process at: [`point`] is called there. With the feature, each hit is
+//! counted per thread, and [`hooks::arm`] runs an action at the n-th hit of
+//! one point (the crash harness prints `FAULT <point> <n>` and blocks until
+//! the parent kills it; other tests cancel or panic). Without the feature,
+//! [`point`] is an empty inline function.
 
 use crate::schema::SchemaPlan;
+
+/// A moment a crash test can stop the process at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[non_exhaustive]
+pub enum FaultPoint {
+    /// The start of one source record in a pass callback, before the
+    /// cancellation check.
+    Record,
+    /// A batch's rows, cursor and counts are written; `COMMIT` is next.
+    BatchBeforeCommit,
+    /// Right after a batch's `COMMIT`.
+    BatchAfterCommit,
+    /// The supersede and new-session (or resume) transaction committed.
+    SessionCommitted,
+    /// A cancelled, stopped or failed session's terminal state committed.
+    TerminalCommitted,
+    /// `begin_write`: partial files and provenance temporaries swept.
+    RecoverySwept,
+    /// `begin_write`: blob intents reconciled.
+    RecoveryReconciled,
+    /// `begin_write`: running sessions marked interrupted.
+    RecoveryMarked,
+    /// Archive creation: the `.oma-new-*` directory is complete and synced;
+    /// the rename is next.
+    CreateBeforeRename,
+    /// Archive creation: renamed into place; the library directory's fsync
+    /// is next.
+    CreateAfterRename,
+}
+
+#[cfg_attr(not(feature = "fault-injection"), allow(dead_code))]
+impl FaultPoint {
+    /// Every point, in a fixed order.
+    pub const ALL: [FaultPoint; 10] = [
+        FaultPoint::Record,
+        FaultPoint::BatchBeforeCommit,
+        FaultPoint::BatchAfterCommit,
+        FaultPoint::SessionCommitted,
+        FaultPoint::TerminalCommitted,
+        FaultPoint::RecoverySwept,
+        FaultPoint::RecoveryReconciled,
+        FaultPoint::RecoveryMarked,
+        FaultPoint::CreateBeforeRename,
+        FaultPoint::CreateAfterRename,
+    ];
+
+    /// The point's name in `OMA_TEST_FAULT` and in `FAULT` lines.
+    pub fn name(self) -> &'static str {
+        match self {
+            FaultPoint::Record => "record",
+            FaultPoint::BatchBeforeCommit => "batch-before-commit",
+            FaultPoint::BatchAfterCommit => "batch-after-commit",
+            FaultPoint::SessionCommitted => "session-committed",
+            FaultPoint::TerminalCommitted => "terminal-committed",
+            FaultPoint::RecoverySwept => "recovery-swept",
+            FaultPoint::RecoveryReconciled => "recovery-reconciled",
+            FaultPoint::RecoveryMarked => "recovery-marked",
+            FaultPoint::CreateBeforeRename => "create-before-rename",
+            FaultPoint::CreateAfterRename => "create-after-rename",
+        }
+    }
+
+    /// The point with this name.
+    pub fn from_name(name: &str) -> Option<FaultPoint> {
+        FaultPoint::ALL.into_iter().find(|p| p.name() == name)
+    }
+}
+
+/// A fault point: a hit is counted, and an armed action may run, with the
+/// `fault-injection` feature; nothing happens without it.
+#[inline]
+pub(crate) fn point(p: FaultPoint) {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::hit(p);
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        let _ = p;
+    }
+}
 
 #[cfg(feature = "fault-injection")]
 pub mod hooks {
@@ -79,6 +167,89 @@ pub mod hooks {
 
     pub(crate) fn current() -> Faults {
         FAULTS.with(|f| *f.borrow())
+    }
+
+    pub use super::FaultPoint;
+
+    /// An action run at the n-th hit of a fault point.
+    pub type FaultAction = Box<dyn FnMut(FaultPoint, u32)>;
+
+    struct Trip {
+        point: FaultPoint,
+        nth: u32,
+        action: Option<FaultAction>,
+    }
+
+    thread_local! {
+        static HITS: RefCell<std::collections::BTreeMap<FaultPoint, u32>> =
+            const { RefCell::new(std::collections::BTreeMap::new()) };
+        static TRIP: RefCell<Option<Trip>> = const { RefCell::new(None) };
+    }
+
+    /// Disarms the trip (and clears the hit counts) when dropped.
+    pub struct TripGuard(());
+
+    impl Drop for TripGuard {
+        fn drop(&mut self) {
+            TRIP.with(|t| *t.borrow_mut() = None);
+            HITS.with(|h| h.borrow_mut().clear());
+        }
+    }
+
+    /// Run `action` at the `nth` hit (1-based) of `point` on this thread,
+    /// counting from now. Hit counts restart at zero.
+    #[must_use]
+    pub fn arm(point: FaultPoint, nth: u32, action: FaultAction) -> TripGuard {
+        HITS.with(|h| h.borrow_mut().clear());
+        TRIP.with(|t| {
+            *t.borrow_mut() = Some(Trip {
+                point,
+                nth,
+                action: Some(action),
+            });
+        });
+        TripGuard(())
+    }
+
+    /// Count hits from zero without an action (to learn how many hits a
+    /// run has).
+    #[must_use]
+    pub fn count() -> TripGuard {
+        HITS.with(|h| h.borrow_mut().clear());
+        TRIP.with(|t| *t.borrow_mut() = None);
+        TripGuard(())
+    }
+
+    /// The hits of `point` on this thread since the last [`arm`] or
+    /// [`count`].
+    pub fn hits(point: FaultPoint) -> u32 {
+        HITS.with(|h| h.borrow().get(&point).copied().unwrap_or(0))
+    }
+
+    pub(crate) fn hit(p: FaultPoint) {
+        let n = HITS.with(|h| {
+            let mut h = h.borrow_mut();
+            let n = h.entry(p).or_insert(0);
+            *n = n.saturating_add(1);
+            *n
+        });
+        // Take the action out while it runs, so it may itself reach a
+        // fault point without a re-entrant borrow.
+        let action = TRIP.with(|t| {
+            let mut t = t.borrow_mut();
+            match t.as_mut() {
+                Some(trip) if trip.point == p && trip.nth == n => trip.action.take(),
+                _ => None,
+            }
+        });
+        if let Some(mut a) = action {
+            a(p, n);
+            TRIP.with(|t| {
+                if let Some(trip) = t.borrow_mut().as_mut() {
+                    trip.action = Some(a);
+                }
+            });
+        }
     }
 
     const V2_DDL: &str = "CREATE TABLE test_v2_note (\n  id INTEGER PRIMARY KEY,\n  note TEXT NOT NULL\n) STRICT;\nCREATE INDEX test_v2_note_by_note ON test_v2_note(note);";

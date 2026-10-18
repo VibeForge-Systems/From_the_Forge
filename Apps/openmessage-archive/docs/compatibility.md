@@ -272,6 +272,40 @@ not a desktop, synthetic fixtures only:
 **Not yet observed:** any of this on Windows, and any import: the content
 manifests have not yet been compared with an archive (from slice 4f on).
 
+### Milestone 4 import core (slice 4f)
+
+Run in the same Linux container on 2026-10-18 (ext4 on virtio, bundled
+SQLite 3.53.2); not CI, not a desktop, synthetic data only:
+
+- **Handles and chats against the model.** Each of the 12 catalogue
+  entries, imported alone into a new archive, gave exactly the handles and
+  chats of its `content.json` (keys, sampled columns, `Col` states, BLOB
+  storage class, history) and the counts of its `import.json`. All ten
+  scenarios, in every order they list, gave their manifest's handles and
+  chats; every scenario with distinct contents per step gave equal content
+  snapshots in both orders, and the per-step counts of
+  `scenarios/*.counts.json`. `integrity_check`, `foreign_key_check` and the
+  FTS rank-1 check were clean after every import.
+- **Crash by kill.** `tests/crash.rs` killed a child import (16-row
+  batches, 70 handles and 45 chats) at every batch commit point (before and
+  after `COMMIT`), at four record positions, after the session
+  transaction, and at each recovery step of `begin_write`, plus once at
+  three points in a row; then reopened read-only, checked the file and
+  continued. Every result equalled the uninterrupted import, including
+  cursors, maps, occurrence counters and duplicate keys. A kill before the
+  creation rename left only a `.oma-new-*` directory, which the sweep
+  removed; a kill after it left a complete archive.
+- **Cancel and in-process crashes.** A cancel at each of the 12 records of
+  `imp-keys-hostile-plain` committed exactly the records before it, with
+  the cursor at the last of them, and continuing gave the uninterrupted
+  result. Twelve runs with panics at random batch boundaries (rowids
+  `i64::MIN` and `i64::MAX`, duplicated keys and identical keyless rows on
+  both sides of boundaries) all ended equal to one uninterrupted run.
+
+**Crash consistency was tested by process kill only; power loss was not
+tested.** Nothing of this slice has run on Windows yet; its crash plan
+there is the batch commit points and the creation rename.
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI

@@ -1,6 +1,7 @@
 //! I6 and §13.2: nothing the crate logs, and no `Debug` or `Display` of a
-//! public type, contains the archive label, an archive id, a path or a hex
-//! digest.
+//! public type, contains the archive label, an archive id, a path, a hex
+//! digest, or a value from an imported backup (the catalogue's sentinels:
+//! addresses, GUIDs, chat names, the device name).
 //!
 //! Its own test binary, with one global capturing subscriber: a
 //! thread-local subscriber would miss events from other threads.
@@ -11,14 +12,29 @@ mod common;
 use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
 
+use common::import::{import, import_with, open_entry, opts};
 use common::*;
 use oma_archive::hooks::{install, Faults, TestSchema};
-use oma_archive::{ArchiveCtx, ArchiveError, CancelToken, FixedClock, Label, NoProgress, Recovery};
+use oma_archive::{
+    ArchiveCtx, ArchiveError, CancelToken, FixedClock, Label, LineageChoice, LineageId, NoProgress,
+    Recovery,
+};
 use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
 
 const LABEL: &str = "SENTINEL-LABEL-7f3a";
+
+/// Values planted in the import catalogue (its README).
+const SENTINELS: &[&str] = &[
+    "SYNTH",
+    "+1555",
+    "example.invalid",
+    "synthetic-handle",
+    "Synthetic Second Phone",
+    "Synthetic Test Phone",
+    "SYNTHETIC0",
+];
 
 #[derive(Clone, Default)]
 struct Capture(Arc<Mutex<Vec<String>>>);
@@ -134,15 +150,68 @@ fn logs_errors_and_debug_output_hold_no_label_id_or_path() {
     shown.push(format!("{newer} {newer:?} {:?}", lib.list().expect("list")));
     shown.push(format!("{:?}", lib.sweep()));
 
-    let mut banned = vec![LABEL.to_owned(), id.as_str().to_owned(), root_text];
+    // An import of the hostile and the baseline entries, its outcomes and
+    // its errors.
+    let (itmp, ilib) = library();
+    let iid = ilib.create(None).expect("create");
+    let mut a = ilib.open(&iid).expect("open");
+    for entry in [
+        "imp-keys-hostile-plain",
+        "imp-dev1-v1-plain",
+        "imp-dev2-plain",
+    ] {
+        let src = open_entry(entry);
+        let s = import(&mut a, &src, &opts(16), LineageChoice::New);
+        shown.push(format!("{s:?}"));
+        let e = import_with(
+            &mut a,
+            &src,
+            &opts(16),
+            LineageChoice::Existing(LineageId::new(999)),
+            &CancelToken::new(),
+        )
+        .expect_err("unknown lineage");
+        shown.push(format!("{e} {e:?}"));
+        let cancel = CancelToken::new();
+        cancel.cancel();
+        let c = import_with(&mut a, &src, &opts(16), LineageChoice::New, &cancel).expect("cancel");
+        shown.push(format!("{c:?}"));
+        src.ob.close();
+    }
+    shown.push(format!(
+        "{a:?} {:?}",
+        a.reader().sessions().expect("sessions")
+    ));
+    drop(a);
+    let iroot = root(&itmp).to_string_lossy().into_owned();
+
+    let mut banned = vec![LABEL.to_owned(), id.as_str().to_owned(), root_text, iroot];
+    banned.push(iid.as_str().to_owned());
+    banned.extend(SENTINELS.iter().map(|s| (*s).to_owned()));
     banned.push(id.as_str()[1..].to_owned());
     let logs = capture.0.lock().expect("lock").clone();
     assert!(
         logs.iter().any(|l| l.contains("archive created")),
         "the capture works: {logs:?}"
     );
+    assert!(
+        logs.iter().any(|l| l.contains("import passes done")),
+        "the import logged: {logs:?}"
+    );
     for line in &logs {
-        assert_clean(line, &banned, "log");
+        // oma-backup logs its own hashed backup id (M2's design); every
+        // other rule holds for every crate.
+        if line
+            .split(' ')
+            .nth(1)
+            .is_some_and(|t| t.starts_with("oma_archive"))
+        {
+            assert_clean(line, &banned, "log");
+        } else {
+            for b in &banned {
+                assert!(!line.contains(b.as_str()), "log leaked {b:?}: {line}");
+            }
+        }
     }
     for s in &shown {
         assert_clean(s, &banned, "debug/display");

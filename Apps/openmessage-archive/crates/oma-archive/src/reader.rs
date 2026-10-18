@@ -395,6 +395,17 @@ impl ArchiveReader {
         })
     }
 
+    /// Run `f` on the reader's connection under an op budget (the import's
+    /// read-only preflight steps).
+    pub(crate) fn budgeted<T>(
+        &self,
+        ops: u64,
+        stage: Stage,
+        f: impl FnOnce(&Connection) -> rusqlite::Result<T>,
+    ) -> Result<T, ArchiveError> {
+        self.conn.budgeted(ops, stage, f)
+    }
+
     /// The newest [`SESSIONS_LIMIT`] sessions, newest first. Content-free.
     pub fn sessions(&self) -> Result<Vec<SessionInfo>, ArchiveError> {
         self.require_current()?;

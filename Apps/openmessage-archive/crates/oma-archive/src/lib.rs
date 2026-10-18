@@ -20,6 +20,10 @@
 //! way to a newer schema; nothing migrates implicitly. M4 ships the
 //! migration framework with no real migration.
 //!
+//! [`Archive::import_core`] is the transactional, resumable import as far
+//! as it is built (slice 4f: the session, the duplicate-key scan, the merge
+//! engine, and the handle and chat passes; see its module documentation).
+//!
 //! Every connection is opened by one module, with the hardening of spec
 //! §5.5 (`DEFENSIVE`, `TRUSTED_SCHEMA` off, no `ATTACH`, an op budget on
 //! reads), through the `win32-longpath` VFS on Windows.
@@ -42,6 +46,7 @@ mod conn;
 mod error;
 mod fault;
 mod id;
+mod import;
 mod layout;
 mod library;
 mod lock;
@@ -50,6 +55,7 @@ mod provenance;
 mod reader;
 pub mod schema;
 pub mod space;
+mod store_fs;
 
 #[cfg(feature = "fault-injection")]
 pub use fault::hooks;
@@ -57,10 +63,16 @@ pub use fault::hooks;
 pub use archive::{Archive, CheckpointOutcome, CloseReport, Recovery, RecoveryReport};
 pub use error::{ArchiveError, DamageKind, IoOp, LocationRefusal, PermProblem, RefusalKind, Stage};
 pub use id::{ArchiveId, IdError, Label, LabelState, ARCHIVE_ID_LEN, LABEL_MAX_BYTES};
+pub use import::{
+    BatchBudget, CoreOutcome, EntityCounts, ImportCounts, ImportOptions, ImportSummary,
+    KeyScanTable, LineageChoice, LineageId, NotImportable, StopReason, KEY_SCAN_CAP,
+    ORDER_KEY_FLOOR_NS, ORDER_KEY_SLACK_NS,
+};
 pub use library::{ArchiveEntry, Library, SweepReport, LIST_LIMIT, SWEEP_MIN_AGE};
 pub use lock::{LOCK_RETRIES, LOCK_RETRY_WAIT};
 pub use progress::{
-    ArchiveCtx, ArchiveEvent, ArchiveSink, CancelToken, Clock, FixedClock, NoProgress, SystemClock,
+    ArchiveCtx, ArchiveEvent, ArchiveSink, CancelToken, Clock, FixedClock, ImportPhase, NoProgress,
+    SystemClock,
 };
 pub use reader::{
     ArchiveInfo, ArchiveReader, ArchiveStats, ImportBlock, ResumableSession, SessionCounts,
@@ -68,6 +80,7 @@ pub use reader::{
 };
 pub use schema::migrate::MigrationReport;
 pub use schema::{APPLICATION_ID, DECODER_VERSION, DERIVER_VERSION, SCHEMA_VERSION};
+pub use store_fs::{DirSync, Placed, RealFs, StoreFs};
 
 /// The app version recorded in `archive_meta.created_by`,
 /// `import_session.app_version` and `schema_migration.app_version`.

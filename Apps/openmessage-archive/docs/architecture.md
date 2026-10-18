@@ -648,7 +648,8 @@ untouched, so the frozen catalogues cannot change by accident.
 - **Two pins.** `SHA256SUMS` covers the inputs and its own hash is pinned
   in `crates/oma-archive/tests/import_fixtures.rs`: the inputs are frozen.
   `EXPECTED.SHA256SUMS` covers `*.expected/` and `scenarios/`. Its own hash
-  is pinned in slice 4f, together with `ImportCounts` and `import.json`.
+  is pinned too (since slice 4f, with `import.json` and the scenario
+  counts).
 - **The content manifest** (`content.json`) is the generator's model of
   what an import must leave in the archive. It covers each row's key or
   unkeyed occurrence, a sample of `Col` states, history values,
@@ -667,7 +668,8 @@ untouched, so the frozen catalogues cannot change by accident.
   R6 key passes), every content digest (staging), the order key, its
   source, the out-of-range qualifier and the 41-byte rank (the plist dates
   read by `oma-backup`), and every attachment hash (`copy_file_to`). The
-  manifests themselves are asserted against archives from slice 4f on.
+  manifests themselves are asserted against archives from slice 4f on
+  (handles and chats so far).
 - **Readings the model makes,** for the import slices to confirm or change
   (they re-pin `EXPECTED.SHA256SUMS`, never the inputs):
   - an empty GUID or handle address is not a usable key, so such a row is
@@ -690,6 +692,104 @@ untouched, so the frozen catalogues cannot change by accident.
   included), D61 (text from before an unsend stays as an earlier body
   version), D59 (raw values kept within caps) and D82 (the history
   columns).
+
+### The import core (M4 slice 4f)
+
+`Archive::import_core` (`crates/oma-archive/src/import/`) is the import as
+far as slice 4f builds it: staging and the probe, the session's facts, the
+resume decision, the duplicate-key scan, the session bookkeeping, and the
+first two passes, **P1 handles and P2 chats**, in batches. The shell does
+not call it yet (slice 4l).
+
+- **Facts first, reads only** (`session.rs`, spec §8.2). The content digest
+  and its framing (`main_len`, the WAL outcome and length), the read
+  profile (SHA-256 of every column cap and the row budget), the code
+  versions, the options and the lineage form the **binding** a resume must
+  match. The rank is 41 bytes, compared with memcmp: the order class, the
+  Status.plist `Date` (else Info.plist `Last Backup Date`) biased by 2^63,
+  then the digest; a date outside 2007-01-01 .. import start + 48 h is
+  ignored and sets `backupDateOutOfRange` (D81). The qualifiers bitmask
+  holds the WAL ones (which decide "full observation" later), the encoding,
+  the size mismatch, unknown tables and columns, and "iOS version
+  untested".
+- **Resume or supersede** (§8.2 step 1). A session in state 0, 2, 4 or 6
+  whose binding equals this import's is continued (`resumes + 1`, counts
+  reloaded); every other unfinished session is superseded (state 5) and
+  its map, occurrence and duplicate-key rows are deleted (D64).
+- **Keys** (`keys.rs`, `preflight.rs`, §6.2, D56, D83). The tagged encoding
+  (0 Absent, 1 Null, 2 Unreadable(kind), 3 Oversized(u64), 4 Value) is
+  pinned byte for byte. A handle is keyed by the tagged (address, service),
+  every other entity by its exact GUID bytes, when the identifying field is
+  a readable, **non-empty** value and its 128-bit key digest is not in the
+  session's duplicate set. The key scan sorts the digests of all four keyed
+  tables (cap 4,194,304 rows each) and persists the duplicated ones in
+  `import_dup_key`; a resume reuses them. Every other row is unkeyed: a
+  SHA-256 fingerprint over every raw field (with the storage class of text
+  and the raw value of an unreadable cell) and a durable occurrence number
+  from `import_occurrence`.
+- **Batches** (`batch.rs`, §8.5, D63). A pass reads records into a buffer
+  with no archive transaction open, until 1,000 rows (16–8,192), 32 MiB
+  (1–256 MiB) or 2 s on the context's clock (tests turn the time budget
+  off). The buffer is then written in one `IMMEDIATE` transaction with one
+  savepoint per record, the importer's own cursor (the last completed
+  rowid), the counts JSON and the issue deltas. After any statement error
+  the batch rolls back, and `ROLLBACK` is issued if SQLite left the
+  transaction open; nothing commits after an error. `SQLITE_FULL` stops the
+  session resumably (state 6); a constraint error is a bug (state 3,
+  `Internal`). `rows_done` must equal the probe's `count(*)`.
+- **Merge** (`merge.rs`, §8.7, D57, D82). Read the stored row and its
+  `value_issue` rows, decide per cell, then `UPDATE` only the changed
+  columns. A Value or Null observation replaces the stored cell at a rank
+  at least `last_rank`, or when the stored cell is Absent, Oversized or
+  Unreadable; those three never replace a Value or Null and are counted as
+  "not applied". A history column keeps every other observed Value or Null
+  in `value_history` (set semantics, hashed with the storage class). A
+  changed cell's `value_issue` rows are rewritten. `first_rank` and
+  `last_rank` move by min and max; an equal rank keeps the earlier
+  session.
+- **Cancel** (§8.6). The callback checks the token at the start of each
+  record; the engine checks it every 128 rows. Either way the completed
+  records are committed and the session becomes cancelled (2), resumable.
+- **Until finalize exists**, a session whose passes all ran stays running
+  (state 0) and the outcome is `CoreOutcome::PassesDone`: it is never
+  marked completed or a full observation. Two consequences, both stated in
+  the tests: an import of the **same content** continues the earlier
+  session and has nothing left to do (so its counts are the earlier
+  session's), and every new import supersedes the previous one.
+- **Crash points** (`fault.rs`, D85). `fault::point(FaultPoint::…)` marks
+  the record start, before and after each batch commit, after the session
+  transaction and the terminal state, each recovery step of `begin_write`,
+  and both sides of the creation rename. Without the `fault-injection`
+  feature the call is empty. `tests/crash.rs` kills a re-executed child at
+  each point and checks that the archive is consistent and that continuing
+  gives the uninterrupted result; `tests/resume.rs` does the same in
+  process with panics at random batch boundaries and with a cancel at every
+  record.
+- **`StoreFs`** (`store_fs.rs`). Creation makes its directory fsyncs and
+  its no-replace rename through a `StoreFs` (`RealFs` in production), so a
+  recording implementation can check the order: subdirectories durably
+  made, the creation directory flushed, the rename, then the library
+  directory flushed. The attachment store (slice 4i) uses the same trait.
+- **Counts** (`counts.rs`). `ImportCounts` is numbers only; the handle and
+  chat groups hold seen, inserted, already present, unkeyed, cells
+  replaced, not applied, history added and value-issue cells.
+  `import.json` (per entry) and `scenarios/*.counts.json` hold the model's
+  counts, and `EXPECTED.SHA256SUMS` is now pinned.
+
+**Readings this slice takes, for the owner to confirm** (`owner-decisions.md`
+did not exist; the spec's leans apply):
+
+- an empty GUID or address is not a key (the catalogue model's reading,
+  now implemented);
+- `value_history.first_rank` of a value that leaves the current slot is the
+  row's `last_rank` before the replacing observation: exact with two
+  sessions, an upper bound with more;
+- a key's tagged encoding ignores the text storage class (two sessions
+  that disagree only in class are one key), while fingerprints and history
+  include it;
+- the resume binding is the spec's list only: a second backup with the
+  same sms.db bytes but other plist dates continues the first one's
+  session and keeps its rank.
 
 ### Status and qualifiers (D43)
 
@@ -795,10 +895,11 @@ superseded by D22: sms.db is staged on disk.
 | D49 | Source values | `Col<T>` | `Option<T>` | M4 can tell "not recorded" from "NULL" from "bad" |
 | D50 | Lookup scope | Only `Library/SMS/Attachments/` and `StickerCache/` | Every `~/` and `/var/mobile` class | Never reaches non-Messages files; the other classes stay counts |
 
-### Milestone 4 decisions in force (slice 4d)
+### Milestone 4 decisions in force (slices 4d–4f)
 
 The full M4 decision list (D51–D88) lands with the M4 documentation slice.
-These are the ones the archive skeleton already implements.
+These are the ones the archive skeleton and the import core already
+implement.
 
 | # | Topic | Choice | Main alternative | Trade-off |
 |---|---|---|---|---|
@@ -809,7 +910,15 @@ These are the ones the archive skeleton already implements.
 | D76 | Views | None in v1; views are disabled on every connection | Read views | `highlight()` fails in views with `TRUSTED_SCHEMA` off |
 | D78 | Permissions | 0700/0600 on Unix, re-checked at every open; the library itself must be ours and not writable by others | Leave the umask | Plaintext archive; ACL inheritance on Windows is disclosed with the privacy write-up |
 | D84 | Reader | `ArchiveReader`: lock-free, query-only, fingerprint first | Read through the locked `Archive` | Details during imports |
-| D85 | Fault injection | Non-default `fault-injection` feature, per-thread hooks | Environment variables in release builds | No test hooks in shipped code |
+| D56 | Keys | Exact GUID bytes, or the tagged (address, service); unkeyed rows by fingerprint and durable occurrence | Synthesise keys | No fabrication; unkeyed rows may repeat across changed sources |
+| D57 | Merge | Never delete; rank decides; missing or unreadable values never replace values; only changed columns are updated | Last import wins | Older backups can be imported later without regression |
+| D63 | Transactions | `IMMEDIATE` batches (1,000 rows / 32 MiB / 2 s), a savepoint per record, the importer's own cursor, `synchronous=FULL` | Per-row transactions | Durable and resumable at batch granularity |
+| D64 | Resume binding | Digest and framing, versions, read profile, options and lineage; otherwise supersede | Resume across any change | One rule set per session |
+| D80 | Lineage | The caller (the gate, later) picks an existing lineage or a new one | Infer from device fields | No silent identity claim |
+| D81 | Rank | (dated, bounded date, content digest), memcmp-compared; undated below dated | Session id as tie-break | Order independence; no host-clock wins |
+| D82 | Value history (**Owner**: column list) | The closed list of 11 history columns keeps every other observed value | History for every column | Content kept where it matters |
+| D83 | In-source duplicate keys | Every occurrence unkeyed; found by a sorted 128-bit digest scan; persisted per session | Key the first in rowid order | Rowid-order independence; a collision can only demote |
+| D85 | Fault injection | Non-default `fault-injection` feature, per-thread hooks and fault points; crash by killing a re-executed child | Environment variables in release builds; `abort()` | No test hooks in shipped code; deterministic boundaries |
 | D86 | Windows long paths | `win32-longpath` with a verbatim path; if WAL and `-shm` fail there in CI, refuse library paths whose deepest archive path exceeds 240 characters | `EXCLUSIVE` locking | Keeps D53's reader. **UNVERIFIED** until the Windows run |
 | D87 | Migrations | Explicit `migrate()` only; fingerprint first; space checked before anything changes; unfinished sessions superseded; a real migration refused until the pre-migration copy exists | Migrate on open | No surprise writes; reads never migrate |
 
