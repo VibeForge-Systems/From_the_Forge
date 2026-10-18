@@ -15,6 +15,7 @@ const COMMANDS: &[&str] = &[
     "forget_backup_folder",
     "get_backup_details",
     "open_backup",
+    "check_extraction",
     "cancel_job",
 ];
 

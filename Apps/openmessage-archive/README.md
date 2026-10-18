@@ -97,8 +97,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 |---|---|---|
 | 1 Foundation | Shell, settings, archive location, CI for Windows and Linux | **Done** |
 | 2 Backup discovery and validation | Find backups, read their manifests, detect encryption, unlock, validate | Implemented; sign-off pending (Windows CI, fixture-generator review, manual tests) |
-| 3 Extraction | Locate sms.db, probe the schema, extract messages, conversations, participants and attachments | Planned (next after M2 sign-off) |
-| 4 Archive database | Versioned SQLite schema, transactional and resumable imports, FTS5 | Planned |
+| 3 Extraction check | Locate sms.db, probe the schema, and check that messages, chats, handles and attachment references can be read (counts only) | Implemented; sign-off pending (Windows CI, the clean-room review of the typedstream decoder and the fixture generators, the manual tests) |
+| 4 Archive database | Extract messages and copy attachments into the archive; versioned SQLite schema, transactional and resumable imports, FTS5 | Planned |
 | 5 Rich viewer | Conversation list, threads, inline media, search, date navigation | Planned |
 | 6 Exports | TXT, CSV, JSON, HTML, PDF, XLSX, and attachments | Planned |
 | 7 Direct device backup | USB device detection and local backup creation | Planned |

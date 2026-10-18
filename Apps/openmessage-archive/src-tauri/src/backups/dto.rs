@@ -14,6 +14,7 @@ use serde::de::{self, Deserializer, Visitor};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use super::extraction::{ExtractionOutcomeDto, ExtractionReportDto};
 use crate::error::IpcError;
 use crate::settings::CheckLevel;
 
@@ -226,6 +227,12 @@ pub struct BackupDetails {
     pub archive_sync_provider: Option<String>,
     pub archive_configured: bool,
     pub last_report: Option<ValidationReportDto>,
+    /// The last extraction check's report, from the same job as
+    /// `lastReport`. A later validation clears it (§16.1).
+    pub last_extraction_report: Option<ExtractionReportDto>,
+    /// The backup's iOS version is not one the extraction check has been
+    /// tested on with a real backup (none are, in M3).
+    pub ios_version_untested: bool,
     /// From the last finished, failed or cancelled job.
     pub last_cleanup: Option<CleanupDto>,
     pub active_job: Option<JobSummary>,
@@ -379,6 +386,48 @@ pub enum JobPhase {
     /// Extracting a file (the M3 extraction API). Validation never reports
     /// it; it exists so the crate's phase set maps one to one.
     Extracting,
+    // The extraction check (M3), one to one with `MessagesPhase`.
+    StagingMessagesDb,
+    ScanningSchema,
+    CheckingIntegrity,
+    ReadingSchema,
+    ReadingHandles,
+    ReadingChats,
+    ReadingChatLinks,
+    ReadingMessages,
+    CheckingAttachments,
+    Summarising,
+}
+
+impl From<oma_messages::MessagesPhase> for JobPhase {
+    fn from(p: oma_messages::MessagesPhase) -> Self {
+        use oma_messages::MessagesPhase as P;
+        match p {
+            P::StagingMessagesDb => JobPhase::StagingMessagesDb,
+            P::ScanningSchema => JobPhase::ScanningSchema,
+            P::CheckingIntegrity => JobPhase::CheckingIntegrity,
+            P::ReadingSchema => JobPhase::ReadingSchema,
+            P::ReadingHandles => JobPhase::ReadingHandles,
+            P::ReadingChats => JobPhase::ReadingChats,
+            P::ReadingChatLinks => JobPhase::ReadingChatLinks,
+            P::ReadingMessages => JobPhase::ReadingMessages,
+            P::CheckingAttachments => JobPhase::CheckingAttachments,
+            // `MessagesPhase` is non-exhaustive; a phase added later shows as
+            // the last one until it has its own label.
+            _ => JobPhase::Summarising,
+        }
+    }
+}
+
+/// What a job does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum JobKind {
+    /// Validate the backup (M2).
+    Validate,
+    /// Validate, then check that the Messages database can be read (M3).
+    ExtractionCheck,
 }
 
 impl From<oma_backup::Phase> for JobPhase {
@@ -410,12 +459,13 @@ pub struct JobStarted {
 pub struct JobSummary {
     pub job_id: String,
     pub backup_id: String,
+    pub kind: JobKind,
     pub phase: Option<JobPhase>,
 }
 
 /// Delivered over a `tauri::ipc::Channel` (D2). Exactly one terminal event
-/// (`finished`, `failed` or `cancelled`) ends every job, and each carries
-/// `stagingRemoved`.
+/// (`finished`, `extractionFinished`, `failed` or `cancelled`) ends every
+/// job, and each carries `stagingRemoved`.
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(
     tag = "kind",
@@ -435,6 +485,16 @@ pub enum JobEvent {
         // Boxed: the report is much larger than the other variants.
         report: Box<ValidationReportDto>,
         staging_removed: bool,
+    },
+    /// The end of an extraction check: a summary only (D47). The reports
+    /// are fetched with `get_backup_details`, an invoke response, so this
+    /// event stays far below the channel's 8 KiB direct-delivery size.
+    ExtractionFinished {
+        job_id: String,
+        outcome: ExtractionOutcomeDto,
+        source_changed: bool,
+        staging_removed: bool,
+        plaintext_removed_after_row_pass: bool,
     },
     Failed {
         job_id: String,
@@ -487,6 +547,27 @@ pub struct OpenBackupRequest {
     #[ts(as = "Option<String>")]
     #[serde(default)]
     pub password: Option<BackupPassword>,
+}
+
+/// Start an extraction check. Like [`OpenBackupRequest`], the only other
+/// IPC input that carries a secret; no `Debug` derive.
+#[derive(Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(export)]
+pub struct CheckExtractionRequest {
+    pub backup_id: String,
+    #[ts(as = "Option<String>")]
+    #[serde(default)]
+    pub password: Option<BackupPassword>,
+}
+
+impl fmt::Debug for CheckExtractionRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CheckExtractionRequest")
+            .field("backup_id", &self.backup_id)
+            .field("password", &"<redacted>")
+            .finish()
+    }
 }
 
 impl fmt::Debug for OpenBackupRequest {
@@ -756,6 +837,8 @@ mod tests {
             JobSummary::decl(&cfg),
             JobEvent::decl(&cfg),
             OpenBackupRequest::decl(&cfg),
+            CheckExtractionRequest::decl(&cfg),
+            ExtractionReportDto::decl(&cfg),
             crate::settings::AddedFolderEntry::decl(&cfg),
         ];
         for d in &decls {
@@ -776,5 +859,48 @@ mod tests {
         let summary = BackupSummary::decl(&cfg);
         assert!(!summary.contains("path"), "{summary}");
         assert!(OpenBackupRequest::decl(&cfg).contains("password: string | null"));
+        assert!(CheckExtractionRequest::decl(&cfg).contains("password: string | null"));
+    }
+
+    #[test]
+    fn check_extraction_request_rejects_unknown_fields_and_redacts() {
+        let bad = format!(r#"{{"backupId":"a","password":"{SENTINEL}","path":"/etc"}}"#);
+        let err = serde_json::from_str::<CheckExtractionRequest>(&bad)
+            .expect_err("unknown field rejected");
+        assert!(!err.to_string().contains(SENTINEL));
+        let ok = format!(r#"{{"backupId":"a","password":"{SENTINEL}"}}"#);
+        let req: CheckExtractionRequest = serde_json::from_str(&ok).expect("valid");
+        let shown = format!("{req:?}");
+        assert!(!shown.contains(SENTINEL), "{shown}");
+        assert!(shown.contains("<redacted>"));
+        let absent: CheckExtractionRequest =
+            serde_json::from_str(r#"{"backupId":"a"}"#).expect("valid");
+        assert!(absent.password.is_none());
+    }
+
+    #[test]
+    fn every_messages_phase_has_its_own_job_phase() {
+        use oma_messages::MessagesPhase as P;
+        let phases = [
+            P::StagingMessagesDb,
+            P::ScanningSchema,
+            P::CheckingIntegrity,
+            P::ReadingSchema,
+            P::ReadingHandles,
+            P::ReadingChats,
+            P::ReadingChatLinks,
+            P::ReadingMessages,
+            P::CheckingAttachments,
+            P::Summarising,
+        ];
+        let mapped: std::collections::HashSet<String> = phases
+            .iter()
+            .map(|p| serde_json::to_string(&JobPhase::from(*p)).expect("json"))
+            .collect();
+        assert_eq!(mapped.len(), phases.len());
+        assert_eq!(
+            serde_json::to_value(JobPhase::from(P::ReadingHandles)).expect("json"),
+            "readingHandles"
+        );
     }
 }

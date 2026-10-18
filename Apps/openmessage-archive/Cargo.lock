@@ -2593,6 +2593,7 @@ dependencies = [
  "dunce",
  "oma-backup",
  "oma-fs",
+ "oma-messages",
  "serde",
  "serde_json",
  "tauri",

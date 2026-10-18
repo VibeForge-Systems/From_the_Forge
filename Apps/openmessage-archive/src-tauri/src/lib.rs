@@ -8,6 +8,7 @@
 pub mod backups;
 pub mod commands;
 pub mod error;
+pub mod panic_hook;
 pub mod settings;
 
 use std::time::Duration;
@@ -33,6 +34,8 @@ fn init_tracing() {
 
 pub fn run() {
     init_tracing();
+    // Panic payloads never reach the log (M3 §16.6).
+    panic_hook::install();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting");
 
     tauri::Builder::default()
@@ -61,6 +64,7 @@ pub fn run() {
             commands::backups::forget_backup_folder,
             commands::backups::get_backup_details,
             commands::jobs::open_backup,
+            commands::jobs::check_extraction,
             commands::jobs::cancel_job,
         ])
         .build(tauri::generate_context!())

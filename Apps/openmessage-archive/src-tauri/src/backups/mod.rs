@@ -11,6 +11,7 @@
 //! drop the guard.
 
 pub mod dto;
+pub mod extraction;
 pub mod listing;
 pub mod messages;
 pub mod worker;
@@ -25,9 +26,10 @@ use oma_backup::{CancelToken, Candidate};
 
 use crate::error::{ErrorCode, IpcError, IpcResult};
 use dto::{
-    BackupList, BackupLocation, BackupSummary, CleanupDto, JobEvent, JobPhase, JobSummary,
+    BackupList, BackupLocation, BackupSummary, CleanupDto, JobEvent, JobKind, JobPhase, JobSummary,
     ValidationReportDto,
 };
+use extraction::ExtractionReportDto;
 
 /// One job at a time, globally (D7).
 pub const MAX_CONCURRENT_JOBS: usize = 1;
@@ -126,14 +128,21 @@ impl BackupRegistry {
 /// A running job.
 pub struct ActiveJob {
     pub backup_id: String,
+    pub kind: JobKind,
     pub cancel: CancelToken,
     pub phase: Option<JobPhase>,
 }
 
 /// What the last job for a backup left behind. In memory only.
+///
+/// `report` and `extraction` are replaced together, whenever a job ends
+/// with a validation report: a Validate job sets `extraction` to `None`, so
+/// an old extraction report is never shown beside a newer validation
+/// (§16.1). A failed or cancelled job keeps both.
 #[derive(Debug, Clone, Default)]
 pub struct LastOutcome {
     pub report: Option<ValidationReportDto>,
+    pub extraction: Option<ExtractionReportDto>,
     pub cleanup: Option<CleanupDto>,
 }
 
@@ -176,7 +185,7 @@ impl Jobs {
     }
 
     /// Reserve the job slot for `backup_id`, or `busy`.
-    pub fn reserve(&self, backup_id: &str) -> IpcResult<Reservation> {
+    pub fn reserve(&self, backup_id: &str, kind: JobKind) -> IpcResult<Reservation> {
         let mut t = self.lock()?;
         if t.active.values().any(|j| j.backup_id == backup_id) {
             return Err(IpcError::new(ErrorCode::Busy, messages::BUSY_SAME));
@@ -192,6 +201,7 @@ impl Jobs {
             job_id.clone(),
             ActiveJob {
                 backup_id: backup_id.to_owned(),
+                kind,
                 cancel: cancel.clone(),
                 phase: None,
             },
@@ -243,6 +253,7 @@ impl Jobs {
                 let last = t.last.entry(job.backup_id).or_default();
                 if outcome.report.is_some() {
                     last.report = outcome.report;
+                    last.extraction = outcome.extraction;
                 }
                 last.cleanup = outcome.cleanup;
             }
@@ -258,6 +269,7 @@ impl Jobs {
             .map(|(id, j)| JobSummary {
                 job_id: id.clone(),
                 backup_id: j.backup_id.clone(),
+                kind: j.kind,
                 phase: j.phase,
             })
     }
@@ -330,18 +342,26 @@ mod tests {
     #[test]
     fn one_job_at_a_time() {
         let jobs = Jobs::default();
-        let a = jobs.reserve("backup-a").expect("first");
+        let a = jobs.reserve("backup-a", JobKind::Validate).expect("first");
         assert_eq!(a.job_id, "job-1");
-        let same = jobs.reserve("backup-a").err().expect("busy");
+        let same = jobs
+            .reserve("backup-a", JobKind::Validate)
+            .err()
+            .expect("busy");
         assert_eq!(same.code, ErrorCode::Busy);
         assert_eq!(same.message, messages::BUSY_SAME);
-        let other = jobs.reserve("backup-b").err().expect("busy");
+        let other = jobs
+            .reserve("backup-b", JobKind::Validate)
+            .err()
+            .expect("busy");
         assert_eq!(other.code, ErrorCode::Busy);
         assert_eq!(other.message, messages::BUSY_OTHER);
         assert!(jobs.any_active());
         jobs.finish(&a.job_id, LastOutcome::default());
         assert!(!jobs.any_active());
-        let b = jobs.reserve("backup-b").expect("free again");
+        let b = jobs
+            .reserve("backup-b", JobKind::Validate)
+            .expect("free again");
         assert_eq!(b.job_id, "job-2");
     }
 
@@ -349,7 +369,7 @@ mod tests {
     fn cancel_unknown_or_finished_returns_false() {
         let jobs = Jobs::default();
         assert!(!jobs.cancel("job-99"));
-        let r = jobs.reserve("b").expect("reserve");
+        let r = jobs.reserve("b", JobKind::Validate).expect("reserve");
         assert!(jobs.cancel(&r.job_id));
         assert!(r.cancel.is_cancelled());
         jobs.finish(&r.job_id, LastOutcome::default());
@@ -359,7 +379,7 @@ mod tests {
     #[test]
     fn exit_waits_for_workers_and_cancels_them() {
         let jobs = std::sync::Arc::new(Jobs::default());
-        let r = jobs.reserve("b").expect("reserve");
+        let r = jobs.reserve("b", JobKind::Validate).expect("reserve");
         let worker_jobs = jobs.clone();
         let handle = std::thread::spawn(move || {
             while !r.cancel.is_cancelled() {
@@ -371,6 +391,112 @@ mod tests {
         assert!(jobs.cancel_all_and_wait(Duration::from_secs(5)));
         handle.join().expect("join");
         assert!(!jobs.any_active());
+    }
+
+    fn validation(importable: bool) -> ValidationReportDto {
+        let stats = dto::ManifestStatsDto {
+            total_rows: 0,
+            files: 0,
+            directories: 0,
+            symlinks: 0,
+            other_flags: 0,
+            declared_bytes: 0,
+            declared_bytes_saturated: false,
+            missing_blobs: 0,
+            size_mismatches: 0,
+            unsafe_blobs: 0,
+            unreadable_blobs: 0,
+            invalid_rows: 0,
+            invalid_file_ids: 0,
+            file_id_mismatches: 0,
+            paths_unusual_for_export: 0,
+            unreadable_records: 0,
+            files_without_key: 0,
+            files_with_unavailable_class: 0,
+            has_properties_table: true,
+            views: 0,
+            triggers: 0,
+            saturated: false,
+        };
+        ValidationReportDto {
+            importable,
+            checks: Vec::new(),
+            stats,
+            sms_db: dto::SmsDbStatusDto {
+                listed: true,
+                ambiguous: false,
+                blob_present: Some(true),
+                declared_size: None,
+                size_consistent: None,
+                header_ok: Some(true),
+                padding_ok: None,
+                wal_listed: false,
+                shm_listed: false,
+            },
+            duration_ms: 0,
+            validated_at: "2026-10-18T00:00:00Z".into(),
+        }
+    }
+
+    /// §16.1: a Validate job that follows an extraction check replaces the
+    /// whole outcome, so the old extraction report is never shown beside
+    /// the newer validation. A failed job keeps both.
+    #[test]
+    fn a_later_validation_clears_the_extraction_report() {
+        let jobs = Jobs::default();
+        let r = jobs
+            .reserve("b", JobKind::ExtractionCheck)
+            .expect("reserve");
+        assert_eq!(
+            jobs.active_for("b").map(|j| j.kind),
+            Some(JobKind::ExtractionCheck)
+        );
+        let skipped = extraction::report_dto(
+            &extraction::ExtractionEnding::SkippedNotImportable,
+            &r.job_id,
+            true,
+            true,
+        );
+        jobs.finish(
+            &r.job_id,
+            LastOutcome {
+                report: Some(validation(false)),
+                extraction: Some(skipped),
+                cleanup: Some(CleanupDto {
+                    staging_removed: true,
+                }),
+            },
+        );
+        assert!(jobs.last("b").extraction.is_some());
+
+        let r = jobs.reserve("b", JobKind::Validate).expect("reserve");
+        jobs.finish(
+            &r.job_id,
+            LastOutcome {
+                report: None,
+                extraction: None,
+                cleanup: None,
+            },
+        );
+        assert!(
+            jobs.last("b").extraction.is_some(),
+            "a failed or cancelled job keeps the last reports"
+        );
+
+        let r = jobs.reserve("b", JobKind::Validate).expect("reserve");
+        jobs.finish(
+            &r.job_id,
+            LastOutcome {
+                report: Some(validation(true)),
+                extraction: None,
+                cleanup: Some(CleanupDto {
+                    staging_removed: true,
+                }),
+            },
+        );
+        let last = jobs.last("b");
+        assert!(last.report.is_some_and(|r| r.importable));
+        assert!(last.extraction.is_none());
     }
 
     #[test]

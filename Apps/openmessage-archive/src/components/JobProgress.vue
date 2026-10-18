@@ -16,7 +16,34 @@ const LABEL: Record<JobPhase, string> = {
   checkingFiles: 'Checking file records',
   checkingMessagesDb: 'Checking the Messages database',
   extracting: 'Extracting a file',
+  // The extraction check (M3 §17.3).
+  stagingMessagesDb: 'Copying the Messages database',
+  scanningSchema: 'Checking the database layout',
+  checkingIntegrity: 'Checking database integrity',
+  readingSchema: 'Reading the database layout',
+  readingHandles: 'Reading addresses',
+  readingChats: 'Reading chats',
+  readingChatLinks: 'Reading chat links',
+  readingMessages: 'Reading messages',
+  checkingAttachments: 'Checking attachments',
+  summarising: 'Summarising',
 };
+
+/** Phases whose `done` and `total` count items; the copy counts bytes. */
+const COUNTED: ReadonlySet<JobPhase> = new Set<JobPhase>([
+  'checkingFiles',
+  'readingSchema',
+  'readingHandles',
+  'readingChats',
+  'readingChatLinks',
+  'readingMessages',
+  'checkingAttachments',
+  'summarising',
+]);
+
+const MIB = 1024 * 1024;
+const mib = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+const megabytes = (n: number) => `${mib.format(n / MIB)} MB`;
 
 /** The phase alone: what the live region announces. */
 const phaseLabel = computed(() => {
@@ -29,11 +56,19 @@ const phaseLabel = computed(() => {
 /** The phase with its count: shown, and exposed as the progressbar's value. */
 const label = computed(() => {
   const j = props.job;
-  if (!j.cancelling && j.phase === 'checkingFiles' && j.total !== null) {
-    return `${LABEL.checkingFiles} (${nf.format(j.done)} of ${nf.format(j.total)})`;
+  if (j.cancelling || j.phase === null || j.total === null) return phaseLabel.value;
+  if (COUNTED.has(j.phase)) {
+    return `${LABEL[j.phase]} (${nf.format(j.done)} of ${nf.format(j.total)})`;
+  }
+  if (j.phase === 'stagingMessagesDb') {
+    return `${LABEL.stagingMessagesDb} (${megabytes(j.done)} of ${megabytes(j.total)})`;
   }
   return phaseLabel.value;
 });
+
+const ariaLabel = computed(() =>
+  props.job.kind === 'extractionCheck' ? 'Extraction check progress' : 'Validation progress',
+);
 
 const percent = computed(() => {
   const { done, total } = props.job;
@@ -63,7 +98,7 @@ const percent = computed(() => {
       <div
         class="progress"
         role="progressbar"
-        aria-label="Validation progress"
+        :aria-label="ariaLabel"
         :aria-valuetext="label"
         :aria-valuenow="percent ?? undefined"
         aria-valuemin="0"

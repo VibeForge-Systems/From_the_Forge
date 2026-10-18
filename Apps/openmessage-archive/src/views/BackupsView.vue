@@ -7,6 +7,7 @@ import BackupLocationsList from '@/components/BackupLocationsList.vue';
 import BackupPasswordDialog from '@/components/BackupPasswordDialog.vue';
 import BackupStateBadge from '@/components/BackupStateBadge.vue';
 import EmptyState from '@/components/EmptyState.vue';
+import ExtractionReport from '@/components/ExtractionReport.vue';
 import JobProgress from '@/components/JobProgress.vue';
 import LocationStatusList from '@/components/LocationStatusList.vue';
 import PanelLayout from '@/components/PanelLayout.vue';
@@ -61,6 +62,11 @@ const validateLabel = computed(() => {
   if (encrypted.value) return again ? 'Unlock and validate again…' : 'Unlock and validate…';
   return again ? 'Validate again' : 'Validate';
 });
+// Enabled under the same rule as Validate (M3 §17.2).
+const extractionLabel = computed(() =>
+  encrypted.value ? 'Unlock and run extraction check…' : 'Run extraction check',
+);
+const extraction = computed(() => backups.selectedExtraction);
 const describedBy = computed(() => {
   if (blocked.value) return 'backup-state-reason';
   if (!archiveConfigured.value) return 'backup-no-archive';
@@ -81,6 +87,10 @@ const promptOpen = computed(() => backups.passwordPrompt !== null);
 
 function validate(): void {
   if (summary.value) void backups.check(summary.value.id);
+}
+
+function runExtractionCheck(): void {
+  if (summary.value) void backups.checkExtraction(summary.value.id);
 }
 
 function onPasswordSubmit(password: string): void {
@@ -194,10 +204,11 @@ function onPasswordSubmit(password: string): void {
             </div>
             <div v-else-if="details.archiveSyncProvider && !blocked" class="alert alert-warning small" role="status">
               Your archive folder appears to be synchronized by {{ details.archiveSyncProvider }}.
-              While the check runs, a copy of the backup's file index (decrypted, if the backup is
-              encrypted) is stored there, and {{ details.archiveSyncProvider }} may upload it
-              before it is deleted. The file index lists the names of files in the backup,
-              including attachment names.
+              While a check runs, a copy of the backup's file index is stored there, and the
+              extraction check also stores a copy of the Messages database (both decrypted, if the
+              backup is encrypted). {{ details.archiveSyncProvider }} may upload them before they
+              are deleted. The file index lists the names of files in the backup, including
+              attachment names; the Messages database holds your messages.
             </div>
             <p v-if="otherJobRunning" id="backup-other-job" class="small text-body-secondary">
               Another backup is being checked.
@@ -221,6 +232,16 @@ function onPasswordSubmit(password: string): void {
                 <i class="bi bi-shield-check me-1" aria-hidden="true"></i>{{ validateLabel }}
               </button>
               <button
+                v-if="!thisJob"
+                type="button"
+                class="btn btn-outline-primary"
+                :disabled="!canValidate"
+                :aria-describedby="`${describedBy} backup-extraction-note`"
+                @click="runExtractionCheck()"
+              >
+                <i class="bi bi-chat-square-text me-1" aria-hidden="true"></i>{{ extractionLabel }}
+              </button>
+              <button
                 v-if="blocked"
                 type="button"
                 class="btn btn-outline-secondary"
@@ -232,13 +253,20 @@ function onPasswordSubmit(password: string): void {
               <button type="button" class="btn btn-outline-secondary" disabled aria-describedby="import-planned">
                 <i class="bi bi-box-arrow-in-down me-1" aria-hidden="true"></i>Import messages
               </button>
-              <span id="import-planned"><PlannedBadge capability="extraction" /></span>
+              <span id="import-planned"><PlannedBadge capability="archive-database" /></span>
             </div>
             <p id="backup-validate-note" class="small text-body-secondary mt-2 mb-0">
               Validation copies the backup's file index (Manifest.db) into your archive folder,
               checks it, and deletes the copy. For an encrypted backup, the copy is decrypted. The
               Messages database is checked where it is and is not copied. The backup itself is
               never changed.
+            </p>
+            <p id="backup-extraction-note" class="small text-body-secondary mt-2 mb-0">
+              The extraction check copies the Messages database out of the backup into your archive
+              folder, decrypting it if the backup is encrypted, reads it to count what can be
+              extracted, and deletes the copy. Attachments are not copied. Nothing is saved, and no
+              message text, names or numbers are shown. If the app crashes during the check, the
+              copy is deleted the next time the app starts.
             </p>
           </div>
         </section>
@@ -253,6 +281,8 @@ function onPasswordSubmit(password: string): void {
         <div v-if="leftovers" class="alert alert-warning small" role="status">
           {{ LEFTOVER_FILES_MESSAGE }}
         </div>
+
+        <ExtractionReport v-if="extraction" :report="extraction" />
 
         <ValidationReport v-if="details?.lastReport" :report="details.lastReport" />
       </div>

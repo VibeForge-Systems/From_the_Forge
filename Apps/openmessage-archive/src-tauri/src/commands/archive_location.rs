@@ -163,7 +163,10 @@ mod tests {
         let library = tmp.path().join("lib");
         fs::create_dir(&library).expect("mkdir");
         let state = state_with_library(tmp.path(), &library);
-        let r = state.jobs.reserve("some-backup").expect("reserve");
+        let r = state
+            .jobs
+            .reserve("some-backup", crate::backups::dto::JobKind::Validate)
+            .expect("reserve");
         let err = clear_inner(&state).expect_err("busy");
         assert_eq!(err.code, ErrorCode::Busy);
         assert_eq!(err.message, BUSY_LOCATION);

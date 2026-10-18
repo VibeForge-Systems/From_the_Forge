@@ -1,6 +1,6 @@
-//! Starting and cancelling a validation job (§11.3). Progress and the
-//! terminal event travel over a `tauri::ipc::Channel<JobEvent>` (D2), which
-//! needs no `core:*` permission.
+//! Starting and cancelling jobs: validation (§11.3) and the extraction check
+//! (M3 §16.2). Progress and the terminal event travel over a
+//! `tauri::ipc::Channel<JobEvent>` (D2), which needs no `core:*` permission.
 
 use std::path::PathBuf;
 
@@ -10,7 +10,10 @@ use tauri::State;
 
 use super::backups::candidate_for;
 use super::AppState;
-use crate::backups::dto::{JobEvent, JobRef, JobStarted, OpenBackupRequest};
+use crate::backups::dto::{
+    BackupPassword, CheckExtractionRequest, JobEvent, JobKind, JobRef, JobStarted,
+    OpenBackupRequest,
+};
 use crate::backups::worker::{self, JobSpec};
 use crate::backups::{messages, JobEventSink};
 use crate::error::{ErrorCode, IpcError, IpcResult};
@@ -40,10 +43,71 @@ pub async fn open_backup(
         backup_id,
         password,
     } = request;
+    start_job(&state, backup_id, password, JobKind::Validate, on_event).await
+}
+
+/// Start an extraction check (M3 §2): validate, then, if the backup is
+/// importable, copy the Messages database into staging, read it to count
+/// what can be extracted, and delete the copy. Returns once the job has
+/// started; a summary of its outcome arrives on `on_event`, and the reports
+/// are fetched with `get_backup_details` (D47).
+#[tauri::command]
+pub async fn check_extraction(
+    state: State<'_, AppState>,
+    request: CheckExtractionRequest,
+    on_event: Channel<JobEvent>,
+) -> IpcResult<JobStarted> {
+    let CheckExtractionRequest {
+        backup_id,
+        password,
+    } = request;
+    start_job(
+        &state,
+        backup_id,
+        password,
+        JobKind::ExtractionCheck,
+        on_event,
+    )
+    .await
+}
+
+async fn start_job(
+    state: &AppState,
+    backup_id: String,
+    password: Option<BackupPassword>,
+    kind: JobKind,
+    on_event: Channel<JobEvent>,
+) -> IpcResult<JobStarted> {
+    let (spec, done) = prepare_job(state, backup_id, password, kind).await?;
+    let job_id = spec.job_id.clone();
+    if worker::spawn(
+        spec,
+        state.jobs.clone(),
+        Box::new(ChannelSink(on_event)),
+        done,
+    )
+    .is_err()
+    {
+        state.jobs.release(&job_id);
+        return Err(IpcError::internal("job thread could not start"));
+    }
+    Ok(JobStarted { job_id })
+}
+
+/// Steps 1–5 of starting a job, shared by both kinds: re-inspect, the
+/// password, the archive location, the job slot (D7) and
+/// `confirm_library_unchanged`. On success the slot is reserved and the
+/// caller must start the worker or release it.
+async fn prepare_job(
+    state: &AppState,
+    backup_id: String,
+    password: Option<BackupPassword>,
+    kind: JobKind,
+) -> IpcResult<(JobSpec, std::sync::mpsc::Sender<()>)> {
     let limits = Limits::default();
 
     // 1. The id must be one Rust handed out.
-    let (candidate, _location) = candidate_for(&state, &backup_id)?;
+    let (candidate, _location) = candidate_for(state, &backup_id)?;
     let configured_library = state.settings()?.settings().archive_directory.clone();
     let library = configured_library.clone().map(PathBuf::from);
 
@@ -124,32 +188,23 @@ pub async fn open_backup(
     // 5. The job slot. The archive location may have changed while step 2
     //    ran (nothing was reserved yet, so the location commands allowed it);
     //    staging must never go to a location the user just left.
-    let reservation = state.jobs.reserve(&backup_id)?;
+    let reservation = state.jobs.reserve(&backup_id, kind)?;
     let job_id = reservation.job_id.clone();
-    confirm_library_unchanged(&state, &job_id, configured_library.as_deref())?;
+    confirm_library_unchanged(state, &job_id, configured_library.as_deref())?;
 
-    // 6. The worker.
-    let spec = JobSpec {
-        job_id: job_id.clone(),
-        backup_id,
-        inspection,
-        library,
-        password,
-        limits,
-        cancel: reservation.cancel.clone(),
-    };
-    if worker::spawn(
-        spec,
-        state.jobs.clone(),
-        Box::new(ChannelSink(on_event)),
+    Ok((
+        JobSpec {
+            job_id,
+            backup_id,
+            kind,
+            inspection,
+            library,
+            password,
+            limits,
+            cancel: reservation.cancel,
+        },
         reservation.done,
-    )
-    .is_err()
-    {
-        state.jobs.release(&job_id);
-        return Err(IpcError::internal("job thread could not start"));
-    }
-    Ok(JobStarted { job_id })
+    ))
 }
 
 /// After the job slot is reserved, check under the settings lock that the
@@ -214,7 +269,10 @@ mod tests {
             .expect("settings")
             .update(|s| s.archive_directory = Some("/new/library".into()))
             .expect("save");
-        let r = state.jobs.reserve("backup-a").expect("reserve");
+        let r = state
+            .jobs
+            .reserve("backup-a", JobKind::Validate)
+            .expect("reserve");
         let err = confirm_library_unchanged(&state, &r.job_id, Some("/old/library"))
             .expect_err("changed");
         assert_eq!(err.code, ErrorCode::NotConfigured);
@@ -226,7 +284,10 @@ mod tests {
             .expect("settings")
             .update(|s| s.archive_directory = None)
             .expect("save");
-        let r = state.jobs.reserve("backup-a").expect("reserve");
+        let r = state
+            .jobs
+            .reserve("backup-a", JobKind::Validate)
+            .expect("reserve");
         assert!(confirm_library_unchanged(&state, &r.job_id, Some("/new/library")).is_err());
         assert!(!state.jobs.any_active());
     }
@@ -235,7 +296,10 @@ mod tests {
     fn an_unchanged_location_keeps_the_slot() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let state = state_with_library(tmp.path(), "/lib");
-        let r = state.jobs.reserve("backup-a").expect("reserve");
+        let r = state
+            .jobs
+            .reserve("backup-a", JobKind::Validate)
+            .expect("reserve");
         confirm_library_unchanged(&state, &r.job_id, Some("/lib")).expect("unchanged");
         assert!(state.jobs.any_active());
     }

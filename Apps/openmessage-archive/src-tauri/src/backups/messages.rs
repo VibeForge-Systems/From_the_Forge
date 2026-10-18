@@ -15,6 +15,8 @@ use oma_backup::{
     SnapshotState, StagingRefusal, UnsupportedReason,
 };
 
+use oma_messages::{BackupStage, MessagesError};
+
 use super::dto::{BackupState, ValidationCheck};
 use crate::error::{ErrorCode, IpcError};
 use crate::settings::CheckLevel;
@@ -360,6 +362,74 @@ pub fn to_ipc(e: &BackupError, limits: &Limits) -> IpcError {
         BackupError::StagingRefused(_) => IpcError::new(ErrorCode::Io, STAGING_NOT_SAFE),
         BackupError::Internal(what) => IpcError::internal(what),
         BackupError::Cancelled => IpcError::internal("cancelled job reported as an error"),
+    }
+}
+
+/// "The backup changed…" for the Messages database copy (M3 §16.5).
+pub const SMS_SOURCE_CHANGED: &str = "The backup changed while the Messages database was being copied. Run the check again when no backup is in progress.";
+
+/// What went wrong opening the staged copy, without "file index" (§16.5).
+fn opening_detail(e: &BackupError) -> String {
+    match e {
+        BackupError::Sqlite { code: Some(c) } => format!("SQLite error {c}"),
+        BackupError::Sqlite { code: None } => "SQLite reported an error".into(),
+        BackupError::Io { kind, .. } => format!("a file could not be read: {kind}"),
+        BackupError::LimitExceeded { .. } | BackupError::SchemaExceedsLimits => {
+            "it exceeds this app's safety limits".into()
+        }
+        _ => "an unexpected error occurred".into(),
+    }
+}
+
+/// `MessagesError` → `IpcError`, by stage (M3 §16.5). No new `ErrorCode`
+/// (D41). `Cancelled` is never an `IpcError`; callers turn it into
+/// `JobEvent::Cancelled` first.
+pub fn messages_to_ipc(e: &MessagesError, limits: &Limits) -> IpcError {
+    match e {
+        MessagesError::Sqlite {
+            code: Some(c @ (11 | 26)),
+            ..
+        } => IpcError::new(
+            ErrorCode::MalformedBackup,
+            format!("The Messages database in this backup is damaged and could not be read (SQLite error {c})."),
+        ),
+        MessagesError::Sqlite { code: Some(c), .. } => IpcError::new(
+            ErrorCode::MalformedBackup,
+            format!("The Messages database in this backup could not be read (SQLite error {c})."),
+        ),
+        MessagesError::Sqlite { code: None, .. } => IpcError::new(
+            ErrorCode::MalformedBackup,
+            "The Messages database in this backup could not be read.",
+        ),
+        MessagesError::Backup { source, stage } => match (stage, source) {
+            (BackupStage::Staging, BackupError::FileUnavailable(f)) => IpcError::new(
+                ErrorCode::MalformedBackup,
+                format!(
+                    "The Messages database could not be copied from the backup: {}.",
+                    file_unavailable(*f)
+                ),
+            ),
+            (BackupStage::Staging | BackupStage::Opening, BackupError::SourceChanged) => {
+                IpcError::new(ErrorCode::Io, SMS_SOURCE_CHANGED)
+            }
+            (_, BackupError::Cancelled) => IpcError::internal("cancelled job reported as an error"),
+            (BackupStage::Opening, e) => IpcError::new(
+                ErrorCode::MalformedBackup,
+                format!(
+                    "The Messages database copy could not be opened ({}).",
+                    opening_detail(e)
+                ),
+            ),
+            (BackupStage::Removing, _) => {
+                IpcError::internal("removing the staged copy reported as an error")
+            }
+            // Staging (other errors), ManifestLookup and AttachmentProbe:
+            // the backup's own sentences, where "file index" is right.
+            (_, e) => to_ipc(e, limits),
+        },
+        MessagesError::Cancelled => IpcError::internal("cancelled job reported as an error"),
+        MessagesError::Internal(what) => IpcError::internal(what),
+        _ => IpcError::internal("unknown messages error"),
     }
 }
 
@@ -908,6 +978,135 @@ mod tests {
             reason,
             "Status.plist could not be read: it is larger than 1 MiB."
         );
+    }
+
+    /// One case per row of M3 §16.5.
+    #[test]
+    fn every_messages_error_row_maps_by_stage() {
+        use oma_messages::Stage;
+        let limits = Limits::default();
+        let cases: Vec<(MessagesError, ErrorCode, &str)> = vec![
+            (
+                MessagesError::Sqlite { code: Some(11), stage: Stage::Messages },
+                ErrorCode::MalformedBackup,
+                "The Messages database in this backup is damaged and could not be read (SQLite error 11).",
+            ),
+            (
+                MessagesError::Sqlite { code: Some(26), stage: Stage::Scan },
+                ErrorCode::MalformedBackup,
+                "The Messages database in this backup is damaged and could not be read (SQLite error 26).",
+            ),
+            (
+                MessagesError::Sqlite { code: Some(1), stage: Stage::Probe },
+                ErrorCode::MalformedBackup,
+                "The Messages database in this backup could not be read (SQLite error 1).",
+            ),
+            (
+                MessagesError::Backup {
+                    source: BackupError::FileUnavailable(FileUnavailable::BlobMissing),
+                    stage: BackupStage::Staging,
+                },
+                ErrorCode::MalformedBackup,
+                "The Messages database could not be copied from the backup: a file the check needs is missing from the backup.",
+            ),
+            (
+                MessagesError::Backup {
+                    source: BackupError::SourceChanged,
+                    stage: BackupStage::Staging,
+                },
+                ErrorCode::Io,
+                SMS_SOURCE_CHANGED,
+            ),
+            (
+                MessagesError::Backup {
+                    source: BackupError::SourceChanged,
+                    stage: BackupStage::Opening,
+                },
+                ErrorCode::Io,
+                SMS_SOURCE_CHANGED,
+            ),
+            (
+                MessagesError::Backup {
+                    source: BackupError::Sqlite { code: Some(14) },
+                    stage: BackupStage::Opening,
+                },
+                ErrorCode::MalformedBackup,
+                "The Messages database copy could not be opened (SQLite error 14).",
+            ),
+            (
+                MessagesError::Backup {
+                    source: BackupError::FileUnavailable(FileUnavailable::Ambiguous),
+                    stage: BackupStage::ManifestLookup,
+                },
+                ErrorCode::MalformedBackup,
+                "The backup could not be checked: a file the check needs is listed more than once. The backup may be damaged.",
+            ),
+            (
+                MessagesError::Backup {
+                    source: BackupError::Sqlite { code: Some(11) },
+                    stage: BackupStage::AttachmentProbe,
+                },
+                ErrorCode::MalformedBackup,
+                "The backup's file index could not be read (SQLite error 11). The backup may be damaged.",
+            ),
+            (
+                MessagesError::Backup {
+                    source: BackupError::Io {
+                        op: oma_backup::IoOp::Write,
+                        side: IoSide::Staging,
+                        kind: io::ErrorKind::StorageFull,
+                        os_code: None,
+                    },
+                    stage: BackupStage::Staging,
+                },
+                ErrorCode::Io,
+                DISK_FULL,
+            ),
+            (
+                MessagesError::Backup {
+                    source: BackupError::Io {
+                        op: oma_backup::IoOp::Remove,
+                        side: IoSide::Staging,
+                        kind: io::ErrorKind::PermissionDenied,
+                        os_code: None,
+                    },
+                    stage: BackupStage::Removing,
+                },
+                ErrorCode::Internal,
+                "Internal error (removing the staged copy reported as an error). Please report this as a bug.",
+            ),
+            (
+                MessagesError::Internal("x"),
+                ErrorCode::Internal,
+                "Internal error (x). Please report this as a bug.",
+            ),
+            (
+                MessagesError::Cancelled,
+                ErrorCode::Internal,
+                "Internal error (cancelled job reported as an error). Please report this as a bug.",
+            ),
+        ];
+        for (e, code, message) in cases {
+            let ipc = messages_to_ipc(&e, &limits);
+            assert_eq!(ipc.code, code, "{e:?}");
+            assert_eq!(ipc.message, message, "{e:?}");
+        }
+        // "File index" belongs to Manifest.db only: never in a sentence
+        // about the Messages database copy.
+        for stage in [BackupStage::Staging, BackupStage::Opening] {
+            for source in [
+                BackupError::Sqlite { code: Some(14) },
+                BackupError::SchemaExceedsLimits,
+                BackupError::FileUnavailable(FileUnavailable::NotListed),
+                BackupError::SourceChanged,
+            ] {
+                let m = messages_to_ipc(&MessagesError::Backup { source, stage }, &limits).message;
+                if stage == BackupStage::Opening {
+                    assert!(!m.contains("file index"), "{m}");
+                }
+                assert!(m.ends_with('.'), "{m}");
+            }
+        }
     }
 
     #[test]

@@ -100,11 +100,12 @@ const warnings = computed(() => settings.location.checks.filter((c) => c.level =
             Pick a folder on this computer. Archives are kept separate from the original backups.
           </li>
           <li>
-            <strong>Find your iPhone backup.</strong> Check it before importing.
+            <strong>Find your iPhone backup.</strong> Check it, and check that its messages can be
+            read, before importing.
             <RouterLink to="/backups">Go to Backups</RouterLink>
           </li>
           <li>
-            <strong>Import messages.</strong> <PlannedBadge capability="extraction" />
+            <strong>Import messages.</strong> <PlannedBadge capability="archive-database" />
           </li>
           <li>
             <strong>Browse, search, and export.</strong> <PlannedBadge capability="viewer" />
@@ -159,8 +160,9 @@ const warnings = computed(() => settings.location.checks.filter((c) => c.level =
           <LocationStatusList :checks="warnings" />
         </div>
         <p class="text-body-secondary small">
-          Find your iPhone backup and check it on the Backups page. Importing messages into the
-          archive arrives in milestone 3. The backup itself is never modified.
+          Find your iPhone backup and check it on the Backups page, including whether its
+          messages can be read. Importing messages into the archive arrives in milestone 4. The
+          backup itself is never modified.
         </p>
         <template #actions>
           <RouterLink to="/backups" class="btn btn-primary">
@@ -169,7 +171,7 @@ const warnings = computed(() => settings.location.checks.filter((c) => c.level =
           <button type="button" class="btn btn-outline-secondary" disabled aria-describedby="import-planned">
             <i class="bi bi-box-arrow-in-down me-1" aria-hidden="true"></i>Import messages
           </button>
-          <span id="import-planned"><PlannedBadge capability="extraction" /></span>
+          <span id="import-planned"><PlannedBadge capability="archive-database" /></span>
         </template>
       </EmptyState>
     </div>

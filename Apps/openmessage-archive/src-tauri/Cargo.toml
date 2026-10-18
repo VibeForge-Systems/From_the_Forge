@@ -23,6 +23,7 @@ tauri-build = { workspace = true, features = [] }
 dunce.workspace = true
 oma-backup.workspace = true
 oma-fs.workspace = true
+oma-messages.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tauri = { workspace = true, features = [] }

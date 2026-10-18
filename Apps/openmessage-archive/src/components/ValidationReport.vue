@@ -50,7 +50,7 @@ const sms = computed(() => {
       >
         {{
           report.importable
-            ? 'This backup passed the checks for message import, which arrives in milestone 3.'
+            ? 'This backup passed the checks for message import, which arrives in milestone 4.'
             : 'This backup cannot be imported. See the failed checks below.'
         }}
       </div>
@@ -78,7 +78,8 @@ const sms = computed(() => {
             </tbody>
           </table>
           <p class="small text-body-secondary mt-2 mb-0">
-            The Messages database was checked where it is and was not copied.
+            Validation checks the Messages database where it is and does not copy it. The
+            extraction check reads a temporary copy.
           </p>
         </div>
       </div>

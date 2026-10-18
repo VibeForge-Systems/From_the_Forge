@@ -3,6 +3,7 @@ import type { BackupSummary } from "./BackupSummary";
 import type { CleanupDto } from "./CleanupDto";
 import type { DeviceDetails } from "./DeviceDetails";
 import type { EncryptionDetails } from "./EncryptionDetails";
+import type { ExtractionReportDto } from "./ExtractionReportDto";
 import type { JobSummary } from "./JobSummary";
 import type { LayoutDetails } from "./LayoutDetails";
 import type { StatusDetails } from "./StatusDetails";
@@ -24,6 +25,16 @@ notes: Array<ValidationCheck>,
  * shown before every validation (D13).
  */
 archiveSyncProvider: string | null, archiveConfigured: boolean, lastReport: ValidationReportDto | null, 
+/**
+ * The last extraction check's report, from the same job as
+ * `lastReport`. A later validation clears it (§16.1).
+ */
+lastExtractionReport: ExtractionReportDto | null, 
+/**
+ * The backup's iOS version is not one the extraction check has been
+ * tested on with a real backup (none are, in M3).
+ */
+iosVersionUntested: boolean, 
 /**
  * From the last finished, failed or cancelled job.
  */
