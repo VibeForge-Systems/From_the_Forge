@@ -7,12 +7,15 @@
 //! `archive_meta` (§5.3 steps 5–7). Every statement runs under an op
 //! budget.
 //!
-//! M5 adds thread pages, search and blob reads here.
+//! [`ArchiveReader::open_blob`] is the one way attachment bytes are read
+//! back (spec §4.3, §9.5); M5 adds thread pages and search here.
 
 use rusqlite::types::ValueRef;
 use rusqlite::Connection;
 
+use crate::blobs::{open_checked, BlobReader, StorageName};
 use crate::conn::{ReadConn, READ_OP_BUDGET};
+use crate::error::BlobProblem;
 use crate::error::{ArchiveError, DamageKind, Stage};
 use crate::id::{ArchiveId, Label, LabelState};
 use crate::layout::ArchiveDir;
@@ -20,6 +23,7 @@ use crate::schema::codes::SessionState;
 use crate::schema::{
     fingerprint, SchemaPlan, APPLICATION_ID, DECODER_VERSION, DERIVER_VERSION, FORMAT,
 };
+use crate::verify::VerifySummary;
 
 /// Why imports into an archive are blocked although it can be read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,6 +123,23 @@ pub struct SessionInfo {
     pub full_observation: Option<bool>,
 }
 
+/// The id of a `blob` row: one file in the attachment store. Ids are
+/// archive-local numbers, never content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BlobId(i64);
+
+impl BlobId {
+    /// The id with this number (M5 gets ids from the reader's queries).
+    pub fn new(id: i64) -> BlobId {
+        BlobId(id)
+    }
+
+    /// The number.
+    pub fn get(self) -> i64 {
+        self.0
+    }
+}
+
 /// The most sessions [`ArchiveReader::sessions`] returns (newest first).
 pub const SESSIONS_LIMIT: u32 = 1000;
 
@@ -193,6 +214,10 @@ fn read_meta(conn: &Connection) -> rusqlite::Result<Option<Result<Meta, ArchiveE
     })))
 }
 
+pub(crate) fn meta_label(conn: &ReadConn) -> Result<LabelState, ArchiveError> {
+    meta(conn).map(|m| m.label)
+}
+
 fn meta(conn: &ReadConn) -> Result<Meta, ArchiveError> {
     conn.budgeted(READ_OP_BUDGET, Stage::Meta, read_meta)?
         .ok_or(ArchiveError::Damaged(DamageKind::MetaMissing))?
@@ -239,6 +264,7 @@ pub(crate) fn inspect(conn: &ReadConn, plan: &SchemaPlan) -> Result<Inspected, A
 /// A lock-free, query-only view of one archive.
 pub struct ArchiveReader {
     conn: ReadConn,
+    dir: ArchiveDir,
     id: ArchiveId,
     inspected: Inspected,
     build_version: u32,
@@ -269,6 +295,7 @@ impl ArchiveReader {
         let inspected = inspect(&conn, plan)?;
         Ok(ArchiveReader {
             conn,
+            dir: dir.clone(),
             id,
             inspected,
             build_version: plan.version,
@@ -277,6 +304,10 @@ impl ArchiveReader {
 
     pub(crate) fn inspected(&self) -> &Inspected {
         &self.inspected
+    }
+
+    pub(crate) fn conn(&self) -> &ReadConn {
+        &self.conn
     }
 
     pub(crate) fn set_version(&mut self, version: u32) {
@@ -404,6 +435,76 @@ impl ArchiveReader {
         f: impl FnOnce(&Connection) -> rusqlite::Result<T>,
     ) -> Result<T, ArchiveError> {
         self.conn.budgeted(ops, stage, f)
+    }
+
+    /// Open the attachment file of blob `id` for reading (spec §4.3, §9.5):
+    /// the row's `storage_name` is parsed and must spell its `sha256`;
+    /// `attachments/` and `<hh>/` must be private real directories; the
+    /// file is opened without following a link and must be a regular file
+    /// of `byte_len` bytes. The [`BlobReader`] re-hashes what it yields and
+    /// fails its last read when the content differs from the digest.
+    /// Works while an import holds the archive's lock: placed files are
+    /// never replaced.
+    pub fn open_blob(&self, id: BlobId) -> Result<BlobReader, ArchiveError> {
+        self.require_current()?;
+        let row: Option<(Vec<u8>, i64, Option<String>)> =
+            self.conn.budgeted(READ_OP_BUDGET, Stage::Read, |c| {
+                let mut stmt =
+                    c.prepare("SELECT sha256, byte_len, storage_name FROM blob WHERE id = ?1")?;
+                let mut rows = stmt.query([id.0])?;
+                let Some(r) = rows.next()? else {
+                    return Ok(None);
+                };
+                let sha = match r.get_ref(0)? {
+                    ValueRef::Blob(b) => b.to_vec(),
+                    _ => Vec::new(),
+                };
+                let len = match r.get_ref(1)? {
+                    ValueRef::Integer(n) => n,
+                    _ => -1,
+                };
+                let name = match r.get_ref(2)? {
+                    ValueRef::Text(t) => std::str::from_utf8(t).ok().map(str::to_owned),
+                    _ => None,
+                };
+                Ok(Some((sha, len, name)))
+            })?;
+        let (sha, len, name) = row.ok_or(ArchiveError::Blob(BlobProblem::NotFound))?;
+        let name = name
+            .as_deref()
+            .and_then(StorageName::parse)
+            .filter(|n| n.sha256().is_some_and(|s| s.as_slice() == sha.as_slice()))
+            .ok_or(ArchiveError::Blob(BlobProblem::BadName))?;
+        open_checked(&self.dir, &name, len).map_err(ArchiveError::Blob)
+    }
+
+    /// The newest verify run, if any (spec §4.3). A run a crash
+    /// interrupted has no outcome; counts that do not parse are `None`.
+    pub fn last_verify(&self) -> Result<Option<VerifySummary>, ArchiveError> {
+        self.require_current()?;
+        let row = self.conn.budgeted(READ_OP_BUDGET, Stage::Read, |c| {
+            let mut stmt = c.prepare(
+                "SELECT id, started_at_ns, ended_at_ns, depth, outcome, counts \
+                 FROM verify_run ORDER BY id DESC LIMIT 1",
+            )?;
+            let mut rows = stmt.query([])?;
+            let Some(r) = rows.next()? else {
+                return Ok(None);
+            };
+            Ok(Some((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, Option<i64>>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, Option<i64>>(4)?,
+                r.get::<_, Option<String>>(5)?,
+            )))
+        })?;
+        row.map(|(run, started, ended, depth, outcome, counts)| {
+            VerifySummary::from_row(run, started, ended, depth, outcome, counts.as_deref())
+                .ok_or_else(unreadable)
+        })
+        .transpose()
     }
 
     /// The newest [`SESSIONS_LIMIT`] sessions, newest first. Content-free.

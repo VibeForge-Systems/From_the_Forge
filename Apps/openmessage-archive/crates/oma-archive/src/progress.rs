@@ -83,6 +83,23 @@ pub enum ImportPhase {
     Checkpointing,
 }
 
+/// A phase of a verify (spec §8.12, §11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum VerifyPhase {
+    /// The header, fingerprint and meta checks, `quick_check` or
+    /// `integrity_check`, `foreign_key_check` and the bookkeeping counts.
+    /// `done` and `total` are not reported.
+    CheckingDatabase,
+    /// The FTS rank-1 `integrity-check`. `done` and `total` are not
+    /// reported.
+    CheckingIndex,
+    /// The attachment files: `done` of `total` `blob` rows in a quick
+    /// verify, and bytes re-hashed in a full one; then the walk of
+    /// `attachments/` and `imports/`.
+    CheckingFiles,
+}
+
 /// A progress event. Content-free.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -93,6 +110,12 @@ pub enum ArchiveEvent {
     /// (`None` when unknown).
     Import {
         phase: ImportPhase,
+        done: u64,
+        total: Option<u64>,
+    },
+    /// A verify phase started or advanced.
+    Verify {
+        phase: VerifyPhase,
         done: u64,
         total: Option<u64>,
     },

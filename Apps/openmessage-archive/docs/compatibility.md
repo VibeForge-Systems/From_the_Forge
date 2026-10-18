@@ -538,9 +538,61 @@ was not regenerated: `SHA256SUMS` and `EXPECTED.SHA256SUMS` are unchanged.
 - **The golden archive** `tests/fixtures/archives/golden-v1/` (dev1 v1
   then v2) was made by this build; a copy opened read-write, passed the
   integrity, foreign-key, FTS and store checks and matched its pinned
-  snapshot. The quick and full verify come with the verifier (slice 4k).
+  snapshot. Since slice 4k it also passes quick and full verify.
 - **Not tested:** Windows (none of the new kill points is in the Windows
   subset), the shell's gate and its timeout (slice 4l).
+
+**Not yet observed:** any of this on Windows.
+
+### Milestone 4 integrity verifier and blob reader (slice 4k)
+
+Run in the same Linux container on 2026-10-18 (bundled SQLite 3.53.2,
+ext4); not CI, not a desktop, synthetic data only. No fixture changed.
+
+- **A clean archive** (`imp-dev1-v1-plain`, six attachment files; an empty
+  archive; the golden archive) passed quick and full verify with every
+  problem count at zero. The full verify re-hashed every file (its byte
+  count equalled the rows' `byte_len` sum) and set `verify_state = 0` on
+  every row; the quick one set none. Both runs were recorded in
+  `verify_run` and read back by `last_verify`. `attachments/` and
+  `imports/` were byte-identical before and after, and the content tables
+  were unchanged apart from the two verify columns.
+- **Store damage was reported by kind:** a deleted file (missing), a
+  truncated one (length mismatch) and a same-length changed one (only the
+  full verify, as a hash mismatch), each with its `verify_state`; an
+  orphan, a misnamed file, a directory below `<hh>/` (not entered), a link
+  to a file outside the archive (not followed; its target unchanged), a
+  partial file, a `blob_intent` row, a malformed and a misnamed
+  `imports/` entry and a provenance `.tmp`. Nothing was removed, repaired
+  or reconciled. A store file with mode 0644 was counted by the full
+  verify only.
+- **Database damage was reported by kind:** a dangling foreign key (by
+  table), `value_issue` and `value_history` rows about missing rows and
+  an unknown entity, an invalid label, a session above the rules
+  high-water mark, a running session (still running afterwards: recovery
+  is skipped), `secure-delete` off, and an index page with an invalid page
+  type (both `quick_check` and `integrity_check`). `sqlite_stat1` was
+  reported without being a problem.
+- **FTS drift** (a body changed with triggers off) failed the rank-1
+  check at both depths; `quick_check` and `integrity_check` did **not**
+  detect it on 3.53.2.
+- **A crafted `storage_name`** (`../` repeated, and a name that does not
+  spell its digest), inserted with the CHECK constraints off, was counted
+  as a bad name and refused by `open_blob`; no file outside the archive's
+  database changed.
+- **The walk is bounded:** with 10,001 extra entries it stopped at
+  `blobs + 10,000` and reported the truncation.
+- **Cancel** before the files and before the start gave outcome
+  `Cancelled`, recorded, with no blob state written. An archive that
+  needs a migration was refused.
+- **`open_blob`** read every file back with the right length and digest,
+  through the lock-free reader while the archive was held open and
+  through the `Archive`; a same-length change failed the final read with
+  `InvalidData`, a truncated file gave `LengthMismatch`, a deleted one
+  `Missing`, and a link `NotRegular` (Linux).
+- **Not tested:** Windows (junctions in the walk, long paths), a verify
+  on a real or large archive (no timing is claimed), a kill during a
+  verify, and the shell's verify job (slice 4l).
 
 **Not yet observed:** any of this on Windows.
 

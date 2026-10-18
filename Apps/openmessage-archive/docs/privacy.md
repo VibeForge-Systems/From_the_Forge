@@ -243,6 +243,15 @@ milestone's documentation.
   address, GUID, content digest, backup date or path, and no archive
   label. Including the model and iOS version follows the spec's lean
   (D70), which still awaits the owner's confirmation.
+- **Integrity checks (implemented, not yet reachable from the app).** A
+  verify reads the archive's database, every attachment file (a full
+  verify reads each one to the end to re-hash it) and every
+  `imports/` file, and changes none of them: it repairs, deletes and
+  moves nothing. It records its result in the archive database only: one
+  row per verify with numbers, booleans, check states and the names of
+  the archive's own tables, and, after a full verify, a check state and
+  time on each stored file's row. Nothing it reads (text, names, paths or
+  hashes) is kept or logged.
 - **The temporary copy of the Messages database (D74).** During an import
   the decrypted copy of sms.db in the library's staging folder lives from
   staging through the confirmation step and every pass, including the

@@ -120,7 +120,8 @@ Each one is enforced in code. Keep it that way.
   FTS index, the link passes, the attachments with their files in the
   content-addressed store, the Recently Deleted markers, the space
   estimate and guards, the gate, finalize and the provenance files,
-  `Archive::import`); the planned
+  `Archive::import`; and the report-only verifier `Archive::verify` with
+  `open_blob`); the planned
   crates are `oma-export` (M6) and `oma-device` (M7). Each must build and test without
   Tauri. The shell's `src-tauri/src/backups/` (registry, job table, worker,
   DTOs, messages) has no Tauri types either, so it is tested without a
@@ -306,6 +307,16 @@ Never hand-edit generated files.
   nothing replaces an existing file. The space guard (`space.rs`) runs
   before every write transaction; tests get a fake probe with 1 TiB free
   from `common::library()`, so no test depends on the runner's disk.
+- **The verifier (`verify.rs`) is report-only.** It opens the writer with
+  `begin_write(Recovery::Skip)` and writes only `verify_run` and, in a
+  full verify, `blob.verify_state`/`verified_at_ns`; never make it sweep,
+  reconcile or repair (that is M8). Its reads go through
+  `ReadConn::cancellable` (no op budget, stopped by the cancel token);
+  the FTS rank-1 check runs on the writer under `conn::armed`. A failed
+  schema check stops it before any table read and writes nothing. Its
+  counts are numbers, booleans, closed states and `v1.sql` table names
+  only. Attachment bytes are read back only through `blobs::open_checked`
+  (`open_blob`, the verifier): add no other reader of store files.
 - **Crash points are `fault::point(FaultPoint::…)` calls.** They compile
   to nothing without the feature. `tests/crash.rs` re-runs its own binary
   with `OMA_TEST_FAULT=<point>:<n>` and kills the child there; add a point

@@ -229,6 +229,29 @@ closed_code! {
 }
 
 closed_code! {
+    /// `blob.verify_state`, set by the full verifier (spec §11). NULL means
+    /// never verified.
+    BlobVerifyState {
+        /// The file re-hashed to its `sha256`.
+        Ok = 0,
+        /// No file at the storage name.
+        Missing = 1,
+        /// A link, a directory or another non-regular file, or a `<hh>`
+        /// directory that is not a private real directory.
+        NotRegular = 2,
+        /// A regular file whose length differs from `byte_len`.
+        LengthMismatch = 3,
+        /// A regular file of the right length whose content hashes to
+        /// another digest.
+        HashMismatch = 4,
+        /// Reading the file failed.
+        Unreadable = 5,
+        /// `storage_name` does not parse, or does not spell `sha256`.
+        BadName = 6,
+    }
+}
+
+closed_code! {
     /// `import_cursor.pass` and `import_issue.pass`: the import passes of
     /// spec §8.4 that write a cursor (P0 and P5b read only), and P9, the
     /// finalize step, which writes no cursor but can record an issue.
@@ -1135,6 +1158,14 @@ mod tests {
         }
         // Every reader path class has its own code.
         assert_eq!(oma_messages::PathClass::ALL.len(), 7);
+    }
+
+    /// The codes added with the verifier (slice 4k).
+    #[test]
+    fn verify_codes_are_pinned() {
+        let got: Vec<i64> = BlobVerifyState::ALL.iter().map(|v| v.code()).collect();
+        assert_eq!(got, [0, 1, 2, 3, 4, 5, 6]);
+        assert_eq!(BlobVerifyState::from_code(7), None);
     }
 
     #[test]

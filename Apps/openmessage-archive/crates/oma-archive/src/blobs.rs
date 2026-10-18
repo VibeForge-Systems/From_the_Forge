@@ -19,6 +19,13 @@
 //!   replacement of one that does not; then one flush per touched `<hh>`
 //!   directory.
 //!
+//! - [`BlobReader`] and [`open_checked`]: the one way attachment bytes are
+//!   read back (`open_blob`, the full verifier; spec §4.3, §9.5): the
+//!   name parsed, the directories checked, the file opened without
+//!   following a link, its length compared with `byte_len`, and its
+//!   content re-hashed while it streams.
+//! - [`walk_store`]: the verifier's bounded walk of `attachments/`.
+//!
 //! The pass that drives the phases (A to D) is `import/attachments.rs`.
 
 use std::collections::BTreeSet;
@@ -49,11 +56,8 @@ impl std::fmt::Debug for StorageName {
 
 impl StorageName {
     /// Parse a stored name. Anything but 64 lowercase hex characters is
-    /// refused, so `..`, separators and upper case never reach a path.
-    /// Its callers (the blob reader and the verifier) arrive in later
-    /// slices; the parser is tested now because the schema's CHECK is not
-    /// trusted on a crafted file.
-    #[allow(dead_code)]
+    /// refused, so `..`, separators and upper case never reach a path (the
+    /// schema's CHECK is not trusted on a crafted file).
     pub(crate) fn parse(s: &str) -> Option<StorageName> {
         let ok = s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
         ok.then(|| StorageName(s.to_owned()))
@@ -436,6 +440,356 @@ fn regular_len(path: &Path) -> Option<u64> {
         .ok()
         .map(|m| m.len())
 }
+
+/// An attachment file opened for reading (spec §4.3 `open_blob`, §9.5).
+///
+/// It yields at most the row's `byte_len` bytes and hashes them as they
+/// stream. At the end of the file it checks that exactly `byte_len` bytes
+/// came and that they hash to the row's `sha256`; otherwise that final
+/// read fails with [`std::io::ErrorKind::InvalidData`] (and so does every
+/// read after it). A reader that stops early gets no such check, so a
+/// caller that must trust the bytes reads to the end before using them.
+pub struct BlobReader {
+    file: io::Take<fs::File>,
+    len: u64,
+    read: u64,
+    hasher: Sha256,
+    expected: [u8; 32],
+    end: Option<bool>,
+}
+
+impl std::fmt::Debug for BlobReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BlobReader")
+            .field("len", &self.len)
+            .field("read", &self.read)
+            .finish_non_exhaustive()
+    }
+}
+
+impl BlobReader {
+    /// The file's length, which equals the row's `byte_len`.
+    pub fn len(&self) -> u64 {
+        self.len
+    }
+
+    /// `true` for an empty file.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    fn mismatch() -> io::Error {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the attachment file does not match its digest",
+        )
+    }
+}
+
+impl Read for BlobReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self.end {
+            Some(true) => return Ok(0),
+            Some(false) => return Err(BlobReader::mismatch()),
+            None => {}
+        }
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        let n = self.file.read(buf)?;
+        if n == 0 {
+            let digest: [u8; 32] = std::mem::take(&mut self.hasher).finalize().into();
+            let ok = self.read == self.len && digest == self.expected;
+            self.end = Some(ok);
+            return if ok {
+                Ok(0)
+            } else {
+                Err(BlobReader::mismatch())
+            };
+        }
+        let chunk = buf
+            .get(..n)
+            .ok_or_else(|| io::Error::other("short buffer"))?;
+        self.hasher.update(chunk);
+        self.read = self
+            .read
+            .saturating_add(u64::try_from(n).unwrap_or(u64::MAX));
+        Ok(n)
+    }
+}
+
+/// Open the store file `name` for a row of `byte_len` bytes (spec §9.5):
+/// `attachments/` and `<hh>/` must be private real directories, the file is
+/// opened with `open_nofollow` and must be a regular file of `byte_len`
+/// bytes. The returned reader re-hashes what it yields against the digest
+/// the name spells.
+pub(crate) fn open_checked(
+    dir: &ArchiveDir,
+    name: &StorageName,
+    byte_len: i64,
+) -> Result<BlobReader, crate::error::BlobProblem> {
+    use crate::error::BlobProblem;
+    let expected = name.sha256().ok_or(BlobProblem::BadName)?;
+    match store_dir(dir, name) {
+        Ok(Some(_)) => {}
+        Ok(None) => return Err(BlobProblem::Missing),
+        Err(_) => return Err(BlobProblem::NotRegular),
+    }
+    let file = match oma_fs::open_nofollow(&name.path_in(dir)) {
+        Ok(f) => f,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Err(BlobProblem::Missing),
+        Err(e) if oma_fs::open_refusal(&e).is_some() => return Err(BlobProblem::NotRegular),
+        Err(e) => return Err(BlobProblem::Io(e.kind())),
+    };
+    let len = file
+        .metadata()
+        .map_err(|e| BlobProblem::Io(e.kind()))?
+        .len();
+    if u64::try_from(byte_len).ok() != Some(len) {
+        return Err(BlobProblem::LengthMismatch);
+    }
+    Ok(BlobReader {
+        file: file.take(len),
+        len,
+        read: 0,
+        hasher: Sha256::new(),
+        expected,
+        end: None,
+    })
+}
+
+/// What [`walk_store`] found under `attachments/`. Counts only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct StoreWalk {
+    /// Entries looked at (both levels, `.incoming/` included).
+    pub(crate) entries: u64,
+    /// Names the store never writes, and directories below `<hh>/`
+    /// (never descended into).
+    pub(crate) unexpected: u64,
+    /// Regular store files no `blob` row names.
+    pub(crate) orphans: u64,
+    /// Links, junctions and other reparse points (never followed).
+    pub(crate) links: u64,
+    /// `attachments/.incoming/<n>.partial` files.
+    pub(crate) partials: u64,
+    /// With `check_modes`: entries that fail [`check_private`] for their
+    /// type (on Unix, the wrong owner or group or other bits).
+    pub(crate) not_private: u64,
+    /// Directories that could not be listed.
+    pub(crate) unlisted: u64,
+    /// The walk stopped at its entry limit.
+    pub(crate) truncated: bool,
+}
+
+/// The type of a directory entry, by `symlink_metadata` (nothing is
+/// followed). A Windows reparse point counts as a link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EntryKind {
+    Link,
+    Dir,
+    File,
+    Other,
+}
+
+fn entry_kind(path: &Path) -> EntryKind {
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return EntryKind::Other;
+    };
+    if meta.file_type().is_symlink() {
+        return EntryKind::Link;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return EntryKind::Link;
+        }
+    }
+    if meta.is_dir() {
+        EntryKind::Dir
+    } else if meta.is_file() {
+        EntryKind::File
+    } else {
+        EntryKind::Other
+    }
+}
+
+/// `true` for two lowercase hex characters.
+fn is_fan_out_name(name: &str) -> bool {
+    name.len() == 2 && name.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// The walk's state: the limit and the counts.
+struct Walker<'a> {
+    referenced: &'a BTreeSet<[u8; 32]>,
+    limit: u64,
+    check_modes: bool,
+    cancel: &'a oma_backup::CancelToken,
+    out: StoreWalk,
+}
+
+/// Why a walk stopped early.
+pub(crate) struct WalkCancelled;
+
+impl Walker<'_> {
+    /// Count one more entry; `false` once the limit is passed.
+    fn admit(&mut self) -> Result<bool, WalkCancelled> {
+        if self.out.entries >= self.limit {
+            self.out.truncated = true;
+            return Ok(false);
+        }
+        self.out.entries = self.out.entries.saturating_add(1);
+        if self.out.entries.is_multiple_of(1024) && self.cancel.is_cancelled() {
+            return Err(WalkCancelled);
+        }
+        Ok(true)
+    }
+
+    fn private(&mut self, path: &Path, kind: Expect) {
+        if self.check_modes && check_private(path, kind).is_err() {
+            self.out.not_private = self.out.not_private.saturating_add(1);
+        }
+    }
+
+    /// The entries of `dir`, or `None` (counted) when it cannot be listed.
+    fn list(&mut self, dir: &Path) -> Option<fs::ReadDir> {
+        match fs::read_dir(dir) {
+            Ok(r) => Some(r),
+            Err(_) => {
+                self.out.unlisted = self.out.unlisted.saturating_add(1);
+                None
+            }
+        }
+    }
+
+    fn incoming(&mut self, dir: &Path) -> Result<(), WalkCancelled> {
+        let Some(entries) = self.list(dir) else {
+            return Ok(());
+        };
+        for entry in entries {
+            if !self.admit()? {
+                return Ok(());
+            }
+            let Ok(entry) = entry else {
+                self.out.unlisted = self.out.unlisted.saturating_add(1);
+                continue;
+            };
+            let path = entry.path();
+            let partial = entry.file_name().to_str().is_some_and(is_partial_name);
+            match entry_kind(&path) {
+                EntryKind::Link => self.out.links = self.out.links.saturating_add(1),
+                EntryKind::File if partial => {
+                    self.out.partials = self.out.partials.saturating_add(1);
+                    self.private(&path, Expect::File);
+                }
+                _ => self.out.unexpected = self.out.unexpected.saturating_add(1),
+            }
+        }
+        Ok(())
+    }
+
+    fn fan_out(&mut self, dir: &Path, hh: &str) -> Result<(), WalkCancelled> {
+        let Some(entries) = self.list(dir) else {
+            return Ok(());
+        };
+        for entry in entries {
+            if !self.admit()? {
+                return Ok(());
+            }
+            let Ok(entry) = entry else {
+                self.out.unlisted = self.out.unlisted.saturating_add(1);
+                continue;
+            };
+            let path = entry.path();
+            let name = entry
+                .file_name()
+                .to_str()
+                .and_then(StorageName::parse)
+                .filter(|n| n.as_str().starts_with(hh));
+            match (entry_kind(&path), name) {
+                (EntryKind::Link, _) => self.out.links = self.out.links.saturating_add(1),
+                (EntryKind::File, Some(name)) => {
+                    let known = name.sha256().is_some_and(|s| self.referenced.contains(&s));
+                    if !known {
+                        self.out.orphans = self.out.orphans.saturating_add(1);
+                    }
+                    self.private(&path, Expect::File);
+                }
+                _ => self.out.unexpected = self.out.unexpected.saturating_add(1),
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Walk `attachments/` (spec §11): at most two levels, no link followed,
+/// at most `limit` entries (then `truncated`). `referenced` holds the
+/// digests the `blob` rows name. With `check_modes`, every directory and
+/// file found is also checked with [`check_private`].
+pub(crate) fn walk_store(
+    dir: &ArchiveDir,
+    referenced: &BTreeSet<[u8; 32]>,
+    limit: u64,
+    check_modes: bool,
+    cancel: &oma_backup::CancelToken,
+) -> Result<StoreWalk, WalkCancelled> {
+    let mut w = Walker {
+        referenced,
+        limit,
+        check_modes,
+        cancel,
+        out: StoreWalk::default(),
+    };
+    let root = dir.attachments();
+    match entry_kind(&root) {
+        EntryKind::Dir => {}
+        EntryKind::Link => {
+            w.out.links = 1;
+            return Ok(w.out);
+        }
+        _ => {
+            w.out.unlisted = 1;
+            return Ok(w.out);
+        }
+    }
+    w.private(&root, Expect::Dir);
+    let Some(entries) = w.list(&root) else {
+        return Ok(w.out);
+    };
+    for entry in entries {
+        if !w.admit()? {
+            break;
+        }
+        let Ok(entry) = entry else {
+            w.out.unlisted = w.out.unlisted.saturating_add(1);
+            continue;
+        };
+        let path = entry.path();
+        let os_name = entry.file_name();
+        let name = os_name.to_str();
+        match (entry_kind(&path), name) {
+            (EntryKind::Link, _) => w.out.links = w.out.links.saturating_add(1),
+            (EntryKind::Dir, Some(INCOMING_NAME)) => {
+                w.private(&path, Expect::Dir);
+                w.incoming(&path)?;
+            }
+            (EntryKind::Dir, Some(hh)) if is_fan_out_name(hh) => {
+                w.private(&path, Expect::Dir);
+                let hh = hh.to_owned();
+                w.fan_out(&path, &hh)?;
+            }
+            _ => w.out.unexpected = w.out.unexpected.saturating_add(1),
+        }
+        if w.out.truncated {
+            break;
+        }
+    }
+    Ok(w.out)
+}
+
+/// The name of `attachments/.incoming`.
+const INCOMING_NAME: &str = crate::layout::INCOMING_DIR;
 
 /// What phase C did with one copied file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -29,6 +29,10 @@
 //! guards, finalize and the provenance file; see its module
 //! documentation.
 //!
+//! [`Archive::verify`] is the report-only integrity verifier (slice 4k,
+//! spec §11), quick or full, and [`ArchiveReader::open_blob`] the one way
+//! attachment bytes are read back.
+//!
 //! Every connection is opened by one module, with the hardening of spec
 //! §5.5 (`DEFENSIVE`, `TRUSTED_SCHEMA` off, no `ATTACH`, an op budget on
 //! reads), through the `win32-longpath` VFS on Windows.
@@ -61,12 +65,16 @@ mod reader;
 pub mod schema;
 pub mod space;
 mod store_fs;
+mod verify;
 
 #[cfg(feature = "fault-injection")]
 pub use fault::hooks;
 
 pub use archive::{Archive, CheckpointOutcome, CloseReport, Recovery, RecoveryReport};
-pub use error::{ArchiveError, DamageKind, IoOp, LocationRefusal, PermProblem, RefusalKind, Stage};
+pub use blobs::BlobReader;
+pub use error::{
+    ArchiveError, BlobProblem, DamageKind, IoOp, LocationRefusal, PermProblem, RefusalKind, Stage,
+};
 pub use id::{ArchiveId, IdError, Label, LabelState, ARCHIVE_ID_LEN, LABEL_MAX_BYTES};
 pub use import::{
     AttachmentFileCounts, BatchBudget, BodyCounts, DeviceEvidence, EntityCounts, FinalizeReport,
@@ -80,16 +88,21 @@ pub use library::{ArchiveEntry, Library, SweepReport, LIST_LIMIT, SWEEP_MIN_AGE}
 pub use lock::{LOCK_RETRIES, LOCK_RETRY_WAIT};
 pub use progress::{
     ArchiveCtx, ArchiveEvent, ArchiveSink, CancelToken, Clock, FixedClock, ImportPhase, NoProgress,
-    SystemClock,
+    SystemClock, VerifyPhase,
 };
 pub use reader::{
-    ArchiveInfo, ArchiveReader, ArchiveStats, ImportBlock, ResumableSession, SessionCounts,
+    ArchiveInfo, ArchiveReader, ArchiveStats, BlobId, ImportBlock, ResumableSession, SessionCounts,
     SessionInfo, SESSIONS_LIMIT,
 };
+pub use schema::codes::{BlobVerifyState, VerifyOutcome};
 pub use schema::migrate::MigrationReport;
 pub use schema::{APPLICATION_ID, DECODER_VERSION, DERIVER_VERSION, SCHEMA_VERSION};
 pub use space::SpaceEstimate;
 pub use store_fs::{DirSync, Placed, RealFs, StoreFs};
+pub use verify::{
+    CheckState, SchemaCheck, VerifyCounts, VerifyDepth, VerifyReport, VerifySummary,
+    IMPORTS_SCAN_SLACK, SQLITE_CHECK_ROWS, STORE_WALK_SLACK,
+};
 
 /// The app version recorded in `archive_meta.created_by`,
 /// `import_session.app_version` and `schema_migration.app_version`.

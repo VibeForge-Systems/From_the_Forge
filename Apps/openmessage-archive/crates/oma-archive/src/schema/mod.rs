@@ -42,6 +42,17 @@ pub(crate) const FTS_TOKENIZER: &str = "unicode61 remove_diacritics 2";
 /// The schema v1 DDL (spec §6.4).
 pub(crate) const V1_SQL: &str = include_str!("v1.sql");
 
+/// The names of the ordinary tables `v1.sql` creates, in file order: the
+/// only table names the verifier reports (spec §11).
+pub(crate) fn v1_table_names() -> Vec<&'static str> {
+    V1_SQL
+        .lines()
+        .filter_map(|l| l.strip_prefix("CREATE TABLE "))
+        .filter_map(|rest| rest.split([' ', '(']).next())
+        .filter(|n| !n.is_empty())
+        .collect()
+}
+
 /// The schema a build reads and writes: its version and the migrations
 /// that lead to it from v1. A shipped build always uses
 /// [`SchemaPlan::BUILD`]; the `fault-injection` feature lets tests swap in
@@ -120,6 +131,16 @@ mod tests {
         // The text is stored verbatim in sqlite_schema; CRLF on one
         // platform would make its archives mismatch on the other.
         assert!(!V1_SQL.contains('\r'));
+    }
+
+    #[test]
+    fn the_v1_table_names_are_found() {
+        let names = v1_table_names();
+        assert_eq!(names.first(), Some(&"archive_meta"));
+        assert_eq!(names.last(), Some(&"verify_run"));
+        assert!(names.contains(&"message_attachment"));
+        assert!(!names.contains(&"message_fts"));
+        assert_eq!(names.len(), 31);
     }
 
     #[test]

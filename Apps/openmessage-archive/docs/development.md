@@ -362,6 +362,17 @@ Slice 4j (same container and method):
 | of which `import_core.rs` | 2.9 s |
 | of which `finalize.rs`, `ordering.rs`, `query_plans.rs` and `golden.rs` | 0.8 s |
 
+Slice 4k (same container and method):
+
+| What | Time |
+|---|---|
+| `cargo test --workspace`, wall clock | 63 s |
+| Sum of all test binaries' run times | 59.7 s |
+| `oma-archive`, all binaries | 41.1 s |
+| of which `crash.rs` (78 child processes in all; unchanged) | 18.5 s |
+| of which `resume.rs` | 6.0 s |
+| of which `verify.rs` (11 tests, one writes 10,001 files) | 2.1 s |
+
 `tests/perf.rs` is ignored and not counted.
 
 All of `oma-archive` is M4 test time, so slice 4f is well inside the

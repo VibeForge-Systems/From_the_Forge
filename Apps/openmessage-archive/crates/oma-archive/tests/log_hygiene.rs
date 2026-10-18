@@ -198,6 +198,41 @@ fn logs_errors_and_debug_output_hold_no_label_id_or_path() {
         "{a:?} {:?}",
         a.reader().sessions().expect("sessions")
     ));
+    // `open_blob` (the first blob row's id is 1), both verify depths and
+    // what they recorded.
+    let any_blob = 1;
+    let reader = ilib.open_read(&iid).expect("reader");
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(
+        &mut reader
+            .open_blob(oma_archive::BlobId::new(any_blob))
+            .expect("open_blob"),
+        &mut bytes,
+    )
+    .expect("read");
+    shown.push(format!(
+        "{:?} {:?}",
+        reader.open_blob(oma_archive::BlobId::new(any_blob)),
+        reader.open_blob(oma_archive::BlobId::new(-1))
+    ));
+    drop(reader);
+    for depth in [
+        oma_archive::VerifyDepth::Quick,
+        oma_archive::VerifyDepth::Full,
+    ] {
+        let r = a
+            .verify(
+                depth,
+                &mut ArchiveCtx {
+                    cancel: &CancelToken::new(),
+                    progress: &mut NoProgress,
+                    clock: &FixedClock(1),
+                },
+            )
+            .expect("verify");
+        shown.push(format!("{r:?}"));
+    }
+    shown.push(format!("{:?}", a.reader().last_verify().expect("last")));
     drop(a);
     let iroot = root(&itmp).to_string_lossy().into_owned();
     // The provenance files every terminal state wrote (spec §18.9:
@@ -225,6 +260,10 @@ fn logs_errors_and_debug_output_hold_no_label_id_or_path() {
     assert!(
         logs.iter().any(|l| l.contains("import passes done")),
         "the import logged: {logs:?}"
+    );
+    assert!(
+        logs.iter().any(|l| l.contains("verify finished")),
+        "the verify logged: {logs:?}"
     );
     for line in &logs {
         // oma-backup logs its own hashed backup id (M2's design); every

@@ -8,10 +8,9 @@
 //! existing archive fails here. The committed files are never written: the
 //! test works on a copy.
 //!
-//! The verifier (quick and full) is slice 4k; until it exists this test
-//! runs the checks it will make that already exist: `integrity_check`,
-//! `foreign_key_check`, the FTS rank-1 check and the store's agreement with
-//! its rows.
+//! After the snapshot comparison it passes quick and full verify (the
+//! full one re-hashes every attachment file), and the test's own
+//! `integrity_check`, `foreign_key_check`, FTS rank-1 and store checks.
 #![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 mod common;
@@ -22,7 +21,10 @@ use std::path::{Path, PathBuf};
 
 use common::import::*;
 use common::*;
-use oma_archive::{ArchiveEntry, Library, Recovery, SessionInfo};
+use oma_archive::{
+    ArchiveCtx, ArchiveEntry, CancelToken, FixedClock, Library, NoProgress, Recovery, SessionInfo,
+    VerifyDepth, VerifyOutcome,
+};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -162,4 +164,24 @@ fn the_golden_archive_opens_read_write_and_reads_as_written() {
             (n.into(), "completed".into())
         );
     }
+
+    // Both verify depths pass (spec §7.3, §18.2).
+    let mut a = lib.open(&info.id).expect("open");
+    for depth in [VerifyDepth::Quick, VerifyDepth::Full] {
+        let r = a
+            .verify(
+                depth,
+                &mut ArchiveCtx {
+                    cancel: &CancelToken::new(),
+                    progress: &mut NoProgress,
+                    clock: &FixedClock(1),
+                },
+            )
+            .expect("verify");
+        assert_eq!(r.outcome, VerifyOutcome::Ok, "{depth:?}: {:?}", r.counts);
+        assert_eq!(r.counts.blobs, stats.blobs);
+        assert_eq!(r.counts.provenance_files, 2);
+        assert!(r.run.is_some());
+    }
+    a.close();
 }

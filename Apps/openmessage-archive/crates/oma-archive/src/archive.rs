@@ -159,6 +159,26 @@ impl Archive {
         )
     }
 
+    /// The schema plan this archive was opened under.
+    pub(crate) fn plan(&self) -> SchemaPlan {
+        self.plan
+    }
+
+    /// What the verifier works with at once: the reader, the writer (when
+    /// [`Archive::begin_write`] opened one) and the archive directory.
+    pub(crate) fn verify_parts(&mut self) -> (&ArchiveReader, Option<&mut WriteConn>, &ArchiveDir) {
+        (&self.reader, self.writer.as_mut(), &self.dir)
+    }
+
+    /// Open the attachment file of blob `id`; see
+    /// [`ArchiveReader::open_blob`].
+    pub fn open_blob(
+        &self,
+        id: crate::reader::BlobId,
+    ) -> Result<crate::blobs::BlobReader, ArchiveError> {
+        self.reader.open_blob(id)
+    }
+
     pub(crate) fn ensure_writer(&mut self) -> Result<&mut WriteConn, ArchiveError> {
         if self.writer.is_none() {
             self.writer = Some(WriteConn::open(&self.dir)?);

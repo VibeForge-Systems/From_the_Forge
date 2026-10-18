@@ -242,7 +242,6 @@ pub(crate) fn write(dir: &ArchiveDir, conn: &Connection, session: i64) -> bool {
 
 /// Why a provenance file was not read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(not(test), allow(dead_code))] // the verifier (slice 4k) reads these
 pub(crate) enum ReadProblem {
     /// The name does not match `^session-[0-9]+\.json$`.
     Name,
@@ -255,7 +254,6 @@ pub(crate) enum ReadProblem {
 }
 
 /// Read and check one provenance file. `name` is its file name.
-#[cfg_attr(not(test), allow(dead_code))] // the verifier (slice 4k) reads these
 pub(crate) fn read(dir: &ArchiveDir, name: &str) -> Result<Value, ReadProblem> {
     let session = provenance_session(name).ok_or(ReadProblem::Name)?;
     let f = oma_fs::open_nofollow(&dir.provenance_file(session))
@@ -283,6 +281,81 @@ pub(crate) fn read(dir: &ArchiveDir, name: &str) -> Result<Value, ReadProblem> {
     } else {
         Err(ReadProblem::NotProvenance)
     }
+}
+
+/// What [`scan`] found in `imports/`. Counts only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct ImportsScan {
+    /// Provenance files that read and check.
+    pub(crate) files: u64,
+    /// Entries that are not a readable provenance file: a wrong name, over
+    /// [`MAX_BYTES`], a link, not a regular file, not JSON, or the wrong
+    /// format, version or session.
+    pub(crate) unreadable: u64,
+    /// `session-<n>.json.tmp` leftovers.
+    pub(crate) tmp: u64,
+    /// With `check_modes`: files that fail `check_private`.
+    pub(crate) not_private: u64,
+    /// `imports/` could not be listed.
+    pub(crate) unlisted: bool,
+    /// The scan stopped at its entry limit.
+    pub(crate) truncated: bool,
+}
+
+/// Read every entry of `imports/` (spec §11), at most `limit` of them.
+/// `None` when cancelled.
+pub(crate) fn scan(
+    dir: &ArchiveDir,
+    limit: u64,
+    check_modes: bool,
+    cancel: &oma_backup::CancelToken,
+) -> Option<ImportsScan> {
+    let mut out = ImportsScan::default();
+    let Ok(entries) = std::fs::read_dir(dir.imports()) else {
+        out.unlisted = true;
+        return Some(out);
+    };
+    let mut seen = 0u64;
+    for entry in entries {
+        if seen >= limit {
+            out.truncated = true;
+            break;
+        }
+        seen = seen.saturating_add(1);
+        if cancel.is_cancelled() {
+            return None;
+        }
+        let Some(name) = entry
+            .ok()
+            .and_then(|e| e.file_name().to_str().map(str::to_owned))
+        else {
+            out.unreadable = out.unreadable.saturating_add(1);
+            continue;
+        };
+        if is_provenance_tmp(&name) {
+            out.tmp = out.tmp.saturating_add(1);
+            continue;
+        }
+        match read(dir, &name) {
+            Ok(_) => {
+                out.files = out.files.saturating_add(1);
+                if check_modes {
+                    if let Some(session) = provenance_session(&name) {
+                        if oma_fs::check_private(
+                            &dir.provenance_file(session),
+                            oma_fs::Expect::File,
+                        )
+                        .is_err()
+                        {
+                            out.not_private = out.not_private.saturating_add(1);
+                        }
+                    }
+                }
+            }
+            Err(_) => out.unreadable = out.unreadable.saturating_add(1),
+        }
+    }
+    Some(out)
 }
 
 #[cfg(test)]

@@ -78,7 +78,7 @@ flowchart LR
 | `crates/oma-fs` | Filesystem safety: filename sanitization, contained path resolution, and guards for backups, MobileSync, iMazing's default store and cloud sync. From M4: volume facts (`volume`: free space, network/virtualised/FAT detection), the Unix private-permission check (`perm::check_private`), and durable placement (`place`: `fsync_dir`, `create_dir_durable`, `place_noreplace`, `open_nofollow`). From slice 4d: `check_owned_unshared` (the library folder), `rename_dir_noreplace`, `create_new_private` and `total_space` | M1, M4 (slices 4a, 4d) |
 | `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them. From M4: `copy_file_to` streams one listed file's plaintext into a caller's writer, hashing it, under `Limits::attachment_bytes` and per-file stamps | ✔ M2, M3, M4 (slice 4b) |
 | `crates/oma-messages` | Scans and probes the sms.db schema by capability, streams typed records (handles, chats, the joins, messages, attachments, Recently Deleted links) as `Col<T>` values, decodes `attributedBody` with a clean-room typedstream decoder, and produces the aggregate `ExtractionReport`. Persists nothing. From M4: stable `KnownColumn` codes, raw values of unreadable cells (`raw_issues`), `payload_data` on request, the raw association columns, key-only passes and the storage class of text cells | ✔ M3, M4 (slice 4c) |
-| `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep. Not yet used by the shell | M4 (slice 4d; import, verify and the shell follow) |
+| `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep; slices 4e–4j the import; slice 4k the report-only verifier and `open_blob`. Not yet used by the shell | M4 (slices 4d–4k; the shell follows) |
 | `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX | planned, M6 |
 | `crates/oma-device` | Detects devices and creates backups behind a platform trait | planned, M7 |
 
@@ -812,7 +812,8 @@ not call it yet (slice 4l).
   `attachments/<hh>/` is touched, `attachments/` and `<hh>` must each be
   a real directory (no link, junction or reparse point) and, on Unix,
   private (`check_private`). The reconcile, P6's "already archived" check
-  and its placement go through it; the verifier (slice 4k) will. A
+  and its placement go through it, and so do the verifier and
+  `open_blob` (slice 4k). A
   planted link at `<hh>` leaves the intent in place and counts the file as
   left.
 - **Counts** (`counts.rs`). `ImportCounts` is numbers only; the handle and
@@ -1247,8 +1248,7 @@ then runs finalize and writes the provenance file. Its outcome is
   checks the sums, opens a copy read-write (`begin_write` with recovery),
   runs the integrity, foreign-key, FTS and store checks, and compares the
   snapshot. It is regenerated only until schema v1 freezes at the M4
-  release tag. The quick and full verify of §11 are added with the
-  verifier (slice 4k).
+  release tag. Since slice 4k it also passes quick and full verify.
 
 **Readings and deviations this slice takes** (implementation readings, not
 owner decisions):
@@ -1269,6 +1269,89 @@ owner decisions):
 - **The `-wal` and `-shm` are left** after `Archive::close`, because the
   read-only connection closes last; the golden generator removes the empty
   `-wal` and the `-shm` from the fixture.
+
+### The integrity verifier and the blob reader (M4 slice 4k)
+
+`Archive::verify(depth, ctx)` (`verify.rs`, spec §11, D69) is
+**report-only**: it repairs, sweeps and reconciles nothing, so it reports
+what a crash left instead of cleaning it up. It runs under the archive's
+lock. Its reads use the ReadOnly connection in a **cancellable** mode (the
+progress handler stops the statement once the cancel token is set; there
+is no op budget, because a verify runs only on the user's request). It
+opens the writer with `begin_write(Recovery::Skip)` and writes only its
+results: a `verify_run` row (inserted with no outcome when the verify
+starts, so a crash leaves a visible unfinished run, and completed with the
+outcome and the counts as JSON at the end), and in a full verify each
+blob's `verify_state` and `verified_at_ns`. Recording is best effort: if
+it fails, the report still comes back, with `run: None`.
+
+| Check | Quick | Full | Reported as |
+|---|---|---|---|
+| Header, fingerprint and `archive_meta` (the open-time `inspect`, run again) | ✓ | ✓ | `SchemaCheck`; on anything but `Ok` nothing else runs and nothing is written |
+| Sessions whose deriver or decoder version is above `archive_meta`'s high-water mark | ✓ | ✓ | count |
+| `sqlite_stat1`/`sqlite_stat4`; newer rules | ✓ | ✓ | booleans, not problems |
+| `message_fts_config` holds `secure-delete = 1` | ✓ | ✓ | check state |
+| `PRAGMA quick_check(100)` / `PRAGMA integrity_check(100)` | quick | full | check state and the rows other than `ok` (a corruption error counts as one) |
+| `PRAGMA foreign_key_check` | ✓ | ✓ | total, and by child table (`v1.sql` names only) |
+| FTS rank-1 `integrity-check`, on the writer under the armed interrupt | ✓ | ✓ | check state (`Failed` is drift or corruption) |
+| `value_issue` and `value_history` rows whose entity row is missing or whose entity code is unknown (entities 6 and 7 have no single row and are skipped) | ✓ | ✓ | counts |
+| The label re-validated | ✓ | ✓ | boolean |
+| Sessions in state 0, `blob_intent` rows | ✓ | ✓ | counts (crash leftovers) |
+| Each `blob`: `storage_name` parses and spells `sha256`; a regular non-link file of `byte_len` | ✓ | ✓ | bad name, missing, not regular, length mismatch |
+| Each `blob`: re-hashed to the end through `open_checked`, progress in bytes | — | ✓ | hash mismatch, unreadable; `verify_state` set for every row |
+| `attachments/` walk: two levels, no link followed, at most `blobs + 10,000` entries | ✓ | ✓ | entries, unexpected names (and directories below `<hh>/`, never entered), orphans, links, partial files, truncated |
+| `imports/`: every entry read through `provenance::read` (name, at most 64 KiB, no link, format, version and session), at most `sessions + 1,000` entries | ✓ | ✓ | readable files, unreadable entries, `.tmp` leftovers, truncated |
+| Owner and mode of every archive file and directory (`check_private`; on Windows only links and types) | — | ✓ | count |
+
+The outcome is `Cancelled` if a cancel stopped it, else `Problems` if any
+problem was found, else `Incomplete` if a check could not run (an
+unlistable directory, a read error, no write connection for the FTS
+check), else `Ok`. `VerifyCounts::has_problems` names which fields are
+problems; the totals, `stat_tables` and `newer_rules` are not. A cancel is
+recorded as cancelled (outcome 2) and the checks that ran keep their
+results. An archive that needs a migration is refused with
+`NeedsMigration`; one written by newer rules verifies normally.
+`ArchiveReader::last_verify` reads the newest run back as a
+`VerifySummary`, dropping any table name in the stored counts that is not
+one of `v1.sql`'s. Progress is `ArchiveEvent::Verify` with
+`VerifyPhase::{CheckingDatabase, CheckingIndex, CheckingFiles}`. The full
+verify's recompute of derived columns is deferred (§21.2).
+
+**`open_blob`** (`ArchiveReader::open_blob` and `Archive::open_blob`,
+`blobs::open_checked`, spec §4.3, §9.5) is the one way attachment bytes
+are read back, by M5, M6 and the verifier: the row's `storage_name` must
+parse and spell its `sha256` (`BlobProblem::BadName` otherwise);
+`attachments/` and `<hh>/` must be private real directories, and the file
+is opened with `open_nofollow` and must be a regular file of `byte_len`
+bytes (`Missing`, `NotRegular`, `LengthMismatch`, `Io`). The returned
+`BlobReader` yields at most `byte_len` bytes, hashes them as they stream,
+and fails its final read with `InvalidData` (and every read after it) when
+the length or the digest differs, so a caller that reads to the end gets
+only the archived bytes. It is lock-free (a reader works while an import
+holds the lock; placed files are never replaced). `BlobId` is an
+archive-local row number.
+
+**Readings and deviations this slice takes** (implementation readings, not
+owner decisions):
+
+- **FTS drift is caught only by the rank-1 check.** Observed on the
+  bundled SQLite 3.53.2 (`tests/verify.rs`): `quick_check` and
+  `integrity_check` pass on an external-content index whose content was
+  changed with the triggers off. Dropping a trigger, the spec's example,
+  changes the schema and is refused by the fingerprint at open, so the
+  test drifts the content instead.
+- **A failed schema check stops the verify** without writing anything
+  (five checks are counted as not run), because nothing else may read
+  tables whose schema is not ours (§4.5).
+- **The `imports/` scan has its own bound** (`sessions + 1,000` entries);
+  the spec bounds only the `attachments/` walk.
+- **Leftovers count as problems** (running sessions, intents, partial and
+  `.tmp` files): they are what a crash left, and only the next import's
+  write open cleans them up.
+- **A quick verify writes no blob state;** only the full one sets
+  `verify_state` (also for missing, short and badly named files).
+- **The verify writes are not under the space guard.** They are one row
+  and one small update per 512 blobs; a failure leaves `run: None`.
 
 ### Status and qualifiers (D43)
 
@@ -1374,7 +1457,7 @@ superseded by D22: sms.db is staged on disk.
 | D49 | Source values | `Col<T>` | `Option<T>` | M4 can tell "not recorded" from "NULL" from "bad" |
 | D50 | Lookup scope | Only `Library/SMS/Attachments/` and `StickerCache/` | Every `~/` and `/var/mobile` class | Never reaches non-Messages files; the other classes stay counts |
 
-### Milestone 4 decisions in force (slices 4d–4h)
+### Milestone 4 decisions in force (slices 4d–4k)
 
 The full M4 decision list (D51–D88) lands with the M4 documentation slice.
 These are the ones the archive skeleton and the import core already
@@ -1402,6 +1485,7 @@ owner's confirmation.
 | D63 | Transactions | `IMMEDIATE` batches (1,000 rows / 32 MiB / 2 s), a savepoint per record, the importer's own cursor, `synchronous=FULL` | Per-row transactions | Durable and resumable at batch granularity |
 | D64 | Resume binding | Digest and framing, versions, read profile, options and lineage; otherwise supersede | Resume across any change | One rule set per session |
 | D65 | Confirmation | A gate inside the import job (`ImportGate`), after every preflight read and before the first write; Decline writes nothing | Two jobs | One staging and one password, versus a longer plaintext window (disclosed) |
+| D69 | Verifier (roadmap: a lean **awaiting the owner's confirmation**) | The library verifier ships in M4, report-only, quick and full (slice 4k); the job and its sentence per finding are the shell's (4l, 4m); repair stays in M8 | All verification in M8 | The M4 brief asks for integrity checks; nothing is repaired before M8 |
 | D70 | Provenance file (product fields: a lean **awaiting the owner's confirmation**) | `imports/session-<n>.json`, content-free, best effort, written at each terminal state; it includes the product type and version | A full copy of the session row | Survives database damage without personal data |
 | D74 | Staged sms.db lifetime | The whole import, the gate and P6 included; removed after P8, before finalize | Re-stage per pass | One copy, versus a longer plaintext window (disclosed) |
 | D80 | Lineage | The user picks an existing lineage or a new one at the gate, with a suggestion and boolean device evidence; only the chosen lineage continues an unfinished session | Infer from device fields | No silent identity claim |
