@@ -5,6 +5,7 @@
 //! allows `disallowed_methods` for that.
 #![allow(dead_code, clippy::disallowed_methods)]
 
+pub mod bulk;
 pub mod import;
 
 use std::collections::BTreeMap;

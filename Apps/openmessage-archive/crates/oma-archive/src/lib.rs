@@ -51,6 +51,8 @@
 
 mod archive;
 mod blobs;
+#[cfg(feature = "fault-injection")]
+mod bulk;
 mod conn;
 mod error;
 mod fault;

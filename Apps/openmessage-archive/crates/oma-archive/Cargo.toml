@@ -32,6 +32,7 @@ zeroize.workspace = true      # source values held during a batch
 
 [dev-dependencies]
 oma-archive = { path = ".", features = ["fault-injection"] }
+image.workspace = true              # viewer fixtures: make_viewer_media and viewer_fixtures.rs
 tempfile.workspace = true
 tracing-subscriber.workspace = true # log-hygiene test
 

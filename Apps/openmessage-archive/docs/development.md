@@ -260,6 +260,51 @@ A model change that leaves the inputs alone changes only
 changed); if `SHA256SUMS` changes, the generator changed an input, and the
 pin in `import_fixtures.rs` fails on purpose.
 
+### Synthetic viewer fixtures (M5)
+
+`tests/fixtures/viewer/` (M5 spec §14.1) is written in two steps. The media
+files come from a Rust example that uses the `image` crate's encoders and
+writes the hostile PNGs and the containers by hand; the backups and the
+model's expectations come from `scripts/fixtures/make_synthetic_viewer.py`,
+in the reference environment (it refuses any SQLite but 3.45.1 and has no
+override). The script imports the M2, M3 and M4 generators as modules and
+changes none of them.
+
+```sh
+rm -rf /tmp/viewer
+cargo run -p oma-archive --example make_viewer_media -- /tmp/viewer/media
+.venv-fixtures/bin/python -I scripts/fixtures/make_synthetic_viewer.py /tmp/viewer --seed 1
+rm -rf tests/fixtures/viewer && cp -r /tmp/viewer tests/fixtures/viewer
+sha256sum tests/fixtures/viewer/SHA256SUMS tests/fixtures/viewer/EXPECTED.SHA256SUMS
+cargo test -p oma-archive --test viewer_fixtures
+```
+
+| File | Covers | Pinned |
+|---|---|---|
+| `SHA256SUMS` | `media/` and every file of every backup (the inputs) | Its SHA-256 is pinned in `crates/oma-archive/tests/viewer_fixtures.rs`; the inputs are frozen |
+| `EXPECTED.SHA256SUMS` | Every file under `*.expected/` and `scenarios/`: the `content` the import must leave and the `viewer` facts the viewer must derive | Its own hash is pinned in the same test and is re-pinned when a viewer slice settles a rule (say which) |
+
+`viewer_fixtures.rs` also rebuilds every `media/` file with the example's
+code (`examples/make_viewer_media/media.rs`) and compares the bytes, so an
+`image` upgrade that changes an encoder's output fails there first. On
+Windows, run the example the same way from PowerShell (it writes plain
+files); the Python step is not run on Windows.
+
+### The bulk generator (M5)
+
+`crates/oma-archive/tests/common/bulk.rs` writes a schema-valid v1 archive
+of any size directly (M5 spec §14.2), through the test-only hook
+`oma_archive::hooks::bulk_writer` (the `fault-injection` feature, enabled
+only by the crate's own tests). It commits import-sized batches, runs the
+import's finalize statistics and FTS merge steps, and the result passes a
+quick verify (`tests/bulk.rs`). It replaces the import-based generator for
+performance work; the calibration against an import-built archive is an
+ignored test:
+
+```sh
+OMA_PERF_MESSAGES=100000 cargo test -p oma-archive --release --test bulk -- --ignored --nocapture
+```
+
 ### Import core tests (M4)
 
 The import tests run in `cargo test --workspace`; these run them alone:

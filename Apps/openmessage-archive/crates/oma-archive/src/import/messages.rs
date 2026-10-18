@@ -347,8 +347,24 @@ fn derive_cells(cells: &[Cell]) -> CellDerived {
 /// `message.sort_key` (spec §6.5): dated messages by their instant, then
 /// undated ones in the source order of the earliest-ranked session.
 fn sort_key(date: Option<&Cell>, first_rank: &Rank, first_src_rowid: i64) -> Vec<u8> {
+    encode_sort_key(
+        date.and_then(Cell::time_utc_ns),
+        first_rank.as_bytes(),
+        first_src_rowid,
+    )
+}
+
+/// The one `sort_key` encoder (spec §6.5): `0x00 ‖ be64(ns ^ 2^63)` for a
+/// dated message, `0x01 ‖ first_rank ‖ be64(first_src_rowid ^ 2^63)` for
+/// an undated one. Also used by the test-only bulk writer, so generated
+/// archives carry the import's keys.
+pub(crate) fn encode_sort_key(
+    utc_ns: Option<i64>,
+    first_rank: &[u8],
+    first_src_rowid: i64,
+) -> Vec<u8> {
     let bias = |v: i64| (u64::from_be_bytes(v.to_be_bytes()) ^ (1u64 << 63)).to_be_bytes();
-    match date.and_then(Cell::time_utc_ns) {
+    match utc_ns {
         Some(ns) => {
             let mut k = Vec::with_capacity(9);
             k.push(0);
@@ -358,7 +374,7 @@ fn sort_key(date: Option<&Cell>, first_rank: &Rank, first_src_rowid: i64) -> Vec
         None => {
             let mut k = Vec::with_capacity(50);
             k.push(1);
-            k.extend_from_slice(first_rank.as_bytes());
+            k.extend_from_slice(first_rank);
             k.extend_from_slice(&bias(first_src_rowid));
             k
         }

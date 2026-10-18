@@ -795,6 +795,58 @@ continue were not exercised** in the window, nor was a crash during an
 import, the gate's timeout, or a reload while an import waited. The
 manual checklist for milestone 4 below has not been run.
 
+### Milestone 5 viewer fixtures and bulk generator (slice 5a)
+
+Generated and checked in the Linux container on 2026-10-18; not CI, not a
+desktop, synthetic data only:
+
+- `make_viewer_media` (the `image` 0.25.10 encoders plus hand-written
+  files) and `make_synthetic_viewer.py` (Python 3.13.16, `sqlite3` 3.45.1,
+  cryptography 50.0.1) wrote `tests/fixtures/viewer/`. Two generator runs
+  over the same `media/` gave byte-identical trees. The hand-written
+  deflate streams of the three hostile PNGs were inflated with Python's
+  `zlib` in scratch: 144,012,000, 134,287,369 and 180,001 zero bytes, with
+  valid Adler-32 and chunk CRCs.
+- `tests/viewer_fixtures.rs` passed (10 tests): both sums pins; every
+  `media/` file rebuilt byte for byte; the images read back with the
+  `image` decoders (EXIF orientation 6 and the GPS pointer, two GIF frames,
+  the hostile PNGs' header dimensions and colour types against the 128 MiB
+  cap); every entry and every scenario imported by the M4 import into an
+  archive equal to the model's `content` manifest; and the `viewer`
+  statement's self-consistency. **The `viewer` facts themselves are not yet
+  compared with any Rust code** (the viewer reads come in slices 5b–5d).
+- One rule was settled by the import: a body of 10,000 two-character
+  formatting runs exceeds the typedstream decoder's materialisation budget
+  (twice the input plus 64 KiB) and is shown from the text column; the
+  fixture uses 16 characters per run, which decodes.
+- **Calibration of the bulk generator** (`tests/bulk.rs`,
+  `calibrate_bulk_against_import`, release profile, 4 CPUs, one run each)
+  against the import of the M4 perf generator's sms.db, 99,997 messages,
+  2,000 handles, 1,000 chats:
+
+  | Measure | Import-built | Bulk, same bodies | Bulk, mixed text |
+  |---|---|---|---|
+  | Writing the archive | 23.1 s (import) | 8.2 s | 8.9 s |
+  | Finalize (statistics, FTS merge, checkpoint) | in the import | 0.16 s, 2 merge steps | 0.17 s, 2 merge steps |
+  | Database size | 110,034,944 bytes | 75,091,968 bytes | 86,319,104 bytes |
+  | Pages | 26,864 | 18,333 | 21,074 |
+  | FTS data blocks (`message_fts_data`) | 1,443,817 bytes in 377 rows | 1,773,707 bytes in 449 rows | 3,359,340 bytes in 877 rows |
+  | Quick verify | 1.02 s | 0.66 s | 0.83 s |
+
+  The bulk archive is smaller because it writes no `value_issue`,
+  `value_history`, `lineage_seen` or unkeyed rows, one attachment per 100
+  messages instead of one per three, and only the columns it sets. Its FTS
+  index is about 23 % larger on similar bodies: its reaction rows carry
+  "Loved “…”" text, and the import generator's rows repeat one body
+  (`SYNTH-SAME`) for every eighth row and leave others empty or invalid. "Mixed text" is the default
+  data (Latin words, 2 % CJK, 1 % emoji). These are synthetic numbers on
+  one host; the viewer timings of spec §11 are not measured yet.
+
+**Not yet observed:** any of this on Windows. Spike 5s (virtualisation
+and playback on a desktop with audio, WebKitGTK and WebView2) cannot run
+in this container; its results are **UNVERIFIED**, and the designed
+behaviour stays behind feature detection until it is run.
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI

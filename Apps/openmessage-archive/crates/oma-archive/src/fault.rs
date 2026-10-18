@@ -265,6 +265,18 @@ pub mod hooks {
         crate::import::plan_statements()
     }
 
+    pub use crate::bulk::{sort_key, BulkFinalize, BulkWriter};
+
+    /// A write handle on `archive` for generating schema-valid v1 rows
+    /// directly (M5 spec §14.2): the archive's own ReadWrite connection,
+    /// after the usual first-write recovery, with the import's transaction
+    /// boundary and finalize steps. Test-only.
+    pub fn bulk_writer(
+        archive: &mut crate::Archive,
+    ) -> Result<BulkWriter<'_>, crate::ArchiveError> {
+        BulkWriter::new(archive)
+    }
+
     /// An action run at the n-th hit of a fault point.
     pub type FaultAction = Box<dyn FnMut(FaultPoint, u32)>;
 

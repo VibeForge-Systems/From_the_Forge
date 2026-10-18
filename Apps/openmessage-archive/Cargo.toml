@@ -55,6 +55,12 @@ tauri-plugin-opener = "=2.7.2"
 fs4 = { version = "=1.1.0", default-features = false }
 rustix = { version = "=1.1.5", features = ["fs", "process"] }
 
+# Milestone 5: images. Dev-dependency of oma-archive in slice 5a (the viewer
+# fixture generator `make_viewer_media` and the fixture tests); the decode
+# helper uses it from slice 5d. Only the four decoders/encoders M5 serves:
+# no AVIF (MPL-2.0 `mp4parse`, C `dav1d`), no TIFF, EXR or rayon.
+image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
+
 oma-fs = { path = "crates/oma-fs" }
 oma-backup = { path = "crates/oma-backup" }
 oma-messages = { path = "crates/oma-messages" }

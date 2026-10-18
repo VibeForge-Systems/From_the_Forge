@@ -41,6 +41,7 @@ Two automated audits enforce the license policy:
 | pbkdf2 (dev only) | 0.13.0 | MIT OR Apache-2.0 | Differential tests against the in-crate PBKDF2; never linked into the app |
 | fs4 | 1.1.0 | MIT OR Apache-2.0 | Free space for the archive's space checks (`oma_fs::available_space`): `statvfs` on Unix, `GetDiskFreeSpaceExW` (caller-scoped, so quotas count) on Windows. Default features off: `sync` (file locking) is not used. It depends on `rustix` (Unix) and `windows-sys` 0.61.2 (Windows), both already in the tree |
 | rustix (Linux only) | 1.1.5 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | `oma-fs` on Linux: `statfs` for the volume kind, `renameat2(RENAME_NOREPLACE)`, `O_NOFOLLOW` opens and `geteuid`, all without `unsafe`. Features `fs` and `process` (plus the default `std`). Already in the tree through Tauri's Linux stack, with both features on |
+| image (dev only in M5 slice 5a) | 0.25.10 | MIT OR Apache-2.0 | The viewer fixtures: `make_viewer_media` encodes the tiny PNG, JPEG, GIF and WebP files with its encoders, and `tests/viewer_fixtures.rs` reads them back with its decoders. Default features off; only `jpeg`, `png`, `gif` and `webp` on (no AVIF, which pulls in MPL-2.0 `mp4parse` and C `dav1d`; no TIFF, EXR or rayon). From slice 5d it decodes images in the decode helper process only (M5 spec §5.5). MSRV 1.88, under the workspace's 1.90 |
 
 `tracing-subscriber` (above) is also a dev-dependency of `oma-backup` and
 `oma-messages`, for their log-hygiene tests (and of `oma-archive`, for
@@ -49,13 +50,27 @@ its own). The shell (`src-tauri`) depends on the workspace crates
 M4, slice 4l); none adds a third-party crate beyond the list above.
 `oma-archive` depends only on crates already listed (`rusqlite`, `serde`,
 `serde_json`, `sha2`, `thiserror`, `dunce`, `tracing`, `zeroize`; `tempfile`
-and `tracing-subscriber` for its tests) and on the workspace crates
+and `tracing-subscriber` for its tests, and from M5 `image` for its viewer
+fixture example and tests) and on the workspace crates
 `oma-backup`, `oma-fs` and `oma-messages`. `oma-messages`
 depends only on crates already listed (`rusqlite`, `sha2`, `thiserror`,
 `tracing`, `zeroize`) and on the workspace crates `oma-backup` and
 `oma-fs`; its typedstream decoder is our own code, not a dependency. No
 JavaScript dependency was added in M2 or M3: `Channel` comes from
 `@tauri-apps/api` 2.12.4, which was already a dependency.
+
+`image` (M5) brings these crates, all new to the lockfile except where
+noted, with their licenses as `Cargo.toml` states them: `zune-jpeg` 0.5.15
+and `zune-core` 0.5.3 (MIT OR Apache-2.0 OR Zlib), `gif` 0.14.2, `image-webp`
+0.2.4 and `weezl` 0.1.12 (MIT OR Apache-2.0), `moxcms` 0.8.1 and `pxfm`
+0.1.30 (BSD-3-Clause OR Apache-2.0), `color_quant` 1.1.0 (MIT),
+`byteorder-lite` 0.1.0 (Unlicense OR MIT) and `quick-error` 2.0.1 (MIT OR
+Apache-2.0). `png` 0.18.1, `fdeflate`, `simd-adler32`, `flate2`,
+`miniz_oxide`, `bytemuck` and `num-traits` were already in the lock through
+Tauri. Every license is on `deny.toml`'s allowlist, which is unchanged.
+Several of these crates contain `unsafe` SIMD code; the workspace's
+`unsafe_code = "forbid"` covers only our own crates, which is one reason
+images are decoded in a helper process (M5 spec §5.5).
 
 The RustCrypto crates resolve to one `cipher` (0.5.2), one `digest` (0.11.3)
 and one `hybrid-array` (0.4.15) major for the backup code. An older
@@ -202,3 +217,5 @@ dependency change; `deny.toml` unchanged. Slice 4n changed no dependency.
 | on merge (M4, slice 4e) | Dev-only Python tooling: `make_synthetic_imports.py` needs only the existing `requirements.txt` (`cryptography`) | The import catalogue. It imports the M2 and M3 generators as modules; no new Python package |
 | on merge (M4, slice 4f) | `oma-archive` moves `oma-messages` and `serde_json` from dev-dependencies to dependencies, and adds `serde` and `zeroize` (all already workspace dependencies) | The import core reads sms.db through the `oma-messages` passes, stores `ImportCounts` as JSON, and zeroizes the source values a batch holds. No new third-party crate: `Cargo.lock` changes only in `oma-archive`'s own dependency list (`serde`, `zeroize` added). `cargo deny check` passes with the unchanged `deny.toml` |
 | on merge (M4, slice 4l) | The shell depends on the workspace crate `oma-archive` | The archive commands and the import and verify jobs. No new third-party crate: the only `Cargo.lock` change is `oma-archive` added to the shell's own dependency list. No new npm package. `cargo deny check` passes with the unchanged `deny.toml` |
+| on merge (M5, slice 5a) | Added image 0.25.10 (`=0.25.10`, default features off, features `jpeg`, `png`, `gif`, `webp`) as a workspace dependency and a dev-dependency of `oma-archive` | The viewer fixture generator (`examples/make_viewer_media`) and `tests/viewer_fixtures.rs`. Eleven new crates in `Cargo.lock` (`image`, `zune-jpeg`, `zune-core`, `gif`, `image-webp`, `weezl`, `moxcms`, `pxfm`, `color_quant`, `byteorder-lite`, `quick-error`; licenses above); `png` 0.18.1 and its deflate crates were already locked. It enters the shipped binary only when slice 5d makes it a dependency of the decode helper. `cargo deny check` passes with the unchanged `deny.toml` |
+| on merge (M5, slice 5a) | Dev-only Python tooling: `make_synthetic_viewer.py` needs only the existing `requirements.txt` (`cryptography`) | The viewer catalogue. It imports the M2, M3 and M4 generators as modules; no new Python package |
