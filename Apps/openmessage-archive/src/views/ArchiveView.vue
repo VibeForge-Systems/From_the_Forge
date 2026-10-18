@@ -100,7 +100,11 @@ const warnings = computed(() => settings.location.checks.filter((c) => c.level =
             Pick a folder on this computer. Archives are kept separate from the original backups.
           </li>
           <li>
-            <strong>Import an iPhone backup.</strong> <PlannedBadge capability="backup-import" />
+            <strong>Find your iPhone backup.</strong> Check it before importing.
+            <RouterLink to="/backups">Go to Backups</RouterLink>
+          </li>
+          <li>
+            <strong>Import messages.</strong> <PlannedBadge capability="extraction" />
           </li>
           <li>
             <strong>Browse, search, and export.</strong> <PlannedBadge capability="viewer" />
@@ -155,14 +159,17 @@ const warnings = computed(() => settings.location.checks.filter((c) => c.level =
           <LocationStatusList :checks="warnings" />
         </div>
         <p class="text-body-secondary small">
-          Importing reads a local iPhone backup and copies Messages data into the archive. The
-          backup itself is never modified.
+          Find your iPhone backup and check it on the Backups page. Importing messages into the
+          archive arrives in milestone 3. The backup itself is never modified.
         </p>
         <template #actions>
+          <RouterLink to="/backups" class="btn btn-primary">
+            <i class="bi bi-phone me-1" aria-hidden="true"></i>Find backups…
+          </RouterLink>
           <button type="button" class="btn btn-outline-secondary" disabled aria-describedby="import-planned">
-            <i class="bi bi-box-arrow-in-down me-1" aria-hidden="true"></i>Import backup…
+            <i class="bi bi-box-arrow-in-down me-1" aria-hidden="true"></i>Import messages
           </button>
-          <span id="import-planned"><PlannedBadge capability="backup-import" /></span>
+          <span id="import-planned"><PlannedBadge capability="extraction" /></span>
         </template>
       </EmptyState>
     </div>
@@ -188,6 +195,7 @@ const warnings = computed(() => settings.location.checks.filter((c) => c.level =
             <li><i class="bi bi-wifi-off" aria-hidden="true"></i>Makes no network requests</li>
             <li><i class="bi bi-person-slash" aria-hidden="true"></i>No accounts or telemetry</li>
             <li><i class="bi bi-lock" aria-hidden="true"></i>Original backups are read-only</li>
+            <li><i class="bi bi-key" aria-hidden="true"></i>Backup passwords are used once and never saved.</li>
           </ul>
         </section>
       </div>

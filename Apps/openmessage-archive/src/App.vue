@@ -17,10 +17,13 @@ const noticeDismissed = ref(false);
 
 useTheme(toRef(settings, 'theme'));
 
+const hasPanels = () => ['archive', 'backups'].includes(String(router.currentRoute.value.name));
+
 const actions: Record<ShortcutId, () => unknown> = {
-  'toggle-left-panel': () => router.currentRoute.value.name === 'archive' && layout.toggleLeft(),
-  'toggle-right-panel': () => router.currentRoute.value.name === 'archive' && layout.toggleRight(),
+  'toggle-left-panel': () => hasPanels() && layout.toggleLeft(),
+  'toggle-right-panel': () => hasPanels() && layout.toggleRight(),
   'go-archive': () => router.push({ name: 'archive' }),
+  'go-backups': () => router.push({ name: 'backups' }),
   'go-settings': () => router.push({ name: 'settings' }),
   'go-about': () => router.push({ name: 'about' }),
   'cycle-theme': () => settings.setTheme(nextTheme(settings.theme)),

@@ -140,6 +140,11 @@ jobs:
       - run: npm ci
       - name: Frontend tests
         run: npm test
+      # cfg(windows) code (oma-backup's guards, staging and Windows-only
+      # tests) is never compiled by the Linux clippy step.
+      - name: clippy (Windows)
+        if: runner.os == 'Windows'
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # Path handling differs by platform (separators, drive prefixes,
       # verbatim paths, reserved names), so the Rust suite runs on each OS.
       - name: Rust tests

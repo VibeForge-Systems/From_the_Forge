@@ -96,10 +96,44 @@ impl SettingsStore {
         }
 
         match serde_json::from_slice::<Settings>(&bytes) {
-            Ok(settings) => store.settings = settings,
+            Ok(settings) => {
+                store.settings = settings;
+                store.revalidate_backup_folders(&bytes);
+            }
             Err(_) => store.set_aside_corrupt(),
         }
         store
+    }
+
+    /// Explain any `backupFolders` entry the lenient reader dropped, then
+    /// re-validate the rest against the current archive location.
+    fn revalidate_backup_folders(&mut self, bytes: &[u8]) {
+        let raw = serde_json::from_slice::<serde_json::Value>(bytes).ok();
+        let raw_folders = raw.as_ref().and_then(|v| v.get("backupFolders"));
+        let mut notices = super::folders::structural_notices(raw_folders);
+        let entries = std::mem::take(&mut self.settings.backup_folders.0);
+        let (kept, more) =
+            super::folders::validate_loaded(entries, self.settings.archive_directory.as_deref());
+        self.settings.backup_folders.0 = kept;
+        notices.extend(more);
+        for notice in notices {
+            self.add_notice(notice);
+        }
+    }
+
+    /// Notices are complete sentences, joined with a space in the order they
+    /// occurred.
+    fn add_notice(&mut self, notice: String) {
+        tracing::warn!("settings loaded with a notice");
+        self.notice = Some(match self.notice.take() {
+            Some(existing) => format!("{existing} {notice}"),
+            None => notice,
+        });
+    }
+
+    /// Whether changes are held in memory only this session.
+    pub fn is_read_only(&self) -> bool {
+        self.read_only
     }
 
     /// Move an unparseable file out of the way rather than overwrite it, so
@@ -307,6 +341,48 @@ mod tests {
             "applies for the session"
         );
         assert_eq!(fs::read(&path).expect("read"), future, "file untouched");
+    }
+
+    #[test]
+    fn a_wrongly_typed_backup_folders_value_keeps_the_archive_directory() {
+        for raw in [
+            r#"{"schemaVersion":1,"archiveDirectory":"/data/lib","backupFolders":"nope"}"#,
+            r#"{"schemaVersion":1,"archiveDirectory":"/data/lib","backupFolders":[5,{"path":"/b","kind":"parent"}]}"#,
+        ] {
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let path = settings_path(tmp.path());
+            fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+            fs::write(&path, raw).expect("write");
+            let store = SettingsStore::load(path.clone());
+            assert_eq!(
+                store.settings().archive_directory.as_deref(),
+                Some("/data/lib")
+            );
+            assert!(path.exists(), "not set aside as corrupt");
+            let notice = store.snapshot().persistence.notice.expect("notice");
+            assert!(notice.contains("added backup folders"), "{notice}");
+        }
+    }
+
+    #[test]
+    fn backup_folders_round_trip() {
+        use super::super::{AddedFolderEntry, AddedFolderKind};
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = settings_path(tmp.path());
+        let folder = tmp.path().join("backups").to_string_lossy().into_owned();
+        let mut store = SettingsStore::load(path.clone());
+        store
+            .update(|s| {
+                s.backup_folders.push(AddedFolderEntry {
+                    path: folder.clone(),
+                    kind: AddedFolderKind::Parent,
+                })
+            })
+            .expect("save");
+        let reloaded = SettingsStore::load(path);
+        assert_eq!(reloaded.settings().backup_folders.len(), 1);
+        assert_eq!(reloaded.settings().backup_folders[0].path, folder);
+        assert!(reloaded.snapshot().persistence.notice.is_none());
     }
 
     #[test]

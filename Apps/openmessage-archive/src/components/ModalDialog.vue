@@ -20,6 +20,16 @@ function sync(open: boolean): void {
 onMounted(() => sync(props.open));
 watch(() => props.open, sync);
 
+/**
+ * The native `close` event is dispatched asynchronously. Report it only when
+ * the user closed the dialog (Escape) while it was meant to be open; a stale
+ * event from a programmatic close that arrives after the dialog was reopened
+ * must not close it again.
+ */
+function onNativeClose(): void {
+  if (props.open && !dialog.value?.open) emit('close');
+}
+
 function onBackdropClick(event: MouseEvent): void {
   if (event.target === dialog.value) emit('close');
 }
@@ -30,7 +40,7 @@ function onBackdropClick(event: MouseEvent): void {
     ref="dialog"
     class="oma-dialog p-0"
     :aria-labelledby="titleId"
-    @close="emit('close')"
+    @close="onNativeClose"
     @click="onBackdropClick"
   >
     <div class="modal-content">

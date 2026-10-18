@@ -10,6 +10,12 @@ const COMMANDS: &[&str] = &[
     "clear_archive_directory",
     "open_archive_directory",
     "get_app_info",
+    "list_backups",
+    "add_backup_folder",
+    "forget_backup_folder",
+    "get_backup_details",
+    "open_backup",
+    "cancel_job",
 ];
 
 fn main() {

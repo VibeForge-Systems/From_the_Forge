@@ -6,6 +6,7 @@ export type ShortcutId =
   | 'toggle-left-panel'
   | 'toggle-right-panel'
   | 'go-archive'
+  | 'go-backups'
   | 'go-settings'
   | 'go-about'
   | 'cycle-theme'
@@ -35,6 +36,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
     key: 'b',
   },
   { id: 'go-archive', description: 'Go to the archive', mod: true, key: '1' },
+  { id: 'go-backups', description: 'Go to backups', mod: true, key: '3' },
   { id: 'go-settings', description: 'Open settings', mod: true, key: ',' },
   { id: 'go-about', description: 'Open About', mod: true, key: '2' },
   { id: 'cycle-theme', description: 'Switch theme (system → light → dark)', mod: true, shift: true, key: 'l' },

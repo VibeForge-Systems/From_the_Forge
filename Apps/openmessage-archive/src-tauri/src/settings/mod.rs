@@ -1,16 +1,18 @@
 //! Application settings: the model, its IPC shapes, and its persistence.
 //!
-//! Settings hold user preferences and the location of the archive library —
-//! never message content, contact data, or credentials. Backup passwords in
-//! particular are never written here; they belong to the operating system's
-//! credential store (see docs/privacy.md).
+//! Settings hold user preferences, the location of the archive library and
+//! the backup folders the user added — never message content, contact data,
+//! or credentials. Backup passwords are never stored; M2 asks for them each
+//! time (see docs/privacy.md).
 
+mod folders;
 mod location;
 mod store;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub use folders::{AddedFolderEntry, AddedFolderKind, BackupFolders, MAX_BACKUP_FOLDERS};
 pub use location::{
     inspect_location, ArchiveLocationStatus, CheckLevel, LocationCheck, LocationState,
 };
@@ -61,6 +63,14 @@ pub struct Settings {
     pub theme: Theme,
     #[serde(default)]
     pub layout: LayoutPreferences,
+    /// Backup folders the user added with "Add backup folder…", as
+    /// display-canonical UTF-8 paths. Only Rust writes this field (from a
+    /// native picker); `SettingsUpdate` cannot. Deserialized leniently: a
+    /// malformed value or element is dropped with a notice instead of making
+    /// the whole file count as corrupt, which would lose `archiveDirectory`.
+    #[serde(default)]
+    #[ts(as = "Vec<AddedFolderEntry>")]
+    pub backup_folders: BackupFolders,
 }
 
 impl Default for Settings {
@@ -70,6 +80,7 @@ impl Default for Settings {
             archive_directory: None,
             theme: Theme::default(),
             layout: LayoutPreferences::default(),
+            backup_folders: BackupFolders::default(),
         }
     }
 }
@@ -129,6 +140,12 @@ mod tests {
         assert!(serde_json::from_str::<SettingsUpdate>(r#"{"theme":"sepia"}"#).is_err());
         let ok: SettingsUpdate = serde_json::from_str(r#"{"theme":"light"}"#).expect("valid");
         assert_eq!(ok.theme, Some(Theme::Light));
+    }
+
+    #[test]
+    fn update_cannot_set_backup_folders() {
+        let attempt = r#"{"backupFolders":[{"path":"/etc","kind":"parent"}]}"#;
+        assert!(serde_json::from_str::<SettingsUpdate>(attempt).is_err());
     }
 
     #[test]

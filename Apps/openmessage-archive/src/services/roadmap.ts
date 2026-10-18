@@ -34,10 +34,11 @@ export const CAPABILITIES: readonly Capability[] = [
   },
   {
     id: 'backup-import',
-    title: 'Import an existing iPhone backup',
+    title: 'Find and check iPhone backups',
     milestone: 2,
-    status: 'planned',
-    summary: 'Select a local backup, parse its manifest, detect encryption, and validate it.',
+    status: 'available',
+    summary:
+      'Discover local backups, show their details, unlock encrypted ones with your password, and validate the file index. Messages are not extracted until milestone 3.',
   },
   {
     id: 'extraction',

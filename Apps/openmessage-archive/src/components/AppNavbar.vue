@@ -2,11 +2,13 @@
 import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
 import { useSettings } from '@/stores/settings';
+import { useBackups } from '@/stores/backups';
 import { nextTheme } from '@/composables/useTheme';
 import type { Theme } from '@/types';
 
 const emit = defineEmits<{ 'show-shortcuts': [] }>();
 const settings = useSettings();
+const backups = useBackups();
 
 const THEME_META: Record<Theme, { label: string; icon: string }> = {
   system: { label: 'System', icon: 'bi-circle-half' },
@@ -26,6 +28,17 @@ const upcoming = computed(() => THEME_META[nextTheme(settings.theme)]);
     <ul class="navbar-nav me-auto">
       <li class="nav-item">
         <RouterLink class="nav-link" exact-active-class="active" to="/">Archive</RouterLink>
+      </li>
+      <li class="nav-item">
+        <RouterLink class="nav-link d-flex align-items-center gap-1" exact-active-class="active" to="/backups">
+          Backups
+          <span
+            v-if="backups.jobRunning"
+            class="spinner-border spinner-border-sm text-primary oma-nav-spinner"
+            role="status"
+            aria-label="A backup check is running"
+          ></span>
+        </RouterLink>
       </li>
       <li class="nav-item">
         <RouterLink class="nav-link" exact-active-class="active" to="/settings">Settings</RouterLink>

@@ -17,6 +17,7 @@ function mountView() {
     routes: [
       { path: '/', component: ArchiveView },
       { path: '/settings', component: { template: '<div />' } },
+      { path: '/backups', component: { template: '<div />' } },
     ],
   });
   return mount(ArchiveView, { global: { plugins: [router] } });
@@ -38,9 +39,17 @@ describe('ArchiveView', () => {
     const choose = wrapper.findAll('button').find((b) => b.text().includes('Choose archive folder'));
     expect(choose?.attributes('disabled')).toBeUndefined();
     expect(wrapper.findAll('.oma-planned').length).toBeGreaterThanOrEqual(2);
+    const steps = wrapper.findAll('.oma-steps li').map((li) => li.text());
+    expect(steps).toHaveLength(4);
+    expect(steps[1]).toContain('Find your iPhone backup.');
+    expect(steps[1]).not.toContain('Planned');
+    expect(wrapper.find('.oma-steps a[href="/backups"]').exists()).toBe(true);
+    expect(steps[2]).toContain('Import messages.');
+    expect(steps[2]).toContain('Planned · M3');
+    expect(steps[3]).toContain('Planned · M5');
   });
 
-  it('never renders an enabled Import button while import is unimplemented', () => {
+  it('offers Find backups and never an enabled Import button before milestone 3', () => {
     const settings = useSettings();
     settings.loaded = true;
     settings.snapshot = snapshot({ archiveDirectory: '/data/archives' });
@@ -48,9 +57,13 @@ describe('ArchiveView', () => {
     const wrapper = mountView();
 
     expect(wrapper.text()).toContain('Your archive library is ready');
-    const importButton = wrapper.findAll('button').find((b) => b.text().includes('Import backup'));
+    const find = wrapper.findAll('a').find((a) => a.text().includes('Find backups'));
+    expect(find?.attributes('href')).toBe('/backups');
+    const importButton = wrapper.findAll('button').find((b) => b.text().includes('Import messages'));
     expect(importButton?.attributes('disabled')).toBeDefined();
-    expect(wrapper.text()).toContain('Planned · M2');
+    expect(wrapper.text()).toContain('Planned · M3');
+    expect(wrapper.text()).not.toContain('Planned · M2');
+    expect(wrapper.text()).toContain('Backup passwords are used once and never saved.');
   });
 
   it('shows why an unavailable location failed', () => {
