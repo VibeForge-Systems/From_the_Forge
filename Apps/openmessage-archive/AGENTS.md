@@ -24,8 +24,8 @@ recorded review of the fixture generator and the manual tests in
 implemented**: `crates/oma-messages` (schema probe, typed record passes, a
 clean-room typedstream decoder, the aggregate `ExtractionReport`), the
 `check_extraction` command and the report on the Backups page. It shows
-counts only and persists nothing. Its sign-off is pending CI on
-`ubuntu-22.04` and `windows-2022`, the clean-room review of the typedstream
+counts only and persists nothing. CI passes on `ubuntu-22.04`
+and `windows-2022`. Its sign-off is pending the clean-room review of the typedstream
 decoder and the fixture generators (`scripts/fixtures/PROVENANCE.md`), and
 the manual checklist in `docs/compatibility.md`. Milestone 4 (the archive
 database and import) is next.

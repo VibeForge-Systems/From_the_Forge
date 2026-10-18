@@ -214,9 +214,8 @@ These apply to Milestone 3.
   on Ubuntu 26.04.1: the folder picker, the backup refusal, and the setting
   surviving a restart. The M2 Backups page and the M3 extraction check have
   not been run by hand on any real desktop yet; both were exercised only in
-  a headless smoke test in a Linux container. On Windows, CI built the app
-  and ran the M2 tests, **but CI has not yet run the M3 tests on Windows**,
-  and nobody has used the UI there. The installer packages, on either
+  a headless smoke test in a Linux container. On Windows, CI builds the app
+  and runs the M2 and M3 tests, but nobody has used the UI there. The installer packages, on either
   platform, have not been installed and run by hand. See
   [compatibility.md](docs/compatibility.md).
 - **Archives are not encrypted yet.** Archive encryption is planned for M8.

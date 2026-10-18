@@ -41,9 +41,9 @@ Last updated: Milestone 3 (2026-10-18).
 
 | Platform | Shell and settings (M1) | Backup discovery and validation (M2) | Extraction check (M3) | Direct device backup (M7) | Notes |
 |---|---|---|---|---|---|
-| Windows 11 x64 | CI | CI (synthetic fixtures only; windows-2022 runner, [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)). Default-location discovery: **Untested** until run on Windows 11. | **Not yet run on Windows at all**: CI has not run the milestone 3 branch on windows-2022, and nobody has run it on Windows 11 | Planned | Needs WebView2, which ships with Windows 11. CI builds bundled SQLite with MSVC and runs the Windows-only tests (junctions, a ~200-character library path). That long-path test found that bundled SQLite's default VFS cannot open a staged copy beyond MAX_PATH; staged databases are now opened through the `win32-longpath` VFS. Direct backup will need Apple's Mobile Device Service (Apple Devices app or iTunes). |
+| Windows 11 x64 | CI | CI (synthetic fixtures only; windows-2022 runner, [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)). Default-location discovery: **Untested** until run on Windows 11. | CI (synthetic fixtures only; windows-2022 runner, [run 39117881774](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39117881774)). Nobody has run it on Windows 11. | Planned | Needs WebView2, which ships with Windows 11. CI builds bundled SQLite with MSVC and runs the Windows-only tests (junctions, a ~200-character library path). That long-path test found that bundled SQLite's default VFS cannot open a staged copy beyond MAX_PATH; staged databases are now opened through the `win32-longpath` VFS. Direct backup will need Apple's Mobile Device Service (Apple Devices app or iTunes). |
 | Windows 11 ARM64 | Untested | Untested | Untested | Planned | Not built in CI yet |
-| Ubuntu 22.04 x64 | CI | CI (synthetic fixtures only; [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)) | CI has not run the milestone 3 branch yet | Planned | CI build baseline, which sets the glibc floor. Needs `libwebkit2gtk-4.1-0`. |
+| Ubuntu 22.04 x64 | CI | CI (synthetic fixtures only; [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)) | CI (synthetic fixtures only; [run 39117881774](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39117881774)) | Planned | CI build baseline, which sets the glibc floor. Needs `libwebkit2gtk-4.1-0`. |
 | Ubuntu 24.04 x64 | Supported (built and unit-tested during M1 development) | Local run only (synthetic fixtures only): `cargo test --workspace` and `npm test` passed in an Ubuntu 24.04.5 LTS container on 2026-10-18. Not CI, not a desktop. | Local run only (synthetic fixtures only): `cargo test --workspace`, `npm test`, `npm run typecheck`, clippy, `cargo deny check` and `npm run licenses` passed in an Ubuntu 24.04.5 LTS container on 2026-10-18, plus the headless smoke test below. Not CI, not a desktop. | Planned | Ships libimobiledevice 1.3.0, which is old. M7 will not depend on it. |
 | Ubuntu 26.04.1 LTS x64 | **Supported** (built from source with `npm run tauri dev`, every M1 check done by hand on a real desktop, a QEMU VM; 2026-10-17/18) | Untested on a real desktop (see the headless smoke test below) | Untested on a real desktop | Planned | First manual run anywhere. The native picker chose an ordinary folder. A folder laid out like a backup (`Manifest.db` + `Info.plist`) was refused with the reason shown, and the previous location was kept. The choice survived a restart. Ships libimobiledevice 1.4.0. |
 | Debian 12, Fedora 40+ | Untested | Untested | Untested | Planned | Need WebKitGTK 4.1 |
@@ -149,8 +149,7 @@ generated stand-ins.
 Every M2 cell in this table passed in CI on Ubuntu 22.04 and Windows
 (windows-2022) in [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524),
 and locally in an Ubuntu 24.04.5 LTS container (2026-10-18). The M3 cells
-have run **locally only**, in the same container; CI has not run them on
-either runner yet. All of it is against synthetic fixtures; none of it is a
+passed in CI on both runners in [run 39117881774](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39117881774), and locally in the same container. All of it is against synthetic fixtures; none of it is a
 real-device test.
 
 | Backup kind | Backup discovery and validation (M2) | Extraction check (M3) |
@@ -242,8 +241,8 @@ ASCII case.
 report with the generator's model in `<name>.expected/report.json`. This
 proves that the Rust code and the generator's second statement of the rules
 agree; it is not external evidence. On 2026-10-18 it passed locally in an
-Ubuntu 24.04.5 LTS container (Linux). **CI on `ubuntu-22.04` and
-`windows-2022` has not run it yet**, and nothing is claimed for Windows.
+Ubuntu 24.04.5 LTS container (Linux). It also passed in CI on
+`ubuntu-22.04` and `windows-2022` in [run 39117881774](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39117881774).
 
 ## Oracle run 1 (encrypted messages fixtures, M3)
 
