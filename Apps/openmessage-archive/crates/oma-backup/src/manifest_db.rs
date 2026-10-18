@@ -255,7 +255,7 @@ pub(crate) fn open_staged(
     file: BackupFile,
     limits: &SqlLimits,
 ) -> Result<(Connection, OpenMode), BackupError> {
-    let read_only = Connection::open_with_flags(
+    let read_only = open_connection(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
@@ -265,7 +265,7 @@ pub(crate) fn open_staged(
         Err(e) if e.sqlite_error_code() == Some(rusqlite::ErrorCode::CannotOpen) => {
             // A staged WAL database without a -shm may need a writable
             // connection to build its index. The copy is ours.
-            let c = Connection::open_with_flags(
+            let c = open_connection(
                 path,
                 OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
             )
@@ -274,6 +274,25 @@ pub(crate) fn open_staged(
             Ok((c, OpenMode::ReadWriteQueryOnly))
         }
         Err(e) => Err(open_error(&e, file)),
+    }
+}
+
+/// Open a connection to a staged file.
+///
+/// Bundled SQLite's default Windows VFS caps a path at MAX_PATH (260
+/// characters), and a staged copy under a deep archive folder can be longer:
+/// the Windows CI job saw `SQLITE_CANTOPEN` there. On Windows the file is
+/// opened through the `win32-longpath` VFS with its verbatim (`\\?\`) path,
+/// which `CreateFileW` accepts at any length.
+fn open_connection(path: &Path, flags: OpenFlags) -> rusqlite::Result<Connection> {
+    #[cfg(windows)]
+    {
+        let verbatim = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        Connection::open_with_flags_and_vfs(verbatim, flags, "win32-longpath")
+    }
+    #[cfg(not(windows))]
+    {
+        Connection::open_with_flags(path, flags)
     }
 }
 
