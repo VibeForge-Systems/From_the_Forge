@@ -303,9 +303,8 @@ carried over from milestones 2 and 3 follow.
   surviving a restart. The M2 Backups page, the M3 extraction check and the
   M4 Archive page have not been run by hand on any real desktop yet; each
   was exercised only in a headless smoke test in a Linux container. On
-  Windows, CI builds the app and runs the tests of M2, M3 and the first
-  part of M4 (slices 4a–4f); the rest of M4 has not run on Windows at all,
-  and nobody has used the UI there. The installer packages, on either
+  Windows, CI builds the app and runs the tests of M2, M3 and M4, but
+  nobody has used the UI there. The installer packages, on either
   platform, have not been installed and run by hand. See
   [compatibility.md](docs/compatibility.md).
 - **Windows relies on Microsoft WebView2,** a proprietary OS component, to

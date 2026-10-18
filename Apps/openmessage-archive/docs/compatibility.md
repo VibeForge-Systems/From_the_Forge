@@ -39,8 +39,8 @@ is an iOS version.
 import catalogue in `tests/fixtures/imports/`, on synthetic databases built
 by the tests, and on the M2 and M3 catalogues. No backup made from a real
 iPhone has been imported. **Crash consistency was tested by process kill;
-power loss was not tested.** Slices 4a–4f passed CI on Linux and Windows;
-slices 4g–4n have run only in a Linux container (see "Milestone 4 CI").
+power loss was not tested.** Slices 4a–4f passed CI on Linux and Windows,
+and slices 4g–4n in [run 39163096062](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39163096062) (see "Milestone 4 CI").
 
 Last updated: Milestone 4 (2026-10-18).
 
@@ -48,9 +48,9 @@ Last updated: Milestone 4 (2026-10-18).
 
 | Platform | Shell and settings (M1) | Backup discovery and validation (M2) | Extraction check (M3) | Archive import (M4) | Direct device backup (M7) | Notes |
 |---|---|---|---|---|---|---|
-| Windows 11 x64 | CI | CI (synthetic fixtures only; windows-2022 runner, [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)). Default-location discovery: **Untested** until run on Windows 11. | CI (synthetic fixtures only; windows-2022 runner, [run 39117881774](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39117881774)). Nobody has run it on Windows 11. | Slices 4a–4f: CI (synthetic fixtures only; windows-2022 runner, [run 39137381988](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39137381988)). Slices 4g–4n: **not yet run on Windows**. Nobody has run it on Windows 11. | Planned | Needs WebView2, which ships with Windows 11. CI builds bundled SQLite with MSVC and runs the Windows-only tests (junctions, a ~200-character library path). That long-path test found that bundled SQLite's default VFS cannot open a staged copy beyond MAX_PATH; staged databases are now opened through the `win32-longpath` VFS. Direct backup will need Apple's Mobile Device Service (Apple Devices app or iTunes). |
+| Windows 11 x64 | CI | CI (synthetic fixtures only; windows-2022 runner, [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)). Default-location discovery: **Untested** until run on Windows 11. | CI (synthetic fixtures only; windows-2022 runner, [run 39117881774](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39117881774)). Nobody has run it on Windows 11. | Slices 4a–4f: CI (synthetic fixtures only; windows-2022 runner, [run 39137381988](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39137381988)). Slices 4g–4n: CI (synthetic fixtures only; windows-2022 runner, [run 39163096062](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39163096062)). Nobody has run it on Windows 11. | Planned | Needs WebView2, which ships with Windows 11. CI builds bundled SQLite with MSVC and runs the Windows-only tests (junctions, a ~200-character library path). That long-path test found that bundled SQLite's default VFS cannot open a staged copy beyond MAX_PATH; staged databases are now opened through the `win32-longpath` VFS. Direct backup will need Apple's Mobile Device Service (Apple Devices app or iTunes). |
 | Windows 11 ARM64 | Untested | Untested | Untested | Untested | Planned | Not built in CI yet |
-| Ubuntu 22.04 x64 | CI | CI (synthetic fixtures only; [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)) | CI (synthetic fixtures only; [run 39117881774](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39117881774)) | Slices 4a–4f: CI (synthetic fixtures only; [run 39137381988](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39137381988)). Slices 4g–4n: not yet in CI | Planned | CI build baseline, which sets the glibc floor. Needs `libwebkit2gtk-4.1-0`. |
+| Ubuntu 22.04 x64 | CI | CI (synthetic fixtures only; [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)) | CI (synthetic fixtures only; [run 39117881774](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39117881774)) | Slices 4a–4f: CI (synthetic fixtures only; [run 39137381988](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39137381988)). Slices 4g–4n: CI (synthetic fixtures only; [run 39163096062](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39163096062)) | Planned | CI build baseline, which sets the glibc floor. Needs `libwebkit2gtk-4.1-0`. |
 | Ubuntu 24.04 x64 | Supported (built and unit-tested during M1 development) | Local run only (synthetic fixtures only): `cargo test --workspace` and `npm test` passed in an Ubuntu 24.04.5 LTS container on 2026-10-18. Not CI, not a desktop. | Local run only (synthetic fixtures only): `cargo test --workspace`, `npm test`, `npm run typecheck`, clippy, `cargo deny check` and `npm run licenses` passed in an Ubuntu 24.04.5 LTS container on 2026-10-18, plus the headless smoke test below. Not CI, not a desktop. | Local run only (synthetic fixtures only): every check in the app's AGENTS.md list passed in an Ubuntu 24.04.5 LTS container on 2026-10-18, plus the headless smoke test below. Not a desktop. | Planned | Ships libimobiledevice 1.3.0, which is old. M7 will not depend on it. |
 | Ubuntu 26.04.1 LTS x64 | **Supported** (built from source with `npm run tauri dev`, every M1 check done by hand on a real desktop, a QEMU VM; 2026-10-17/18) | Untested on a real desktop (see the headless smoke test below) | Untested on a real desktop | Untested on a real desktop | Planned | First manual run anywhere. The native picker chose an ordinary folder. A folder laid out like a backup (`Manifest.db` + `Info.plist`) was refused with the reason shown, and the previous location was kept. The choice survived a restart. Ships libimobiledevice 1.4.0. |
 | Debian 12, Fedora 40+ | Untested | Untested | Untested | Untested | Planned | Need WebKitGTK 4.1 |
@@ -681,7 +681,7 @@ passed as well. On `windows-2022` run 39137381988 includes, all passing:
   commit, each resumed to the uninterrupted result.
 
 **Windows tests for slices 4g–4n (spec §18.8): written, partly missing.**
-None of these has run on Windows yet.
+These passed on `windows-2022` in [run 39163096062](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39163096062), except where marked missing.
 
 - `crates/oma-archive/tests/long_paths.rs` runs on every platform: under a
   library path of about 230 characters it imports `imp-dev1-v1-plain` (6
@@ -690,20 +690,19 @@ None of these has run on Windows yet.
   and checks that the store paths exceed 300 characters and `.incoming` is
   empty. It passed in the Linux container (store file paths of 360
   characters); on `windows-2022` it is the long-path import, placement,
-  re-hash and verify test, not yet run.
+  re-hash and verify test, and it passed in [run 39163096062](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39163096062).
 - `crates/oma-archive/tests/windows.rs`, `a_junction_in_the_store_is_never_followed`:
   a `<hh>` directory replaced by a junction is never written through.
-  Not yet run (its logic was checked on Linux with a symbolic link).
+  Passed on `windows-2022` in [run 39163096062](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39163096062).
 - **Missing:** a partial file held by a `share_mode(0)` handle (the
   removal retries and `partialsLeft`), and a killed lock holder released
-  within the retry window. The pending CI run does **not** cover them;
+  within the retry window. CI does **not** cover them;
   the retry path is exercised only through a `StoreFs` whose removals
   fail (`store.rs`), on Linux.
 
 The `RECORD` lines these tests print are captured by the test harness and
 do not appear in the CI log, so only the assertions above are claimed.
-**Slices 4g–4n have not run in CI** (on either OS) at the time of writing;
-their results above and below are from the Linux container only.
+Slices 4g–4n passed CI on `ubuntu-22.04` and `windows-2022` in [run 39163096062](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39163096062).
 
 ### Milestone 4 headless smoke test (Linux container, not a desktop)
 

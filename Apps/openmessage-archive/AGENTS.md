@@ -32,9 +32,8 @@ database and import) is implemented**: `crates/oma-archive` (schema v1,
 the import with its gate, the content-addressed attachment store, FTS5,
 the report-only verifier), six archive IPC commands with import and verify
 jobs, and the Archive page. Archives are plaintext at rest (encryption is
-M8). Slices 4a–4f pass CI on `ubuntu-22.04` and `windows-2022`; slices
-4g–4n have run only in a Linux container and a headless smoke test. Its
-sign-off is pending CI for those slices, the manual checklist in
+M8). All slices pass CI on `ubuntu-22.04` and `windows-2022`. Its sign-off
+is pending the manual checklist in
 `docs/compatibility.md`, and the owner's answers on D69, D70, D71, D79 and
 D82 (D51, D59, D60 and D61 are owner-confirmed). Milestone 5 (the rich
 viewer) is next.
