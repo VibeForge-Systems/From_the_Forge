@@ -2554,6 +2554,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "oma-messages"
+version = "0.1.0"
+dependencies = [
+ "oma-backup",
+ "rusqlite",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+ "zeroize",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

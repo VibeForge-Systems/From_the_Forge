@@ -50,6 +50,7 @@ tauri-plugin-opener = "=2.7.2"
 
 oma-fs = { path = "crates/oma-fs" }
 oma-backup = { path = "crates/oma-backup" }
+oma-messages = { path = "crates/oma-messages" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -81,4 +82,6 @@ opt-level = 3
 # The bundled SQLite C build: Cargo passes this profile's OPT_LEVEL to `cc`.
 # The M3 checks run whole-database passes and integrity checks in tests.
 [profile.dev.package.libsqlite3-sys]
+opt-level = 3
+[profile.dev.package.oma-messages]
 opt-level = 3
