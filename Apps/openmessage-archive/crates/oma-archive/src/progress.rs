@@ -38,8 +38,7 @@ impl Clock for FixedClock {
     }
 }
 
-/// A phase of an import (spec §8.12). Slices 4f to 4i have the phases up
-/// to P8; the gate and finalize add theirs.
+/// A phase of an import (spec §8.12).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ImportPhase {
@@ -55,6 +54,8 @@ pub enum ImportPhase {
     /// The attachment estimate: each attachment looked up and its file
     /// probed (spec §8.2 step 5). `done` and `total` are not reported.
     EstimatingAttachments,
+    /// Waiting for the gate's decision (spec §8.2 step 7).
+    AwaitingConfirmation,
     /// The session bookkeeping after the archive's first write.
     PreparingArchive,
     /// P1.
@@ -72,6 +73,14 @@ pub enum ImportPhase {
     ImportingAttachmentLinks,
     /// P8: the Recently Deleted markers.
     ImportingRecentlyDeleted,
+    /// P9, finalize: the statistics, the session-local cleanup and the
+    /// terminal state (spec §8.9 steps 1–4).
+    Finalizing,
+    /// P9: FTS merge steps (step 5). `done` counts steps; `total` is not
+    /// known.
+    OptimizingIndex,
+    /// P9: `wal_checkpoint(TRUNCATE)` (step 6).
+    Checkpointing,
 }
 
 /// A progress event. Content-free.

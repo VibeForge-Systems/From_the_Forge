@@ -387,11 +387,16 @@ impl<W: Write> Write for SinkWriter<W> {
     }
 }
 
+/// The attachment table's merge definition.
+pub(crate) fn table_def() -> TableDef {
+    TableDef::new(Entity::Attachment, "attachment", false, &[])
+}
+
 impl<'a> Attachments<'a> {
     pub(crate) fn new(rd: &'a RdSkip, store: StoreCtx<'a>) -> Attachments<'a> {
         Attachments {
             kind: EntityKind {
-                def: TableDef::new(Entity::Attachment, "attachment", false, &[]),
+                def: table_def(),
                 key: KeyStyle::Guid(0),
                 lineage_seen: true,
                 derive_insert: |_| Vec::new(),

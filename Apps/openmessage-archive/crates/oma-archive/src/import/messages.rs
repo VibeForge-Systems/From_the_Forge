@@ -125,6 +125,11 @@ fn rename(source: &'static str) -> &'static str {
     }
 }
 
+/// The message table's merge definition.
+pub(crate) fn table_def() -> TableDef {
+    TableDef::new(Entity::Message, "message", false, DERIVED)
+}
+
 pub(crate) struct Messages {
     def: TableDef,
     rd: RdPlan,
@@ -136,7 +141,7 @@ impl Messages {
     /// always kept (D59) and `attributedBody` is decoded.
     pub(crate) fn new(rd: RdPlan) -> Messages {
         Messages {
-            def: TableDef::new(Entity::Message, "message", false, DERIVED),
+            def: table_def(),
             rd,
             opts: MessageReadOptions::default()
                 .with_decode_attributed_body(true)
@@ -734,14 +739,15 @@ struct StoredBody {
     edit_label: (i64, Option<i64>, Option<i64>),
 }
 
+/// A message's body version by its raw hash.
+pub(crate) const BODY_FIND_SQL: &str =
+    "SELECT id, first_rank, last_rank, decoder_version, edit_label, edit_label_a, edit_label_b \
+     FROM message_body WHERE message_id = ?1 AND raw_hash = ?2";
+
 impl<'c> BodyStmts<'c> {
     fn prepare(c: &'c Connection) -> rusqlite::Result<BodyStmts<'c>> {
         Ok(BodyStmts {
-            find: c.prepare(
-                "SELECT id, first_rank, last_rank, decoder_version, edit_label, edit_label_a, \
-                        edit_label_b \
-                 FROM message_body WHERE message_id = ?1 AND raw_hash = ?2",
-            )?,
+            find: c.prepare(BODY_FIND_SQL)?,
             insert: c.prepare(
                 "INSERT INTO message_body (message_id, raw_hash, text_raw, text_raw_st, \
                      attributed_raw, attributed_raw_st, summary_raw, summary_raw_st, \
@@ -1026,13 +1032,9 @@ struct MessageStmts<'c> {
 impl<'c> MessageStmts<'c> {
     fn prepare(c: &'c Connection, def: &TableDef) -> rusqlite::Result<MessageStmts<'c>> {
         Ok(MessageStmts {
-            by_key: c.prepare(&def.select_sql("key_kind = 1 AND guid = ?1"))?,
-            by_unkeyed: c.prepare(
-                &def.select_sql("key_kind = 2 AND unkeyed_fp = ?1 AND unkeyed_occ = ?2"),
-            )?,
-            stored_issues: c.prepare(
-                "SELECT col, kind, bytes, raw FROM value_issue WHERE entity = ?1 AND row_id = ?2",
-            )?,
+            by_key: c.prepare(&def.select_sql(super::merge::KEY_GUID))?,
+            by_unkeyed: c.prepare(&def.select_sql(super::merge::KEY_UNKEYED))?,
+            stored_issues: c.prepare(super::merge::STORED_ISSUES_SQL)?,
             insert: c.prepare(&def.insert_sql())?,
             derived: c.prepare(
                 "SELECT service_class, item_kind, assoc_present, assoc_kind, assoc_target_shape, \

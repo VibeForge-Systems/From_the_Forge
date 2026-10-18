@@ -20,11 +20,12 @@
 //!   key is unique in this source and already archived is only re-observed
 //!   ([`RdPlan::archived`]); every other Recently Deleted row, an unkeyed
 //!   one included, is excluded ([`RdPlan::excluded`]). The archive lookup
-//!   runs for Recently Deleted rows only, one at a time; no key outlives
-//!   its row.
+//!   (one indexed read per message key on the read-only connection) runs
+//!   one row at a time; no key outlives its row.
 //!
-//! The attachment scans, the estimate and the gate come with the passes
-//! that need them (slices 4h–4j).
+//! The key scan also tallies, per keyed table, the keyable, unkeyed and
+//! duplicated keys, and for messages the keys already archived: what the
+//! gate shows (`gate.rs`).
 
 use std::ops::ControlFlow;
 
@@ -187,18 +188,40 @@ impl DupSet {
     }
 }
 
-/// The digests that occur more than once in `all` (sorted in place).
-fn duplicated(all: &mut [[u8; 16]]) -> Vec<[u8; 16]> {
+/// One key-scan entry: the 16-byte key digest and a flag byte (1: the key
+/// is already a keyed row of the archive; messages only).
+type Entry = [u8; 17];
+
+/// Sort `all` and return the digests that occur more than once, the rows
+/// carrying them, and the rows whose key is unique here and flagged.
+fn tally(all: &mut [Entry]) -> (Vec<[u8; 16]>, u64, u64) {
     all.sort_unstable();
-    let mut out: Vec<[u8; 16]> = Vec::new();
-    for w in all.windows(2) {
-        if let [a, b] = w {
-            if a == b && out.last() != Some(a) {
-                out.push(*a);
+    let mut dups: Vec<[u8; 16]> = Vec::new();
+    let mut dup_rows = 0u64;
+    let mut flagged = 0u64;
+    for group in all.chunk_by(|a, b| a.first_chunk::<16>() == b.first_chunk::<16>()) {
+        let Some(first) = group.first() else { continue };
+        if group.len() > 1 {
+            if let Some(d) = first.first_chunk::<16>() {
+                dups.push(*d);
             }
+            dup_rows = dup_rows.saturating_add(u64::try_from(group.len()).unwrap_or(u64::MAX));
+        } else if first.last() == Some(&1) {
+            flagged = flagged.saturating_add(1);
         }
     }
-    out
+    (dups, dup_rows, flagged)
+}
+
+fn entry(digest: [u8; 16], flag: bool) -> Entry {
+    let mut e = [0u8; 17];
+    for (dst, src) in e.iter_mut().zip(digest.iter()) {
+        *dst = *src;
+    }
+    if let Some(last) = e.last_mut() {
+        *last = u8::from(flag);
+    }
+    e
 }
 
 /// The tagged-key digest of a GUID column, when it is a usable key: a
@@ -222,10 +245,28 @@ pub(crate) fn handle_digest(address: &Cell, service: &Cell) -> Option<([u8; 16],
     Some((key_digest(&nk), nk))
 }
 
+/// What the key scan counted for one keyed table (spec §8.2 step 3).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct KeyTally {
+    /// Rows read.
+    pub(crate) rows: u64,
+    /// Rows with a usable key (a readable, non-empty identifier).
+    pub(crate) keyable: u64,
+    /// Distinct keys that occur more than once.
+    pub(crate) duplicated_keys: u64,
+    /// Rows imported unkeyed: no usable key, or a duplicated one.
+    pub(crate) unkeyed: u64,
+    /// Messages only: rows whose key is unique here and already a keyed
+    /// message of the archive (the overlap the gate shows).
+    pub(crate) already_archived: u64,
+}
+
 /// What the key scan found.
+#[allow(clippy::large_enum_variant)] // made once per import
 pub(crate) enum KeyScan {
-    /// The duplicate set, and the Recently Deleted plan.
-    Done(DupSet, RdPlan),
+    /// The duplicate set, the Recently Deleted plan, and the tallies of
+    /// handle, chat, message and attachment keys.
+    Done(DupSet, RdPlan, [KeyTally; 4]),
     /// More than [`KEY_SCAN_CAP`] rows in this entity's table.
     OverLimit(Entity),
 }
@@ -234,7 +275,7 @@ pub(crate) enum KeyScan {
 pub(crate) enum ScanError {
     /// Reading the source.
     Read(MessagesError),
-    /// The archive lookup of a Recently Deleted row's key.
+    /// The archive lookup of a message key.
     Archive(rusqlite::Error),
 }
 
@@ -253,9 +294,10 @@ struct RdRow {
     archived: bool,
 }
 
-/// The key scan of §8.2 step 3. `rd` is P0's set; for each of its rows
-/// with a usable key, `is_archived` is asked whether that key is already
-/// a keyed message in the archive (only when `exclude_rd`).
+/// The key scan of §8.2 step 3. `rd` is P0's set. Every message row with a
+/// usable key asks `is_archived` whether that key is already a keyed
+/// message in the archive (one indexed lookup on the read-only connection;
+/// the key is not kept past its row).
 pub(crate) fn scan_keys(
     db: &SmsDb<'_>,
     ctx: &mut MessagesCtx<'_>,
@@ -264,21 +306,22 @@ pub(crate) fn scan_keys(
     is_archived: &mut dyn FnMut(&[u8]) -> rusqlite::Result<bool>,
 ) -> Result<KeyScan, ScanError> {
     let mut out = DupSet::default();
+    let mut tallies = [KeyTally::default(); 4];
     let mut rd_rows: Vec<RdRow> = Vec::new();
     let mut lookup_err: Option<rusqlite::Error> = None;
     for entity in KEYED {
-        let mut digests: Vec<[u8; 16]> = Vec::new();
+        let mut entries: Vec<Entry> = Vec::new();
         let mut rows = 0u64;
         let mut over = false;
         {
-            let mut push = |d: Option<[u8; 16]>| -> ControlFlow<()> {
+            let mut push = |d: Option<([u8; 16], bool)>| -> ControlFlow<()> {
                 rows = rows.saturating_add(1);
                 if rows > KEY_SCAN_CAP {
                     over = true;
                     return ControlFlow::Break(());
                 }
-                if let Some(d) = d {
-                    digests.push(d);
+                if let Some((d, flag)) = d {
+                    entries.push(entry(d, flag));
                 }
                 ControlFlow::Continue(())
             };
@@ -287,35 +330,35 @@ pub(crate) fn scan_keys(
                     db.for_each_handle_key(Cursor::Start, ctx, |r: HandleKeyRow| {
                         let a = Cell::text(&r.id);
                         let s = Cell::text(&r.service);
-                        push(handle_digest(&a, &s).map(|(d, _)| d))
+                        push(handle_digest(&a, &s).map(|(d, _)| (d, false)))
                     })?;
                 }
                 Entity::Chat => {
                     db.for_each_chat_key(Cursor::Start, ctx, |r: KeyRow| {
-                        push(guid_digest(&Cell::text(&r.guid)).map(|(d, _)| d))
+                        push(guid_digest(&Cell::text(&r.guid)).map(|(d, _)| (d, false)))
                     })?;
                 }
                 Entity::Message => {
                     db.for_each_message_key(Cursor::Start, ctx, |r: KeyRow| {
                         let key = guid_digest(&Cell::text(&r.guid));
+                        let archived = match &key {
+                            Some((_, k)) => match is_archived(k) {
+                                Ok(a) => a,
+                                Err(e) => {
+                                    lookup_err = Some(e);
+                                    return ControlFlow::Break(());
+                                }
+                            },
+                            None => false,
+                        };
                         if exclude_rd && rd.binary_search(&r.rowid).is_ok() {
-                            let archived = match &key {
-                                Some((_, k)) => match is_archived(k) {
-                                    Ok(a) => a,
-                                    Err(e) => {
-                                        lookup_err = Some(e);
-                                        return ControlFlow::Break(());
-                                    }
-                                },
-                                None => false,
-                            };
                             rd_rows.push(RdRow {
                                 rowid: r.rowid,
                                 digest: key.as_ref().map(|(d, _)| *d),
                                 archived,
                             });
                         }
-                        push(key.map(|(d, _)| d))
+                        push(key.map(|(d, _)| (d, archived)))
                     })?;
                     if let Some(e) = lookup_err.take() {
                         return Err(ScanError::Archive(e));
@@ -323,7 +366,7 @@ pub(crate) fn scan_keys(
                 }
                 _ => {
                     db.for_each_attachment_key(Cursor::Start, ctx, |r: KeyRow| {
-                        push(guid_digest(&Cell::text(&r.guid)).map(|(d, _)| d))
+                        push(guid_digest(&Cell::text(&r.guid)).map(|(d, _)| (d, false)))
                     })?;
                 }
             }
@@ -331,7 +374,18 @@ pub(crate) fn scan_keys(
         if over {
             return Ok(KeyScan::OverLimit(entity));
         }
-        let dups = duplicated(&mut digests);
+        let keyable = u64::try_from(entries.len()).unwrap_or(u64::MAX);
+        let (dups, dup_rows, archived) = tally(&mut entries);
+        drop(entries);
+        if let Some(t) = slot(entity).and_then(|i| tallies.get_mut(i)) {
+            *t = KeyTally {
+                rows,
+                keyable,
+                duplicated_keys: u64::try_from(dups.len()).unwrap_or(u64::MAX),
+                unkeyed: rows.saturating_sub(keyable).saturating_add(dup_rows),
+                already_archived: archived,
+            };
+        }
         if let Some(s) = slot(entity).and_then(|i| out.sets.get_mut(i)) {
             *s = dups;
         }
@@ -353,7 +407,7 @@ pub(crate) fn scan_keys(
     }
     plan.archived.sort_unstable();
     plan.excluded.sort_unstable();
-    Ok(KeyScan::Done(out, plan))
+    Ok(KeyScan::Done(out, plan, tallies))
 }
 
 /// The stored `import_dup_key` rows of a session being continued.
@@ -394,6 +448,8 @@ pub(crate) struct Binding {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Resume {
     pub(crate) id: i64,
+    /// Its lineage.
+    pub(crate) lineage: i64,
     /// Its stored counts JSON.
     pub(crate) counts: Option<String>,
     /// Its stored rank. A continued session writes every row at this rank,
@@ -416,7 +472,15 @@ pub(crate) struct ResumeDecision {
 /// newest matching candidate is continued; every other candidate is
 /// superseded. A failed session (3) is never a candidate. A candidate
 /// whose stored rank cannot be read is superseded.
-pub(crate) fn decide_resume(conn: &Connection, want: &Binding) -> rusqlite::Result<ResumeDecision> {
+///
+/// With `any_lineage`, the lineage is not compared: the preflight asks
+/// which session *could* continue before the user picks the lineage at the
+/// gate; the decision that counts is made again with the chosen one.
+pub(crate) fn decide_resume(
+    conn: &Connection,
+    want: &Binding,
+    any_lineage: bool,
+) -> rusqlite::Result<ResumeDecision> {
     let mut stmt = conn.prepare(
         "SELECT id, lineage_id, content_digest, main_len, wal_outcome, wal_len, app_version, \
                 schema_version, deriver_version, decoder_version, read_profile, \
@@ -442,7 +506,7 @@ pub(crate) fn decide_resume(conn: &Connection, want: &Binding) -> rusqlite::Resu
         let rank: Option<Rank> = Rank::from_slice(&r.get::<_, Vec<u8>>(14)?);
         let matches = out.resume.is_none()
             && rank.is_some()
-            && want.lineage == Some(lineage)
+            && (any_lineage || want.lineage == Some(lineage))
             && digest.as_slice() == want.digest.as_slice()
             && r.get::<_, i64>(3)? == want.main_len
             && r.get::<_, i64>(4)? == want.wal_outcome
@@ -458,6 +522,7 @@ pub(crate) fn decide_resume(conn: &Connection, want: &Binding) -> rusqlite::Resu
             (true, Some(rank)) => {
                 out.resume = Some(Resume {
                     id,
+                    lineage,
                     counts: r.get(13)?,
                     rank,
                 });
@@ -477,10 +542,21 @@ mod tests {
         let a = [1u8; 16];
         let b = [2u8; 16];
         let c = [3u8; 16];
-        let mut all = vec![c, a, b, a, c, c];
-        assert_eq!(duplicated(&mut all), vec![a, c]);
-        let mut none = vec![a, b, c];
-        assert!(duplicated(&mut none).is_empty());
+        let d = [4u8; 16];
+        // The flag never splits a group: `a` is duplicated whether or not
+        // one occurrence is archived.
+        let mut all = vec![
+            entry(c, false),
+            entry(a, true),
+            entry(b, false),
+            entry(a, false),
+            entry(c, false),
+            entry(c, false),
+            entry(d, true),
+        ];
+        assert_eq!(tally(&mut all), (vec![a, c], 5, 1));
+        let mut none = vec![entry(a, false), entry(b, false), entry(c, false)];
+        assert_eq!(tally(&mut none), (Vec::new(), 0, 0));
         let mut set = DupSet::default();
         set.insert(Entity::Chat, b);
         set.insert(Entity::Chat, a);

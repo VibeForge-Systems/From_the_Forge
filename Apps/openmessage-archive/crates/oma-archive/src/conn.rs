@@ -231,6 +231,7 @@ impl WriteConn {
             Some(crate::error::SQLITE_NOTADB) => ArchiveError::NotAnArchive,
             _ => ArchiveError::sqlite(Stage::Configure, &e),
         })?;
+        crate::fault::observe_commits(&conn);
         Ok(WriteConn { conn })
     }
 
@@ -257,10 +258,63 @@ impl WriteConn {
     }
 }
 
+/// Run `f`, a single long statement in its own transaction, with the
+/// archive interrupt **armed** (spec §8.6): a progress handler checks
+/// `cancel` every [`OPS_PER_TICK`] VM operations and interrupts the
+/// statement once it is set, which SQLite reports as `SQLITE_INTERRUPT`.
+///
+/// The handler is removed before this returns, so the caller's `COMMIT`
+/// (or `ROLLBACK`) and every batch statement run disarmed: an interrupted
+/// INSERT, UPDATE or DELETE inside an explicit transaction rolls the whole
+/// transaction back (sqlite.org/c3ref/interrupt.html), so the batch path
+/// never arms it. Only the write connection is armed; read connections
+/// keep their op budget.
+pub(crate) fn armed<T>(
+    conn: &Connection,
+    cancel: &oma_backup::CancelToken,
+    f: impl FnOnce(&Connection) -> rusqlite::Result<T>,
+) -> rusqlite::Result<T> {
+    let token = cancel.clone();
+    conn.progress_handler(OPS_PER_TICK, Some(move || token.is_cancelled()))?;
+    let out = f(conn);
+    let disarmed = conn.progress_handler(0, None::<fn() -> bool>);
+    match (out, disarmed) {
+        (Ok(v), Ok(())) => Ok(v),
+        (Err(e), _) | (Ok(_), Err(e)) => Err(e),
+    }
+}
+
 /// An in-memory database with the ReadWrite hardening, for building the
 /// expected schema objects (§7.3).
 pub(crate) fn open_memory() -> Result<Connection, ArchiveError> {
     let conn = Connection::open_in_memory().map_err(|e| ArchiveError::sqlite(Stage::Open, &e))?;
     harden_common(&conn).map_err(|e| ArchiveError::sqlite(Stage::Configure, &e))?;
     Ok(conn)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LONG: &str =
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000000) \
+                        SELECT count(*) FROM n";
+
+    #[test]
+    fn an_armed_statement_stops_on_cancel_and_the_handler_is_removed() {
+        let conn = open_memory().expect("memory");
+        let token = oma_backup::CancelToken::new();
+        let n: i64 = armed(&conn, &token, |c| c.query_row(LONG, [], |r| r.get(0))).expect("runs");
+        assert_eq!(n, 2_000_000);
+        token.cancel();
+        let e = armed(&conn, &token, |c| {
+            c.query_row(LONG, [], |r| r.get::<_, i64>(0))
+        })
+        .expect_err("interrupted");
+        assert_eq!(primary_code(&e), Some(SQLITE_INTERRUPT));
+        // Disarmed afterwards: the same statement runs although the token
+        // stays cancelled.
+        let n: i64 = conn.query_row(LONG, [], |r| r.get(0)).expect("disarmed");
+        assert_eq!(n, 2_000_000);
+    }
 }

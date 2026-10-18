@@ -31,7 +31,8 @@ pub enum FaultPoint {
     BatchAfterCommit,
     /// The supersede and new-session (or resume) transaction committed.
     SessionCommitted,
-    /// A cancelled, stopped or failed session's terminal state committed.
+    /// A session's terminal state committed: completed (finalize), or
+    /// cancelled, stopped or failed.
     TerminalCommitted,
     /// `begin_write`: partial files and provenance temporaries swept.
     RecoverySwept,
@@ -59,12 +60,34 @@ pub enum FaultPoint {
     /// Archive creation: renamed into place; the library directory's fsync
     /// is next.
     CreateAfterRename,
+    /// The import is about to ask the gate (spec §8.2 step 7); nothing has
+    /// been written.
+    GateWaiting,
+    /// Finalize: `chat_stats` and `archive_stats` committed.
+    FinalizeStats,
+    /// Finalize: one chunk of the session-local cleanup committed.
+    FinalizeCleanup,
+    /// Finalize: one FTS merge step committed (between steps).
+    FtsMergeStep,
+    /// Finalize: `wal_checkpoint(TRUNCATE)` is next.
+    Checkpoint,
+    /// Provenance: `imports/session-<n>.json.tmp` was created; its content
+    /// is next.
+    ProvenanceTmpCreated,
+    /// Provenance: the `.tmp` file is written and synced; the rename is
+    /// next.
+    ProvenanceBeforeRename,
+    /// A migration step's DDL and data ran inside its transaction; its
+    /// checks are next.
+    MigrationStep,
+    /// A migration step passed its checks; its `COMMIT` is next.
+    MigrationBeforeCommit,
 }
 
 #[cfg_attr(not(feature = "fault-injection"), allow(dead_code))]
 impl FaultPoint {
     /// Every point, in a fixed order.
-    pub const ALL: [FaultPoint; 16] = [
+    pub const ALL: [FaultPoint; 25] = [
         FaultPoint::Record,
         FaultPoint::BatchBeforeCommit,
         FaultPoint::BatchAfterCommit,
@@ -81,6 +104,15 @@ impl FaultPoint {
         FaultPoint::AttachmentDirSynced,
         FaultPoint::CreateBeforeRename,
         FaultPoint::CreateAfterRename,
+        FaultPoint::GateWaiting,
+        FaultPoint::FinalizeStats,
+        FaultPoint::FinalizeCleanup,
+        FaultPoint::FtsMergeStep,
+        FaultPoint::Checkpoint,
+        FaultPoint::ProvenanceTmpCreated,
+        FaultPoint::ProvenanceBeforeRename,
+        FaultPoint::MigrationStep,
+        FaultPoint::MigrationBeforeCommit,
     ];
 
     /// The point's name in `OMA_TEST_FAULT` and in `FAULT` lines.
@@ -102,6 +134,15 @@ impl FaultPoint {
             FaultPoint::AttachmentDirSynced => "attachment-dir-synced",
             FaultPoint::CreateBeforeRename => "create-before-rename",
             FaultPoint::CreateAfterRename => "create-after-rename",
+            FaultPoint::GateWaiting => "gate-waiting",
+            FaultPoint::FinalizeStats => "finalize-stats",
+            FaultPoint::FinalizeCleanup => "finalize-cleanup",
+            FaultPoint::FtsMergeStep => "fts-merge-step",
+            FaultPoint::Checkpoint => "checkpoint",
+            FaultPoint::ProvenanceTmpCreated => "provenance-tmp-created",
+            FaultPoint::ProvenanceBeforeRename => "provenance-before-rename",
+            FaultPoint::MigrationStep => "migration-step",
+            FaultPoint::MigrationBeforeCommit => "migration-before-commit",
         }
     }
 
@@ -176,6 +217,11 @@ pub mod hooks {
         /// plus this many pages (negative: below the current size), whatever
         /// the space probe says.
         pub max_page_room: Option<i64>,
+        /// Fail finalize's terminal bookkeeping (the "completed" update)
+        /// with this SQLite primary result code.
+        pub terminal_error: Option<i32>,
+        /// Fail every provenance file write before its `.tmp` is created.
+        pub provenance_fails: bool,
     }
 
     thread_local! {
@@ -206,6 +252,12 @@ pub mod hooks {
     }
 
     pub use super::FaultPoint;
+
+    /// The import's index-dependent statements, by name, exactly as the
+    /// code prepares them (for `tests/query_plans.rs`).
+    pub fn plan_statements() -> Vec<(&'static str, String)> {
+        crate::import::plan_statements()
+    }
 
     /// An action run at the n-th hit of a fault point.
     pub type FaultAction = Box<dyn FnMut(FaultPoint, u32)>;
@@ -262,7 +314,61 @@ pub mod hooks {
         HITS.with(|h| h.borrow().get(&point).copied().unwrap_or(0))
     }
 
+    /// What the ordering test sees, in order (spec §18.4 `ordering.rs`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Observed {
+        /// A fault point was reached.
+        Point(FaultPoint),
+        /// A transaction on the archive's write connection is committing
+        /// (rusqlite's commit hook).
+        Commit,
+    }
+
+    /// Receives every [`Observed`] event on this thread.
+    pub type Observer = Box<dyn FnMut(Observed)>;
+
+    thread_local! {
+        static OBSERVER: RefCell<Option<Observer>> = const { RefCell::new(None) };
+    }
+
+    /// Removes the observer when dropped.
+    pub struct ObserveGuard(());
+
+    impl Drop for ObserveGuard {
+        fn drop(&mut self) {
+            OBSERVER.with(|o| *o.borrow_mut() = None);
+        }
+    }
+
+    /// Send every fault point hit and every write-connection commit on
+    /// this thread to `observer` until the guard is dropped. Write
+    /// connections opened while it is installed get the commit hook.
+    #[must_use]
+    pub fn observe(observer: Observer) -> ObserveGuard {
+        OBSERVER.with(|o| *o.borrow_mut() = Some(observer));
+        ObserveGuard(())
+    }
+
+    pub(crate) fn observing() -> bool {
+        OBSERVER.with(|o| o.borrow().is_some())
+    }
+
+    pub(crate) fn notify(event: Observed) {
+        // Take the observer out while it runs, so it may not re-enter.
+        let taken = OBSERVER.with(|o| o.borrow_mut().take());
+        if let Some(mut f) = taken {
+            f(event);
+            OBSERVER.with(|o| {
+                let mut slot = o.borrow_mut();
+                if slot.is_none() {
+                    *slot = Some(f);
+                }
+            });
+        }
+    }
+
     pub(crate) fn hit(p: FaultPoint) {
+        notify(Observed::Point(p));
         let n = HITS.with(|h| {
             let mut h = h.borrow_mut();
             let n = h.entry(p).or_insert(0);
@@ -443,5 +549,53 @@ pub(crate) fn max_page_room() -> Option<i64> {
     #[cfg(not(feature = "fault-injection"))]
     {
         None
+    }
+}
+
+/// The error finalize's terminal bookkeeping must fail with, if a test set
+/// one.
+#[inline]
+pub(crate) fn terminal_error() -> Option<rusqlite::Error> {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current()
+            .terminal_error
+            .map(|code| rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None))
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        None
+    }
+}
+
+/// The provenance write must fail.
+#[inline]
+pub(crate) fn provenance_fails() -> bool {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current().provenance_fails
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        false
+    }
+}
+
+/// Give a new write connection the commit hook when a test observes this
+/// thread (`hooks::observe`); nothing without the feature.
+#[inline]
+pub(crate) fn observe_commits(conn: &rusqlite::Connection) {
+    #[cfg(feature = "fault-injection")]
+    {
+        if hooks::observing() {
+            let _ = conn.commit_hook(Some(|| {
+                hooks::notify(hooks::Observed::Commit);
+                false
+            }));
+        }
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        let _ = conn;
     }
 }

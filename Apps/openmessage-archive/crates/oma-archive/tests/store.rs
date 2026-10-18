@@ -19,7 +19,7 @@ use common::import::*;
 use common::*;
 use oma_archive::hooks::{arm, install, FaultPoint, Faults};
 use oma_archive::{
-    CancelToken, CoreOutcome, DirSync, Library, LineageChoice, Placed, RealFs, Recovery,
+    CancelToken, DirSync, ImportOutcome, Library, LineageChoice, Placed, RealFs, Recovery,
     StopReason, StoreFs,
 };
 use sha2::{Digest, Sha256};
@@ -52,7 +52,6 @@ fn import_entry(at: &Imported, entry: &str) -> oma_archive::ImportSummary {
     let s = import(&mut a, &src, &opts(1000), LineageChoice::New);
     drop(a);
     assert!(src.ob.close().removed);
-    finish_sessions(&at.db());
     s
 }
 
@@ -477,7 +476,6 @@ fn intents_remove_placed_files_whose_rows_never_committed() {
     drop(a);
     assert!(s.resumed);
     assert_eq!(s.counts.attachment_files.copied, 6);
-    finish_sessions(&at.db());
     assert_store_consistent(&at.db(), true);
     assert_eq!(logical_snapshot(&at.db(), Scope::Content), want);
 }
@@ -533,7 +531,7 @@ fn a_file_changed_during_its_copy_stops_the_import_and_continuing_finishes() {
         src.ob.close();
         o
     };
-    let CoreOutcome::Stopped { reason, summary } = outcome else {
+    let ImportOutcome::Stopped { reason, summary } = outcome else {
         panic!("not stopped: {outcome:?}");
     };
     assert_eq!(reason, StopReason::SourceChanged);
@@ -560,7 +558,6 @@ fn a_file_changed_during_its_copy_stops_the_import_and_continuing_finishes() {
     drop(a);
     assert!(s.resumed);
     assert_eq!(s.counts.attachment_files.blobs_added, 6);
-    finish_sessions(&at.db());
     let fresh_at = fresh();
     import_entry(&fresh_at, "imp-dev1-v1-plain");
     assert_eq!(
@@ -588,7 +585,7 @@ fn a_cancel_inside_the_copy_commits_the_records_before_it() {
         drop(a);
         o
     };
-    let CoreOutcome::Cancelled(Some(summary)) = outcome else {
+    let ImportOutcome::Cancelled(Some(summary)) = outcome else {
         panic!("not cancelled: {outcome:?}");
     };
     assert_eq!(summary.counts.attachment_files.blobs_added, 2);
@@ -604,7 +601,6 @@ fn a_cancel_inside_the_copy_commits_the_records_before_it() {
     );
     drop(a);
     assert!(s.resumed);
-    finish_sessions(&at.db());
     let fresh_at = fresh();
     import_entry(&fresh_at, "imp-dev1-v1-plain");
     assert_eq!(

@@ -118,8 +118,9 @@ Each one is enforced in code. Keep it that way.
   core: sessions, the Recently Deleted and duplicate-key scans, the merge
   engine, the handle, chat and message passes with body versions and the
   FTS index, the link passes, the attachments with their files in the
-  content-addressed store, the Recently Deleted markers, and the space
-  estimate and guards, `Archive::import_core`); the planned
+  content-addressed store, the Recently Deleted markers, the space
+  estimate and guards, the gate, finalize and the provenance files,
+  `Archive::import`); the planned
   crates are `oma-export` (M6) and `oma-device` (M7). Each must build and test without
   Tauri. The shell's `src-tauri/src/backups/` (registry, job table, worker,
   DTOs, messages) has no Tauri types either, so it is tested without a
@@ -272,8 +273,29 @@ Never hand-edit generated files.
   resolve both sides through this session's `import_rowid_map` and are
   never inserted with an unresolved side; the Recently Deleted decisions
   after P3 (`import/rd.rs`) are re-derived from that map, never carried
-  over from the preflight. Until finalize exists (slice 4j) a session whose passes
-  all ran stays **running**: `CoreOutcome::PassesDone` is not "completed".
+  over from the preflight. The gate (`import/gate.rs`) runs before the
+  first write: nothing may be written before `ImportGate::confirm`
+  returns Proceed (Decline is tested to leave the files byte-identical),
+  and the preflight it shows carries counts, closed kinds and booleans
+  only (device facts are compared inside the crate). Finalize
+  (`import/finalize.rs`) completes the session; its terminal update is
+  best effort and must never run under the armed interrupt.
+- **Only `conn::armed` arms the archive interrupt,** around a single long
+  statement in its own transaction (the `chat_stats` recompute, an FTS
+  merge step); it is removed before any `COMMIT`. Never wrap a batch, a
+  terminal update or a commit in it.
+- **`imports/session-<n>.json` is content-free** (`provenance.rs`): no
+  device name, GUID, digest, rank, message date, path or label; counts are
+  re-serialised from `ImportCounts`. Writing it is best effort and never
+  changes an outcome.
+- **The golden archive** (`tests/fixtures/archives/golden-v1/`) is made
+  only by `cargo run -p oma-archive --example make_golden` and pinned by
+  its `SHA256SUMS` and `logical_snapshot.json`; tests work on a copy.
+  Regenerate it only until schema v1 freezes at the M4 release tag.
+- **`tests/query_plans.rs` pins the plans** of the import's
+  index-dependent statements, taken from the crate through
+  `hooks::plan_statements`. A new merge read or lookup goes into that list;
+  a changed plan is re-pinned deliberately.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush
@@ -287,7 +309,8 @@ Never hand-edit generated files.
 - **Crash points are `fault::point(FaultPoint::…)` calls.** They compile
   to nothing without the feature. `tests/crash.rs` re-runs its own binary
   with `OMA_TEST_FAULT=<point>:<n>` and kills the child there; add a point
-  to `FaultPoint::ALL` and a kill at it in that test together. Its checks
+  to `FaultPoint::ALL` and a kill at it in that test together
+  (`every_fault_point_has_a_kill` fails otherwise). Its checks
   after a kill run on a copy of the database files: a read-write
   connection closing on the original would checkpoint and delete the
   `-wal` the resume must see.

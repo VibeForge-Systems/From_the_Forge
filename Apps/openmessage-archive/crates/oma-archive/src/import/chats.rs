@@ -32,11 +32,16 @@ fn rename(source: &'static str) -> &'static str {
     }
 }
 
+/// The chat table's merge definition.
+pub(crate) fn table_def() -> TableDef {
+    TableDef::new(Entity::Chat, "chat", false, &["service_class"])
+}
+
 impl Chats {
     pub(crate) fn new() -> Chats {
         Chats {
             kind: EntityKind {
-                def: TableDef::new(Entity::Chat, "chat", false, &["service_class"]),
+                def: table_def(),
                 key: KeyStyle::Guid(0),
                 lineage_seen: true,
                 derive_insert: |cells| vec![service_class(cells.get(SERVICE_NAME))],

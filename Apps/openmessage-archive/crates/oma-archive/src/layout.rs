@@ -113,6 +113,16 @@ impl ArchiveDir {
         self.root.join(IMPORTS_DIR)
     }
 
+    /// `imports/session-<n>.json`, the provenance file of session `n`.
+    pub(crate) fn provenance_file(&self, session: i64) -> PathBuf {
+        self.imports().join(provenance_name(session, false))
+    }
+
+    /// `imports/session-<n>.json.tmp`, its temporary file.
+    pub(crate) fn provenance_tmp(&self, session: i64) -> PathBuf {
+        self.imports().join(provenance_name(session, true))
+    }
+
     /// `attachments/<hh>/<storage name>`. `name` must already be a parsed
     /// storage name (64 lowercase hex characters); `blobs.rs` guarantees it.
     pub(crate) fn store_file(&self, hh: &str, name: &str) -> PathBuf {
@@ -169,6 +179,15 @@ impl ArchiveDir {
         check_private(&self.imports(), Expect::Dir)?;
         Ok(())
     }
+}
+
+/// `session-<n>.json`, or with `.tmp` appended. A session id is a
+/// positive integer from the database, never a string from outside.
+fn provenance_name(session: i64, tmp: bool) -> String {
+    let mut name = String::from("session-");
+    name.push_str(&session.to_string());
+    name.push_str(if tmp { ".json.tmp" } else { ".json" });
+    name
 }
 
 fn exists(p: &Path) -> Result<bool, ArchiveError> {

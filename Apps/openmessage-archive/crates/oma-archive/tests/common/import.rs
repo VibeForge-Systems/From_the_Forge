@@ -12,8 +12,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use oma_archive::{
-    Archive, ArchiveCtx, ArchiveError, CancelToken, CoreOutcome, FixedClock, ImportOptions,
-    ImportSummary, LineageChoice, LineageId, NoProgress,
+    Archive, ArchiveCtx, ArchiveError, CancelToken, FixedClock, ImportOptions, ImportOutcome,
+    ImportSummary, LineageChoice, LineageId, NoProgress, ProceedWith,
 };
 use oma_backup::{
     inspect, Candidate, JobCtx, Limits, OpenBackup, Password, Progress, StagingRoot, Zeroizing,
@@ -156,18 +156,18 @@ pub fn opts(rows: u32) -> ImportOptions {
     o
 }
 
-/// Run the import core with a fixed clock (the model's import start).
+/// Run the import with a fixed clock (the model's import start).
 pub fn import_with(
     archive: &mut Archive,
     src: &Source,
     opts: &ImportOptions,
     lineage: LineageChoice,
     cancel: &CancelToken,
-) -> Result<CoreOutcome, ArchiveError> {
+) -> Result<ImportOutcome, ArchiveError> {
     import_at(archive, src, opts, lineage, cancel, MODEL_NOW_NS)
 }
 
-/// Run the import core with the clock fixed at `now_ns`.
+/// Run the import with the clock fixed at `now_ns`.
 pub fn import_at(
     archive: &mut Archive,
     src: &Source,
@@ -175,7 +175,7 @@ pub fn import_at(
     lineage: LineageChoice,
     cancel: &CancelToken,
     now_ns: i64,
-) -> Result<CoreOutcome, ArchiveError> {
+) -> Result<ImportOutcome, ArchiveError> {
     let clock = FixedClock(now_ns);
     let mut progress = NoProgress;
     let mut ctx = ArchiveCtx {
@@ -183,10 +183,11 @@ pub fn import_at(
         progress: &mut progress,
         clock: &clock,
     };
-    archive.import_core(&src.ob, opts, lineage, &mut ctx)
+    archive.import(&src.ob, opts, &mut ProceedWith(lineage), &mut ctx)
 }
 
-/// Run the import core to the end of its passes and return the summary.
+/// Run the import to completion (a gate that proceeds with `lineage`) and
+/// return the summary.
 pub fn import(
     archive: &mut Archive,
     src: &Source,
@@ -194,8 +195,52 @@ pub fn import(
     lineage: LineageChoice,
 ) -> ImportSummary {
     match import_with(archive, src, opts, lineage, &CancelToken::new()).expect("import") {
-        CoreOutcome::PassesDone(s) => s,
-        other => panic!("import did not finish its passes: {other:?}"),
+        ImportOutcome::Completed(s) => s,
+        other => panic!("import did not complete: {other:?}"),
+    }
+}
+
+/// Cancels the import when the chat pass starts: P1's rows, map and
+/// occurrence counters, and the session's duplicate keys, are committed.
+pub struct CancelAtChats(pub CancelToken);
+
+impl oma_archive::ArchiveSink for CancelAtChats {
+    fn event(&mut self, event: oma_archive::ArchiveEvent) {
+        if let oma_archive::ArchiveEvent::Import {
+            phase: oma_archive::ImportPhase::ImportingChats,
+            ..
+        } = event
+        {
+            self.0.cancel();
+        }
+    }
+}
+
+/// Import until the chat pass starts, then cancel: an unfinished session.
+pub fn cancelled_at_chats(
+    a: &mut oma_archive::Archive,
+    src: &Source,
+    o: &oma_archive::ImportOptions,
+    lineage: LineageChoice,
+) -> oma_archive::ImportSummary {
+    let token = CancelToken::new();
+    let mut sink = CancelAtChats(token.clone());
+    let clock = FixedClock(MODEL_NOW_NS);
+    let out = a
+        .import(
+            &src.ob,
+            o,
+            &mut oma_archive::ProceedWith(lineage),
+            &mut ArchiveCtx {
+                cancel: &token,
+                progress: &mut sink,
+                clock: &clock,
+            },
+        )
+        .expect("import");
+    match out {
+        ImportOutcome::Cancelled(Some(s)) => s,
+        other => panic!("not cancelled: {other:?}"),
     }
 }
 
@@ -207,23 +252,21 @@ pub fn lineage_for(labels: &mut BTreeMap<String, LineageId>, label: &str) -> Lin
         .map_or(LineageChoice::New, |id| LineageChoice::Existing(*id))
 }
 
-/// Stand in for finalize (slice 4j), which does not exist yet: mark the
-/// running session completed and empty its session-local tables, so the
-/// next import of the same content starts a **fresh** session instead of
-/// continuing this one (spec §8.2 step 1 resumes only unfinished ones).
-pub fn finish_sessions(db: &Path) {
-    let c = super::raw(db);
-    c.execute_batch(
-        "DELETE FROM import_rowid_map WHERE session_id IN \
-             (SELECT id FROM import_session WHERE state = 0); \
-         DELETE FROM import_occurrence WHERE session_id IN \
-             (SELECT id FROM import_session WHERE state = 0); \
-         DELETE FROM import_dup_key WHERE session_id IN \
-             (SELECT id FROM import_session WHERE state = 0); \
-         UPDATE import_session SET state = 1, ended_at_ns = started_at_ns, \
-             full_observation = (qualifiers & 2) = 0 WHERE state = 0;",
-    )
-    .expect("finish");
+/// Session `session` is completed (finalize ran) and left no session-local
+/// rows.
+pub fn assert_completed(db: &Path, session: i64) {
+    let c = read_only(db);
+    let (state, local): (i64, i64) = c
+        .query_row(
+            "SELECT state, (SELECT count(*) FROM import_rowid_map WHERE session_id = ?1) \
+                  + (SELECT count(*) FROM import_occurrence WHERE session_id = ?1) \
+                  + (SELECT count(*) FROM import_dup_key WHERE session_id = ?1) \
+             FROM import_session WHERE id = ?1",
+            [session],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .expect("session");
+    assert_eq!((state, local), (1, 0), "session {session}");
 }
 
 /// A read-only connection to a closed archive's database.
@@ -921,8 +964,7 @@ pub fn single_lineage(db: &Path) -> LineageLabels {
 
 /// The lineages that label a row "not in the latest import" (spec §8.7):
 /// those whose newest **full observation** ranks above the highest rank at
-/// which that lineage saw the row. Finalize (slice 4j) sets
-/// `full_observation`; until then [`finish_sessions`] stands in for it.
+/// which that lineage saw the row. Finalize sets `full_observation`.
 fn not_in_latest(c: &rusqlite::Connection, entity: i64, id: i64, labels: &LineageLabels) -> Value {
     let mut out: Vec<String> = c
         .prepare(

@@ -486,6 +486,64 @@ regenerated: `SHA256SUMS` and `EXPECTED.SHA256SUMS` are unchanged.
 
 **Not yet observed:** any of this on Windows.
 
+### Milestone 4 gate, finalize, provenance and golden archive (slice 4j)
+
+Run in the same Linux container on 2026-10-18 (bundled SQLite 3.53.2,
+ext4); not CI, not a desktop, synthetic data only. The import catalogue
+was not regenerated: `SHA256SUMS` and `EXPECTED.SHA256SUMS` are unchanged.
+
+- **Finalize.** Every catalogue entry imported alone ended **completed**
+  with `full_observation` equal to the model's (`imp-wal-missing-plain`
+  is not a full observation), no session-local rows left and the FTS
+  merge run to the end; every scenario step, in every order, completed
+  too. On `imp-dev1-v1-plain` the checkpoint left a 0-byte `-wal` while
+  the archive was still open, and `chat_stats` and `archive_stats` equalled
+  direct counts. A cancel before the terminal
+  state left the session cancelled and continuing it gave the
+  uninterrupted content; a cancel after it only skipped the merge. A
+  simulated `SQLITE_FULL` on the terminal update stopped the import with
+  the session still running; the next import continued it from finalize
+  to the uninterrupted content. A cancel at a batch's commit point never
+  interrupted the commit.
+- **The gate.** Decline, and a cancel while the gate waited, left the
+  database, its `-wal`, `attachments/` and `imports/` byte-identical. The
+  preflight's key and Recently Deleted counts equalled the import's own
+  counts on `imp-keys-hostile-plain` and `imp-rd-plain`. After dev1 v1:
+  dev1 v2 matched the lineage's model and name and was suggested into it;
+  dev2 matched neither and got a new lineage; dev1 v1 again was reported
+  as already imported and older than the newest backup. An unfinished
+  session was offered for continuing, continued only under its own
+  lineage, and set aside under another.
+- **Provenance.** `imports/session-<n>.json` was written when a session
+  was cancelled and rewritten when it completed; it held the counts and
+  the model, and no device name, `SYNTH-` value, digest, rank, archive id
+  or path (also checked across every catalogue import in the log-hygiene
+  test). A simulated write failure left no file and did not change the
+  outcome.
+- **Crash by process kill** (Linux only): at the gate (nothing written),
+  after the statistics and after each cleanup chunk (continued to the
+  uninterrupted result), at the completion, after each FTS merge step,
+  before the checkpoint and at both provenance points (the session stayed
+  completed and consistent, the next write open removed the `.tmp`, and
+  the archive equalled the uninterrupted one), and inside a test-only
+  migration step and before its commit (version 1 stayed, consistent, and
+  the migration then ran). Power loss is not tested.
+- **Ordering.** On two imports, every placed store file followed write →
+  `sync_all` → intent commit → rename → directory flush → row commit, and
+  creation committed the database and flushed `.oma-new-*` before the
+  rename and the library after it.
+- **Query plans** of every index-dependent import statement and of the M5
+  read shapes are pinned on 3.53.2: index searches only, except one scan
+  of `chat` for `chat_stats`.
+- **The golden archive** `tests/fixtures/archives/golden-v1/` (dev1 v1
+  then v2) was made by this build; a copy opened read-write, passed the
+  integrity, foreign-key, FTS and store checks and matched its pinned
+  snapshot. The quick and full verify come with the verifier (slice 4k).
+- **Not tested:** Windows (none of the new kill points is in the Windows
+  subset), the shell's gate and its timeout (slice 4l).
+
+**Not yet observed:** any of this on Windows.
+
 ### Synthetic fixtures
 
 Every M2 cell in this table passed in CI on Ubuntu 22.04 and Windows

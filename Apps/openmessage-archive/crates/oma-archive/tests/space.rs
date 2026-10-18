@@ -18,7 +18,7 @@ use common::*;
 use oma_archive::hooks::{install, Faults};
 use oma_archive::space::{reserve_for, wal_allowance, SpaceProbe};
 use oma_archive::{
-    ArchiveCtx, ArchiveEvent, ArchiveSink, CancelToken, CoreOutcome, FixedClock, ImportPhase,
+    ArchiveCtx, ArchiveEvent, ArchiveSink, CancelToken, FixedClock, ImportOutcome, ImportPhase,
     Library, LineageChoice, LineageId, StopReason,
 };
 
@@ -38,7 +38,6 @@ fn uninterrupted() -> serde_json::Value {
     let src = open_entry(ENTRY);
     import(&mut a, &src, &opts(16), LineageChoice::New);
     drop(a);
-    finish_sessions(&db_path(&tmp, &id));
     logical_snapshot(&db_path(&tmp, &id), Scope::Content)
 }
 
@@ -73,7 +72,6 @@ fn resume_and_compare(
     );
     drop(a);
     assert!(s.resumed);
-    finish_sessions(db);
     assert_consistent(db);
     assert_store_consistent(db, true);
     assert_eq!(&logical_snapshot(db, Scope::Content), want);
@@ -100,7 +98,7 @@ fn the_estimate_warns_and_refuses_only_below_the_floor() {
     )
     .expect("import");
     drop(a);
-    let CoreOutcome::InsufficientSpace(e) = o else {
+    let ImportOutcome::InsufficientSpace(e) = o else {
         panic!("not refused: {o:?}");
     };
     assert!(e.refuses() && e.warns());
@@ -132,7 +130,7 @@ fn the_estimate_warns_and_refuses_only_below_the_floor() {
     )
     .expect("import");
     drop(a);
-    let CoreOutcome::Stopped { reason, summary } = o else {
+    let ImportOutcome::Stopped { reason, summary } = o else {
         panic!("not stopped: {o:?}");
     };
     assert_eq!(reason, StopReason::InsufficientSpace);
@@ -202,10 +200,15 @@ fn a_shortfall_before_a_write_stops_cleanly_and_resumes() {
         clock: &clock,
     };
     let o = a
-        .import_core(&src.ob, &opts(16), LineageChoice::New, &mut ctx)
+        .import(
+            &src.ob,
+            &opts(16),
+            &mut oma_archive::ProceedWith(LineageChoice::New),
+            &mut ctx,
+        )
         .expect("import");
     drop(a);
-    let CoreOutcome::Stopped { reason, summary } = o else {
+    let ImportOutcome::Stopped { reason, summary } = o else {
         panic!("not stopped: {o:?}");
     };
     assert_eq!(reason, StopReason::InsufficientSpace);
@@ -254,7 +257,7 @@ fn a_tiny_page_limit_stops_with_sqlite_full_and_resumes() {
             )
             .expect("import");
             drop(a);
-            let CoreOutcome::Stopped { reason, .. } = o else {
+            let ImportOutcome::Stopped { reason, .. } = o else {
                 panic!("room {room}: not stopped: {o:?}");
             };
             assert_eq!(reason, StopReason::InsufficientSpace);
@@ -307,7 +310,7 @@ fn a_page_limit_below_the_current_size_is_caught_by_the_read_back() {
         assert!(
             matches!(
                 o,
-                CoreOutcome::Stopped {
+                ImportOutcome::Stopped {
                     reason: StopReason::InsufficientSpace,
                     ..
                 }

@@ -94,6 +94,7 @@ pub(crate) fn run_step(
     let tx = Transaction::new(w.conn_mut(), TransactionBehavior::Immediate).map_err(sql)?;
     tx.execute_batch(step.ddl).map_err(sql)?;
     (step.data)(&tx).map_err(sql)?;
+    crate::fault::point(crate::fault::FaultPoint::MigrationStep);
 
     let fk_violation = {
         let mut stmt = tx.prepare("PRAGMA foreign_key_check").map_err(sql)?;
@@ -139,6 +140,7 @@ pub(crate) fn run_step(
         rusqlite::params![step.to, step.from, now_ns, app_version],
     )
     .map_err(sql)?;
+    crate::fault::point(crate::fault::FaultPoint::MigrationBeforeCommit);
     tx.commit().map_err(sql)?;
     w.conn()
         .pragma_update(None, "foreign_keys", true)

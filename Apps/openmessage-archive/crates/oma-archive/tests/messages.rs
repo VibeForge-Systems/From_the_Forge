@@ -27,7 +27,7 @@ use common::*;
 use oma_archive::{ImportSummary, LineageChoice};
 use serde_json::Value;
 
-/// Import `entry` into the archive `id`, then stand in for finalize.
+/// Import `entry` into the archive `id` (finalize completes the session).
 fn step(
     lib: &oma_archive::Library,
     id: &oma_archive::ArchiveId,
@@ -43,7 +43,7 @@ fn step(
     let s = import(&mut a, &src, &o, lineage);
     drop(a);
     assert!(src.ob.close().removed);
-    finish_sessions(db);
+    assert_completed(db, s.session);
     s
 }
 

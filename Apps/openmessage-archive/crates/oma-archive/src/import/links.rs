@@ -78,6 +78,10 @@ fn tally(c: &mut LinkCounts, o: LinkOutcome) {
     }
 }
 
+/// The map resolution of one side of a join.
+pub(crate) const RESOLVE_SQL: &str =
+    "SELECT archive_id FROM import_rowid_map WHERE session_id = ?1 AND src = ?2 AND src_rowid = ?3";
+
 /// The statements every link pass shares, prepared once per batch.
 pub(crate) struct LinkStmts<'c> {
     resolve: Statement<'c>,
@@ -88,10 +92,7 @@ pub(crate) struct LinkStmts<'c> {
 impl<'c> LinkStmts<'c> {
     pub(crate) fn prepare(c: &'c Connection) -> rusqlite::Result<LinkStmts<'c>> {
         Ok(LinkStmts {
-            resolve: c.prepare(
-                "SELECT archive_id FROM import_rowid_map \
-                 WHERE session_id = ?1 AND src = ?2 AND src_rowid = ?3",
-            )?,
+            resolve: c.prepare(RESOLVE_SQL)?,
             session_rank: c.prepare("SELECT rank FROM import_session WHERE id = ?1")?,
             ranks: HashMap::new(),
         })

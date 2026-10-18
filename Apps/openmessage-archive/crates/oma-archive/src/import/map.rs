@@ -17,6 +17,10 @@ use rusqlite::{Connection, Statement};
 use super::keys::Rank;
 use crate::schema::codes::Entity;
 
+/// The occurrence counter of one unkeyed fingerprint.
+pub(crate) const OCCURRENCE_SQL: &str =
+    "SELECT seen FROM import_occurrence WHERE session_id = ?1 AND entity = ?2 AND fp = ?3";
+
 pub(crate) struct MapStmts<'c> {
     map: Statement<'c>,
     occ_bump: Statement<'c>,
@@ -36,9 +40,7 @@ impl<'c> MapStmts<'c> {
                 "INSERT INTO import_occurrence (session_id, entity, fp, seen) VALUES (?1, ?2, ?3, 1) \
                  ON CONFLICT (session_id, entity, fp) DO UPDATE SET seen = seen + 1",
             )?,
-            occ_get: c.prepare(
-                "SELECT seen FROM import_occurrence WHERE session_id = ?1 AND entity = ?2 AND fp = ?3",
-            )?,
+            occ_get: c.prepare(OCCURRENCE_SQL)?,
             seen: c.prepare(
                 "INSERT INTO lineage_seen (entity, row_id, lineage_id, last_rank, last_session_id) \
                  VALUES (?1, ?2, ?3, ?4, ?5) \

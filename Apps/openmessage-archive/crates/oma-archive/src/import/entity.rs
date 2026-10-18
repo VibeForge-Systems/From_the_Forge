@@ -20,6 +20,7 @@ use super::keys::fingerprint;
 use super::map::MapStmts;
 use super::merge::{
     attach_issues, insert, merge, read_stored, DeriveUpdate, Ident, MergeStmts, Param, TableDef,
+    KEY_GUID, KEY_NATURAL, KEY_UNKEYED, STORED_ISSUES_SQL,
 };
 use super::preflight::{guid_digest, handle_digest};
 use crate::schema::codes::IssueCode;
@@ -91,15 +92,12 @@ pub(crate) fn write_records(
 ) -> rusqlite::Result<()> {
     let def = &kind.def;
     let key_cond = match kind.key {
-        KeyStyle::Guid(_) => "key_kind = 1 AND guid = ?1",
-        KeyStyle::Natural { .. } => "key_kind = 1 AND natural_key = ?1",
+        KeyStyle::Guid(_) => KEY_GUID,
+        KeyStyle::Natural { .. } => KEY_NATURAL,
     };
     let mut by_key = tx.prepare(&def.select_sql(key_cond))?;
-    let mut by_unkeyed =
-        tx.prepare(&def.select_sql("key_kind = 2 AND unkeyed_fp = ?1 AND unkeyed_occ = ?2"))?;
-    let mut stored_issues = tx.prepare(
-        "SELECT col, kind, bytes, raw FROM value_issue WHERE entity = ?1 AND row_id = ?2",
-    )?;
+    let mut by_unkeyed = tx.prepare(&def.select_sql(KEY_UNKEYED))?;
+    let mut stored_issues = tx.prepare(STORED_ISSUES_SQL)?;
     let mut ins = tx.prepare(&def.insert_sql())?;
     let mut ms = MergeStmts::prepare(tx)?;
     let mut maps = MapStmts::prepare(tx)?;

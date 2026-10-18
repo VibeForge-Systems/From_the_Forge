@@ -3,9 +3,9 @@
 //! `lineage_seen` records, per lineage, the highest rank at which it saw
 //! each chat, message and attachment. A row is "not in the latest import"
 //! for lineage L when L's newest **full observation** ranks above that.
-//! Finalize (slice 4j) sets `full_observation`; these tests stand in for it
-//! with `finish_sessions`, which marks a session full unless its `-wal`
-//! was skipped, and leave a cancelled session as the import left it.
+//! Finalize sets `full_observation`: a completed session is full unless
+//! its `-wal` was skipped (or another WAL-related qualifier is set); a
+//! cancelled session is never full.
 //!
 //! - dev1 v1 (L1), then dev2 (L2), then dev1 v2 (L1): v1's rows that v2
 //!   lacks are labelled by L1 only; dev2's rows are never labelled by L1,
@@ -22,7 +22,7 @@ use std::path::Path;
 use common::import::*;
 use common::*;
 use oma_archive::hooks::{arm, FaultPoint};
-use oma_archive::{CancelToken, CoreOutcome, ImportSummary, LineageChoice, LineageId};
+use oma_archive::{CancelToken, ImportOutcome, ImportSummary, LineageChoice, LineageId};
 
 fn step(
     lib: &oma_archive::Library,
@@ -36,7 +36,7 @@ fn step(
     let s = import(&mut a, &src, &opts(1000), lineage);
     drop(a);
     assert!(src.ob.close().removed);
-    finish_sessions(db);
+    assert_completed(db, s.session);
     s
 }
 
@@ -163,10 +163,8 @@ fn a_cancelled_latest_session_labels_nothing() {
     drop(guard);
     drop(a);
     src.ob.close();
-    assert!(matches!(out, CoreOutcome::Cancelled(Some(_))), "{out:?}");
-    // `finish_sessions` finishes only running sessions: the cancelled one
-    // stays cancelled and is not a full observation.
-    finish_sessions(&db);
+    assert!(matches!(out, ImportOutcome::Cancelled(Some(_))), "{out:?}");
+    // The cancelled session is not a full observation.
     let full: Option<i64> = read_only(&db)
         .query_row(
             "SELECT full_observation FROM import_session WHERE state = 2",

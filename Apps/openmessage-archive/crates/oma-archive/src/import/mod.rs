@@ -1,21 +1,26 @@
-//! The import core (spec §8; slices 4f to 4i).
+//! The import (spec §8; slices 4f to 4j).
 //!
-//! [`Archive::import_core`] runs the parts of the import that exist so
-//! far, in the order of spec §2:
+//! [`Archive::import`] runs the whole import, in the order of spec §2:
 //!
 //! 1. stage sms.db (and its `-wal`, best effort) and probe it;
 //! 2. compute the session's facts: the content digest and its framing, the
 //!    read profile, the rank (§8.7), the qualifiers;
 //! 3. P0, the Recently Deleted scan (§8.2 step 2), then the duplicate-key
-//!    scan with the Recently Deleted classification (step 3), then the scan
-//!    for attachments linked only to excluded messages (step 4, which
-//!    refuses a source over its cap), which always run, then the
+//!    scan with the Recently Deleted classification and the key tallies
+//!    (step 3), then the scan for attachments linked only to excluded
+//!    messages (step 4, which refuses a source over its cap), then the
 //!    attachment and space estimates (step 5 and §12; an available space
 //!    below the reserve plus the WAL allowance refuses the import before
-//!    anything is written), then the resume decision (step 1);
-//! 4. the archive's first write ([`Archive::begin_write`] with recovery),
-//!    then the session bookkeeping transaction (§8.3);
-//! 5. the passes, in batches (§8.5), each committing its cursor, counts and
+//!    anything is written);
+//! 4. **the gate** (step 7, `gate.rs`): the [`Preflight`], with the resume
+//!    plan (step 1), the lineages and their device evidence, the key and
+//!    Recently Deleted facts, the space estimate and the order facts, is
+//!    given to the [`ImportGate`]. Decline returns
+//!    [`ImportOutcome::Declined`] with nothing written;
+//! 5. the archive's first write ([`Archive::begin_write`] with recovery),
+//!    then the session bookkeeping transaction (§8.3), continuing the
+//!    unfinished session only if the chosen lineage is its own;
+//! 6. the passes, in batches (§8.5), each committing its cursor, counts and
 //!    issues with its rows: **P1 handles, P2 chats, P3 messages** (with
 //!    their body versions, the FTS index through its triggers, and the
 //!    Recently Deleted policy), **P4 chat ↔ handle, P5 chat ↔ message, P5b**
@@ -23,21 +28,21 @@
 //!    state; it writes nothing), **P6 attachments** (their rows, and their
 //!    files copied into the content-addressed store; `attachments.rs`),
 //!    **P7 message ↔ attachment and P8 the Recently Deleted markers**;
-//! 6. the source check after P8: a backup that changed since it was opened
+//! 7. the source check after P8: a backup that changed since it was opened
 //!    stops the session in a resumable state (§9.3), as a file that
-//!    changed during its copy does.
+//!    changed during its copy does; then the check that the staged copy
+//!    was only read;
+//! 8. the staged sms.db is removed (§8.11);
+//! 9. **P9, finalize** (`finalize.rs`): the statistics, the session-local
+//!    cleanup, the terminal state with `full_observation`, the FTS merge
+//!    steps and the checkpoint;
+//! 10. **the provenance file** `imports/session-<n>.json` (best effort) at
+//!     every terminal state this import records: completed, cancelled,
+//!     stopped or failed.
 //!
 //! Before every write transaction the space guard (§12) checks the free
 //! space and bounds `max_page_count`; a shortfall, or `SQLITE_FULL`, stops
 //! the session in a resumable state (6).
-//!
-//! **What is not here yet.** The gate and finalize arrive in slice 4j: the
-//! estimates are returned in the summary instead. Until finalize exists,
-//! a session whose passes all ran is left **running** (state 0) and the
-//! outcome is [`CoreOutcome::PassesDone`]: it is never marked completed or
-//! a full observation. The next write open marks it interrupted, and an
-//! import of the same content continues it (its passes are already done).
-//! A cancel, a stop or a failure is recorded as such.
 //!
 //! The shell does not call this yet (slice 4l).
 
@@ -47,6 +52,8 @@ mod bind;
 mod chats;
 mod counts;
 mod entity;
+mod finalize;
+mod gate;
 mod handles;
 mod keys;
 mod links;
@@ -68,6 +75,12 @@ pub use batch::BatchBudget;
 pub use counts::{
     AttachmentFileCounts, BodyCounts, EntityCounts, ImportCounts, LinkCounts, RecentlyDeletedCounts,
 };
+pub use finalize::FinalizeReport;
+pub use gate::{
+    DeviceEvidence, FreshReason, GateDecision, ImportGate, KeyCountFacts, KeyFacts, LineageFacts,
+    OrderFacts, OrderSource, Preflight, ProceedWith, ProceedWithSuggestion, RdFacts, ResumePlan,
+    LINEAGES_LIMIT,
+};
 pub use preflight::{KEY_SCAN_CAP, RECOVERABLE_SCAN_CAP};
 pub(crate) use session::{supersede_sessions, unfinished_sessions};
 pub use session::{ORDER_KEY_FLOOR_NS, ORDER_KEY_SLACK_NS};
@@ -75,11 +88,14 @@ pub use session::{ORDER_KEY_FLOOR_NS, ORDER_KEY_SLACK_NS};
 use crate::archive::{Archive, Recovery};
 use crate::conn::{JOURNAL_SIZE_LIMIT, READ_OP_BUDGET};
 use crate::error::{primary_code, ArchiveError, DamageKind, Stage};
+use crate::layout::ArchiveDir;
 use crate::progress::{ArchiveCtx, ArchiveEvent, ImportPhase};
+use crate::provenance;
 use crate::schema::codes::{Entity, IssueCode, Pass, ServiceClassCode, SessionState};
 use crate::space::{reserve_for, wal_allowance, SpaceEstimate, SpaceGuard};
 use batch::{run_pass, PassEnd, PassError, Run};
 use bind::Cell;
+use finalize::NotCompleted;
 use preflight::{
     decide_resume, load_dup_keys, scan_keys, scan_recoverable, KeyScan, RecoverableScan, ScanError,
 };
@@ -208,31 +224,146 @@ pub struct ImportSummary {
     pub counts: ImportCounts,
     /// The preflight's space estimate for this attempt (spec §12).
     pub estimate: SpaceEstimate,
+    /// The staged (plaintext) sms.db was removed (spec §8.11). When not,
+    /// closing the backup removes it, and the M2 sweep covers a crash.
+    pub staging_removed: bool,
+    /// `imports/session-<n>.json` was written for this terminal state
+    /// (spec §8.10; best effort, so `false` never changes the outcome).
+    pub provenance_written: bool,
+    /// What finalize did after the session completed; `None` for any other
+    /// outcome.
+    pub finalize: Option<FinalizeReport>,
 }
 
-/// The outcome of [`Archive::import_core`].
+/// The outcome of [`Archive::import`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum CoreOutcome {
-    /// Every pass this build has (P1–P8, P6 without files) is done. The
-    /// session stays running (state 0) until finalize exists (slice 4j);
-    /// see the module documentation.
-    PassesDone(ImportSummary),
+pub enum ImportOutcome {
+    /// Every pass ran and finalize recorded the session completed (state
+    /// 1), with `full_observation` set (spec §8.7).
+    Completed(ImportSummary),
     /// Cancelled. With a session, its completed records are committed and
     /// it is resumable (state 2); `None` when the cancel came before the
-    /// session started, and nothing was written.
+    /// session started (at the gate included), and nothing was written.
     Cancelled(Option<ImportSummary>),
-    /// Stopped in a resumable state (state 6).
+    /// Stopped in a resumable state (state 6, D88). When finalize's own
+    /// terminal bookkeeping failed for lack of space, the session is left
+    /// running instead; the next write open marks it interrupted (4),
+    /// which is just as resumable (spec §8.9 step 4).
     Stopped {
         reason: StopReason,
         summary: ImportSummary,
     },
+    /// The gate declined; nothing was written (spec §8.2 step 7).
+    Declined,
     /// The backup cannot be imported; nothing was written.
     NotImportable(NotImportable),
     /// Available space is below the reserve plus the WAL allowance (spec
-    /// §12): refused before anything was written. An estimate above the
-    /// available space is only a warning ([`SpaceEstimate::warns`]).
+    /// §12): refused before the gate, with nothing written. An estimate
+    /// above the available space is only a warning
+    /// ([`SpaceEstimate::warns`]), shown at the gate.
     InsufficientSpace(SpaceEstimate),
+}
+
+/// The SQL that asks whether a message key is already a keyed message
+/// (the preflight's overlap lookup; spec §8.2 step 3).
+pub(crate) const MESSAGE_KEY_ARCHIVED_SQL: &str =
+    "SELECT 1 FROM message WHERE key_kind = 1 AND guid = ?1";
+
+/// How [`Archive::import_staged`] ended.
+#[allow(clippy::large_enum_variant)] // made once per import
+enum Staged {
+    /// A final outcome.
+    Done(ImportOutcome),
+    /// Every pass is done; finalize is next, after the staged copy is
+    /// removed.
+    Finalize(Box<Finish>),
+}
+
+/// What finalize needs from the passes.
+struct Finish {
+    run: Run,
+    counts: ImportCounts,
+    started: session::Started,
+    estimate: SpaceEstimate,
+    qualifiers: i64,
+}
+
+impl Finish {
+    fn summary(&self, counts: &ImportCounts) -> ImportSummary {
+        summary_of(&self.started, counts, self.estimate)
+    }
+}
+
+fn summary_of(
+    started: &session::Started,
+    counts: &ImportCounts,
+    estimate: SpaceEstimate,
+) -> ImportSummary {
+    ImportSummary {
+        session: started.session,
+        lineage: LineageId(started.lineage),
+        resumed: started.resumed,
+        superseded: started.superseded,
+        counts: counts.clone(),
+        estimate,
+        staging_removed: false,
+        provenance_written: false,
+        finalize: None,
+    }
+}
+
+/// Mark the summary of an outcome with the staging removal.
+fn with_staging(outcome: ImportOutcome, removed: bool) -> ImportOutcome {
+    let mark = |mut s: ImportSummary| {
+        s.staging_removed = removed;
+        s
+    };
+    match outcome {
+        ImportOutcome::Completed(s) => ImportOutcome::Completed(mark(s)),
+        ImportOutcome::Cancelled(Some(s)) => ImportOutcome::Cancelled(Some(mark(s))),
+        ImportOutcome::Stopped { reason, summary } => ImportOutcome::Stopped {
+            reason,
+            summary: mark(summary),
+        },
+        other => other,
+    }
+}
+
+/// The import's index-dependent statements, by name, exactly as the code
+/// prepares them, for the query-plan pins (spec §18.2, C3.22).
+#[cfg_attr(not(feature = "fault-injection"), allow(dead_code))]
+pub(crate) fn plan_statements() -> Vec<(&'static str, String)> {
+    use merge::{KEY_GUID, KEY_NATURAL, KEY_UNKEYED, STORED_ISSUES_SQL};
+    let (h, c, m, a) = (
+        handles::table_def(),
+        chats::table_def(),
+        messages::table_def(),
+        attachments::table_def(),
+    );
+    vec![
+        ("handle by natural key", h.select_sql(KEY_NATURAL)),
+        ("handle unkeyed", h.select_sql(KEY_UNKEYED)),
+        ("chat by guid", c.select_sql(KEY_GUID)),
+        ("chat unkeyed", c.select_sql(KEY_UNKEYED)),
+        ("message by guid", m.select_sql(KEY_GUID)),
+        ("message unkeyed", m.select_sql(KEY_UNKEYED)),
+        ("attachment by guid", a.select_sql(KEY_GUID)),
+        ("attachment unkeyed", a.select_sql(KEY_UNKEYED)),
+        ("value issues of a row", STORED_ISSUES_SQL.to_owned()),
+        (
+            "body version by raw hash",
+            messages::BODY_FIND_SQL.to_owned(),
+        ),
+        ("overlap lookup", MESSAGE_KEY_ARCHIVED_SQL.to_owned()),
+        (
+            "current blob by guid",
+            attachments::CURRENT_BLOB_SQL.to_owned(),
+        ),
+        ("map resolution", links::RESOLVE_SQL.to_owned()),
+        ("occurrence counter", map::OCCURRENCE_SQL.to_owned()),
+        ("finalize chat_stats", finalize::CHAT_STATS_SQL.to_owned()),
+    ]
 }
 
 /// The archive code of a readable service text.
@@ -254,20 +385,20 @@ fn messages_err(e: MessagesError) -> ArchiveError {
 }
 
 impl Archive {
-    /// Import a validated, opened backup into this archive: the import
-    /// core of slice 4f (module documentation). `lineage` is the user's
-    /// choice at the gate (D80); to continue an unfinished session, pass
-    /// that session's lineage.
+    /// Import a validated, opened backup into this archive (module
+    /// documentation). `gate` is asked once, after the preflight reads and
+    /// before anything is written; the lineage it chooses decides whether
+    /// an unfinished session continues (D80).
     ///
-    /// The staged sms.db is removed before this returns (the backup's
-    /// `close` is the backstop).
-    pub fn import_core(
+    /// The staged sms.db is removed after the last pass, before finalize
+    /// (the backup's `close` is the backstop).
+    pub fn import(
         &mut self,
         ob: &OpenBackup,
         opts: &ImportOptions,
-        lineage: LineageChoice,
+        gate: &mut dyn ImportGate,
         ctx: &mut ArchiveCtx<'_>,
-    ) -> Result<CoreOutcome, ArchiveError> {
+    ) -> Result<ImportOutcome, ArchiveError> {
         if self.needs_migration() {
             return Err(ArchiveError::NeedsMigration {
                 found: self.schema_version(),
@@ -293,28 +424,35 @@ impl Archive {
             let mut sctx = MessagesCtx::new(cancel, &mut forward);
             match stage(ob, opts.wal, &mut sctx) {
                 Ok(s) => s,
-                Err(MessagesError::Cancelled) => return Ok(CoreOutcome::Cancelled(None)),
+                Err(MessagesError::Cancelled) => return Ok(ImportOutcome::Cancelled(None)),
                 Err(e) => return Err(messages_err(e)),
             }
         };
         let mut msink = |_: MessagesProgress| {};
         let mut mctx = MessagesCtx::new(cancel, &mut msink);
-        let result = self.import_staged(ob, &staged, opts, lineage, ctx, &mut mctx);
-        if staged.remove().is_err() {
+        let result = self.import_staged(ob, &staged, opts, gate, ctx, &mut mctx);
+        // §8.11: the plaintext copy goes before finalize.
+        let removed = staged.remove().is_ok();
+        if !removed {
             tracing::warn!("the staged sms.db was not removed; closing the backup removes it");
         }
-        result
+        match result? {
+            Staged::Done(outcome) => Ok(with_staging(outcome, removed)),
+            Staged::Finalize(finish) => self.finish(*finish, ctx).map(|o| with_staging(o, removed)),
+        }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn import_staged(
         &mut self,
         ob: &OpenBackup,
         staged: &oma_backup::StagedDatabase<'_>,
         opts: &ImportOptions,
-        lineage: LineageChoice,
+        gate: &mut dyn ImportGate,
         ctx: &mut ArchiveCtx<'_>,
         mctx: &mut MessagesCtx<'_>,
-    ) -> Result<CoreOutcome, ArchiveError> {
+    ) -> Result<Staged, ArchiveError> {
+        let done = |o: ImportOutcome| Ok(Staged::Done(o));
         ctx.progress.event(ArchiveEvent::Import {
             phase: ImportPhase::ReadingSchema,
             done: 0,
@@ -323,53 +461,46 @@ impl Archive {
         let conn = match connect(staged, mctx) {
             Ok(Connect::Ready(c)) => c,
             Ok(Connect::SchemaExceedsLimits) => {
-                return Ok(CoreOutcome::NotImportable(
+                return done(ImportOutcome::NotImportable(
                     NotImportable::SchemaExceedsLimits,
                 ))
             }
-            Err(MessagesError::Cancelled) => return Ok(CoreOutcome::Cancelled(None)),
+            Err(MessagesError::Cancelled) => return done(ImportOutcome::Cancelled(None)),
             Err(e) => return Err(messages_err(e)),
         };
         let probe_opts = ProbeOptions::default().with_keep_raw_values(true);
         let db = match SmsDb::open_with(&conn, &probe_opts, mctx) {
             Ok(Probe::Supported(db)) => db,
             Ok(Probe::Unsupported(_)) => {
-                return Ok(CoreOutcome::NotImportable(NotImportable::Unsupported))
+                return done(ImportOutcome::NotImportable(NotImportable::Unsupported))
             }
-            Ok(Probe::Damaged(_)) => return Ok(CoreOutcome::NotImportable(NotImportable::Damaged)),
-            Ok(_) => return Ok(CoreOutcome::NotImportable(NotImportable::Incomplete)),
-            Err(MessagesError::Cancelled) => return Ok(CoreOutcome::Cancelled(None)),
+            Ok(Probe::Damaged(_)) => {
+                return done(ImportOutcome::NotImportable(NotImportable::Damaged))
+            }
+            Ok(_) => return done(ImportOutcome::NotImportable(NotImportable::Incomplete)),
+            Err(MessagesError::Cancelled) => return done(ImportOutcome::Cancelled(None)),
             Err(e) => return Err(messages_err(e)),
         };
 
-        // Facts and the resume decision (reads only).
+        // Facts (reads only). The lineage is chosen at the gate.
         let now = ctx.clock.now_ns();
-        let lineage_id = match lineage {
-            LineageChoice::Existing(id) => Some(id.0),
-            LineageChoice::New => None,
-        };
-        let facts = match session::facts(
-            ob,
-            staged,
-            db.capabilities(),
-            opts,
-            now,
-            lineage_id,
-            ctx.cancel,
-        ) {
-            Ok(f) => f,
-            Err(oma_backup::BackupError::Cancelled) => return Ok(CoreOutcome::Cancelled(None)),
-            Err(e) => {
-                return Err(messages_err(MessagesError::Backup {
-                    source: e,
-                    stage: oma_messages::BackupStage::Opening,
-                }))
-            }
-        };
-        // P0 and the key scan always run, before the resume decision: the
-        // gate (slice 4j) shows their evidence before the lineage is
-        // chosen. A continued session keeps its stored duplicate set, which
-        // is the same set, because the binding includes the content digest.
+        let mut facts =
+            match session::facts(ob, staged, db.capabilities(), opts, now, None, ctx.cancel) {
+                Ok(f) => f,
+                Err(oma_backup::BackupError::Cancelled) => {
+                    return done(ImportOutcome::Cancelled(None))
+                }
+                Err(e) => {
+                    return Err(messages_err(MessagesError::Backup {
+                        source: e,
+                        stage: oma_messages::BackupStage::Opening,
+                    }))
+                }
+            };
+        // P0 and the key scan always run, before the gate: it shows their
+        // evidence before the lineage is chosen. A continued session keeps
+        // its stored duplicate set, which is the same set, because the
+        // binding includes the content digest.
         ctx.progress.event(ArchiveEvent::Import {
             phase: ImportPhase::ScanningRecentlyDeleted,
             done: 0,
@@ -378,11 +509,11 @@ impl Archive {
         let rd = match scan_recoverable(&db, mctx) {
             Ok(RecoverableScan::Done(rd)) => rd,
             Ok(RecoverableScan::OverLimit) => {
-                return Ok(CoreOutcome::NotImportable(
+                return done(ImportOutcome::NotImportable(
                     NotImportable::OverRecentlyDeletedCap,
                 ))
             }
-            Err(MessagesError::Cancelled) => return Ok(CoreOutcome::Cancelled(None)),
+            Err(MessagesError::Cancelled) => return done(ImportOutcome::Cancelled(None)),
             Err(e) => return Err(messages_err(e)),
         };
         let rd_messages = u64::try_from(rd.len()).unwrap_or(u64::MAX);
@@ -391,18 +522,23 @@ impl Archive {
             done: 0,
             total: None,
         });
-        // The archive lookup of each Recently Deleted key runs on the
-        // reader, under an op budget that grows with the set (bounded by
-        // the P0 cap).
+        // The archive lookup of each message key runs on the reader, under
+        // an op budget that grows with the message table (bounded by the
+        // key-scan cap).
         let exclude_rd = !opts.include_recently_deleted;
-        let ops = READ_OP_BUDGET.saturating_add(rd_messages.saturating_mul(256));
+        let message_rows = db
+            .capabilities()
+            .table(oma_messages::KnownTable::Message)
+            .and_then(|t| t.rows)
+            .unwrap_or(0);
+        let ops = READ_OP_BUDGET.saturating_add(message_rows.saturating_mul(256));
         let scanned = self.reader().budgeted(ops, Stage::Preflight, |c| {
-            let mut stmt = c.prepare("SELECT 1 FROM message WHERE key_kind = 1 AND guid = ?1")?;
+            let mut stmt = c.prepare(MESSAGE_KEY_ARCHIVED_SQL)?;
             let mut lookup = |k: &[u8]| stmt.exists([k]);
             Ok(scan_keys(&db, mctx, rd, exclude_rd, &mut lookup))
         })?;
-        let (scanned, rd_plan) = match scanned {
-            Ok(KeyScan::Done(d, plan)) => (d, plan),
+        let (scanned, rd_plan, tallies) = match scanned {
+            Ok(KeyScan::Done(d, plan, tallies)) => (d, plan, tallies),
             Ok(KeyScan::OverLimit(e)) => {
                 let t = match e {
                     Entity::Handle => KeyScanTable::Handles,
@@ -410,10 +546,12 @@ impl Archive {
                     Entity::Message => KeyScanTable::Messages,
                     _ => KeyScanTable::Attachments,
                 };
-                return Ok(CoreOutcome::NotImportable(NotImportable::OverKeyScanCap(t)));
+                return done(ImportOutcome::NotImportable(NotImportable::OverKeyScanCap(
+                    t,
+                )));
             }
             Err(ScanError::Read(MessagesError::Cancelled)) => {
-                return Ok(CoreOutcome::Cancelled(None))
+                return done(ImportOutcome::Cancelled(None))
             }
             Err(ScanError::Read(e)) => return Err(messages_err(e)),
             Err(ScanError::Archive(e)) => return Err(ArchiveError::sqlite(Stage::Preflight, &e)),
@@ -431,11 +569,11 @@ impl Archive {
             match rd::scan_attachments(&db, &rd_plan.excluded, mctx) {
                 Ok(rd::AttachmentScan::Done(a)) => rd_only = a,
                 Ok(rd::AttachmentScan::OverLimit) => {
-                    return Ok(CoreOutcome::NotImportable(
+                    return done(ImportOutcome::NotImportable(
                         NotImportable::OverRecentlyDeletedCap,
                     ))
                 }
-                Err(MessagesError::Cancelled) => return Ok(CoreOutcome::Cancelled(None)),
+                Err(MessagesError::Cancelled) => return done(ImportOutcome::Cancelled(None)),
                 Err(e) => return Err(messages_err(e)),
             }
         }
@@ -472,7 +610,7 @@ impl Archive {
             match est {
                 Ok(Ok(e)) => e,
                 Ok(Err(e)) => return Err(ArchiveError::sqlite(Stage::Preflight, &e)),
-                Err(MessagesError::Cancelled) => return Ok(CoreOutcome::Cancelled(None)),
+                Err(MessagesError::Cancelled) => return done(ImportOutcome::Cancelled(None)),
                 Err(e) => return Err(messages_err(e)),
             }
         } else {
@@ -508,18 +646,69 @@ impl Archive {
                 floor = estimate.floor(),
                 "import refused: not enough free space"
             );
-            return Ok(CoreOutcome::InsufficientSpace(estimate));
+            return done(ImportOutcome::InsufficientSpace(estimate));
         }
         let guard = SpaceGuard::new(probe, dir.root(), reserve, allowance);
 
+        // The gate (§8.2 step 7). Nothing has been written.
+        let side = self
+            .reader()
+            .budgeted(READ_OP_BUDGET, Stage::Preflight, |c| {
+                gate::archive_side(c, &facts, &facts.binding)
+            })?;
+        let preflight = gate::preflight(
+            side,
+            &facts,
+            &tallies,
+            &rd_plan,
+            u64::try_from(rd_only.len()).unwrap_or(u64::MAX),
+            estimate,
+            ob.is_encrypted(),
+            oma_fs::cloud_sync_provider(dir.root()).is_some(),
+        );
+        if ctx.cancel.is_cancelled() {
+            return done(ImportOutcome::Cancelled(None));
+        }
+        ctx.progress.event(ArchiveEvent::Import {
+            phase: ImportPhase::AwaitingConfirmation,
+            done: 0,
+            total: None,
+        });
+        crate::fault::point(crate::fault::FaultPoint::GateWaiting);
+        let lineage = match gate.confirm(&preflight) {
+            GateDecision::Proceed { lineage } => lineage,
+            GateDecision::Decline => {
+                tracing::info!("import declined at the gate");
+                return done(ImportOutcome::Declined);
+            }
+        };
+        drop(preflight);
+        if ctx.cancel.is_cancelled() {
+            return done(ImportOutcome::Cancelled(None));
+        }
+        if let LineageChoice::Existing(id) = lineage {
+            let known = self
+                .reader()
+                .budgeted(READ_OP_BUDGET, Stage::Preflight, |c| {
+                    c.query_row(
+                        "SELECT EXISTS (SELECT 1 FROM lineage WHERE id = ?1)",
+                        [id.0],
+                        |r| r.get::<_, bool>(0),
+                    )
+                })?;
+            if !known {
+                return Err(ArchiveError::UnknownLineage);
+            }
+        }
+        facts.binding.lineage = match lineage {
+            LineageChoice::Existing(id) => Some(id.0),
+            LineageChoice::New => None,
+        };
         let decision = self
             .reader()
             .budgeted(READ_OP_BUDGET, Stage::Preflight, |c| {
-                decide_resume(c, &facts.binding)
+                decide_resume(c, &facts.binding, false)
             })?;
-        if ctx.cancel.is_cancelled() {
-            return Ok(CoreOutcome::Cancelled(None));
-        }
 
         // The first write, then the session.
         ctx.progress.event(ArchiveEvent::Import {
@@ -567,14 +756,7 @@ impl Archive {
         let mut counts = started.counts.clone();
         // P0 is re-run on every resume and finds the same set.
         counts.recently_deleted.messages = rd_messages;
-        let summary = |counts: &ImportCounts| ImportSummary {
-            session: started.session,
-            lineage: LineageId(started.lineage),
-            resumed: started.resumed,
-            superseded: started.superseded,
-            counts: counts.clone(),
-            estimate,
-        };
+        let summary = |counts: &ImportCounts| summary_of(&started, counts, estimate);
 
         // The passes, in order; each stops the chain unless it is done.
         let ended = (|| {
@@ -703,8 +885,6 @@ impl Archive {
             }
             Ok((PassEnd::Done, Pass::RecentlyDeleted))
         })();
-        // The page limit belongs to this import's guards only.
-        SpaceGuard::lift(wc);
         let end_now = ctx.clock.now_ns();
         match ended {
             Ok((PassEnd::Done, _)) => {
@@ -715,6 +895,7 @@ impl Archive {
                     && conn.authorizer_denials() == 0
                     && conn.total_changes() == 0;
                 if !untouched {
+                    SpaceGuard::lift(wc);
                     session::end_session(
                         wc,
                         started.session,
@@ -723,6 +904,7 @@ impl Archive {
                         &counts,
                         end_now,
                     );
+                    provenance::write(&dir, wc, started.session);
                     tracing::warn!(
                         session = started.session,
                         "the staged sms.db was not only read"
@@ -750,9 +932,16 @@ impl Archive {
                     batches = counts.batches,
                     "import passes done"
                 );
-                Ok(CoreOutcome::PassesDone(summary(&counts)))
+                Ok(Staged::Finalize(Box::new(Finish {
+                    run,
+                    counts,
+                    started,
+                    estimate,
+                    qualifiers: facts.qualifiers,
+                })))
             }
             Ok((PassEnd::Cancelled, _)) => {
+                SpaceGuard::lift(wc);
                 session::end_session(
                     wc,
                     started.session,
@@ -761,33 +950,133 @@ impl Archive {
                     &counts,
                     end_now,
                 );
+                let mut s = summary(&counts);
+                s.provenance_written = provenance::write(&dir, wc, started.session);
                 tracing::info!(session = started.session, "import cancelled");
-                Ok(CoreOutcome::Cancelled(Some(summary(&counts))))
+                done(ImportOutcome::Cancelled(Some(s)))
             }
             Err((e, pass)) => {
-                let (state, issue, out) = classify(e);
-                session::end_session(
-                    wc,
-                    started.session,
-                    state,
-                    Some((pass.code(), issue)),
-                    &counts,
-                    end_now,
-                );
-                match out {
-                    Ok(reason) => {
-                        tracing::info!(session = started.session, ?reason, "import stopped");
-                        Ok(CoreOutcome::Stopped {
-                            reason,
-                            summary: summary(&counts),
-                        })
+                SpaceGuard::lift(wc);
+                let mut s = summary(&counts);
+                match end_with_error(wc, &dir, started.session, pass, e, &counts, end_now) {
+                    Ok((reason, written)) => {
+                        s.provenance_written = written;
+                        done(ImportOutcome::Stopped { reason, summary: s })
                     }
-                    Err(err) => {
-                        tracing::warn!(session = started.session, error = %err, ?issue, "import failed");
-                        Err(err)
-                    }
+                    Err(err) => Err(err),
                 }
             }
+        }
+    }
+
+    /// Finalize (P9) and the provenance file, after the staged copy is
+    /// removed.
+    fn finish(
+        &mut self,
+        f: Finish,
+        ctx: &mut ArchiveCtx<'_>,
+    ) -> Result<ImportOutcome, ArchiveError> {
+        let dir = self.store_parts().1;
+        let w = self.ensure_writer()?;
+        let wc = w.conn_mut();
+        let result = finalize::finalize(wc, &f.run, &f.counts, f.qualifiers, ctx);
+        SpaceGuard::lift(wc);
+        let session = f.started.session;
+        let end_now = ctx.clock.now_ns();
+        let mut summary = f.summary(&f.counts);
+        match result {
+            Ok(report) => {
+                summary.finalize = Some(report);
+                summary.provenance_written = provenance::write(&dir, wc, session);
+                tracing::info!(
+                    session,
+                    fts_merge_steps = report.fts_merge_steps,
+                    fts_merge_complete = report.fts_merge_complete,
+                    session_rows_removed = report.session_rows_removed,
+                    provenance_written = summary.provenance_written,
+                    "import completed"
+                );
+                Ok(ImportOutcome::Completed(summary))
+            }
+            Err(NotCompleted::Cancelled) => {
+                session::end_session(
+                    wc,
+                    session,
+                    SessionState::Cancelled,
+                    None,
+                    &f.counts,
+                    end_now,
+                );
+                summary.provenance_written = provenance::write(&dir, wc, session);
+                tracing::info!(session, "import cancelled while finalizing");
+                Ok(ImportOutcome::Cancelled(Some(summary)))
+            }
+            Err(NotCompleted::Failed(e)) => {
+                match end_with_error(wc, &dir, session, Pass::Finalize, e, &f.counts, end_now) {
+                    Ok((reason, written)) => {
+                        summary.provenance_written = written;
+                        Ok(ImportOutcome::Stopped { reason, summary })
+                    }
+                    Err(err) => Err(err),
+                }
+            }
+            // The session stays running (spec §8.9 step 4): no terminal
+            // state is recorded, and no provenance file is written.
+            Err(NotCompleted::TerminalFailed(e)) => match finalize::terminal_stop(&e) {
+                Some(reason) => {
+                    tracing::info!(
+                        session,
+                        ?reason,
+                        "the terminal state was not recorded; the session stays resumable"
+                    );
+                    Ok(ImportOutcome::Stopped { reason, summary })
+                }
+                None => {
+                    let (_, issue, out) = classify(e);
+                    tracing::warn!(
+                        session,
+                        ?issue,
+                        "the terminal state was not recorded; the session stays resumable"
+                    );
+                    Err(out.err().unwrap_or(ArchiveError::Internal(
+                        "the terminal state was not recorded",
+                    )))
+                }
+            },
+        }
+    }
+}
+
+/// Record a pass or finalize error (spec §8.5): the state, the issue, and
+/// the provenance file. A stop gives its reason and whether the provenance
+/// file was written; anything else gives the error.
+fn end_with_error(
+    wc: &mut rusqlite::Connection,
+    dir: &ArchiveDir,
+    session: i64,
+    pass: Pass,
+    e: PassError,
+    counts: &ImportCounts,
+    now_ns: i64,
+) -> Result<(StopReason, bool), ArchiveError> {
+    let (state, issue, out) = classify(e);
+    session::end_session(
+        wc,
+        session,
+        state,
+        Some((pass.code(), issue)),
+        counts,
+        now_ns,
+    );
+    let written = provenance::write(dir, wc, session);
+    match out {
+        Ok(reason) => {
+            tracing::info!(session, ?reason, "import stopped");
+            Ok((reason, written))
+        }
+        Err(err) => {
+            tracing::warn!(session, error = %err, ?issue, "import failed");
+            Err(err)
         }
     }
 }

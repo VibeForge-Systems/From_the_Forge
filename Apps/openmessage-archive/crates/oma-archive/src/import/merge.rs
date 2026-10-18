@@ -320,6 +320,16 @@ pub(crate) fn decide(stored: &Cell, observed: &Cell, rank: Rank, last_rank: Rank
     Decision::Replace { changed: !same }
 }
 
+/// The merge read of a keyed row by its exact GUID bytes.
+pub(crate) const KEY_GUID: &str = "key_kind = 1 AND guid = ?1";
+/// The merge read of a keyed handle by its tagged natural key.
+pub(crate) const KEY_NATURAL: &str = "key_kind = 1 AND natural_key = ?1";
+/// The merge read of an unkeyed row by fingerprint and occurrence.
+pub(crate) const KEY_UNKEYED: &str = "key_kind = 2 AND unkeyed_fp = ?1 AND unkeyed_occ = ?2";
+/// The `value_issue` rows of one stored row.
+pub(crate) const STORED_ISSUES_SQL: &str =
+    "SELECT col, kind, bytes, raw FROM value_issue WHERE entity = ?1 AND row_id = ?2";
+
 /// The statements every merge uses, prepared once per batch transaction.
 pub(crate) struct MergeStmts<'c> {
     issue_delete: Statement<'c>,

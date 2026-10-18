@@ -229,8 +229,9 @@ closed_code! {
 }
 
 closed_code! {
-    /// `import_cursor.pass`: the import passes of spec §8.4 that write a
-    /// cursor (P0 and P5b read only; P9 is the finalize step).
+    /// `import_cursor.pass` and `import_issue.pass`: the import passes of
+    /// spec §8.4 that write a cursor (P0 and P5b read only), and P9, the
+    /// finalize step, which writes no cursor but can record an issue.
     Pass {
         Handles = 1,
         Chats = 2,
@@ -240,6 +241,7 @@ closed_code! {
         Attachments = 6,
         MessageAttachments = 7,
         RecentlyDeleted = 8,
+        Finalize = 9,
     }
 }
 
@@ -973,7 +975,7 @@ mod tests {
             ),
         ];
         let want: [(&str, &[i64]); 7] = [
-            ("Pass", &[1, 2, 3, 4, 5, 6, 7, 8]),
+            ("Pass", &[1, 2, 3, 4, 5, 6, 7, 8, 9]),
             ("WalOutcomeCode", &[0, 1, 2]),
             ("TextEncodingCode", &[1, 2, 3]),
             ("ServiceClassCode", &[1, 2, 3, 4, 5, 6]),

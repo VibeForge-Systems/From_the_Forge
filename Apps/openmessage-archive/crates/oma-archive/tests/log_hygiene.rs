@@ -175,13 +175,18 @@ fn logs_errors_and_debug_output_hold_no_label_id_or_path() {
         shown.push(format!("{c:?}"));
         src.ob.close();
     }
-    // The Recently Deleted option, continuing then superseding a session.
+    // The Recently Deleted option, superseding then continuing a session.
     for entry in ["imp-rd-plain", "imp-dev1-v1-plain"] {
         let src = open_entry(entry);
-        let first = import(&mut a, &src, &opts(16), LineageChoice::New);
+        let first = common::import::cancelled_at_chats(&mut a, &src, &opts(16), LineageChoice::New);
         let mut rd = opts(16);
         rd.include_recently_deleted = true;
-        let s = import(&mut a, &src, &rd, LineageChoice::Existing(first.lineage));
+        let s = common::import::cancelled_at_chats(
+            &mut a,
+            &src,
+            &rd,
+            LineageChoice::Existing(first.lineage),
+        );
         assert_eq!(s.superseded, 1, "{entry}");
         shown.push(format!("{first:?} {s:?}"));
         let again = import(&mut a, &src, &rd, LineageChoice::Existing(first.lineage));
@@ -195,6 +200,17 @@ fn logs_errors_and_debug_output_hold_no_label_id_or_path() {
     ));
     drop(a);
     let iroot = root(&itmp).to_string_lossy().into_owned();
+    // The provenance files every terminal state wrote (spec §18.9:
+    // `imports/*.json`).
+    let mut provenance = 0;
+    for e in std::fs::read_dir(archive_dir(&itmp, &iid).join("imports"))
+        .expect("imports")
+        .flatten()
+    {
+        shown.push(std::fs::read_to_string(e.path()).expect("provenance"));
+        provenance += 1;
+    }
+    assert!(provenance >= ENTRIES.len(), "{provenance} provenance files");
 
     let mut banned = vec![LABEL.to_owned(), id.as_str().to_owned(), root_text, iroot];
     banned.push(iid.as_str().to_owned());

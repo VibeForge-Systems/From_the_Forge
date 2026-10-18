@@ -22,7 +22,7 @@ use common::import::*;
 use common::*;
 use oma_archive::hooks::{arm, install, FaultPoint, Faults, TestSchema};
 use oma_archive::{
-    ArchiveCtx, ArchiveError, CancelToken, CoreOutcome, FixedClock, LineageChoice, LineageId,
+    ArchiveCtx, ArchiveError, CancelToken, FixedClock, ImportOutcome, LineageChoice, LineageId,
     NoProgress, Recovery,
 };
 use serde_json::Value;
@@ -232,10 +232,9 @@ fn every_entry_imports_as_the_model_says() {
 /// Every scenario's content, in every order it lists; the orders give equal
 /// content snapshots; each step's counts match the model's.
 ///
-/// Each step's session is completed before the next step
-/// ([`finish_sessions`]), so a step whose staged content equals an earlier
-/// step's is a fresh session that re-observes it, as it will be once
-/// finalize exists: unkeyed rows must be idempotent and an equal or
+/// Each step's session is completed by finalize before the next step, so a
+/// step whose staged content equals an earlier step's is a fresh session
+/// that re-observes it: unkeyed rows must be idempotent and an equal or
 /// undated rank must merge as the model says.
 #[test]
 fn every_scenario_holds_in_every_order() {
@@ -274,7 +273,6 @@ fn every_scenario_holds_in_every_order() {
                 labels.insert(label.to_owned(), s.lineage);
                 drop(a);
                 assert!(src.ob.close().removed);
-                finish_sessions(&db);
                 assert!(!s.resumed, "{name} order {oi} step {si}");
                 let digest = m["sessions"][entry]["contentDigest"]
                     .as_str()
@@ -344,7 +342,6 @@ fn a_second_session_of_the_same_content_inserts_nothing() {
     let mut a = lib.open(&id).expect("open");
     let first = import(&mut a, &src, &opts(16), LineageChoice::New);
     drop(a);
-    finish_sessions(&db);
     let before = logical_snapshot(&db, Scope::Content);
     let mut a = lib.open(&id).expect("open");
     let second = import(
@@ -437,16 +434,29 @@ fn the_session_records_the_rank_and_qualifiers_the_model_computes() {
             model_q.contains("walSkipped"),
             "{entry}"
         );
-        // Until finalize exists, a session whose passes ran stays running.
-        assert_eq!(state, 0, "{entry}");
-        let dup: i64 = c
+        // Finalize completed the session and emptied its session-local
+        // rows; the key scan's duplicates are in the counts' unkeyed rows.
+        assert_eq!(state, 1, "{entry}");
+        let full: Option<i64> = c
             .query_row(
-                "SELECT count(*) FROM import_dup_key WHERE session_id = ?1",
+                "SELECT full_observation FROM import_session WHERE id = ?1",
                 [s.session],
                 |r| r.get(0),
             )
-            .expect("dups");
-        assert_eq!(dup > 0, *entry == "imp-keys-hostile-plain", "{entry}");
+            .expect("full");
+        assert_eq!(
+            full == Some(1),
+            want["fullObservation"].as_bool().expect("fullObservation"),
+            "{entry}"
+        );
+        assert_eq!(
+            session_local_rows(&db_path(&tmp, &id), s.session),
+            0,
+            "{entry}"
+        );
+        let f = s.finalize.expect("finalize report");
+        assert!(f.fts_merge_complete, "{entry}");
+        assert!(s.staging_removed && s.provenance_written, "{entry}");
     }
 }
 
@@ -456,7 +466,26 @@ fn duplicated_keys_are_unkeyed_in_every_occurrence_and_persisted() {
     let id = lib.create(None).expect("create");
     let mut a = lib.open(&id).expect("open");
     let src = open_entry("imp-keys-hostile-plain");
-    let s = import(&mut a, &src, &opts(16), LineageChoice::New);
+    // Stop after P1, so the session-local rows (which finalize deletes)
+    // can be read.
+    let token = CancelToken::new();
+    let mut sink = CancelAtChats(token.clone());
+    let clock = FixedClock(MODEL_NOW_NS);
+    let out = a
+        .import(
+            &src.ob,
+            &opts(16),
+            &mut oma_archive::ProceedWith(LineageChoice::New),
+            &mut ArchiveCtx {
+                cancel: &token,
+                progress: &mut sink,
+                clock: &clock,
+            },
+        )
+        .expect("import");
+    let ImportOutcome::Cancelled(Some(s)) = out else {
+        panic!("not cancelled: {out:?}");
+    };
     drop(a);
     src.ob.close();
     let c = read_only(&db_path(&tmp, &id));
@@ -518,29 +547,31 @@ fn other_options_supersede_and_the_fresh_session_changes_no_content() {
     src.ob.close();
     let before = logical_snapshot(&db_path(&tmp, &id), Scope::Content);
 
-    // The same content with a different option, then with another lineage,
-    // then with a different batch budget (which is not part of the
-    // binding, so it continues).
+    // Unfinished sessions of the same content: with a different option,
+    // then with another lineage, then with a different batch budget (which
+    // is not part of the binding, so it continues). A completed session is
+    // never continued or superseded.
     let mut o = opts(1000);
     o.include_recently_deleted = true;
     let mut a = lib.open(&id).expect("open");
     let src = open_entry("imp-dev1-v2-plain");
-    let second = import(&mut a, &src, &o, LineageChoice::Existing(first.lineage));
+    let second = cancelled_at_chats(&mut a, &src, &o, LineageChoice::Existing(first.lineage));
     assert!(!second.resumed);
-    assert_eq!(second.superseded, 1);
+    assert_eq!(second.superseded, 0);
     assert_eq!(second.counts.handles.inserted, 0);
     assert_eq!(second.counts.handles.already_present, 4);
     assert_eq!(second.counts.handles.cells_replaced, 0);
-    let third = import(&mut a, &src, &o, LineageChoice::New);
+    let third = cancelled_at_chats(&mut a, &src, &o, LineageChoice::New);
     assert!(!third.resumed);
     assert_eq!(third.superseded, 1);
-    let fourth = import(
+    let fourth = cancelled_at_chats(
         &mut a,
         &src,
         &opts(16),
         LineageChoice::Existing(third.lineage),
     );
     assert!(!fourth.resumed, "the RD option differs again");
+    assert_eq!(fourth.superseded, 1);
     let mut o16 = opts(16);
     o16.include_recently_deleted = false;
     let fifth = import(&mut a, &src, &o16, LineageChoice::Existing(third.lineage));
@@ -558,18 +589,13 @@ fn other_options_supersede_and_the_fresh_session_changes_no_content() {
         .expect("query")
         .collect::<Result<_, _>>()
         .expect("rows");
-    assert_eq!(states, [5, 5, 5, 0]);
-    // A superseded session keeps no map, counter or duplicate rows.
-    let leftovers: i64 = c
-        .query_row(
-            "SELECT (SELECT count(*) FROM import_rowid_map WHERE session_id <> ?1) + \
-                    (SELECT count(*) FROM import_cursor WHERE session_id <> ?1 AND done = 0)",
-            [fourth.session],
-            |r| r.get(0),
-        )
-        .expect("count");
-    assert_eq!(leftovers, 0);
+    assert_eq!(states, [1, 5, 5, 1]);
     drop(c);
+    // No session keeps a map, counter or duplicate rows: superseded ones
+    // lost them when set aside, completed ones at finalize.
+    for s in [first.session, second.session, third.session, fourth.session] {
+        assert_eq!(session_local_rows(&db, s), 0, "session {s}");
+    }
     // Re-observing identical content changes no content, except that a
     // second lineage now saw the chats.
     let after = logical_snapshot(&db, Scope::Content);
@@ -590,7 +616,7 @@ fn a_cancel_before_the_session_starts_writes_nothing() {
     let token = CancelToken::new();
     token.cancel();
     let out = import_with(&mut a, &src, &opts(1000), LineageChoice::New, &token).expect("import");
-    assert_eq!(out, CoreOutcome::Cancelled(None));
+    assert_eq!(out, ImportOutcome::Cancelled(None));
     drop(a);
     assert!(src.ob.close().removed);
     assert_eq!(data_snapshot(&tmp, &id), before);
@@ -683,7 +709,7 @@ fn cancelled_hostile(
     drop(a);
     src.ob.close();
     match out {
-        CoreOutcome::Cancelled(Some(s)) => s,
+        ImportOutcome::Cancelled(Some(s)) => s,
         other => panic!("not cancelled: {other:?}"),
     }
 }

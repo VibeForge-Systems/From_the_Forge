@@ -38,7 +38,7 @@ fn step(
     let s = import(&mut a, &src, &o, lineage);
     drop(a);
     assert!(src.ob.close().removed);
-    finish_sessions(db);
+    assert_completed(db, s.session);
     s
 }
 

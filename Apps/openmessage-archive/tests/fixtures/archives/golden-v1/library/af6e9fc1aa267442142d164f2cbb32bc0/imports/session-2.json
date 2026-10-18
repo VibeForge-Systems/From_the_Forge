@@ -1,0 +1,146 @@
+{
+  "appVersion": "0.1.0",
+  "counts": {
+    "attachmentFiles": {
+      "adopted": 0,
+      "alreadyArchived": 3,
+      "blobUnavailable": 1,
+      "blobsAdded": 2,
+      "bytesCopied": 90,
+      "copied": 2,
+      "currentMoved": 3,
+      "deduplicated": 1,
+      "fsyncs": 5,
+      "notInBackup": 0,
+      "notLookedUp": 0,
+      "notRequested": 0,
+      "orphanReplaced": 0,
+      "overLimit": 0,
+      "partialsLeft": 0,
+      "readFailed": 0,
+      "replaced": 0,
+      "sizeMismatch": 0,
+      "storeConflicts": 0,
+      "tooLargeForVolume": 0,
+      "writeFailed": 0
+    },
+    "attachments": {
+      "alreadyPresent": 5,
+      "cellsReplaced": 1,
+      "historyAdded": 0,
+      "inserted": 2,
+      "notApplied": 0,
+      "seen": 7,
+      "unkeyed": 0,
+      "valueIssueCells": 0
+    },
+    "batches": 8,
+    "bodies": {
+      "added": 5,
+      "currentMoved": 2,
+      "decodeFailed": 0,
+      "displayAttributedBody": 0,
+      "displayText": 4,
+      "displayTextLossy": 0,
+      "noneAttributedBodyUnusable": 0,
+      "noneNoSource": 1,
+      "noneTextEmpty": 0,
+      "rederived": 0,
+      "runIssues": 0,
+      "sourcesDiffer": 0,
+      "unchanged": 18
+    },
+    "chatHandles": {
+      "alreadyPresent": 4,
+      "inserted": 0,
+      "seen": 4,
+      "skippedRecentlyDeleted": 0,
+      "unresolved": 0,
+      "unresolvedFirst": 0,
+      "unresolvedSecond": 0
+    },
+    "chatMessages": {
+      "alreadyPresent": 20,
+      "inserted": 3,
+      "seen": 23,
+      "skippedRecentlyDeleted": 0,
+      "unresolved": 0,
+      "unresolvedFirst": 0,
+      "unresolvedSecond": 0
+    },
+    "chats": {
+      "alreadyPresent": 3,
+      "cellsReplaced": 0,
+      "historyAdded": 0,
+      "inserted": 0,
+      "notApplied": 3,
+      "seen": 3,
+      "unkeyed": 0,
+      "valueIssueCells": 0
+    },
+    "handles": {
+      "alreadyPresent": 4,
+      "cellsReplaced": 1,
+      "historyAdded": 1,
+      "inserted": 0,
+      "notApplied": 0,
+      "seen": 4,
+      "unkeyed": 0,
+      "valueIssueCells": 0
+    },
+    "messageAttachments": {
+      "alreadyPresent": 5,
+      "inserted": 2,
+      "seen": 7,
+      "skippedRecentlyDeleted": 0,
+      "unresolved": 0,
+      "unresolvedFirst": 0,
+      "unresolvedSecond": 0
+    },
+    "messages": {
+      "alreadyPresent": 20,
+      "cellsReplaced": 24,
+      "historyAdded": 1,
+      "inserted": 3,
+      "notApplied": 0,
+      "seen": 23,
+      "unkeyed": 0,
+      "valueIssueCells": 0
+    },
+    "recentlyDeleted": {
+      "attachmentsExcluded": 0,
+      "excluded": 0,
+      "imported": 0,
+      "marked": 0,
+      "messages": 0,
+      "notMarked": 0,
+      "notUpdated": 0
+    },
+    "resumes": 0
+  },
+  "decoderVersion": 1,
+  "deriverVersion": 1,
+  "endedAtNs": 1798761600000000000,
+  "format": "oma-import-provenance",
+  "formatVersion": 1,
+  "fullObservation": true,
+  "lineage": 1,
+  "options": {
+    "copyAttachments": true,
+    "includeRecentlyDeleted": false
+  },
+  "orderClass": "dated",
+  "orderKeySource": "statusPlistDate",
+  "qualifiers": [],
+  "resumes": 0,
+  "schemaVersion": 1,
+  "session": 2,
+  "source": {
+    "encrypted": false,
+    "productType": "iPhone0,0",
+    "productVersion": "18.0"
+  },
+  "startedAtNs": 1798761600000000000,
+  "state": "completed",
+  "walOutcome": "notListed"
+}

@@ -16,14 +16,20 @@
 //! compares the result with an uninterrupted import. Each child stages
 //! under a directory the parent removes (a killed child never cleans up).
 //!
-//! Every point in `FaultPoint::ALL` is killed at: the batch, record,
-//! session and recovery points by the import plan, the attachment store's
-//! points (partial created, copying, synced, intents committed, placed,
-//! directories flushed) by the store plan on a catalogue entry with
-//! attachment files, the terminal commit by a child that cancels during
-//! the chat pass, and the two creation points by the creation test. After
-//! every kill, no `blob` row references a missing file; after the resume,
-//! no store file is unreferenced and no intent is left.
+//! Every point in `FaultPoint::ALL` is killed at (a test fails when one
+//! is not): the batch, record, session and recovery points by the import
+//! plan, the attachment store's points (partial created, copying, synced,
+//! intents committed, placed, directories flushed) by the store plan on a
+//! catalogue entry with attachment files, the terminal commit by a child
+//! that cancels during the chat pass and by one at the completion, the
+//! gate (nothing written), finalize before completion (the statistics and
+//! each cleanup chunk: the session continues), after completion (the
+//! terminal commit, each FTS merge step, the checkpoint and both
+//! provenance points: the session stays completed and the next write open
+//! sweeps the `.tmp`), a migration step and its commit (version 1 stays),
+//! and the two creation points by the creation test. After every kill, no
+//! `blob` row references a missing file; after the resume, no store file
+//! is unreferenced and no intent is left.
 //!
 //! What this shows: consistency after a **process kill**. A kill leaves the
 //! kernel's page cache intact, so it does not exercise fsync ordering;
@@ -39,10 +45,10 @@ use std::time::Duration;
 
 use common::import::*;
 use common::*;
-use oma_archive::hooks::{arm, count, hits, FaultPoint};
+use oma_archive::hooks::{arm, count, hits, install, FaultPoint, Faults, TestSchema};
 use oma_archive::{
     ArchiveCtx, ArchiveEntry, ArchiveEvent, ArchiveId, ArchiveSink, CancelToken, FixedClock,
-    ImportPhase, Library, LineageChoice, LineageId,
+    ImportPhase, Library, LineageChoice, LineageId, NoProgress, Recovery,
 };
 
 /// Cancels `token` once the chat pass has committed a batch.
@@ -100,10 +106,28 @@ fn crash_child() {
         }),
     );
     let library = PathBuf::from(std::env::var(ENV_LIBRARY).expect("library"));
-    let lib = Library::new(&library).expect("library");
+    // The parent's fake space probe, so no child depends on the runner's
+    // free disk (spec §12).
+    let lib = Library::new(&library)
+        .expect("library")
+        .with_space_probe(fake_space(Some(TEST_AVAILABLE), Some(2 * TEST_AVAILABLE)));
     match std::env::var(ENV_SCENARIO).expect("scenario").as_str() {
         "create" => {
             lib.create(None).expect("create");
+        }
+        "migrate" => {
+            let id = ArchiveId::parse(&std::env::var(ENV_ARCHIVE).expect("id")).expect("id");
+            let _faults = install(Faults {
+                schema: Some(TestSchema::V2),
+                ..Faults::default()
+            });
+            let mut a = lib.open(&id).expect("open");
+            a.migrate(&mut ArchiveCtx {
+                cancel: &CancelToken::new(),
+                progress: &mut NoProgress,
+                clock: &FixedClock(MODEL_NOW_NS),
+            })
+            .expect("migrate");
         }
         "import" => {
             let id = ArchiveId::parse(&std::env::var(ENV_ARCHIVE).expect("id")).expect("id");
@@ -123,8 +147,13 @@ fn crash_child() {
                     progress: &mut sink,
                     clock: &clock,
                 };
-                a.import_core(&src.ob, &opts(16), lineage, &mut ctx)
-                    .expect("import");
+                a.import(
+                    &src.ob,
+                    &opts(16),
+                    &mut oma_archive::ProceedWith(lineage),
+                    &mut ctx,
+                )
+                .expect("import");
             } else {
                 import_with(&mut a, &src, &opts(16), lineage, &token).expect("import");
             }
@@ -464,4 +493,235 @@ fn a_kill_during_creation_leaves_no_half_archive() {
             }
         }
     }
+}
+
+/// Run an import child killed at the n-th hit of `point` on a fresh
+/// archive; returns the library, the archive and its database.
+fn kill_once(
+    fx: &Fixture,
+    point: FaultPoint,
+    n: u32,
+) -> (
+    tempfile::TempDir,
+    Library,
+    ArchiveId,
+    PathBuf,
+    tempfile::TempDir,
+) {
+    let (tmp, lib) = library();
+    let staging = tempfile::tempdir().expect("staging");
+    let id = lib.create(None).expect("create");
+    let db = db_path(&tmp, &id);
+    let envs = vec![
+        (ENV_FAULT, format!("{}:{n}", point.name())),
+        (ENV_SCENARIO, "import".to_owned()),
+        (ENV_LIBRARY, tmp.path().display().to_string()),
+        (ENV_ARCHIVE, id.as_str().to_owned()),
+        (ENV_BACKUP, fx.backup.display().to_string()),
+        (ENV_LINEAGE, "new".to_owned()),
+        (ENV_STAGING, staging.path().display().to_string()),
+    ];
+    assert_eq!(
+        run_child(&envs),
+        Child::Killed,
+        "{} {n} not reached",
+        point.name()
+    );
+    (tmp, lib, id, db, staging)
+}
+
+fn fx_hits(fx: &Fixture, p: FaultPoint) -> u32 {
+    fx.hits.iter().find(|(q, _)| *q == p).map_or(0, |(_, n)| *n)
+}
+
+/// A kill while the gate waits: nothing was written, and a new import
+/// gives the uninterrupted result.
+#[test]
+fn a_kill_at_the_gate_writes_nothing() {
+    if cfg!(windows) {
+        return;
+    }
+    let fx = fixture();
+    assert_eq!(fx_hits(&fx, FaultPoint::GateWaiting), 1);
+    let (tmp, lib) = library();
+    let staging = tempfile::tempdir().expect("staging");
+    let id = lib.create(None).expect("create");
+    let db = db_path(&tmp, &id);
+    let before = data_snapshot(&tmp, &id);
+    let envs = vec![
+        (ENV_FAULT, format!("{}:1", FaultPoint::GateWaiting.name())),
+        (ENV_SCENARIO, "import".to_owned()),
+        (ENV_LIBRARY, tmp.path().display().to_string()),
+        (ENV_ARCHIVE, id.as_str().to_owned()),
+        (ENV_BACKUP, fx.backup.display().to_string()),
+        (ENV_LINEAGE, "new".to_owned()),
+        (ENV_STAGING, staging.path().display().to_string()),
+    ];
+    assert_eq!(run_child(&envs), Child::Killed);
+    assert_eq!(data_snapshot(&tmp, &id), before);
+    let mut a = lib.open(&id).expect("open");
+    let src = open_dir(&fx.backup, None);
+    import(&mut a, &src, &opts(16), LineageChoice::New);
+    drop(a);
+    src.ob.close();
+    assert_eq!(logical_snapshot(&db, Scope::WithSessions), fx.want);
+}
+
+/// Kills in finalize before the terminal state (spec §18.4: the map
+/// cleanup): the session continues to the uninterrupted result.
+#[test]
+fn a_kill_in_finalize_before_completion_resumes() {
+    if cfg!(windows) {
+        return;
+    }
+    let fx = fixture();
+    assert_eq!(fx_hits(&fx, FaultPoint::FinalizeStats), 1);
+    let cleanup = fx_hits(&fx, FaultPoint::FinalizeCleanup);
+    // One chunk per session-local table.
+    assert_eq!(cleanup, 3);
+    kill_import_and_resume(&fx, &[(FaultPoint::FinalizeStats, 1)], false);
+    for n in 1..=cleanup {
+        kill_import_and_resume(&fx, &[(FaultPoint::FinalizeCleanup, n)], false);
+    }
+}
+
+/// Kills after the session completed (spec §18.4: between FTS merge
+/// steps, at the checkpoint, during the provenance `.tmp` write and before
+/// its rename): the session stays completed, the archive is consistent,
+/// the next write open sweeps the `.tmp`, and the archive equals the
+/// uninterrupted one.
+#[test]
+fn a_kill_after_completion_leaves_a_completed_consistent_archive() {
+    if cfg!(windows) {
+        return;
+    }
+    let fx = fixture();
+    assert_eq!(fx_hits(&fx, FaultPoint::TerminalCommitted), 1);
+    let merges = fx_hits(&fx, FaultPoint::FtsMergeStep);
+    assert!(merges >= 1);
+    let mut kills = vec![(FaultPoint::TerminalCommitted, 1)];
+    kills.extend((1..=merges).map(|n| (FaultPoint::FtsMergeStep, n)));
+    for p in [
+        FaultPoint::Checkpoint,
+        FaultPoint::ProvenanceTmpCreated,
+        FaultPoint::ProvenanceBeforeRename,
+    ] {
+        assert_eq!(fx_hits(&fx, p), 1, "{}", p.name());
+        kills.push((p, 1));
+    }
+    for (point, n) in kills {
+        let (_tmp, lib, id, db, _staging) = kill_once(&fx, point, n);
+        let state: i64 = read_only(&db)
+            .query_row("SELECT state FROM import_session", [], |r| r.get(0))
+            .expect("state");
+        assert_eq!(state, 1, "{} {n}", point.name());
+        let a = lib.open(&id).expect("open after a kill");
+        drop(a);
+        assert_consistent_copy(&db);
+        let imports = db.with_file_name("imports");
+        let mut a = lib.open(&id).expect("open");
+        a.begin_write(Recovery::Run).expect("write open");
+        drop(a);
+        let names: Vec<String> = std::fs::read_dir(&imports)
+            .expect("imports")
+            .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            names.iter().all(|n| !n.ends_with(".tmp")),
+            "{} {n}: {names:?}",
+            point.name()
+        );
+        assert_consistent(&db);
+        assert_eq!(
+            logical_snapshot(&db, Scope::WithSessions),
+            fx.want,
+            "after a kill at {} {n}",
+            point.name()
+        );
+    }
+}
+
+/// Kills inside a migration step and at its `COMMIT` (spec §18.4): the
+/// archive stays at version 1, consistent, and the migration then runs.
+#[test]
+fn a_kill_in_a_migration_step_leaves_the_old_version() {
+    if cfg!(windows) {
+        return;
+    }
+    for point in [FaultPoint::MigrationStep, FaultPoint::MigrationBeforeCommit] {
+        let (tmp, lib) = library();
+        let id = lib.create(None).expect("create");
+        let db = db_path(&tmp, &id);
+        let envs = [
+            (ENV_FAULT, format!("{}:1", point.name())),
+            (ENV_SCENARIO, "migrate".to_owned()),
+            (ENV_LIBRARY, tmp.path().display().to_string()),
+            (ENV_ARCHIVE, id.as_str().to_owned()),
+        ];
+        assert_eq!(run_child(&envs), Child::Killed, "{}", point.name());
+        let version: i64 = read_only(&db)
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .expect("version");
+        assert_eq!(version, 1, "{}", point.name());
+        assert_consistent_copy(&db);
+        let _faults = install(Faults {
+            schema: Some(TestSchema::V2),
+            ..Faults::default()
+        });
+        let mut a = lib.open(&id).expect("open");
+        assert!(a.needs_migration());
+        let r = a
+            .migrate(&mut ArchiveCtx {
+                cancel: &CancelToken::new(),
+                progress: &mut NoProgress,
+                clock: &FixedClock(MODEL_NOW_NS),
+            })
+            .expect("migrates");
+        assert_eq!((r.from, r.to), (1, 2));
+        drop(a);
+        assert_consistent(&db);
+    }
+}
+
+/// Every fault point is killed at by one of the tests above (add a point
+/// to `FaultPoint::ALL` and its kill together).
+#[test]
+fn every_fault_point_has_a_kill() {
+    let covered = [
+        // a_kill_at_any_import_fault_point_resumes_to_the_uninterrupted_result
+        FaultPoint::Record,
+        FaultPoint::BatchBeforeCommit,
+        FaultPoint::BatchAfterCommit,
+        FaultPoint::SessionCommitted,
+        FaultPoint::RecoverySwept,
+        FaultPoint::RecoveryReconciled,
+        FaultPoint::RecoveryMarked,
+        // a_kill_after_the_terminal_commit_resumes, and after completion
+        FaultPoint::TerminalCommitted,
+        // the store plan
+        FaultPoint::AttachmentPartialCreated,
+        FaultPoint::AttachmentCopying,
+        FaultPoint::AttachmentSynced,
+        FaultPoint::AttachmentIntentCommitted,
+        FaultPoint::AttachmentPlaced,
+        FaultPoint::AttachmentDirSynced,
+        // creation
+        FaultPoint::CreateBeforeRename,
+        FaultPoint::CreateAfterRename,
+        // the gate, finalize and provenance
+        FaultPoint::GateWaiting,
+        FaultPoint::FinalizeStats,
+        FaultPoint::FinalizeCleanup,
+        FaultPoint::FtsMergeStep,
+        FaultPoint::Checkpoint,
+        FaultPoint::ProvenanceTmpCreated,
+        FaultPoint::ProvenanceBeforeRename,
+        // migration
+        FaultPoint::MigrationStep,
+        FaultPoint::MigrationBeforeCommit,
+    ];
+    for p in FaultPoint::ALL {
+        assert!(covered.contains(&p), "{} has no kill", p.name());
+    }
+    assert_eq!(covered.len(), FaultPoint::ALL.len());
 }

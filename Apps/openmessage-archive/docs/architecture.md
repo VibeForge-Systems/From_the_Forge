@@ -182,7 +182,7 @@ re-checked:
       .incoming/                  <n>.partial while a copy is in flight
       <hh>/<64 hex>               content-addressed plaintext
     imports/
-      session-<n>.json            content-free provenance (from slice 4j)
+      session-<n>.json            content-free provenance (slice 4j)
 ```
 
 The directory name is a random id (`a` and 32 lowercase hex characters);
@@ -697,7 +697,7 @@ untouched, so the frozen catalogues cannot change by accident.
 
 ### The import core (M4 slice 4f)
 
-`Archive::import_core` (`crates/oma-archive/src/import/`) is the import as
+`Archive::import` (`crates/oma-archive/src/import/`) is the import as
 far as slice 4f builds it: staging and the probe, the session's facts, the
 resume decision, the duplicate-key scan, the session bookkeeping, and the
 first two passes, **P1 handles and P2 chats**, in batches. The shell does
@@ -729,8 +729,7 @@ not call it yet (slice 4l).
   import also deletes any such rows a failed or superseded session still
   owns.
 - **The key scan runs before the resume decision**, on every import,
-  so the gate (slice 4j) can show its evidence before the lineage is
-  chosen; a continued session keeps its stored duplicate set (the same
+  so the gate can show its evidence before the lineage is chosen; a continued session keeps its stored duplicate set (the same
   set, as the digest is bound). Staging reports its bytes as the
   `StagingMessagesDb` phase.
 - **`source_backup`** holds the plist strings exactly as recorded
@@ -775,16 +774,13 @@ not call it yet (slice 4l).
 - **Cancel** (§8.6). The callback checks the token at the start of each
   record; the engine checks it every 128 rows. Either way the completed
   records are committed and the session becomes cancelled (2), resumable.
-- **Until finalize exists**, a session whose passes all ran stays running
-  (state 0) and the outcome is `CoreOutcome::PassesDone`: it is never
-  marked completed or a full observation. Two consequences: an import of
-  the **same content** continues the earlier session and has nothing left
-  to do, and every new import supersedes the previous one. The scenario
-  tests therefore stand in for finalize between steps (they mark the
-  session completed and empty its session-local tables), so a repeated
-  digest is a fresh session: the model's per-step counts and order
-  independence are asserted for every scenario, including the four that
-  repeat a digest.
+- **Until finalize existed** (slices 4f to 4i), a session whose passes
+  all ran stayed running (state 0) and the tests stood in for finalize
+  between steps. Since slice 4j finalize completes it (below), so an
+  import of the same content after a completed one is a fresh session
+  that re-observes it: the model's per-step counts and order independence
+  are asserted for every scenario, including the four that repeat a
+  digest.
 - **Crash points** (`fault.rs`, D85). `fault::point(FaultPoint::…)` marks
   the record start, before and after each batch commit, after the session
   transaction and the terminal state, each recovery step of `begin_write`,
@@ -864,9 +860,9 @@ leans awaiting the owner's confirmation.
 ### Messages, bodies and the FTS index (M4 slice 4g)
 
 Slice 4g adds the preflight's Recently Deleted steps and **P3 messages**
-(`import/preflight.rs`, `import/messages.rs`) to `Archive::import_core`.
+(`import/preflight.rs`, `import/messages.rs`) to `Archive::import`.
 The passes now run P1, P2, P3; a session whose passes ran still stays
-running until finalize (slice 4j).
+running until finalize (slice 4j, below).
 
 - **P0** (spec §8.2 step 2). `for_each_recoverable` gives the sorted,
   distinct message rowids of `chat_recoverable_message_join`; a join row
@@ -961,8 +957,8 @@ running until finalize (slice 4j).
 
 Slice 4h adds the passes after P3 (`import/links.rs`, `import/rd.rs`,
 `import/attachments.rs`, `import/recently_deleted.rs`). The passes now run
-P1, P2, P3, P4, P5, P5b, P6, P7, P8; a session whose passes ran still stays
-running until finalize (slice 4j).
+P1, P2, P3, P4, P5, P5b, P6, P7, P8; a session whose passes ran stayed
+running until finalize (slice 4j, below).
 
 - **P4 chat ↔ handle, P5 chat ↔ message, P7 message ↔ attachment.** Each
   join row's two source rowids are resolved through this session's
@@ -1080,8 +1076,9 @@ import its space rules (`space.rs`).
   to copy are summed (Recently Deleted-only and already-archived files left
   out), with the largest file, giving `SpaceEstimate`. Above the available
   space it only warns; below `reserve + wal_allowance` the import returns
-  `CoreOutcome::InsufficientSpace` before the first write. Until the gate
-  exists (slice 4j) the estimate is returned in `ImportSummary`.
+  `ImportOutcome::InsufficientSpace` before the gate. Otherwise the
+  estimate is shown at the gate (`Preflight::space`) and returned in
+  `ImportSummary`.
 - **The space guard** (`SpaceGuard`) runs before every write transaction
   of the passes (P6's intent transactions included): below the floor the
   session stops (state 6, `insufficient_space`); otherwise
@@ -1137,6 +1134,141 @@ owner decisions):
   still swept).
 - **`K`** stays at the provisional 3.0 in code; the synthetic measurement
   is in `compatibility.md`.
+
+### The gate, finalize and provenance (M4 slice 4j)
+
+Slice 4j completes the import: `Archive::import(ob, opts, gate, ctx)`
+(renamed from `import_core`) asks an `ImportGate` before the first write,
+then runs finalize and writes the provenance file. Its outcome is
+`ImportOutcome`: `Completed`, `Cancelled`, `Stopped`, `Declined`,
+`NotImportable` or `InsufficientSpace`.
+
+- **The gate** (`import/gate.rs`, spec §8.2 step 7, D65). After every
+  preflight read, the import builds a `Preflight` and calls
+  `ImportGate::confirm`; the answer is `Proceed { lineage }` or `Decline`.
+  **Decline writes nothing**: no write connection has been opened, and a
+  test hashes the database, its `-wal`, `attachments/` and `imports/`
+  before and after. A cancel while the gate waits is the same. The shell's
+  blocking gate with its 2-minute timeout is slice 4l; `ProceedWith` and
+  `ProceedWithSuggestion` are the fixed gates tests and tools use.
+- **What the preflight shows.** The resume plan: `Continue { session,
+  lineage, from }` (the first pass not done, or `Finalize`) for an
+  unfinished session whose binding matches except for the lineage, or
+  `Fresh { supersedes, reason }`. Whether a completed session already
+  imported the same content. Every lineage (at most 1,000) with its
+  session and full-observation counts, the backup date of its newest full
+  observation, and **booleans only** for whether the backup's product type
+  and device name equal that session's (D51); the values are compared
+  inside the crate and never leave it. The suggested lineage: the one the
+  continuable session belongs to, else the one lineage whose model and
+  name both match, else a new one (D80). The key tallies per keyed table
+  (rows, keyable, distinct duplicated keys, rows to be imported unkeyed)
+  and the message keys already archived (the overlap; zero with a
+  non-empty archive is shown, not refused). The Recently Deleted counts,
+  the space estimate, the order facts (dated, the date's source, out of
+  range, older than the archive's highest-ranked completed session, a
+  different date source than that session), the encrypted source, the
+  cloud-sync folder and Windows ACL warnings, and the qualifiers. The
+  message-key scan now looks up every unique message key in the archive
+  (one indexed read each on the read-only connection), not only the
+  Recently Deleted ones.
+- **The lineage decides the resume.** The decision is made again with the
+  chosen lineage: an unfinished session continues only when that lineage
+  is its own; otherwise it is superseded. An `Existing` lineage that does
+  not exist is refused before anything is written.
+- **The staged sms.db is removed after P8,** before finalize (§8.11);
+  `ImportSummary::staging_removed` says whether it was.
+- **Finalize** (`import/finalize.rs`, §8.9), each step its own
+  transaction with the space guard before it and a cancel honoured between
+  steps: `chat_stats` (one row per chat, with the archive interrupt armed
+  around its single statement), `archive_stats`, the session-local rows in
+  chunks of 50,000, then the terminal state (completed, `ended_at_ns`,
+  `full_observation`, the final counts), the FTS merge steps (`merge =
+  500`, armed, until `total_changes()` grows by less than 2, at most
+  10,000 steps) and `wal_checkpoint(TRUNCATE)`. `full_observation` is 1
+  unless a WAL-related qualifier is set (§8.7). A cancel or error before
+  the terminal state records the session cancelled, stopped or failed as
+  after a pass (`Pass::Finalize`, code 9, in `import_issue`); a resume
+  finds every pass done and runs finalize again. **The terminal state is
+  best effort:** if it fails, nothing else is recorded, the session stays
+  running, the next write open marks it interrupted, and the outcome is
+  `Stopped { InsufficientSpace }` for `SQLITE_FULL` (an error otherwise).
+  After it the session is completed whatever follows: a cancel only skips
+  the remaining merge steps, and a failed merge step or checkpoint is
+  reported in `FinalizeReport`, never an error.
+- **The armed interrupt** (`conn::armed`, §8.6) is a progress handler on
+  the write connection that interrupts the one statement it wraps once the
+  cancel token is set. It is removed before the caller's `COMMIT`; batch
+  statements, the terminal update and every commit run disarmed (a test
+  cancels at a batch's commit point and the batch still commits).
+- **Provenance** (`provenance.rs`, §8.10, D70): `imports/session-<n>.json`
+  is written at every terminal state the import records (completed,
+  cancelled, stopped, failed) and rewritten when a continued session ends
+  again: `.tmp` created new (0600), written, synced, renamed, `imports/`
+  flushed. It holds the format and version, the session, its state,
+  versions, the import's own start and end times, resumes, the order class
+  and date source (not the date), `fullObservation`, the lineage number,
+  the product type and version and whether the backup was encrypted, the
+  qualifier names, the WAL outcome, the options and the counts
+  (re-serialised from `ImportCounts`). It holds no device name, GUID,
+  digest, rank, message date, path or label. A failure is logged by kind,
+  sets `provenance_written = false` and never changes the outcome. The
+  reader accepts only `^session-[0-9]+\.json$`, at most 64 KiB, opened
+  without following links, with a matching format, version and session.
+- **New fault points** (D85): while the gate waits; after the statistics;
+  after each cleanup chunk; after each merge step; before the checkpoint;
+  after the provenance `.tmp` is created and before its rename; inside a
+  migration step and before its commit. `tests/crash.rs` kills at every
+  one (a test fails if a point in `FaultPoint::ALL` has no kill): before
+  completion the session continues to the uninterrupted result; after it
+  the session is completed and consistent, the next write open sweeps the
+  `.tmp`, and the archive equals the uninterrupted one; a killed migration
+  step leaves version 1 and migrates afterwards. The observer hook
+  (`hooks::observe`) receives every fault point and, through rusqlite's
+  commit hook on write connections, every commit, for `tests/ordering.rs`.
+- **`tests/ordering.rs`** records every `StoreFs` call with the observed
+  points and commits in one sequence and asserts, for every placed file,
+  write → `sync_all` → intent commit → rename → directory flush → row
+  commit, and for creation, database commit and `.oma-new-*` flush before
+  the rename and the library flush after it.
+- **`tests/query_plans.rs`** pins `EXPLAIN QUERY PLAN` for every
+  index-dependent import statement, taken from the crate as it prepares
+  them (`hooks::plan_statements`: the merge reads by GUID, natural key and
+  fingerprint, the value-issue read, the body-version read, the overlap
+  lookup, the current-blob read, the map resolution, the occurrence
+  counter and the finalize `GROUP BY`), and for the M5 shapes of §6.5 (the
+  timeline keyset, FTS to the current body, a message's attachments in
+  order). No import statement scans a table except the statistics' one
+  pass over `chat`, and none sorts.
+- **The golden archive** `tests/fixtures/archives/golden-v1/` (§7.3,
+  §19.2) was made by `cargo run -p oma-archive --example make_golden` from
+  `imp-dev1-v1-plain` then `imp-dev1-v2-plain` (one lineage, fixed clock),
+  with its `SHA256SUMS` and `logical_snapshot.json`. `tests/golden.rs`
+  checks the sums, opens a copy read-write (`begin_write` with recovery),
+  runs the integrity, foreign-key, FTS and store checks, and compares the
+  snapshot. It is regenerated only until schema v1 freezes at the M4
+  release tag. The quick and full verify of §11 are added with the
+  verifier (slice 4k).
+
+**Readings and deviations this slice takes** (implementation readings, not
+owner decisions):
+
+- **The preflight has no M3 extraction status.** The import computes no
+  `ExtractionReport`; the qualifiers it records are shown instead. The
+  shell already has the M3 check.
+- **"Latest" for `sortsBeforeLatest`** is the archive's highest-ranked
+  completed session in any lineage, because the lineage is not chosen yet
+  when the gate is shown.
+- **A cancel after the terminal state is `Completed`**, with
+  `fts_merge_complete = false`: the session is complete and resumable work
+  is not needed.
+- **A failed terminal update leaves no provenance file** (the session is
+  still running); the file appears when the continued session ends.
+- **Superseded and interrupted sessions get no provenance file**: they are
+  set by another import or by the next write open, not at their own end.
+- **The `-wal` and `-shm` are left** after `Archive::close`, because the
+  read-only connection closes last; the golden generator removes the empty
+  `-wal` and the `-shm` from the fixture.
 
 ### Status and qualifiers (D43)
 
@@ -1269,7 +1401,10 @@ owner's confirmation.
 | D62 | FTS | External content over `message_body.display_text`, unicode61 `remove_diacritics 2`, `detail=full`, guarded triggers, every version indexed, `secure-delete` | Writes from Rust; trigram now | Snippets, rebuild and drift checks; CJK limits stated |
 | D63 | Transactions | `IMMEDIATE` batches (1,000 rows / 32 MiB / 2 s), a savepoint per record, the importer's own cursor, `synchronous=FULL` | Per-row transactions | Durable and resumable at batch granularity |
 | D64 | Resume binding | Digest and framing, versions, read profile, options and lineage; otherwise supersede | Resume across any change | One rule set per session |
-| D80 | Lineage | The caller (the gate, later) picks an existing lineage or a new one | Infer from device fields | No silent identity claim |
+| D65 | Confirmation | A gate inside the import job (`ImportGate`), after every preflight read and before the first write; Decline writes nothing | Two jobs | One staging and one password, versus a longer plaintext window (disclosed) |
+| D70 | Provenance file (product fields: a lean **awaiting the owner's confirmation**) | `imports/session-<n>.json`, content-free, best effort, written at each terminal state; it includes the product type and version | A full copy of the session row | Survives database damage without personal data |
+| D74 | Staged sms.db lifetime | The whole import, the gate and P6 included; removed after P8, before finalize | Re-stage per pass | One copy, versus a longer plaintext window (disclosed) |
+| D80 | Lineage | The user picks an existing lineage or a new one at the gate, with a suggestion and boolean device evidence; only the chosen lineage continues an unfinished session | Infer from device fields | No silent identity claim |
 | D81 | Rank | (dated, bounded date, content digest), memcmp-compared; undated below dated | Session id as tie-break | Order independence; no host-clock wins |
 | D82 | Value history (column list: a lean **awaiting the owner's confirmation**) | The closed list of 11 history columns keeps every other observed value | History for every column | Content kept where it matters |
 | D83 | In-source duplicate keys | Every occurrence unkeyed; found by a sorted 128-bit digest scan; persisted per session | Key the first in rowid order | Rowid-order independence; a collision can only demote |

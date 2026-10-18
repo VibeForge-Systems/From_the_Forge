@@ -226,7 +226,28 @@ milestone's documentation.
   never stores or hashes the UDID; when a backup is imported, the app
   shows which device facts match earlier imports and you choose whether it
   is the same phone. The device name, model, iOS version and build are
-  stored exactly as the backup records them.
+  stored exactly as the backup records them. At the confirmation step
+  (implemented, not yet reachable from the app) the comparison is shown
+  only as "matches" or "differs" for the model and the name; the values
+  themselves are not passed out of the archive library.
+- **Import records (`imports/session-<n>.json`; implemented, not yet
+  reachable from the app).** Each import writes a small file per import
+  session into the archive's `imports/` folder (0600 on Unix) when it
+  completes, is cancelled, stops or fails, so the import history survives
+  damage to the database. It holds the app and schema versions, the
+  session's state, the import's own start and end times, whether the
+  backup was dated and which file the date came from (not the date), the
+  lineage number, the backup's **model and iOS version** and whether it
+  was encrypted, the WAL and option settings, the qualifiers, and the
+  import's counts (numbers only). It holds **no** device name, message,
+  address, GUID, content digest, backup date or path, and no archive
+  label. Including the model and iOS version follows the spec's lean
+  (D70), which still awaits the owner's confirmation.
+- **The temporary copy of the Messages database (D74).** During an import
+  the decrypted copy of sms.db in the library's staging folder lives from
+  staging through the confirmation step and every pass, including the
+  attachment copy, and is deleted after the last pass, before the archive
+  is finalized. A crash leaves it until the next staging sweep.
 
 ## Device identifiers (M2)
 

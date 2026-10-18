@@ -27,7 +27,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use common::import::*;
 use common::*;
 use oma_archive::hooks::{arm, count, hits, FaultPoint};
-use oma_archive::{CancelToken, CoreOutcome, LineageChoice, ORDER_KEY_FLOOR_NS};
+use oma_archive::{CancelToken, ImportOutcome, LineageChoice, ORDER_KEY_FLOOR_NS};
 
 /// The source tables of the passes, in pass order (P1–P8).
 const PASS_TABLES: [&str; 8] = [
@@ -132,7 +132,7 @@ fn a_cancel_at_every_record_commits_what_completed_and_resumes_to_the_same_archi
         let guard = arm(FaultPoint::Record, k, Box::new(move |_, _| t.cancel()));
         let out = import_with(&mut a, &src, &opts(16), LineageChoice::New, &token).expect("import");
         drop(guard);
-        let CoreOutcome::Cancelled(Some(s)) = out else {
+        let ImportOutcome::Cancelled(Some(s)) = out else {
             panic!("record {k}: not cancelled: {out:?}");
         };
         let done = u64::from(k) - 1;
@@ -235,7 +235,7 @@ fn crash_once(
     drop(a);
     src.ob.close();
     match r {
-        Ok(Ok(CoreOutcome::PassesDone(s))) => Some(s),
+        Ok(Ok(ImportOutcome::Completed(s))) => Some(s),
         Ok(other) => panic!("unexpected outcome {other:?}"),
         Err(_) => None,
     }
@@ -311,8 +311,20 @@ fn random_crashes_at_batch_boundaries_never_change_the_result() {
     assert!(max[&FaultPoint::BatchAfterCommit] >= 8, "{max:?}");
     let db0 = db_path(&tmp0, &id0);
     let want = logical_snapshot(&db0, Scope::WithSessions);
-    // Both extreme rowids were imported.
-    let c = read_only(&db0);
+    // Both extreme rowids were imported: seen in the map of a run stopped
+    // just before finalize deletes it.
+    let (tmpx, libx) = library();
+    let idx = libx.create(None).expect("create");
+    assert!(crash_once(
+        &libx,
+        &idx,
+        &backup,
+        LineageChoice::New,
+        FaultPoint::FinalizeStats,
+        1
+    )
+    .is_none());
+    let c = read_only(&db_path(&tmpx, &idx));
     for extreme in [i64::MIN, i64::MAX] {
         let n: i64 = c
             .query_row(
@@ -417,7 +429,7 @@ fn a_resumed_session_writes_at_its_stored_rank_when_the_clock_changes() {
     let out =
         import_at(&mut a, &src, &opts(16), LineageChoice::New, &token, early).expect("import");
     drop(guard);
-    let CoreOutcome::Cancelled(Some(s)) = out else {
+    let ImportOutcome::Cancelled(Some(s)) = out else {
         panic!("not cancelled: {out:?}");
     };
     assert_eq!(s.counts.handles.seen, 2);
