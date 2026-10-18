@@ -611,9 +611,12 @@ mod tests {
         #[cfg(windows)]
         let f = {
             use std::os::windows::fs::OpenOptionsExt;
-            // FILE_WRITE_ATTRIBUTES; std opens with backup semantics, so a
-            // directory handle can be opened this way.
-            OpenOptions::new().access_mode(0x0100).open(path)
+            // FILE_WRITE_ATTRIBUTES. A directory handle needs
+            // FILE_FLAG_BACKUP_SEMANTICS, which std does not set by default.
+            OpenOptions::new()
+                .access_mode(0x0100)
+                .custom_flags(0x0200_0000)
+                .open(path)
         };
         #[cfg(not(windows))]
         let f = File::open(path);

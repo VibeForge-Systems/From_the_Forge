@@ -12,7 +12,12 @@ fn age(path: &std::path::Path) {
     #[cfg(windows)]
     let f = {
         use std::os::windows::fs::OpenOptionsExt;
-        fs::OpenOptions::new().access_mode(0x0100).open(path)
+        // FILE_WRITE_ATTRIBUTES, plus FILE_FLAG_BACKUP_SEMANTICS, without
+        // which Windows refuses to open a directory handle.
+        fs::OpenOptions::new()
+            .access_mode(0x0100)
+            .custom_flags(0x0200_0000)
+            .open(path)
     };
     #[cfg(not(windows))]
     let f = fs::File::open(path);
