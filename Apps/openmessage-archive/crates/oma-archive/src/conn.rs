@@ -48,7 +48,7 @@ const OPS_PER_TICK: i32 = 1000;
 /// wide margin and still bounds a crafted file.
 pub(crate) const READ_OP_BUDGET: u64 = 5_000_000;
 /// `journal_size_limit`: the WAL is truncated to this after checkpoints.
-const JOURNAL_SIZE_LIMIT: i64 = 64 << 20;
+pub(crate) const JOURNAL_SIZE_LIMIT: i64 = 64 << 20;
 /// `SQLITE_LIMIT_LENGTH`: the largest value. The largest capped source value
 /// is `attributedBody` at 16 MiB.
 const LIMIT_LENGTH: i32 = 64 << 20;

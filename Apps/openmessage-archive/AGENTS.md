@@ -117,8 +117,9 @@ Each one is enforced in code. Keep it that way.
   create, open, lock, schema v1, fingerprint, migrations; and the import
   core: sessions, the Recently Deleted and duplicate-key scans, the merge
   engine, the handle, chat and message passes with body versions and the
-  FTS index, the link passes, the attachment rows (no files yet) and the
-  Recently Deleted markers, `Archive::import_core`); the planned
+  FTS index, the link passes, the attachments with their files in the
+  content-addressed store, the Recently Deleted markers, and the space
+  estimate and guards, `Archive::import_core`); the planned
   crates are `oma-export` (M6) and `oma-device` (M7). Each must build and test without
   Tauri. The shell's `src-tauri/src/backups/` (registry, job table, worker,
   DTOs, messages) has no Tauri types either, so it is tested without a
@@ -273,7 +274,16 @@ Never hand-edit generated files.
   after P3 (`import/rd.rs`) are re-derived from that map, never carried
   over from the preflight. Until finalize exists (slice 4j) a session whose passes
   all ran stays **running**: `CoreOutcome::PassesDone` is not "completed".
-  P6 writes attachment rows only; the store is slice 4i.
+- **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
+  spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
+  then the `blob_intent` commit, the no-replace placement and one flush
+  per `<hh>`, then the rows in the batch. Keep that order (write →
+  `sync_all` → intent commit → rename → directory flush → row commit);
+  the crash tests kill at each step. Every store path goes through
+  `blobs::store_dir`, every store file is opened with `open_nofollow`, and
+  nothing replaces an existing file. The space guard (`space.rs`) runs
+  before every write transaction; tests get a fake probe with 1 TiB free
+  from `common::library()`, so no test depends on the runner's disk.
 - **Crash points are `fault::point(FaultPoint::…)` calls.** They compile
   to nothing without the feature. `tests/crash.rs` re-runs its own binary
   with `OMA_TEST_FAULT=<point>:<n>` and kills the child there; add a point

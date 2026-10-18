@@ -39,6 +39,20 @@ pub enum FaultPoint {
     RecoveryReconciled,
     /// `begin_write`: running sessions marked interrupted.
     RecoveryMarked,
+    /// P6 phase A: a partial file was created; the copy is next.
+    AttachmentPartialCreated,
+    /// P6 phase A: the first write of a copy into its partial file.
+    AttachmentCopying,
+    /// P6 phase A: a partial file is written and synced (`sync_all`).
+    AttachmentSynced,
+    /// P6 phase B: the batch's blob intents committed.
+    AttachmentIntentCommitted,
+    /// P6 phase C: a file was renamed into the store; its directory's fsync
+    /// is next.
+    AttachmentPlaced,
+    /// P6 phase C: the store directories are flushed; the row batch (phase
+    /// D) is next.
+    AttachmentDirSynced,
     /// Archive creation: the `.oma-new-*` directory is complete and synced;
     /// the rename is next.
     CreateBeforeRename,
@@ -50,7 +64,7 @@ pub enum FaultPoint {
 #[cfg_attr(not(feature = "fault-injection"), allow(dead_code))]
 impl FaultPoint {
     /// Every point, in a fixed order.
-    pub const ALL: [FaultPoint; 10] = [
+    pub const ALL: [FaultPoint; 16] = [
         FaultPoint::Record,
         FaultPoint::BatchBeforeCommit,
         FaultPoint::BatchAfterCommit,
@@ -59,6 +73,12 @@ impl FaultPoint {
         FaultPoint::RecoverySwept,
         FaultPoint::RecoveryReconciled,
         FaultPoint::RecoveryMarked,
+        FaultPoint::AttachmentPartialCreated,
+        FaultPoint::AttachmentCopying,
+        FaultPoint::AttachmentSynced,
+        FaultPoint::AttachmentIntentCommitted,
+        FaultPoint::AttachmentPlaced,
+        FaultPoint::AttachmentDirSynced,
         FaultPoint::CreateBeforeRename,
         FaultPoint::CreateAfterRename,
     ];
@@ -74,6 +94,12 @@ impl FaultPoint {
             FaultPoint::RecoverySwept => "recovery-swept",
             FaultPoint::RecoveryReconciled => "recovery-reconciled",
             FaultPoint::RecoveryMarked => "recovery-marked",
+            FaultPoint::AttachmentPartialCreated => "attachment-partial-created",
+            FaultPoint::AttachmentCopying => "attachment-copying",
+            FaultPoint::AttachmentSynced => "attachment-synced",
+            FaultPoint::AttachmentIntentCommitted => "attachment-intent-committed",
+            FaultPoint::AttachmentPlaced => "attachment-placed",
+            FaultPoint::AttachmentDirSynced => "attachment-dir-synced",
             FaultPoint::CreateBeforeRename => "create-before-rename",
             FaultPoint::CreateAfterRename => "create-after-rename",
         }
@@ -143,6 +169,13 @@ pub mod hooks {
         /// Fail every import batch just before its `COMMIT` with this
         /// SQLite primary result code (the batch then rolls back).
         pub batch_error: Option<i32>,
+        /// Fail every attachment copy's first write to its partial file with
+        /// this raw OS error code (for example `EFBIG`).
+        pub copy_write_error: Option<i32>,
+        /// The space guard sets `max_page_count` to the current page count
+        /// plus this many pages (negative: below the current size), whatever
+        /// the space probe says.
+        pub max_page_room: Option<i64>,
     }
 
     thread_local! {
@@ -379,6 +412,33 @@ pub(crate) fn batch_error() -> Option<rusqlite::Error> {
         hooks::current()
             .batch_error
             .map(|code| rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None))
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        None
+    }
+}
+
+/// The raw OS error an attachment copy's first write must fail with, if a
+/// test set one.
+#[inline]
+pub(crate) fn copy_write_error() -> Option<i32> {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current().copy_write_error
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        None
+    }
+}
+
+/// The page room the space guard must give, if a test set one.
+#[inline]
+pub(crate) fn max_page_room() -> Option<i64> {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current().max_page_room
     }
     #[cfg(not(feature = "fault-injection"))]
     {

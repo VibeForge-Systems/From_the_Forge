@@ -318,6 +318,20 @@ Slice 4h (same container; after compiling, as for slice 4f):
 | of which `messages.rs` | 1.8 s |
 | of which `links.rs` and `lineage.rs` | 1.9 s |
 
+Slice 4i (same container and method):
+
+| What | Time |
+|---|---|
+| `cargo test --workspace`, wall clock | 57 s |
+| Sum of all test binaries' run times | 54.3 s |
+| `oma-archive`, all binaries | 38.3 s |
+| of which `crash.rs` (the main kill test runs 56 child processes, the store kill test 10) | 18.0 s |
+| of which `resume.rs` | 5.6 s |
+| of which `import_core.rs` | 4.0 s |
+| of which `store.rs` and `space.rs` | 1.3 s |
+
+`tests/perf.rs` is ignored and not counted.
+
 All of `oma-archive` is M4 test time, so slice 4f is well inside the
 budget on Linux. CI runners and Windows have not been measured; the
 Windows crash plan is smaller on purpose (§18.12). Later slices add their
@@ -349,6 +363,7 @@ No GPL or LGPL tool or wrapper is committed.
 |---|---|
 | Typedstream mutations, one million iterations (20,000 by default) | `OMA_TS_MUTATIONS=1000000 cargo test -p oma-messages --release --test typedstream_mutation` |
 | Synthetic performance: 1,000,000 messages, 2,000 chats, 50,000 attachments | `cargo test -p oma-messages --release -- --ignored perf_synthetic_large --nocapture` |
+| The archive's growth factor `K` on a synthetic import (`OMA_PERF_MESSAGES` messages, default 20,000) | `OMA_PERF_MESSAGES=100000 cargo test -p oma-archive --release --test perf -- --ignored --nocapture` |
 | The check on a backup outside the repository (oracle run 4) | `OMA_EXTERNAL_BACKUP=<backup dir> cargo test -p oma-messages --test external_sample -- --ignored --nocapture` |
 
 Record performance results in `docs/compatibility.md` as **synthetic**,

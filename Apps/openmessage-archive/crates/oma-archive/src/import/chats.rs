@@ -100,6 +100,8 @@ impl PassWriter for Chats {
     fn read(
         &self,
         db: &SmsDb<'_>,
+        _conn: &Connection,
+        _run: &Run,
         from: Cursor,
         ctx: &mut MessagesCtx<'_>,
         f: &mut dyn FnMut(ChatRecord) -> ControlFlow<Brk>,
@@ -119,7 +121,15 @@ impl PassWriter for Chats {
             rowid: r.rowid,
             cells: self.cells(r),
         });
-        write_records(tx, &self.kind, run, recs, &mut counts.chats, issues)
+        write_records(
+            tx,
+            &self.kind,
+            run,
+            recs,
+            &mut counts.chats,
+            issues,
+            &mut |_, _| Ok(()),
+        )
     }
 }
 

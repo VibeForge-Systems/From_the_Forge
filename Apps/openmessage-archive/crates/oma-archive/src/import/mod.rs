@@ -1,4 +1,4 @@
-//! The import core (spec §8; slices 4f to 4h).
+//! The import core (spec §8; slices 4f to 4i).
 //!
 //! [`Archive::import_core`] runs the parts of the import that exist so
 //! far, in the order of spec §2:
@@ -9,8 +9,10 @@
 //! 3. P0, the Recently Deleted scan (§8.2 step 2), then the duplicate-key
 //!    scan with the Recently Deleted classification (step 3), then the scan
 //!    for attachments linked only to excluded messages (step 4, which
-//!    refuses a source over its cap), which always run, then the resume
-//!    decision (step 1);
+//!    refuses a source over its cap), which always run, then the
+//!    attachment and space estimates (step 5 and §12; an available space
+//!    below the reserve plus the WAL allowance refuses the import before
+//!    anything is written), then the resume decision (step 1);
 //! 4. the archive's first write ([`Archive::begin_write`] with recovery),
 //!    then the session bookkeeping transaction (§8.3);
 //! 5. the passes, in batches (§8.5), each committing its cursor, counts and
@@ -18,13 +20,19 @@
 //!    their body versions, the FTS index through its triggers, and the
 //!    Recently Deleted policy), **P4 chat ↔ handle, P5 chat ↔ message, P5b**
 //!    (the Recently Deleted attachment exclusion, re-derived from durable
-//!    state; it writes nothing), **P6 attachment rows, P7 message ↔
-//!    attachment and P8 the Recently Deleted markers**.
+//!    state; it writes nothing), **P6 attachments** (their rows, and their
+//!    files copied into the content-addressed store; `attachments.rs`),
+//!    **P7 message ↔ attachment and P8 the Recently Deleted markers**;
+//! 6. the source check after P8: a backup that changed since it was opened
+//!    stops the session in a resumable state (§9.3), as a file that
+//!    changed during its copy does.
 //!
-//! **What is not here yet.** P6 writes the attachment rows only: no file
-//! is looked up, read or copied, and no `blob` or `attachment_observation`
-//! row exists until the store arrives (slice 4i). The attachment estimate,
-//! the gate and finalize arrive in slices 4i and 4j. Until finalize exists,
+//! Before every write transaction the space guard (§12) checks the free
+//! space and bounds `max_page_count`; a shortfall, or `SQLITE_FULL`, stops
+//! the session in a resumable state (6).
+//!
+//! **What is not here yet.** The gate and finalize arrive in slice 4j: the
+//! estimates are returned in the summary instead. Until finalize exists,
 //! a session whose passes all ran is left **running** (state 0) and the
 //! outcome is [`CoreOutcome::PassesDone`]: it is never marked completed or
 //! a full observation. The next write open marks it interrupted, and an
@@ -57,16 +65,19 @@ use oma_messages::{
 };
 
 pub use batch::BatchBudget;
-pub use counts::{BodyCounts, EntityCounts, ImportCounts, LinkCounts, RecentlyDeletedCounts};
+pub use counts::{
+    AttachmentFileCounts, BodyCounts, EntityCounts, ImportCounts, LinkCounts, RecentlyDeletedCounts,
+};
 pub use preflight::{KEY_SCAN_CAP, RECOVERABLE_SCAN_CAP};
 pub(crate) use session::{supersede_sessions, unfinished_sessions};
 pub use session::{ORDER_KEY_FLOOR_NS, ORDER_KEY_SLACK_NS};
 
 use crate::archive::{Archive, Recovery};
-use crate::conn::READ_OP_BUDGET;
+use crate::conn::{JOURNAL_SIZE_LIMIT, READ_OP_BUDGET};
 use crate::error::{primary_code, ArchiveError, DamageKind, Stage};
 use crate::progress::{ArchiveCtx, ArchiveEvent, ImportPhase};
 use crate::schema::codes::{Entity, IssueCode, Pass, ServiceClassCode, SessionState};
+use crate::space::{reserve_for, wal_allowance, SpaceEstimate, SpaceGuard};
 use batch::{run_pass, PassEnd, PassError, Run};
 use bind::Cell;
 use preflight::{
@@ -162,8 +173,23 @@ pub enum NotImportable {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum StopReason {
-    /// SQLite reported the disk or the database full (`SQLITE_FULL`).
+    /// Not enough space: available space fell below the reserve plus the
+    /// WAL allowance before a write or a file copy, `max_page_count` could
+    /// not be set as requested, or SQLite or the file system reported the
+    /// disk full (`SQLITE_FULL`, `ENOSPC`).
     InsufficientSpace,
+    /// The backup changed while it was read: a file changed during its copy,
+    /// or the backup's stamps differ after P8 (§9.3).
+    SourceChanged,
+}
+
+impl StopReason {
+    fn issue(self) -> IssueCode {
+        match self {
+            StopReason::InsufficientSpace => IssueCode::InsufficientSpace,
+            StopReason::SourceChanged => IssueCode::SourceChanged,
+        }
+    }
 }
 
 /// What an import did. Content-free.
@@ -180,6 +206,8 @@ pub struct ImportSummary {
     pub superseded: u32,
     /// The counts, including earlier segments of a continued session.
     pub counts: ImportCounts,
+    /// The preflight's space estimate for this attempt (spec §12).
+    pub estimate: SpaceEstimate,
 }
 
 /// The outcome of [`Archive::import_core`].
@@ -201,6 +229,10 @@ pub enum CoreOutcome {
     },
     /// The backup cannot be imported; nothing was written.
     NotImportable(NotImportable),
+    /// Available space is below the reserve plus the WAL allowance (spec
+    /// §12): refused before anything was written. An estimate above the
+    /// available space is only a warning ([`SpaceEstimate::warns`]).
+    InsufficientSpace(SpaceEstimate),
 }
 
 /// The archive code of a readable service text.
@@ -386,9 +418,10 @@ impl Archive {
             Err(ScanError::Read(e)) => return Err(messages_err(e)),
             Err(ScanError::Archive(e)) => return Err(ArchiveError::sqlite(Stage::Preflight, &e)),
         };
-        // Step 4: the attachments linked only to excluded messages. Only
-        // the cap matters here (the estimate that uses the set is slice
-        // 4i's); P5b re-derives the set after P3 from durable state.
+        // Step 4: the attachments linked only to excluded messages, for the
+        // cap and the estimate; P5b re-derives the set after P3 from
+        // durable state.
+        let mut rd_only: Vec<i64> = Vec::new();
         if !rd_plan.excluded.is_empty() {
             ctx.progress.event(ArchiveEvent::Import {
                 phase: ImportPhase::ScanningRecentlyDeleted,
@@ -396,7 +429,7 @@ impl Archive {
                 total: None,
             });
             match rd::scan_attachments(&db, &rd_plan.excluded, mctx) {
-                Ok(rd::AttachmentScan::Done(_)) => {}
+                Ok(rd::AttachmentScan::Done(a)) => rd_only = a,
                 Ok(rd::AttachmentScan::OverLimit) => {
                     return Ok(CoreOutcome::NotImportable(
                         NotImportable::OverRecentlyDeletedCap,
@@ -406,6 +439,79 @@ impl Archive {
                 Err(e) => return Err(messages_err(e)),
             }
         }
+        // Step 5 and §12: the attachment and space estimates.
+        let attachments = if opts.copy_attachments {
+            ctx.progress.event(ArchiveEvent::Import {
+                phase: ImportPhase::EstimatingAttachments,
+                done: 0,
+                total: None,
+            });
+            let rows = db
+                .capabilities()
+                .table(oma_messages::KnownTable::Attachment)
+                .and_then(|t| t.rows)
+                .unwrap_or(0);
+            let ops = READ_OP_BUDGET.saturating_add(rows.saturating_mul(256));
+            let est = self.reader().budgeted(ops, Stage::Preflight, |c| {
+                let mut stmt = c.prepare(attachments::CURRENT_BLOB_SQL)?;
+                let mut lookup = |k: &[u8]| -> rusqlite::Result<Option<u64>> {
+                    use rusqlite::OptionalExtension;
+                    stmt.query_row([k], |r| r.get::<_, i64>(1))
+                        .optional()
+                        .map(|l| l.and_then(|l| u64::try_from(l).ok()))
+                };
+                Ok(attachments::estimate(
+                    &db,
+                    ob,
+                    &scanned,
+                    &rd_only,
+                    mctx,
+                    &mut lookup,
+                ))
+            })?;
+            match est {
+                Ok(Ok(e)) => e,
+                Ok(Err(e)) => return Err(ArchiveError::sqlite(Stage::Preflight, &e)),
+                Err(MessagesError::Cancelled) => return Ok(CoreOutcome::Cancelled(None)),
+                Err(e) => return Err(messages_err(e)),
+            }
+        } else {
+            attachments::AttachmentEstimate::default()
+        };
+        let (probe, dir, store) = self.store_parts();
+        let reserve = reserve_for(probe.total(dir.root()).ok());
+        let allowance = wal_allowance(
+            opts.batch.bytes(),
+            u64::try_from(JOURNAL_SIZE_LIMIT).unwrap_or(0),
+        );
+        let staged_bytes = u64::try_from(facts.binding.main_len)
+            .unwrap_or(0)
+            .saturating_add(
+                facts
+                    .binding
+                    .wal_len
+                    .and_then(|l| u64::try_from(l).ok())
+                    .unwrap_or(0),
+            );
+        let estimate = SpaceEstimate::new(
+            staged_bytes,
+            attachments.bytes,
+            attachments.files,
+            attachments.largest,
+            reserve,
+            allowance,
+            probe.available(dir.root()).ok(),
+        );
+        if estimate.refuses() {
+            tracing::info!(
+                needed = estimate.needed,
+                floor = estimate.floor(),
+                "import refused: not enough free space"
+            );
+            return Ok(CoreOutcome::InsufficientSpace(estimate));
+        }
+        let guard = SpaceGuard::new(probe, dir.root(), reserve, allowance);
+
         let decision = self
             .reader()
             .budgeted(READ_OP_BUDGET, Stage::Preflight, |c| {
@@ -456,6 +562,7 @@ impl Archive {
             rank,
             dups,
             budget: opts.batch,
+            guard,
         };
         let mut counts = started.counts.clone();
         // P0 is re-run on every resume and finds the same set.
@@ -466,6 +573,7 @@ impl Archive {
             resumed: started.resumed,
             superseded: started.superseded,
             counts: counts.clone(),
+            estimate,
         };
 
         // The passes, in order; each stops the chain unless it is done.
@@ -541,7 +649,16 @@ impl Archive {
                 Err(e) => return Err((PassError::Read(e), Pass::Attachments)),
             }
             let p = run_pass(
-                &attachments::Attachments::new(&skip),
+                &attachments::Attachments::new(
+                    &skip,
+                    attachments::StoreCtx {
+                        ob,
+                        dir: dir.clone(),
+                        store: std::sync::Arc::clone(&store),
+                        cancel: ctx.cancel,
+                        copy: opts.copy_attachments,
+                    },
+                ),
                 &db,
                 wc,
                 &run,
@@ -576,8 +693,18 @@ impl Archive {
             if let Some(end) = step(p, Pass::RecentlyDeleted)? {
                 return Ok(end);
             }
+            // §9.3: the backup must be as it was when it was opened. An
+            // unreadable stamp counts as a change (the stop is resumable).
+            if !ob.unchanged_since_open().unwrap_or(false) {
+                return Err((
+                    PassError::Stopped(StopReason::SourceChanged),
+                    Pass::RecentlyDeleted,
+                ));
+            }
             Ok((PassEnd::Done, Pass::RecentlyDeleted))
         })();
+        // The page limit belongs to this import's guards only.
+        SpaceGuard::lift(wc);
         let end_now = ctx.clock.now_ns();
         match ended {
             Ok((PassEnd::Done, _)) => {
@@ -606,6 +733,9 @@ impl Archive {
                 }
                 tracing::info!(
                     session = started.session,
+                    attachment_files_copied = counts.attachment_files.copied,
+                    attachment_files_already_archived = counts.attachment_files.already_archived,
+                    attachment_bytes_copied = counts.attachment_files.bytes_copied,
                     handles = counts.handles.seen,
                     chats = counts.chats.seen,
                     messages = counts.messages.seen,
@@ -710,6 +840,16 @@ fn classify(e: PassError) -> (SessionState, IssueCode, Result<StopReason, Archiv
             Err(ArchiveError::Internal(
                 "the Recently Deleted attachment scan exceeded its cap after the preflight",
             )),
+        ),
+        PassError::Stopped(r) => (SessionState::Stopped, r.issue(), Ok(r)),
+        PassError::Store(kind) => (
+            SessionState::Failed,
+            IssueCode::ArchiveError,
+            Err(ArchiveError::Io {
+                op: crate::error::IoOp::Sync,
+                kind,
+                os: None,
+            }),
         ),
     }
 }

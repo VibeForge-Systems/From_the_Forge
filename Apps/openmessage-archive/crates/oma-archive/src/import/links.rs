@@ -273,6 +273,8 @@ impl PassWriter for ChatHandles {
     fn read(
         &self,
         db: &SmsDb<'_>,
+        _conn: &Connection,
+        _run: &Run,
         from: Cursor,
         ctx: &mut MessagesCtx<'_>,
         f: &mut dyn FnMut(ChatHandleLink) -> ControlFlow<Brk>,
@@ -459,6 +461,8 @@ impl PassWriter for ChatMessages<'_> {
     fn read(
         &self,
         db: &SmsDb<'_>,
+        _conn: &Connection,
+        _run: &Run,
         from: Cursor,
         ctx: &mut MessagesCtx<'_>,
         f: &mut dyn FnMut(ChatMessageLink) -> ControlFlow<Brk>,
@@ -598,6 +602,8 @@ impl PassWriter for MessageAttachments<'_> {
     fn read(
         &self,
         db: &SmsDb<'_>,
+        _conn: &Connection,
+        _run: &Run,
         from: Cursor,
         ctx: &mut MessagesCtx<'_>,
         f: &mut dyn FnMut(MessageAttachmentLink) -> ControlFlow<Brk>,

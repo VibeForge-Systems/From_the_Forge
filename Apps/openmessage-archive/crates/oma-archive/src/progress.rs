@@ -38,8 +38,8 @@ impl Clock for FixedClock {
     }
 }
 
-/// A phase of an import (spec §8.12). Slices 4f to 4h have the phases up
-/// to P8; the attachment copy, the gate and finalize add theirs.
+/// A phase of an import (spec §8.12). Slices 4f to 4i have the phases up
+/// to P8; the gate and finalize add theirs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ImportPhase {
@@ -52,6 +52,9 @@ pub enum ImportPhase {
     ScanningRecentlyDeleted,
     /// The duplicate-key scan.
     ScanningKeys,
+    /// The attachment estimate: each attachment looked up and its file
+    /// probed (spec §8.2 step 5). `done` and `total` are not reported.
+    EstimatingAttachments,
     /// The session bookkeeping after the archive's first write.
     PreparingArchive,
     /// P1.
@@ -62,9 +65,9 @@ pub enum ImportPhase {
     ImportingMessages,
     /// P4 and P5: the chat links.
     ImportingChatLinks,
-    /// P6: the attachment rows. `done` and `total` are rows; no file is
-    /// copied yet (the store is slice 4i).
-    ImportingAttachments,
+    /// P6: the attachment rows and their files. `done` and `total` are
+    /// rows (not bytes, as spec §8.12 has it; see `docs/architecture.md`).
+    CopyingAttachments,
     /// P7: the message ↔ attachment links.
     ImportingAttachmentLinks,
     /// P8: the Recently Deleted markers.

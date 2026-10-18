@@ -4,10 +4,9 @@
 //! transaction as every batch, reloaded on resume and added to, never reset.
 //! Nothing here is content: no value, key, digest, date or path.
 //!
-//! Slices 4f to 4h count the handle, chat, message and attachment-row
-//! passes, the body versions, the three link passes and the Recently
-//! Deleted policy and markers. The attachment file counts (copies, the
-//! store) arrive with the store (slice 4i).
+//! Slices 4f to 4i count the handle, chat, message and attachment passes,
+//! the body versions, the three link passes, the Recently Deleted policy
+//! and markers, and the attachment store (copies and placements).
 
 use serde::{Deserialize, Serialize};
 
@@ -83,8 +82,8 @@ pub struct RecentlyDeletedCounts {
     pub not_updated: u64,
     /// Recently Deleted messages imported (the opt-in).
     pub imported: u64,
-    /// Attachments linked only to excluded messages: no row (and, once the
-    /// store exists, no file; spec §8.8).
+    /// Attachments linked only to excluded messages: no row and no file
+    /// (spec §8.8).
     pub attachments_excluded: u64,
     /// P8: markers written (`message_recently_deleted` rows).
     pub marked: u64,
@@ -125,6 +124,118 @@ pub struct LinkCounts {
     pub skipped_recently_deleted: u64,
 }
 
+/// What P6 did with attachment files (spec §8.13, §9.1). Every attachment
+/// row P6 wrote is counted in exactly one of the outcome fields, from
+/// `copied` to `write_failed` (`size_mismatch` is counted on top).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+#[non_exhaustive]
+pub struct AttachmentFileCounts {
+    /// Copied and placed as a new store file.
+    pub copied: u64,
+    /// Copied and placed again because the current blob's store file was
+    /// missing or unusable.
+    pub replaced: u64,
+    /// Copied, then dropped: the store already held the file.
+    pub deduplicated: u64,
+    /// Copied, then an unreferenced store file of that name re-hashed equal
+    /// and was adopted.
+    pub adopted: u64,
+    /// Copied, and an unreferenced store file of that name that did not
+    /// match was replaced.
+    pub orphan_replaced: u64,
+    /// Not read: the current blob's file is present with the same length
+    /// (presence and length only, never the bytes; spec §9.2).
+    pub already_archived: u64,
+    /// Copied, but a store file in the way is unusable; left untouched.
+    pub store_conflicts: u64,
+    /// Not read: `copy_attachments` is off.
+    pub not_requested: u64,
+    /// Not read: no lookup was attempted (the name's class or form).
+    pub not_looked_up: u64,
+    /// Not read: not listed in this backup.
+    pub not_in_backup: u64,
+    /// Not read: listed, but its blob or key is unusable.
+    pub blob_unavailable: u64,
+    /// Not read: over the attachment size limit.
+    pub over_limit: u64,
+    /// The copy failed: too large for the archive volume (counted per
+    /// file; the import continues).
+    pub too_large_for_volume: u64,
+    /// The copy failed reading or decrypting the backup's file.
+    pub read_failed: u64,
+    /// The copy failed writing or placing the store file.
+    pub write_failed: u64,
+    /// Of the files read: the plaintext length differs from Manifest
+    /// `Size` (stored anyway).
+    pub size_mismatch: u64,
+    /// Partial files that could not be removed (swept at the next open).
+    pub partials_left: u64,
+    /// Plaintext bytes written to partial files.
+    pub bytes_copied: u64,
+    /// File and directory flushes.
+    pub fsyncs: u64,
+    /// New `blob` rows.
+    pub blobs_added: u64,
+    /// Attachments whose current blob was set or moved.
+    pub current_moved: u64,
+}
+
+impl AttachmentFileCounts {
+    /// Add `other` to these counts.
+    pub(crate) fn add(&mut self, o: &AttachmentFileCounts) {
+        let pairs: [(&mut u64, u64); 21] = [
+            (&mut self.copied, o.copied),
+            (&mut self.replaced, o.replaced),
+            (&mut self.deduplicated, o.deduplicated),
+            (&mut self.adopted, o.adopted),
+            (&mut self.orphan_replaced, o.orphan_replaced),
+            (&mut self.already_archived, o.already_archived),
+            (&mut self.store_conflicts, o.store_conflicts),
+            (&mut self.not_requested, o.not_requested),
+            (&mut self.not_looked_up, o.not_looked_up),
+            (&mut self.not_in_backup, o.not_in_backup),
+            (&mut self.blob_unavailable, o.blob_unavailable),
+            (&mut self.over_limit, o.over_limit),
+            (&mut self.too_large_for_volume, o.too_large_for_volume),
+            (&mut self.read_failed, o.read_failed),
+            (&mut self.write_failed, o.write_failed),
+            (&mut self.size_mismatch, o.size_mismatch),
+            (&mut self.partials_left, o.partials_left),
+            (&mut self.bytes_copied, o.bytes_copied),
+            (&mut self.fsyncs, o.fsyncs),
+            (&mut self.blobs_added, o.blobs_added),
+            (&mut self.current_moved, o.current_moved),
+        ];
+        for (a, b) in pairs {
+            *a = a.saturating_add(b);
+        }
+    }
+
+    /// The rows counted in an outcome field (every P6 row exactly once).
+    pub fn outcomes(&self) -> u64 {
+        [
+            self.copied,
+            self.replaced,
+            self.deduplicated,
+            self.adopted,
+            self.orphan_replaced,
+            self.already_archived,
+            self.store_conflicts,
+            self.not_requested,
+            self.not_looked_up,
+            self.not_in_backup,
+            self.blob_unavailable,
+            self.over_limit,
+            self.too_large_for_volume,
+            self.read_failed,
+            self.write_failed,
+        ]
+        .iter()
+        .fold(0u64, |a, b| a.saturating_add(*b))
+    }
+}
+
 /// Everything an import counted.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -143,9 +254,11 @@ pub struct ImportCounts {
     pub chat_handles: LinkCounts,
     /// P5: chat ↔ message links.
     pub chat_messages: LinkCounts,
-    /// P6: attachment rows (the files are slice 4i's). Records the Recently
-    /// Deleted policy skipped are counted in `recently_deleted`, not here.
+    /// P6: attachment rows. Records the Recently Deleted policy skipped are
+    /// counted in `recently_deleted`, not here.
     pub attachments: EntityCounts,
+    /// P6: attachment files and the store.
+    pub attachment_files: AttachmentFileCounts,
     /// P7: message ↔ attachment links.
     pub message_attachments: LinkCounts,
     /// P0, P3, P5b, P6 and P8: the Recently Deleted policy and markers.

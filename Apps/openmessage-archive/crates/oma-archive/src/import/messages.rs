@@ -1365,6 +1365,8 @@ impl PassWriter for Messages {
     fn read(
         &self,
         db: &SmsDb<'_>,
+        _conn: &Connection,
+        _run: &Run,
         from: Cursor,
         ctx: &mut MessagesCtx<'_>,
         f: &mut dyn FnMut(MessageRecord) -> ControlFlow<Brk>,

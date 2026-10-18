@@ -180,7 +180,7 @@ re-checked:
     archive.sqlite-wal, -shm      SQLite's own files; same mode as the database
     attachments/
       .incoming/                  <n>.partial while a copy is in flight
-      <hh>/<64 hex>               content-addressed plaintext (from slice 4i)
+      <hh>/<64 hex>               content-addressed plaintext
     imports/
       session-<n>.json            content-free provenance (from slice 4j)
 ```
@@ -810,13 +810,15 @@ not call it yet (slice 4l).
   a logged durability warning, and the id is returned. The intent
   reconcile flushes each `attachments/<hh>/` it removed a file from,
   through the same trait, before the intents' deletion commits. The
-  attachment store (slice 4i) uses the same trait.
+  attachment store (slice 4i) uses the same trait, which gained
+  `remove_file` (a default method) for partial files and replaced orphans.
 - **Store paths** (`blobs.rs`, `store_dir`). Before any file under
   `attachments/<hh>/` is touched, `attachments/` and `<hh>` must each be
   a real directory (no link, junction or reparse point) and, on Unix,
-  private (`check_private`). The reconcile goes through it today; slice
-  4i's placement and reads and the verifier will. A planted link at
-  `<hh>` leaves the intent in place and counts the file as left.
+  private (`check_private`). The reconcile, P6's "already archived" check
+  and its placement go through it; the verifier (slice 4k) will. A
+  planted link at `<hh>` leaves the intent in place and counts the file as
+  left.
 - **Counts** (`counts.rs`). `ImportCounts` is numbers only; the handle and
   chat groups hold seen, inserted, already present, unkeyed, cells
   replaced, not applied, history added and value-issue cells.
@@ -986,16 +988,16 @@ running until finalize (slice 4j).
 - **P5b and the preflight's step 4.** Two streams of
   `message_attachment_join`: the attachment rowids linked to a left-out
   message, minus those linked to any other message. What remains gets **no
-  attachment row and no link** (and, from slice 4i, no file); a join row
+  attachment row, no link and no file**; a join row
   with an unreadable side is ignored. The preflight runs the same scan on
   the preflight's excluded set and refuses a source whose candidates exceed
   4,194,304 distinct rowids (`NotImportable(OverRecentlyDeletedCap)`,
   nothing written); P5b re-runs it after P3 on every resume.
-- **P6 writes the attachment rows only.** Keyed on the exact GUID bytes
-  (unkeyed by fingerprint otherwise), merged by the column rules, mapped
-  for P7 and recorded in `lineage_seen`. **No file is looked up, read or
-  copied**: `blob`, `blob_intent`, `attachment_observation` and
-  `current_blob_id` arrive with the store in slice 4i.
+- **P6's attachment rows.** Keyed on the exact GUID bytes (unkeyed by
+  fingerprint otherwise), merged by the column rules, mapped for P7 and
+  recorded in `lineage_seen`. In slice 4h no file was read; the files,
+  `blob`, `blob_intent`, `attachment_observation` and `current_blob_id`
+  arrived with the store in slice 4i (below).
 - **P8 markers.** One `message_recently_deleted` row per
   `chat_recoverable_message_join` row whose message is mapped in this
   session (imported with the opt-in, or re-observed by default), with the
@@ -1029,6 +1031,112 @@ running until finalize (slice 4j).
   repeated join, extreme join rowids, an attachment linked only to a
   Recently Deleted message), and the cancel test stops at every record of
   every pass.
+
+### The attachment store and disk space (M4 slice 4i)
+
+Slice 4i gives P6 its files (`import/attachments.rs`, `blobs.rs`) and the
+import its space rules (`space.rs`).
+
+- **Phase A, while the pass reads, with no archive transaction open.**
+  Each record is classified: copying off (`notRequested`, and no lookup
+  at all), Recently Deleted-only (no row, no file), no lookup attempted,
+  not in the backup, blob or key unusable, or copyable. A copyable file is
+  **already archived** when the attachment's current blob, found by exact
+  GUID, has a store file that is a regular non-link file of `byte_len`
+  and the backup's file has that plaintext length: it is not read
+  (presence and length only, D66). Otherwise the space for it is checked,
+  `attachments/.incoming/<n>.partial` is created new (0600), the plaintext
+  streams into it through `OpenBackup::copy_file_to` and a 1 MiB
+  `BufWriter` (`into_inner` surfaces the last flush), and it is synced and
+  length-checked. A failed copy removes its partial file (five tries on
+  Windows; one that stays is counted and swept at the next write open).
+  `EFBIG`/`ERROR_FILE_TOO_LARGE` is counted per file and the pass goes on;
+  a changed source, a cancel or no space ends the batch at the record
+  before. A batch ends after 64 copied files, 256 MiB copied, or one file
+  of 64 MiB or more.
+- **Phase B** commits a `blob_intent` for each copied digest with no
+  `blob` row. **Phase C** places each file (`Placer`): a no-replace
+  rename when nothing is there; for a referenced name (or one placed
+  earlier in the batch) the copy is dropped if the store file is regular
+  with the right length (`deduplicated`), and otherwise left alone
+  (`storeConflict`); an unreferenced file is re-hashed through
+  `open_nofollow` and adopted if it matches its name, else removed (a
+  link is removed itself, never its target; a directory is a conflict)
+  and replaced (`orphanReplaced`). Each touched `<hh>` is flushed once
+  after the renames. **Phase D**, in the batch transaction: the attachment
+  merges, `blob` (`ON CONFLICT DO NOTHING`), one `attachment_observation`
+  per row and session (path class, lookup and copy codes, the blob read,
+  `size_matched_manifest`), `current_blob_id`, and the deletion of the
+  batch's intents. The order per file is write → `sync_all` → intent
+  commit → rename → directory flush → row commit; the crash tests kill at
+  each step.
+- **`current_blob_id`** is the blob of the highest-ranked session that
+  read bytes for the attachment (rank compared as bytes, as everywhere); a
+  session that read none never moves it. This is the catalogue model's
+  reading, and it keeps the result order-independent when a newer backup
+  lost a file.
+- **The preflight estimates** (§8.2 step 5, §12): every attachment is
+  looked up and probed once more; the plaintext lengths of the files still
+  to copy are summed (Recently Deleted-only and already-archived files left
+  out), with the largest file, giving `SpaceEstimate`. Above the available
+  space it only warns; below `reserve + wal_allowance` the import returns
+  `CoreOutcome::InsufficientSpace` before the first write. Until the gate
+  exists (slice 4j) the estimate is returned in `ImportSummary`.
+- **The space guard** (`SpaceGuard`) runs before every write transaction
+  of the passes (P6's intent transactions included): below the floor the
+  session stops (state 6, `insufficient_space`); otherwise
+  `max_page_count` is set to the page count plus the room above the floor
+  and read back, and any value other than the one requested stops the
+  session too (SQLite never sets it below the current size). Unknown free
+  space lifts the limit; the limit is lifted again when the passes end.
+  `SQLITE_FULL` and `ENOSPC` stop the session the same way; it resumes
+  once space is freed.
+- **The source** must be unchanged: a file whose stamp changes during its
+  copy, or `unchanged_since_open()` false (or unreadable) after P8, stops
+  the session with `source_changed` (state 6). The records before it are
+  committed with their files.
+- **Codes and counts.** New closed codes, pinned by a test:
+  `PathClassCode`, `LookupCode` (lookup and probe outcomes) and
+  `CopyCode`. `ImportCounts.attachmentFiles` counts every P6 row once in
+  an outcome (copied, replaced, deduplicated, adopted, orphan replaced,
+  already archived, store conflict, not requested, not looked up, not in
+  the backup, blob unavailable, over the limit, too large for the volume,
+  read failed, write failed), plus size mismatches, partial files left,
+  bytes copied, flushes, new blobs and current-blob moves.
+- **Fault points**: after a partial file is created, at the first write of
+  a copy, after `sync_all`, after the intent commit, after a rename, and
+  after the directory flushes; hooks fail a copy's first write with an OS
+  error and give the space guard a fixed page room.
+
+**Readings and deviations this slice takes** (implementation readings, not
+owner decisions):
+
+- **A Manifest `Size` mismatch is copied.** §9.1 step 1 names only
+  `Present`, but §9.2 says a mismatch "is recorded, and the bytes are
+  stored anyway"; the generator's model copies it too.
+- **The plaintext length of an encrypted file** is its Manifest `Size`
+  (the probe already checked it against the padded blob), through a new
+  `AttachmentKey::declared_size()` in `oma-backup`. Without a usable
+  `Size` the file is copied again rather than declared archived. The
+  estimate then counts the stored length, an upper bound.
+- **"Already archived" is looked up by exact GUID.** An unkeyed attachment
+  is always copied again; the store deduplicates it.
+- **A conflict with a referenced blob** still records that blob in the
+  observation (the bytes read hash to it), so `current_blob_id` may name
+  a blob whose file the verifier will report. A conflict where no `blob`
+  row exists records none.
+- **An I/O error placing one file** is counted (`writeFailed`) and the
+  pass goes on; a failed directory flush fails the session, because the
+  rows must not commit before their files' entries are durable.
+- **Progress for `CopyingAttachments` is in rows**, not bytes (§8.12).
+- **`EFBIG` on the database** is not mapped to `Stopped { VolumeFileLimit }`
+  yet: SQLite reports it as an I/O error, which fails the session.
+- **Counts outside a record** (a partial file that could not be removed,
+  flushes) are added to the next committed batch; a pass that stops
+  before buffering any record of a batch loses them (the partial file is
+  still swept).
+- **`K`** stays at the provisional 3.0 in code; the synthetic measurement
+  is in `compatibility.md`.
 
 ### Status and qualifiers (D43)
 

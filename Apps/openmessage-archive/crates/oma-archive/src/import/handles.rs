@@ -84,6 +84,8 @@ impl PassWriter for Handles {
     fn read(
         &self,
         db: &SmsDb<'_>,
+        _conn: &Connection,
+        _run: &Run,
         from: Cursor,
         ctx: &mut MessagesCtx<'_>,
         f: &mut dyn FnMut(HandleRecord) -> ControlFlow<Brk>,
@@ -103,6 +105,14 @@ impl PassWriter for Handles {
             rowid: r.rowid,
             cells: self.cells(r),
         });
-        write_records(tx, &self.kind, run, recs, &mut counts.handles, issues)
+        write_records(
+            tx,
+            &self.kind,
+            run,
+            recs,
+            &mut counts.handles,
+            issues,
+            &mut |_, _| Ok(()),
+        )
     }
 }

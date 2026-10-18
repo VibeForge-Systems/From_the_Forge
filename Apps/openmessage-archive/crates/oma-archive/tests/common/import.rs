@@ -20,6 +20,7 @@ use oma_backup::{
     SMS_DB_FILE_ID,
 };
 use rusqlite::types::ValueRef;
+use rusqlite::OptionalExtension;
 use serde_json::{json, Map, Value};
 
 use super::hex;
@@ -82,11 +83,16 @@ pub const ENV_STAGING: &str = "OMA_TEST_STAGING";
 /// library (under [`ENV_STAGING`] when that is set). The backup itself is
 /// never written.
 pub fn open_dir(dir: &Path, password: Option<&str>) -> Source {
+    open_dir_with(dir, password, &Limits::default())
+}
+
+/// [`open_dir`] with other limits.
+pub fn open_dir_with(dir: &Path, password: Option<&str>, limits: &Limits) -> Source {
     let staging = match std::env::var_os(ENV_STAGING) {
         Some(parent) => tempfile::tempdir_in(parent).expect("tempdir"),
         None => tempfile::tempdir().expect("tempdir"),
     };
-    let limits = Limits::default();
+    let limits = limits.clone();
     let mut n = 0;
     let candidate = Candidate::for_dir(dir).expect("candidate");
     let inspection = inspect(&candidate, &limits, &mut n).expect("inspect");
@@ -120,6 +126,14 @@ pub fn backup_with_sms(dir: &Path, main: &[u8]) -> PathBuf {
     let blob = udid.join(&SMS_DB_FILE_ID[..2]).join(SMS_DB_FILE_ID);
     fs::write(blob, main).expect("sms blob");
     udid
+}
+
+/// A copy of a catalogue entry's backup in `dir` (for tests that change a
+/// backup; the catalogue itself is never written). Returns the `<UDID>`
+/// folder.
+pub fn copy_entry(entry: &str, dir: &Path) -> PathBuf {
+    copy_tree(&imports_root().join(entry), dir);
+    dir.join(UDID)
 }
 
 fn copy_tree(src: &Path, dst: &Path) {
@@ -226,6 +240,9 @@ pub const DB_SIDES: [&str; 3] = ["", "-wal", "-shm"];
 /// `-shm`, so the checks change nothing the next open sees (the last
 /// read-write connection to close checkpoints and deletes the `-wal`).
 /// Only for a database no connection has open.
+/// Also checks that no `blob` row references a missing or wrong file
+/// (spec §18.4); files without rows are allowed here (the next write open
+/// reconciles them).
 pub fn assert_consistent_copy(db: &Path) {
     let scratch = tempfile::tempdir().expect("tempdir");
     let name = db.file_name().expect("name").to_string_lossy().into_owned();
@@ -235,7 +252,9 @@ pub fn assert_consistent_copy(db: &Path) {
             fs::copy(&from, scratch.path().join(format!("{name}{side}"))).expect("copy");
         }
     }
-    assert_consistent(&scratch.path().join(&name));
+    let copy = scratch.path().join(&name);
+    assert_store_consistent_at(&copy, db.parent().expect("archive dir"), false);
+    assert_consistent(&copy);
 }
 
 /// The `-wal` next to `db`, if it exists: its bytes' hash.
@@ -405,7 +424,24 @@ pub fn logical_snapshot(db: &Path, scope: Scope) -> Value {
     out.insert("chat".into(), json!(rows(&c, "SELECT * FROM chat", &plain)));
     // Message, attachment and link tables, with every row reference
     // replaced by its key.
+    let mut blobs: BTreeMap<i64, String> = BTreeMap::new();
+    {
+        let mut s = c.prepare("SELECT id, sha256 FROM blob").expect("prepare");
+        for r in s
+            .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Vec<u8>>(1)?)))
+            .expect("query")
+        {
+            let (id, sha) = r.expect("row");
+            blobs.insert(id, hex(&sha));
+        }
+    }
     let refs = |n: &str, v: ValueRef<'_>| -> Option<Value> {
+        if n == "current_blob_id" || n == "blob_id" {
+            return Some(match v {
+                ValueRef::Integer(i) => json!(blobs.get(&i).cloned().unwrap_or_default()),
+                other => value_json(other),
+            });
+        }
         let entity = match n {
             "handle_ref" | "other_handle_ref" | "handle_id" => 1,
             "chat_id" | "chat_ref" => 2,
@@ -433,6 +469,17 @@ pub fn logical_snapshot(db: &Path, scope: Scope) -> Value {
             json!(rows(&c, &format!("SELECT * FROM {t}"), &refs)),
         );
     }
+    // The store: its rows (without the session that first wrote one,
+    // which depends on the import order) and its files.
+    out.insert(
+        "blob".into(),
+        json!(rows(
+            &c,
+            "SELECT sha256, byte_len, storage_name, verified_at_ns, verify_state FROM blob",
+            &plain
+        )),
+    );
+    out.insert("store".into(), json!(store_files(db)));
     let fts: i64 = c
         .query_row("SELECT count(*) FROM message_fts", [], |r| r.get(0))
         .expect("fts rows");
@@ -489,6 +536,18 @@ pub fn logical_snapshot(db: &Path, scope: Scope) -> Value {
                 "archive_id"
             )),
         );
+        out.insert(
+            "attachment_observation".into(),
+            json!(rows(&c, "SELECT * FROM attachment_observation", &refs)),
+        );
+        out.insert(
+            "blob_sessions".into(),
+            json!(rows(
+                &c,
+                "SELECT sha256, first_session_id FROM blob",
+                &plain
+            )),
+        );
         for t in [
             "import_cursor",
             "import_occurrence",
@@ -496,6 +555,7 @@ pub fn logical_snapshot(db: &Path, scope: Scope) -> Value {
             "import_issue",
             "source_backup",
             "lineage",
+            "blob_intent",
         ] {
             let skip_time = |n: &str, v: ValueRef<'_>| -> Option<Value> {
                 if n.ends_with("_at_ns") {
@@ -520,6 +580,98 @@ pub fn logical_snapshot(db: &Path, scope: Scope) -> Value {
         );
     }
     Value::Object(out)
+}
+
+/// The store files of the archive holding `db`: `<hh>/<name>` → SHA-256
+/// of the content, without `.incoming`.
+pub fn store_files(db: &Path) -> BTreeMap<String, String> {
+    let att = db.parent().expect("archive dir").join("attachments");
+    super::tree(&att)
+        .into_iter()
+        .filter(|(k, v)| !k.starts_with(".incoming") && v != "dir")
+        .collect()
+}
+
+/// The archive's `blob` rows in the manifest's `blobs` form, sorted.
+pub fn blob_list(db: &Path) -> Value {
+    let c = read_only(db);
+    let v: Vec<Value> = c
+        .prepare("SELECT sha256, byte_len FROM blob ORDER BY lower(hex(sha256))")
+        .expect("prepare")
+        .query_map([], |r| {
+            Ok(json!({ "byteLen": r.get::<_, i64>(1)?, "sha256": hex(&r.get::<_, Vec<u8>>(0)?) }))
+        })
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("rows");
+    json!(v)
+}
+
+/// The partial files in `attachments/.incoming/`.
+pub fn partial_files(db: &Path) -> usize {
+    let inc = db
+        .parent()
+        .expect("archive dir")
+        .join("attachments")
+        .join(".incoming");
+    fs::read_dir(inc).map_or(0, |d| d.count())
+}
+
+/// The store agrees with its rows (spec §18.4): every `blob` row's file is
+/// a regular file of `byte_len` whose content hashes to `sha256`; with
+/// `no_orphans`, every store file has a `blob` row, and no `blob_intent`
+/// row is left.
+pub fn assert_store_consistent(db: &Path, no_orphans: bool) {
+    assert_store_consistent_at(db, db.parent().expect("archive dir"), no_orphans);
+}
+
+/// [`assert_store_consistent`] with the rows read from `db` (for example a
+/// copy of the database files) and the store under `archive`.
+pub fn assert_store_consistent_at(db: &Path, archive: &Path, no_orphans: bool) {
+    let c = read_only(db);
+    let rows: Vec<(Vec<u8>, i64, String)> = c
+        .prepare("SELECT sha256, byte_len, storage_name FROM blob")
+        .expect("prepare")
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("rows");
+    let files = store_files(&archive.join("archive.sqlite"));
+    let att = archive.join("attachments");
+    for (sha, len, name) in &rows {
+        assert_eq!(&hex(sha), name);
+        let path = att.join(&name[..2]).join(name);
+        let meta = fs::symlink_metadata(&path)
+            .unwrap_or_else(|_| panic!("a blob row references a missing file"));
+        assert!(meta.is_file(), "not a regular file");
+        assert_eq!(i64::try_from(meta.len()).expect("len"), *len);
+        assert_eq!(super::file_hash(&path).as_deref(), Some(name.as_str()));
+    }
+    if no_orphans {
+        let named: std::collections::BTreeSet<String> = rows
+            .iter()
+            .map(|(_, _, n)| format!("{}|{n}", &n[..2]))
+            .collect();
+        for k in files.keys() {
+            assert!(named.contains(k), "an unreferenced store file: {k}");
+        }
+        let intents: i64 = c
+            .query_row("SELECT count(*) FROM blob_intent", [], |r| r.get(0))
+            .expect("intents");
+        assert_eq!(intents, 0, "blob intents left");
+    }
+    // Every current blob and every observed blob is a stored one.
+    let dangling: i64 = c
+        .query_row(
+            "SELECT (SELECT count(*) FROM attachment WHERE current_blob_id IS NOT NULL \
+                 AND current_blob_id NOT IN (SELECT id FROM blob)) + \
+             (SELECT count(*) FROM attachment_observation WHERE blob_id IS NOT NULL \
+                 AND blob_id NOT IN (SELECT id FROM blob))",
+            [],
+            |r| r.get(0),
+        )
+        .expect("dangling");
+    assert_eq!(dangling, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -828,7 +980,8 @@ fn ids_of(c: &rusqlite::Connection, sql: &str, p: i64) -> Vec<i64> {
 /// per table, a list of `{ref, columns, history}`, with every unkeyed
 /// row's ref `"unkeyed"` (the manifest numbers them locally; compare by
 /// content). Chats also carry their `handles` (P4) and, like attachments,
-/// `notInLatest`. An attachment's blobs are slice 4i's.
+/// `notInLatest`; attachments carry their current blob (`sha256`) and every
+/// blob a session read for them (`blobs`).
 pub fn manifest_view(db: &Path, labels: &LineageLabels) -> BTreeMap<&'static str, Vec<Value>> {
     let c = read_only(db);
     let mut out = BTreeMap::new();
@@ -898,6 +1051,30 @@ pub fn manifest_view(db: &Path, labels: &LineageLabels) -> BTreeMap<&'static str
             if table != "handle" {
                 row["notInLatest"] = not_in_latest(&c, entity, id, labels);
             }
+            if table == "attachment" {
+                let current: Option<Vec<u8>> = c
+                    .query_row(
+                        "SELECT b.sha256 FROM attachment a JOIN blob b ON b.id = a.current_blob_id \
+                         WHERE a.id = ?1",
+                        [id],
+                        |r| r.get(0),
+                    )
+                    .optional()
+                    .expect("current blob");
+                row["sha256"] = current.map_or(Value::Null, |s| json!(hex(&s)));
+                let mut read: Vec<String> = c
+                    .prepare(
+                        "SELECT DISTINCT b.sha256 FROM attachment_observation o \
+                         JOIN blob b ON b.id = o.blob_id WHERE o.attachment_id = ?1",
+                    )
+                    .expect("prepare")
+                    .query_map([id], |r| r.get::<_, Vec<u8>>(0))
+                    .expect("query")
+                    .map(|r| hex(&r.expect("row")))
+                    .collect();
+                read.sort();
+                row["blobs"] = json!(read);
+            }
             list.push(row);
         }
         list.sort_by_key(|v| v.to_string());
@@ -935,6 +1112,10 @@ pub fn manifest_expected(m: &Value, plural: &str) -> Vec<Value> {
             }
             if plural != "handles" {
                 row["notInLatest"] = r["notInLatest"].clone();
+            }
+            if plural == "attachments" {
+                row["sha256"] = r["sha256"].clone();
+                row["blobs"] = r["blobs"].clone();
             }
             row
         })

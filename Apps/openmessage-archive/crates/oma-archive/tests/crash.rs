@@ -17,9 +17,13 @@
 //! under a directory the parent removes (a killed child never cleans up).
 //!
 //! Every point in `FaultPoint::ALL` is killed at: the batch, record,
-//! session and recovery points by the import plan, the terminal commit by
-//! a child that cancels during the chat pass, and the two creation points
-//! by the creation test.
+//! session and recovery points by the import plan, the attachment store's
+//! points (partial created, copying, synced, intents committed, placed,
+//! directories flushed) by the store plan on a catalogue entry with
+//! attachment files, the terminal commit by a child that cancels during
+//! the chat pass, and the two creation points by the creation test. After
+//! every kill, no `blob` row references a missing file; after the resume,
+//! no store file is unreferenced and no intent is left.
 //!
 //! What this shows: consistency after a **process kill**. A kill leaves the
 //! kernel's page cache intact, so it does not exercise fsync ordering;
@@ -217,6 +221,17 @@ struct Fixture {
 fn fixture() -> Fixture {
     let tmp = tempfile::tempdir().expect("tempdir");
     let backup = backup_with_sms(&tmp.path().join("backup"), &synthetic_sms(11, 70, 45, 40));
+    fixture_for(tmp, backup)
+}
+
+/// A catalogue entry with attachment files, opened in place (staging is
+/// elsewhere; the catalogue is never written).
+fn store_fixture() -> Fixture {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    fixture_for(tmp, imports_root().join("imp-dev1-v1-plain").join(UDID))
+}
+
+fn fixture_for(tmp: tempfile::TempDir, backup: PathBuf) -> Fixture {
     let (ltmp, lib) = library();
     let id = lib.create(None).expect("create");
     let mut a = lib.open(&id).expect("open");
@@ -295,6 +310,7 @@ fn kill_import_and_resume(fx: &Fixture, kills: &[(FaultPoint, u32)], cancel: boo
     drop(a);
     src.ob.close();
     assert_consistent(&db);
+    assert_store_consistent(&db, true);
     assert_eq!(
         logical_snapshot(&db, Scope::WithSessions),
         fx.want,
@@ -350,6 +366,43 @@ fn a_kill_at_any_import_fault_point_resumes_to_the_uninterrupted_result() {
     for kill in plan(&fx) {
         kill_import_and_resume(&fx, &[kill], false);
     }
+}
+
+/// The store's points (spec §18.4): after creating a partial file, during
+/// the copy, after `sync_all`, after the intent commit, after a rename and
+/// after the directory flush. Windows runs the intent and rename points
+/// (spec §18.12).
+#[test]
+fn a_kill_at_any_store_fault_point_resumes_to_the_uninterrupted_result() {
+    let fx = store_fixture();
+    let hits = |p: FaultPoint| fx.hits.iter().find(|(q, _)| *q == p).map_or(0, |(_, n)| *n);
+    let points: &[FaultPoint] = if cfg!(windows) {
+        &[
+            FaultPoint::AttachmentIntentCommitted,
+            FaultPoint::AttachmentPlaced,
+        ]
+    } else {
+        &[
+            FaultPoint::AttachmentPartialCreated,
+            FaultPoint::AttachmentCopying,
+            FaultPoint::AttachmentSynced,
+            FaultPoint::AttachmentIntentCommitted,
+            FaultPoint::AttachmentPlaced,
+            FaultPoint::AttachmentDirSynced,
+        ]
+    };
+    for p in points {
+        let n = hits(*p);
+        assert!(n >= 1, "{} never hit", p.name());
+        let mut at = vec![1, n];
+        at.dedup();
+        for i in at {
+            kill_import_and_resume(&fx, &[(*p, i)], false);
+        }
+    }
+    // Six files in one batch: one intent commit and one flush round.
+    assert_eq!(hits(FaultPoint::AttachmentPlaced), 6);
+    assert_eq!(hits(FaultPoint::AttachmentIntentCommitted), 1);
 }
 
 #[test]

@@ -1,8 +1,8 @@
 //! `StoreFs`: the file-system operations whose order matters for crash
 //! safety (spec §9.1, §18.2, §18.4).
 //!
-//! Archive creation and the attachment store (slice 4i) make these calls
-//! through a [`StoreFs`], which is [`RealFs`] in production. A test can
+//! Archive creation and the attachment store make these calls through a
+//! [`StoreFs`], which is [`RealFs`] in production. A test can
 //! pass a recording implementation (`Library::with_store_fs`) and check
 //! the order of operations: for creation, the directory fsyncs come before
 //! the no-replace rename, and the library directory is flushed after it.
@@ -27,6 +27,13 @@ pub trait StoreFs: Send + Sync {
     /// Move a file, never replacing an existing target
     /// ([`oma_fs::place_noreplace`]).
     fn place_noreplace(&self, from: &Path, to: &Path) -> io::Result<Placed>;
+    /// Remove a file the store owns (a partial copy, or an unreferenced
+    /// store file being replaced). A link is removed itself, never its
+    /// target. A test can make it fail, as a scanner holding the file open
+    /// does on Windows.
+    fn remove_file(&self, path: &Path) -> io::Result<()> {
+        std::fs::remove_file(path)
+    }
 }
 
 /// The real file system, through `oma-fs`.

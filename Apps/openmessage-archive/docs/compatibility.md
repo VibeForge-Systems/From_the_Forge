@@ -422,7 +422,67 @@ regenerated: `SHA256SUMS` and `EXPECTED.SHA256SUMS` are unchanged.
   every pass and kills in every pass resumed to the uninterrupted result.
   `integrity_check`, `foreign_key_check` and the FTS rank-1 check were
   clean after every import.
-- **Not tested:** attachment files (none is read or copied yet; slice 4i).
+- **Not tested** in slice 4h: attachment files (none was read or copied
+  yet; see slice 4i below).
+
+**Not yet observed:** any of this on Windows.
+
+### Milestone 4 attachment store and disk space (slice 4i)
+
+Run in the same Linux container on 2026-10-18 (bundled SQLite 3.53.2,
+ext4); not CI, not a desktop, synthetic data only. The catalogue was not
+regenerated: `SHA256SUMS` and `EXPECTED.SHA256SUMS` are unchanged.
+
+- **Against the model.** Each of the 12 entries alone, and all ten
+  scenarios in every order, gave exactly their manifests' current blob and
+  blobs read per attachment and the store's blob list; every `blob` row's
+  file was a regular file of `byte_len` hashing to its name, no store file
+  was unreferenced, and no intent or partial file was left. Content
+  snapshots, now including the `blob` rows and the store's files, were
+  equal in both orders.
+- **Copies.** The encrypted entry's stored files were byte for byte the
+  generator's plaintexts. On `imp-attach-plain`: four files copied (one
+  with a Manifest `Size` mismatch, stored and recorded), the same bytes
+  under a second GUID deduplicated, a missing blob, a file not in the
+  backup and three names not looked up, each counted once and observed
+  with its codes. A second import of the same backup read no file.
+- **Store states** (v1, then v2 after damaging the store): a deleted
+  referenced file was placed again; a referenced file with the wrong
+  length was reported as a conflict and left byte-identical; an
+  unreferenced file with the right bytes was adopted; one with other bytes
+  was replaced. A link at a store file and a link at an `<hh>` directory
+  (Linux) were never followed, and nothing was written outside the
+  archive.
+- **Failures.** A simulated `EFBIG` on every copy was counted per file and
+  the import finished; partial files that could not be removed were
+  counted and swept at the next write open; files over a lowered
+  `attachment_bytes` were not read; a file whose stamp changed during its
+  copy stopped the session (state 6, `source_changed`) after committing
+  the file before it, and continuing finished it with the uninterrupted
+  content; a cancel inside the copy committed the records before it.
+- **Intents.** A crash after placement and before the row commit (in
+  process, and by process kill at each of the six store points) left
+  placed files with intents; the next write open removed them, and the
+  resume copied them again to the uninterrupted result.
+- **Space** (fake probe): below the reserve plus the WAL allowance the
+  import was refused with every archive file byte-identical; just above it
+  the estimate warned and the guards then stopped the session safely; a
+  shortfall in the message pass stopped it after the committed batch; a
+  page limit with zero or one page of room gave `SQLITE_FULL`, a rollback
+  and consistent cursors, and the resume reached the uninterrupted
+  result; a limit below the current size was caught by the read-back
+  before anything was written.
+- **The growth factor `K`** (`tests/perf.rs`, the synthetic generator of
+  the crash tests, which keeps raw bodies and has many short messages):
+  archive database ÷ staged sms.db was **5.17** at 20,000 messages (4.2 MB
+  staged, debug build) and **5.23** at 100,000 messages (21.0 MB staged,
+  release build; import 25 s, peak RSS 38 MiB including the generator).
+  The code keeps the provisional `K` = 3.0, so the estimate understates
+  this synthetic database by about 40 %; it only warns, and the guards
+  stop safely. Real backups are not measured. Attachment copy times and
+  fsyncs per file were not measured on a large set.
+- **Not tested:** Windows (placement, the partial-file retries, long
+  paths), a full or size-limited real volume, power loss.
 
 **Not yet observed:** any of this on Windows.
 

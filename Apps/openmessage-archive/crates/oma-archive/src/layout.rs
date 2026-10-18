@@ -102,6 +102,13 @@ impl ArchiveDir {
         self.root.join(ATTACHMENTS_DIR).join(INCOMING_DIR)
     }
 
+    /// `attachments/.incoming/<n>.partial`.
+    pub(crate) fn partial(&self, n: u64) -> PathBuf {
+        let mut name = n.to_string();
+        name.push_str(".partial");
+        self.incoming().join(name)
+    }
+
     pub(crate) fn imports(&self) -> PathBuf {
         self.root.join(IMPORTS_DIR)
     }

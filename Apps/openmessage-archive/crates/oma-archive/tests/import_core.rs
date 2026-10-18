@@ -2,8 +2,9 @@
 //! generator's content model (the content oracle) and counts, for every
 //! entry and every scenario in every order: P1 handles, P2 chats, P3
 //! messages (columns, history, handle reference, body versions and display
-//! text, sort order), P4 and P5 chat links, P6 attachment rows (their
-//! files are slice 4i's), P7 attachment links in the §6.5 order, P8 the
+//! text, sort order), P4 and P5 chat links, P6 attachment rows and their
+//! files (the current blob, every blob read, and the store), P7 attachment
+//! links in the §6.5 order, P8 the
 //! Recently Deleted markers, the Recently Deleted exclusion of messages and
 //! attachments, and "not in the latest import" per lineage. Also the
 //! session's facts and the refusals.
@@ -160,6 +161,17 @@ fn every_entry_imports_as_the_model_says() {
         let (_, unkeyed) = assert_view(&db, &m, &labels, entry);
         assert_eq!(unkeyed > 0, *entry == "imp-keys-hostile-plain", "{entry}");
         let (messages, _) = assert_messages(&db, &m, &labels, entry);
+        // The store holds exactly the model's blobs, each file whole.
+        assert_eq!(blob_list(&db), m["content"]["blobs"], "{entry}: blobs");
+        assert_store_consistent(&db, true);
+        assert_eq!(partial_files(&db), 0, "{entry}: partial files left");
+        let f = &s.counts.attachment_files;
+        assert_eq!(f.outcomes(), s.counts.attachments.seen, "{entry}: {f:?}");
+        assert_eq!(
+            f.blobs_added,
+            u64::try_from(m["content"]["blobs"].as_array().expect("blobs").len()).expect("n"),
+            "{entry}"
+        );
         // The Recently Deleted counts against the model's exclusions.
         let ex = &m["content"]["excluded"];
         let n = |k: &str| ex[k].as_array().map_or(0, Vec::len) as u64;
@@ -285,6 +297,12 @@ fn every_scenario_holds_in_every_order() {
             let by_id: LineageLabels = labels.iter().map(|(k, v)| (v.get(), k.clone())).collect();
             history_values += assert_view(&db, &m, &by_id, &format!("{name} order {oi}")).0;
             let (_, bodies) = assert_messages(&db, &m, &by_id, &format!("{name} order {oi}"));
+            assert_eq!(
+                blob_list(&db),
+                m["content"]["blobs"],
+                "{name} order {oi}: blobs"
+            );
+            assert_store_consistent(&db, true);
             not_in_latest += count_not_in_latest(&m);
             body_versions = body_versions.max(bodies);
             snapshots.push(logical_snapshot(&db, Scope::Content));

@@ -188,8 +188,8 @@ milestone's documentation.
   not updated from the deleted copy. The text of Recently Deleted message
   parts (`recoverable_message_part.part_text`) is never read either way.
   By default, an attachment that belongs **only** to excluded messages is
-  left out as well: the archive gets no record of it (and, once
-  attachment files are copied, no file). An attachment also used by a
+  left out as well: the archive gets no record of it and no file. An
+  attachment also used by a
   message that is imported is kept. The mark records, for each backup
   that showed the message in Recently Deleted, which conversation it was
   deleted from and the deletion time as the backup stores it.
@@ -207,6 +207,21 @@ milestone's documentation.
   `message_summary_info` and `payload_data` bytes of each message (poll,
   app and link payloads included), within fixed size caps, so a newer
   version of the app can decode them again without the backup.
+- **Attachment files (implemented, not yet reachable from the app).** An
+  import copies each attachment file it finds in the backup into the
+  archive's `attachments/` folder **as plaintext**, decrypted when the
+  backup is encrypted (archive encryption is M8). Each file is named only
+  by the SHA-256 of its content (`attachments/<first two>/<64 hex>`),
+  never by its original name; the original name stays in the database.
+  Identical files are stored once. While a file is copied it is written
+  to `attachments/.incoming/<n>.partial` (0600 on Unix, no temporary
+  attribute on Windows); a failed copy deletes it, and a copy left by a
+  crash is deleted the next time the archive is opened for writing. A file
+  placed by an import that crashed before recording it is deleted at that
+  next open too. A file that is already in the archive with the same
+  length is not read again, so its bytes are only re-checked by a full
+  verify. Nothing about a file (name, path, hash or content) is logged;
+  only counts are. Deleting files from the archive is not offered in M4.
 - **Device identity (D51).** The archive does not identify your phone. It
   never stores or hashes the UDID; when a backup is imported, the app
   shows which device facts match earlier imports and you choose whether it

@@ -25,8 +25,15 @@
 //! Cancellation: the callback checks the token at the start of each record,
 //! and the engine checks it every 128 rows. Either way the records already
 //! read are complete, so the batch **commits** them with the cursor, and
-//! the pass reports [`PassEnd::Cancelled`].
+//! the pass reports [`PassEnd::Cancelled`]. A pass's reader can also stop
+//! the pass in a resumable state (P6: the source changed, or no space for
+//! the next file); the records already read are committed the same way.
+//!
+//! **Space** (spec §12): before every write transaction the [`Run`]'s
+//! space guard checks the free space and sets `max_page_count`; a shortfall
+//! stops the pass with nothing of that transaction written.
 
+use std::io;
 use std::ops::ControlFlow;
 use std::time::Duration;
 
@@ -36,9 +43,11 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 use super::counts::ImportCounts;
 use super::keys::Rank;
 use super::preflight::DupSet;
+use super::StopReason;
 use crate::fault::{point, FaultPoint};
 use crate::progress::{ArchiveCtx, ArchiveEvent, ImportPhase};
 use crate::schema::codes::{IssueCode, Pass};
+use crate::space::{GuardStop, SpaceGuard};
 
 /// How much one batch transaction holds (spec §8.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,6 +113,8 @@ pub(crate) enum Brk {
     Full,
     /// The job was cancelled at the start of a record.
     Cancelled,
+    /// The pass must stop in a resumable state before this record.
+    Stop(StopReason),
 }
 
 /// The import session a pass writes for.
@@ -113,6 +124,22 @@ pub(crate) struct Run {
     pub(crate) rank: Rank,
     pub(crate) dups: DupSet,
     pub(crate) budget: BatchBudget,
+    /// The space guard run before every write transaction.
+    pub(crate) guard: SpaceGuard,
+}
+
+impl Run {
+    /// Run the space guard before a write transaction.
+    pub(crate) fn guard(&self, conn: &Connection) -> Result<(), PassError> {
+        match self.guard.before_write(conn) {
+            Ok(()) => Ok(()),
+            Err(GuardStop::Space) => Err(PassError::Stopped(StopReason::InsufficientSpace)),
+            Err(GuardStop::Sqlite(code)) => Err(PassError::Batch(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(code.unwrap_or(rusqlite::ffi::SQLITE_ERROR)),
+                None,
+            ))),
+        }
+    }
 }
 
 /// Issue counts a batch adds to `import_issue`, per kind.
@@ -141,14 +168,23 @@ pub(crate) trait PassWriter {
     fn size(r: &Self::Record) -> u64;
     /// Read records from `from` on. It takes `&self`, so a pass can hold
     /// what its reader needs at run time (P6's attachment locator, which
-    /// borrows the opened backup).
+    /// borrows the opened backup). `conn` is the archive's write connection
+    /// with no transaction open: P6 reads the stored blob of each record
+    /// from it.
     fn read(
         &self,
         db: &SmsDb<'_>,
+        conn: &Connection,
+        run: &Run,
         from: Cursor,
         ctx: &mut MessagesCtx<'_>,
         f: &mut dyn FnMut(Self::Record) -> ControlFlow<Brk>,
     ) -> Result<PassOutcome<Brk>, MessagesError>;
+    /// The pass's own end of a batch, besides the row, byte and time
+    /// budgets (P6: its file budget). The default never ends one.
+    fn ends_batch(&self, _buffered: &[Self::Record]) -> bool {
+        false
+    }
     /// Work a pass must make durable **before** its batch, in transactions
     /// of its own on `conn` (no batch is open). The default does nothing.
     /// P6 commits its blob intents and places the files here, so that the
@@ -159,8 +195,8 @@ pub(crate) trait PassWriter {
         &self,
         _conn: &mut Connection,
         _run: &Run,
-        _records: &[Self::Record],
-    ) -> rusqlite::Result<()> {
+        _records: &mut [Self::Record],
+    ) -> Result<(), PassError> {
         Ok(())
     }
     /// Write the records, one savepoint each, inside the open batch.
@@ -206,6 +242,12 @@ pub(crate) enum PassError {
     CountMismatch,
     /// P5b's scan went over the cap the preflight checked.
     ScanOverLimit,
+    /// The pass stopped in a resumable state, after committing the records
+    /// it had read.
+    Stopped(StopReason),
+    /// A store file operation whose failure the batch cannot outlive (a
+    /// directory flush before the rows that need it).
+    Store(io::ErrorKind),
 }
 
 /// A stored cursor.
@@ -334,7 +376,7 @@ pub(crate) fn run_pass<W: PassWriter>(
         let clock = ctx.clock;
         let started = clock.now_ns();
         let from = cursor.map_or(Cursor::Start, Cursor::After);
-        let read = w.read(db, from, mctx, &mut |rec| {
+        let read = w.read(db, &*conn, run, from, mctx, &mut |rec| {
             point(FaultPoint::Record);
             if cancel.is_cancelled() {
                 return ControlFlow::Break(Brk::Cancelled);
@@ -342,7 +384,11 @@ pub(crate) fn run_pass<W: PassWriter>(
             bytes = bytes.saturating_add(W::size(&rec));
             buf.push(rec);
             let over_time = time_ns.is_some_and(|t| clock.now_ns().saturating_sub(started) >= t);
-            if buf.len() >= rows_budget || bytes >= budget.bytes() || over_time {
+            if buf.len() >= rows_budget
+                || bytes >= budget.bytes()
+                || over_time
+                || w.ends_batch(&buf)
+            {
                 ControlFlow::Break(Brk::Full)
             } else {
                 ControlFlow::Continue(())
@@ -352,6 +398,7 @@ pub(crate) fn run_pass<W: PassWriter>(
             Exhausted,
             Full,
             Cancelled,
+            Stopped(StopReason),
             Failed(MessagesError),
         }
         let end = match read {
@@ -359,6 +406,7 @@ pub(crate) fn run_pass<W: PassWriter>(
                 None => End::Exhausted,
                 Some(Brk::Full) => End::Full,
                 Some(Brk::Cancelled) => End::Cancelled,
+                Some(Brk::Stop(r)) => End::Stopped(r),
             },
             Err(MessagesError::Cancelled) => End::Cancelled,
             Err(e) => End::Failed(e),
@@ -369,8 +417,9 @@ pub(crate) fn run_pass<W: PassWriter>(
             let n = u64::try_from(buf.len()).unwrap_or(u64::MAX);
             let new_rows = rows_done.saturating_add(n);
             if !buf.is_empty() {
-                w.before_batch(conn, run, &buf).map_err(PassError::Batch)?;
+                w.before_batch(conn, run, &mut buf)?;
             }
+            run.guard(conn)?;
             commit_batch(w, conn, run, &buf, last, new_rows, done, counts)
                 .map_err(PassError::Batch)?;
             cursor = last;
@@ -390,6 +439,7 @@ pub(crate) fn run_pass<W: PassWriter>(
             }
             End::Full => {}
             End::Cancelled => return Ok(PassEnd::Cancelled),
+            End::Stopped(r) => return Err(PassError::Stopped(r)),
             End::Failed(e) => return Err(PassError::Read(e)),
         }
     }

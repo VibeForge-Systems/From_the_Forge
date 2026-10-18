@@ -73,7 +73,13 @@ pub(crate) fn text_len(c: &Col<Redacted<SqlText>>) -> u64 {
         .map_or(8, |t| u64::try_from(t.expose().len()).unwrap_or(u64::MAX))
 }
 
-/// Write `records` inside the open batch.
+/// What [`write_records`] runs inside each record's savepoint, once the
+/// record's row exists: the source rowid and the archive row id.
+pub(crate) type AfterRecord<'a> = &'a mut dyn FnMut(i64, i64) -> rusqlite::Result<()>;
+
+/// Write `records` inside the open batch. `after` runs inside each record's
+/// savepoint, after its row and map are written (P6 writes the file
+/// observation there).
 pub(crate) fn write_records(
     tx: &Connection,
     kind: &EntityKind,
@@ -81,6 +87,7 @@ pub(crate) fn write_records(
     records: impl Iterator<Item = EntityRecord>,
     counts: &mut EntityCounts,
     issues: &mut IssueDeltas,
+    after: AfterRecord<'_>,
 ) -> rusqlite::Result<()> {
     let def = &kind.def;
     let key_cond = match kind.key {
@@ -174,6 +181,7 @@ pub(crate) fn write_records(
             if kind.lineage_seen {
                 maps.seen(def.entity, applied.id, run.lineage, &run.rank, run.session)?;
             }
+            after(rec.rowid, applied.id)?;
             Ok((applied, ident.is_keyed()))
         })?;
         let (a, keyed) = applied;

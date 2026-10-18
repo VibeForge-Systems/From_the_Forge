@@ -149,6 +149,16 @@ impl Archive {
         self.reader.inspected().import_blocked
     }
 
+    /// What the attachment store and the space guards work with: the
+    /// space probe, the archive directory and the store's file operations.
+    pub(crate) fn store_parts(&self) -> (Arc<dyn SpaceProbe>, ArchiveDir, Arc<dyn StoreFs>) {
+        (
+            Arc::clone(&self.space),
+            self.dir.clone(),
+            Arc::clone(&self.store),
+        )
+    }
+
     pub(crate) fn ensure_writer(&mut self) -> Result<&mut WriteConn, ArchiveError> {
         if self.writer.is_none() {
             self.writer = Some(WriteConn::open(&self.dir)?);
