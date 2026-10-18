@@ -15,6 +15,9 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::extraction::{ExtractionOutcomeDto, ExtractionReportDto};
+use crate::archives::dto::{
+    GateEndingDto, ImportOutcomeDto, NotImportableDto, StopReasonDto, VerifyOutcomeDto,
+};
 use crate::error::IpcError;
 use crate::settings::CheckLevel;
 
@@ -386,8 +389,8 @@ pub enum JobPhase {
     /// Extracting a file (the M3 extraction API). Validation never reports
     /// it; it exists so the crate's phase set maps one to one.
     Extracting,
-    /// Copying an attachment into the archive (M4); `done` and `total` are
-    /// bytes.
+    /// P6 of an import (M4): the attachment rows and their files. `done`
+    /// and `total` count rows, not bytes (see `docs/architecture.md`).
     CopyingAttachments,
     // The extraction check (M3), one to one with `MessagesPhase`.
     StagingMessagesDb,
@@ -400,6 +403,28 @@ pub enum JobPhase {
     ReadingMessages,
     CheckingAttachments,
     Summarising,
+    // The import (M4 §8.12); `stagingMessagesDb`, `readingSchema` and
+    // `copyingAttachments` above are shared.
+    ScanningRecentlyDeleted,
+    ScanningKeys,
+    EstimatingAttachments,
+    /// Waiting at the gate for the user's answer.
+    AwaitingConfirmation,
+    PreparingArchive,
+    ImportingHandles,
+    ImportingChats,
+    ImportingMessages,
+    ImportingChatLinks,
+    ImportingAttachmentLinks,
+    ImportingRecentlyDeleted,
+    Finalizing,
+    OptimizingIndex,
+    Checkpointing,
+    // The verify (M4 §11).
+    VerifyingDatabase,
+    VerifyingIndex,
+    /// Rows in a quick verify, bytes re-hashed in a full one.
+    VerifyingFiles,
 }
 
 impl From<oma_messages::MessagesPhase> for JobPhase {
@@ -431,6 +456,10 @@ pub enum JobKind {
     Validate,
     /// Validate, then check that the Messages database can be read (M3).
     ExtractionCheck,
+    /// Import a backup into an archive (M4).
+    Import,
+    /// Verify an archive (M4).
+    Verify,
 }
 
 impl From<oma_backup::Phase> for JobPhase {
@@ -468,8 +497,11 @@ pub struct JobSummary {
 }
 
 /// Delivered over a `tauri::ipc::Channel` (D2). Exactly one terminal event
-/// (`finished`, `extractionFinished`, `failed` or `cancelled`) ends every
-/// job, and each carries `stagingRemoved`.
+/// (`finished`, `extractionFinished`, `importFinished`, `verifyFinished`,
+/// `failed` or `cancelled`) ends every job. `progress` and
+/// `importPreflight` are the only non-terminal events. Every event stays
+/// under 1 KiB (D47): reports and the preflight are fetched with
+/// `get_backup_details` and `get_archive_details`.
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(
     tag = "kind",
@@ -509,12 +541,63 @@ pub enum JobEvent {
         job_id: String,
         staging_removed: bool,
     },
+    /// An import waits at the gate (M4 §15.3). Non-terminal; the
+    /// preflight is fetched with `get_archive_details`, then answered with
+    /// `confirm_import` within two minutes.
+    ImportPreflight { job_id: String },
+    /// The end of an import, except a cancel during the passes, which ends
+    /// with `cancelled`. Counts are fetched with `get_archive_details`.
+    ImportFinished {
+        job_id: String,
+        outcome: ImportOutcomeDto,
+        /// For `stopped`.
+        stop_reason: Option<StopReasonDto>,
+        /// For `notImportable`.
+        not_importable: Option<NotImportableDto>,
+        /// For `cancelledAtGate`.
+        gate: Option<GateEndingDto>,
+        /// The session, for `completed` and `stopped`.
+        session: Option<i64>,
+        /// The sentence for `stopped` and `notImportable`.
+        notice: Option<IpcError>,
+        /// The staging folder (the backup's file index and the Messages
+        /// database copy) was removed.
+        staging_removed: bool,
+        /// The plaintext Messages database copy was removed after the last
+        /// pass, before finalize; `null` when no session ran.
+        plaintext_removed: Option<bool>,
+    },
+    /// The end of a verify. The report is fetched with
+    /// `get_archive_details`.
+    VerifyFinished {
+        job_id: String,
+        outcome: VerifyOutcomeDto,
+        /// The result was recorded in the archive.
+        recorded: bool,
+    },
 }
 
 impl JobEvent {
-    /// `finished`, `failed` or `cancelled`.
+    /// Every event but `progress` and `importPreflight`.
     pub fn is_terminal(&self) -> bool {
-        !matches!(self, JobEvent::Progress { .. })
+        !matches!(
+            self,
+            JobEvent::Progress { .. } | JobEvent::ImportPreflight { .. }
+        )
+    }
+
+    /// The job the event belongs to.
+    pub fn job_id(&self) -> &str {
+        match self {
+            JobEvent::Progress { job_id, .. }
+            | JobEvent::Finished { job_id, .. }
+            | JobEvent::ExtractionFinished { job_id, .. }
+            | JobEvent::Failed { job_id, .. }
+            | JobEvent::Cancelled { job_id, .. }
+            | JobEvent::ImportPreflight { job_id }
+            | JobEvent::ImportFinished { job_id, .. }
+            | JobEvent::VerifyFinished { job_id, .. } => job_id,
+        }
     }
 }
 

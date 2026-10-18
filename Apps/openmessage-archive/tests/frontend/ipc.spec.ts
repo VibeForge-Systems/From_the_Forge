@@ -192,3 +192,63 @@ describe('backup wrappers', () => {
     expect(ERROR_CODES).toContain('busy');
   });
 });
+
+describe('archive wrappers (M4)', () => {
+  beforeEach(() => {
+    fake.calls.length = 0;
+    fake.respond = () => Promise.resolve(null);
+  });
+
+  const ID = `a${'0'.repeat(32)}`;
+  const OPTIONS = { includeRecentlyDeleted: false, copyAttachments: true };
+
+  it('call the six commands with requests wrapped as specified', async () => {
+    await ipc.listArchives();
+    await ipc.createArchive('Family phone');
+    await ipc.getArchiveDetails(ID);
+    await ipc.startImport('b1', ID, null, OPTIONS, () => undefined);
+    await ipc.confirmImport('job-1', true, { kind: 'existing', lineageId: 2 });
+    await ipc.confirmImport('job-1', false, null);
+    await ipc.verifyArchive(ID, 'quick', () => undefined);
+    expect(fake.calls.map(([c]) => c)).toEqual([
+      'list_archives',
+      'create_archive',
+      'get_archive_details',
+      'start_import',
+      'confirm_import',
+      'confirm_import',
+      'verify_archive',
+    ]);
+    const args = fake.calls.map(([, a]) => a);
+    expect(args[1]).toEqual({ request: { label: 'Family phone' } });
+    expect(args[2]).toEqual({ request: { archiveId: ID } });
+    const start = args[3] as { request: unknown; onEvent: unknown };
+    expect(start.request).toEqual({ backupId: 'b1', archiveId: ID, password: null, options: OPTIONS });
+    expect(start.onEvent).toBeDefined();
+    expect(args[4]).toEqual({
+      request: { jobId: 'job-1', proceed: true, lineage: { kind: 'existing', lineageId: 2 } },
+    });
+    expect(args[6]).toMatchObject({ request: { archiveId: ID, depth: 'quick' } });
+  });
+
+  it('put the password only at request.password, and never copy a raw start_import rejection', async () => {
+    await ipc.startImport('b1', ID, PASSWORD, OPTIONS, () => undefined);
+    const args = fake.calls.map(([, a]) => a)[0];
+    expect(strings(args).filter((s) => s === PASSWORD)).toHaveLength(1);
+    expect((args as { request: { password: string } }).request.password).toBe(PASSWORD);
+    fake.respond = () => Promise.reject(`invalid args: ${PASSWORD}`);
+    const err = await ipc.startImport('b1', ID, PASSWORD, OPTIONS, () => undefined).catch((e) => e);
+    expect(err).toBeInstanceOf(IpcError);
+    expect(err.code).toBe('internal');
+    expect(err.message).not.toContain(PASSWORD);
+  });
+
+  it('keep the new archive error codes', async () => {
+    fake.respond = () => Promise.reject({ code: 'jobNotWaiting', message: 'Not waiting.' });
+    const err = await ipc.confirmImport('job-1', false, null).catch((e) => e);
+    expect(err.code).toBe('jobNotWaiting');
+    for (const code of ['archiveLocked', 'insufficientSpace', 'invalidInput'] as const) {
+      expect(ERROR_CODES).toContain(code);
+    }
+  });
+});

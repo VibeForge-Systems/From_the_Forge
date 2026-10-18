@@ -18,8 +18,9 @@ use crate::conn::{ReadConn, READ_OP_BUDGET};
 use crate::error::BlobProblem;
 use crate::error::{ArchiveError, DamageKind, Stage};
 use crate::id::{ArchiveId, Label, LabelState};
+use crate::import::{ImportCounts, LineageId, StopReason};
 use crate::layout::ArchiveDir;
-use crate::schema::codes::SessionState;
+use crate::schema::codes::{IssueCode, SessionState};
 use crate::schema::{
     fingerprint, SchemaPlan, APPLICATION_ID, DECODER_VERSION, DERIVER_VERSION, FORMAT,
 };
@@ -121,6 +122,38 @@ pub struct SessionInfo {
     pub resumes: u32,
     /// Set at a terminal state (§8.7); `None` before.
     pub full_observation: Option<bool>,
+}
+
+/// The newest import session, as [`ArchiveReader::last_import`] reads it.
+/// Content-free.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct LastImport {
+    pub session: i64,
+    pub lineage: LineageId,
+    pub state: SessionState,
+    pub started_at_ns: i64,
+    pub ended_at_ns: Option<i64>,
+    pub resumes: u32,
+    /// The counts stored with the session's last batch; `None` before the
+    /// first batch, or when they do not parse.
+    pub counts: Option<ImportCounts>,
+    /// Why a stopped session stopped (state 6), from `import_issue`.
+    pub stop_reason: Option<StopReason>,
+    /// The session's derived values are provisional (D79).
+    pub ios_version_untested: bool,
+}
+
+/// What the shell knows about a listed backup, for pre-selecting the
+/// backup an unfinished session came from
+/// ([`ArchiveReader::resume_matches`]). Compared inside this crate; the
+/// archive's stored device facts never leave it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceFacts<'a> {
+    pub device_name: Option<&'a str>,
+    pub product_type: Option<&'a str>,
+    /// Info.plist "Last Backup Date", in whole seconds since the Unix epoch.
+    pub last_backup_secs: Option<i64>,
 }
 
 /// The id of a `blob` row: one file in the attachment store. Ids are
@@ -505,6 +538,135 @@ impl ArchiveReader {
                 .ok_or_else(unreadable)
         })
         .transpose()
+    }
+
+    /// The newest import session, if any (spec §15.2: the details' last
+    /// import summary).
+    pub fn last_import(&self) -> Result<Option<LastImport>, ArchiveError> {
+        self.require_current()?;
+        type Row = (i64, i64, i64, i64, Option<i64>, i64, Option<String>, i64);
+        let row: Option<Row> = self.conn.budgeted(READ_OP_BUDGET, Stage::Read, |c| {
+            let mut stmt = c.prepare(
+                "SELECT id, lineage_id, state, started_at_ns, ended_at_ns, resumes, counts, \
+                        ios_version_untested \
+                 FROM import_session ORDER BY id DESC LIMIT 1",
+            )?;
+            let mut rows = stmt.query([])?;
+            let Some(r) = rows.next()? else {
+                return Ok(None);
+            };
+            Ok(Some((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
+                r.get(7)?,
+            )))
+        })?;
+        let Some((session, lineage, state, started, ended, resumes, counts, untested)) = row else {
+            return Ok(None);
+        };
+        let state = SessionState::from_code(state).ok_or_else(unreadable)?;
+        let stop_reason = if state == SessionState::Stopped {
+            let kinds: Vec<i64> = self.conn.budgeted(READ_OP_BUDGET, Stage::Read, |c| {
+                let mut stmt = c.prepare(
+                    "SELECT kind FROM import_issue WHERE session_id = ?1 AND kind IN (?2, ?3) \
+                     ORDER BY pass DESC, kind",
+                )?;
+                let rows = stmt.query_map(
+                    rusqlite::params![
+                        session,
+                        IssueCode::InsufficientSpace.code(),
+                        IssueCode::SourceChanged.code()
+                    ],
+                    |r| r.get(0),
+                )?;
+                rows.collect()
+            })?;
+            kinds.first().and_then(|k| match IssueCode::from_code(*k) {
+                Some(IssueCode::InsufficientSpace) => Some(StopReason::InsufficientSpace),
+                Some(IssueCode::SourceChanged) => Some(StopReason::SourceChanged),
+                _ => None,
+            })
+        } else {
+            None
+        };
+        Ok(Some(LastImport {
+            session,
+            lineage: LineageId::new(lineage),
+            state,
+            started_at_ns: started,
+            ended_at_ns: ended,
+            resumes: u32::try_from(resumes).map_err(|_| unreadable())?,
+            counts: counts.as_deref().and_then(ImportCounts::from_json),
+            stop_reason,
+            ios_version_untested: untested == 1,
+        }))
+    }
+
+    /// For each of `backups`, whether it looks like the source of the
+    /// archive's newest session when that session is unfinished (the one
+    /// [`ArchiveInfo::resumable`] names): the same device name, product
+    /// type and Info.plist backup date (to the second; both absent counts
+    /// as equal). Only a pre-selection for the UI: whether the session can
+    /// actually continue is decided by the import's resume rules (§8.2),
+    /// which compare content digests. All `false` when nothing is
+    /// unfinished.
+    pub fn resume_matches(&self, backups: &[SourceFacts<'_>]) -> Result<Vec<bool>, ArchiveError> {
+        self.require_current()?;
+        type Row = (i64, Option<Vec<u8>>, Option<Vec<u8>>, Option<i64>);
+        let row: Option<Row> = self.conn.budgeted(READ_OP_BUDGET, Stage::Read, |c| {
+            let mut stmt = c.prepare(
+                "SELECT s.state, b.device_name, b.product_type, b.info_last_backup_ns \
+                 FROM import_session s JOIN source_backup b ON b.id = s.source_backup_id \
+                 ORDER BY s.id DESC LIMIT 1",
+            )?;
+            let mut rows = stmt.query([])?;
+            let Some(r) = rows.next()? else {
+                return Ok(None);
+            };
+            let text = |i: usize| -> rusqlite::Result<Option<Vec<u8>>> {
+                Ok(match r.get_ref(i)? {
+                    ValueRef::Text(t) => Some(t.to_vec()),
+                    _ => None,
+                })
+            };
+            let date = match r.get_ref(3)? {
+                ValueRef::Integer(n) => Some(n),
+                _ => None,
+            };
+            Ok(Some((r.get(0)?, text(1)?, text(2)?, date)))
+        })?;
+        let unfinished = |state: i64| {
+            matches!(
+                SessionState::from_code(state),
+                Some(
+                    SessionState::Running
+                        | SessionState::Cancelled
+                        | SessionState::Interrupted
+                        | SessionState::Stopped
+                )
+            )
+        };
+        let Some((_, name, model, date_ns)) = row.filter(|r| unfinished(r.0)) else {
+            return Ok(vec![false; backups.len()]);
+        };
+        let date_secs = date_ns.map(|ns| ns.div_euclid(1_000_000_000));
+        let same = |stored: &Option<Vec<u8>>, ours: Option<&str>| match (stored, ours) {
+            (Some(s), Some(o)) => s.as_slice() == o.as_bytes(),
+            _ => false,
+        };
+        Ok(backups
+            .iter()
+            .map(|b| {
+                same(&name, b.device_name)
+                    && same(&model, b.product_type)
+                    && date_secs == b.last_backup_secs
+            })
+            .collect())
     }
 
     /// The newest [`SESSIONS_LIMIT`] sessions, newest first. Content-free.

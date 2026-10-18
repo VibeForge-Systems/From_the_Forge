@@ -1039,10 +1039,9 @@ pub fn report_dto(
 
 #[cfg(test)]
 mod tests {
-    use std::any::TypeId;
     use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-    use ts_rs::{Config, TypeVisitor};
+    use ts_rs::Config;
 
     use super::*;
     use crate::backups::dto::{BackupDetails, JobEvent, JobPhase, ValidationReportDto};
@@ -1090,108 +1089,15 @@ mod tests {
 
     // -------------------------------------------- structural guard (§16.4)
 
-    /// Every declared IPC type reachable from a root, by name.
-    struct Walk {
-        cfg: Config,
-        seen: HashSet<TypeId>,
-        decls: BTreeMap<String, String>,
-    }
-
-    impl TypeVisitor for Walk {
-        fn visit<T: TS + 'static + ?Sized>(&mut self) {
-            if T::output_path().is_none() || !self.seen.insert(TypeId::of::<T>()) {
-                return;
-            }
-            self.decls.insert(T::ident(&self.cfg), T::decl(&self.cfg));
-            T::visit_dependencies(self);
-        }
-    }
+    use crate::ts_guard::{self, fields};
 
     fn walk() -> BTreeMap<String, String> {
-        let mut w = Walk {
-            cfg: Config::from_env(),
-            seen: HashSet::new(),
-            decls: BTreeMap::new(),
-        };
-        w.visit::<ExtractionReportDto>();
-        w.visit::<ValidationReportDto>();
-        w.visit::<BackupDetails>();
-        w.visit::<JobEvent>();
-        w.decls
-    }
-
-    fn strip_comments(s: &str) -> String {
-        let mut out = String::with_capacity(s.len());
-        let mut rest = s;
-        while let Some(start) = rest.find("/*") {
-            out.push_str(&rest[..start]);
-            match rest[start..].find("*/") {
-                Some(end) => rest = &rest[start + end + 2..],
-                None => return out,
-            }
-        }
-        out.push_str(rest);
-        out
-    }
-
-    /// The field keys of a declaration and the text of each field's type.
-    /// String literal *values* (such as `"readingHandles"`) are not keys.
-    fn fields(decl: &str) -> Vec<(String, String)> {
-        let body = strip_comments(decl);
-        let body = body.split_once('=').map_or(body.as_str(), |(_, b)| b);
-        let chars: Vec<char> = body.chars().collect();
-        let mut out = Vec::new();
-        let mut i = 0;
-        while i < chars.len() {
-            if chars[i] != '{' && chars[i] != ',' {
-                i += 1;
-                continue;
-            }
-            // A key: an identifier or a quoted string, then `?:` or `:`.
-            let mut j = i + 1;
-            while j < chars.len() && chars[j].is_whitespace() {
-                j += 1;
-            }
-            let mut key = String::new();
-            if j < chars.len() && chars[j] == '"' {
-                j += 1;
-                while j < chars.len() && chars[j] != '"' {
-                    key.push(chars[j]);
-                    j += 1;
-                }
-                j += 1;
-            } else {
-                while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '_') {
-                    key.push(chars[j]);
-                    j += 1;
-                }
-            }
-            if j < chars.len() && chars[j] == '?' {
-                j += 1;
-            }
-            if key.is_empty() || j >= chars.len() || chars[j] != ':' {
-                i += 1;
-                continue;
-            }
-            // Its type, up to the next `,` or `}` at the same depth.
-            j += 1;
-            let mut depth = 0i32;
-            let mut ty = String::new();
-            while j < chars.len() {
-                let c = chars[j];
-                match c {
-                    '{' | '<' | '(' | '[' => depth += 1,
-                    '}' | '>' | ')' | ']' if depth > 0 => depth -= 1,
-                    ',' | '}' if depth == 0 => break,
-                    _ => {}
-                }
-                ty.push(c);
-                j += 1;
-            }
-            out.push((key, ty.trim().to_owned()));
-            i = j;
-        }
-        out
+        let mut w = ts_guard::Walk::new();
+        w.root::<ExtractionReportDto>();
+        w.root::<ValidationReportDto>();
+        w.root::<BackupDetails>();
+        w.root::<JobEvent>();
+        w.decls()
     }
 
     const FORBIDDEN_KEYS: &[&str] = &[
@@ -1247,61 +1153,16 @@ mod tests {
         "IpcError.message",
     ];
 
-    /// Every type reachable from the roots. A new nested type fails this
-    /// test until it is added here, so it is reviewed against the guard.
-    const EXPECTED_TYPES: &[&str] = &[
-        "AttachmentOutcomesDto",
-        "BackupDetails",
-        "BackupState",
-        "BackupSummary",
-        "CheckLevel",
-        "CleanupDto",
-        "CountsDto",
-        "DamageReasonDto",
-        "DatesDto",
-        "DbFactsDto",
-        "DeviceDetails",
-        "EncryptionDetails",
-        "ErrorCode",
-        "ExtractionOutcomeDto",
-        "ExtractionReportDto",
-        "FailureKindDto",
-        "FeaturesDto",
-        "IncompleteReasonDto",
-        "IntegrityDto",
-        "IpcError",
-        "JobEvent",
-        "JobKind",
-        "JobPhase",
-        "JobSummary",
-        "KnownColumnDto",
-        "KnownTableDto",
-        "LayoutDetails",
-        "BackupFormat",
-        "ManifestStatsDto",
-        "OpenModeDto",
-        "ProblemDto",
-        "QualifierDto",
-        "SchemaReportDto",
-        "SmsDbStatusDto",
-        "SourceFile",
-        "SourcedText",
-        "StatusDetails",
-        "TableReportDto",
-        "TextEncodingDto",
-        "UnsupportedReasonDto",
-        "ValidationCheck",
-        "ValidationReportDto",
-        "WalFramesDto",
-        "WalOutcomeDto",
-    ];
-
     #[test]
     fn no_reachable_ipc_type_has_a_content_key_or_a_free_string() {
         let decls = walk();
         let mut checked = 0;
         for (ty, decl) in &decls {
             assert!(!decl.contains("bigint"), "{decl}");
+            // The archive event types have their own guard (archives::dto).
+            if ts_guard::M4_EVENT_TYPES.contains(&ty.as_str()) {
+                continue;
+            }
             for (key, field_ty) in fields(decl) {
                 let qualified = format!("{ty}.{key}");
                 if FORBIDDEN_KEYS.contains(&key.as_str()) {
@@ -1310,10 +1171,7 @@ mod tests {
                         "forbidden key {qualified}"
                     );
                 }
-                let is_string = field_ty
-                    .split(|c: char| !c.is_alphanumeric())
-                    .any(|w| w == "string");
-                if is_string {
+                if ts_guard::is_string(&field_ty) {
                     assert!(
                         STRING_FIELDS.contains(&qualified.as_str()),
                         "{qualified} is typed {field_ty}"
@@ -1337,7 +1195,11 @@ mod tests {
     #[test]
     fn the_walk_reaches_exactly_the_reviewed_types() {
         let reached: BTreeSet<String> = walk().into_keys().collect();
-        let expected: BTreeSet<String> = EXPECTED_TYPES.iter().map(|s| (*s).to_owned()).collect();
+        let expected: BTreeSet<String> = ts_guard::M2_M3_TYPES
+            .iter()
+            .chain(ts_guard::M4_EVENT_TYPES)
+            .map(|s| (*s).to_owned())
+            .collect();
         assert_eq!(reached, expected);
     }
 

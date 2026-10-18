@@ -596,6 +596,49 @@ ext4); not CI, not a desktop, synthetic data only. No fixture changed.
 
 **Not yet observed:** any of this on Windows.
 
+### Milestone 4 archive commands and jobs (slice 4l)
+
+Run in the same Linux container on 2026-10-18, through the shell's
+Tauri-free layer (`cargo test -p openmessage-archive`), not through a
+window; synthetic data only. No fixture changed.
+
+- **An import job** (`imp-dev1-v1-plain`) stopped at the gate with its
+  preflight in the details and the archive listed as `importing`, then
+  completed after `confirm_import` with a new lineage: one terminal
+  `importFinished` (`completed`, session 1, staging and the plaintext copy
+  removed), progress through the staging, key-scan, gate, pass and
+  finalize phases, and the details afterwards showed the completed session
+  with its counts and no device identifier.
+- **Decline, cancel and the timeout at the gate** (the two minutes on an
+  injected clock) each ended with `cancelledAtGate` and its ending, left
+  `archive.sqlite` byte-identical (and no `-wal` with content), and
+  removed the staging folder. The exit handler woke a waiting gate and
+  returned within its 5 s budget.
+- **A cancel during the chat pass** ended with `cancelled`; the archive
+  then reported the session as resumable and pre-selected exactly that
+  backup in `matchingBackupIds`.
+- **A backup that fails validation** (`missing-sms-blob`) ended with
+  `notImportable` and wrote nothing; an archive id that is not in the
+  library failed with `archiveNotFound`.
+- **A verify job** (quick) on an imported archive ended with
+  `verifyFinished` `ok`, recorded; one cancelled before it started ended
+  with `cancelled`.
+- **The list** showed `inUse` for an archive held by another handle,
+  `importing` or `verifying` when this app's job held it, `ready`
+  otherwise, and `notConfigured` or `unusable` for a missing or bad
+  library.
+- **Log hygiene:** every import catalogue entry (the encrypted one
+  included) was imported through the job, confirmed at its gate, then
+  given a full verify; no log line held a planted sentinel, the password,
+  the UDID, the device name, a temporary path, an archive id or the
+  archive's label, and no event, details or listing JSON held a planted
+  sentinel, the password or the UDID.
+- **Not tested:** the commands through a real window (no UI until slice
+  4m), the channel delivery of the new events, Windows, and the 2-minute
+  timeout in real time.
+
+**Not yet observed:** any of this on Windows.
+
 ### Synthetic fixtures
 
 Every M2 cell in this table passed in CI on Ubuntu 22.04 and Windows

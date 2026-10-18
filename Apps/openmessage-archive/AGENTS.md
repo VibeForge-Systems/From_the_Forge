@@ -121,11 +121,13 @@ Each one is enforced in code. Keep it that way.
   content-addressed store, the Recently Deleted markers, the space
   estimate and guards, the gate, finalize and the provenance files,
   `Archive::import`; and the report-only verifier `Archive::verify` with
-  `open_blob`); the planned
+  `open_blob`), driven by the shell's six archive commands and its
+  import and verify jobs (slice 4l, no UI yet); the planned
   crates are `oma-export` (M6) and `oma-device` (M7). Each must build and test without
   Tauri. The shell's `src-tauri/src/backups/` (registry, job table, worker,
-  DTOs, messages) has no Tauri types either, so it is tested without a
-  window.
+  DTOs, messages) and `src-tauri/src/archives/` (listing, details, the
+  gate, the import and verify workers, DTOs, sentences) have no Tauri
+  types either, so they are tested without a window.
 - **Frontend:**
   - Views live in `src/views/`, components in `src/components/`, and Pinia
     stores in `src/stores/`.
@@ -325,6 +327,21 @@ Never hand-edit generated files.
   after a kill run on a copy of the database files: a read-write
   connection closing on the original would checkpoint and delete the
   `-wal` the resume must see.
+- **The shell's import gate** (`src-tauri/src/archives/gate.rs`) is a
+  `Mutex` + `Condvar` with a two-minute timeout from an injectable
+  `GateClock`. `ShellGate::confirm` opens the gate *before* it publishes
+  the preflight and sends `importPreflight`, so an answer that arrives
+  first is kept; `Jobs::cancel` and the exit handler wake it, and every
+  ending but Proceed declines (nothing written). The `importPreflight`
+  event carries only the job id: the preflight is fetched with
+  `get_archive_details` (D47). Jobs are reserved by subject (backup,
+  archive or both, D73); keep `MAX_CONCURRENT_JOBS` at 1.
+- **Archive DTOs** (`src-tauri/src/archives/dto.rs`) have one free-text
+  field, `ArchiveSummaryDto.label`; the structural guard there (sharing
+  `src-tauri/src/ts_guard.rs` with the Backups guard) fails on any other
+  `string` field and on keys such as `guid`, `rank` or `path`. Device
+  facts cross as booleans, dates as Unix milliseconds. The shell never
+  logs an archive id or a label; `tests/log_hygiene.rs` checks it.
 - **Headless smoke testing works**, using `xvfb-run` with
   `WEBKIT_DISABLE_DMABUF_RENDERER=1` and `XDG_CONFIG_HOME` pointed at a
   scratch directory. However, the GTK folder picker cannot list directories

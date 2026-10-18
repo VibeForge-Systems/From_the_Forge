@@ -15,13 +15,13 @@ use crate::backups::dto::{
     OpenBackupRequest,
 };
 use crate::backups::worker::{self, JobSpec};
-use crate::backups::{messages, JobEventSink};
+use crate::backups::{messages, JobEventSink, JobSubject};
 use crate::error::{ErrorCode, IpcError, IpcResult};
 use crate::settings::inspect_location;
 
 /// `Channel<JobEvent>` as the worker's sink. A failed delivery is logged by
 /// kind only and never cancels the job: the UI recovers by polling.
-struct ChannelSink(Channel<JobEvent>);
+pub(crate) struct ChannelSink(pub(crate) Channel<JobEvent>);
 
 impl JobEventSink for ChannelSink {
     fn send(&mut self, event: JobEvent) {
@@ -78,7 +78,8 @@ async fn start_job(
     kind: JobKind,
     on_event: Channel<JobEvent>,
 ) -> IpcResult<JobStarted> {
-    let (spec, done) = prepare_job(state, backup_id, password, kind).await?;
+    let subject = JobSubject::backup(&backup_id);
+    let (spec, done, _) = prepare_job(state, backup_id, password, kind, subject).await?;
     let job_id = spec.job_id.clone();
     if worker::spawn(
         spec,
@@ -94,16 +95,26 @@ async fn start_job(
     Ok(JobStarted { job_id })
 }
 
-/// Steps 1–5 of starting a job, shared by both kinds: re-inspect, the
-/// password, the archive location, the job slot (D7) and
-/// `confirm_library_unchanged`. On success the slot is reserved and the
-/// caller must start the worker or release it.
-async fn prepare_job(
+/// What `prepare_job` reserved: the spec, the completion sender, and an
+/// import's gate.
+pub(crate) type Prepared = (
+    JobSpec,
+    std::sync::mpsc::Sender<()>,
+    Option<std::sync::Arc<crate::archives::gate::Gate>>,
+);
+
+/// Steps 1–5 of starting a job on a backup, shared by every kind that
+/// reads one (validate, extraction check, import): re-inspect, the
+/// password, the archive location, the job slot for `subject` (D7, D73)
+/// and `confirm_library_unchanged`. On success the slot is reserved and
+/// the caller must start the worker or release it.
+pub(crate) async fn prepare_job(
     state: &AppState,
     backup_id: String,
     password: Option<BackupPassword>,
     kind: JobKind,
-) -> IpcResult<(JobSpec, std::sync::mpsc::Sender<()>)> {
+    subject: JobSubject,
+) -> IpcResult<Prepared> {
     let limits = Limits::default();
 
     // 1. The id must be one Rust handed out.
@@ -188,7 +199,7 @@ async fn prepare_job(
     // 5. The job slot. The archive location may have changed while step 2
     //    ran (nothing was reserved yet, so the location commands allowed it);
     //    staging must never go to a location the user just left.
-    let reservation = state.jobs.reserve(&backup_id, kind)?;
+    let reservation = state.jobs.reserve(subject, kind)?;
     let job_id = reservation.job_id.clone();
     confirm_library_unchanged(state, &job_id, configured_library.as_deref())?;
 
@@ -204,6 +215,7 @@ async fn prepare_job(
             cancel: reservation.cancel,
         },
         reservation.done,
+        reservation.gate,
     ))
 }
 
@@ -212,7 +224,7 @@ async fn prepare_job(
 /// commands check for a job under the same lock before they change it, so
 /// either they see this reservation and refuse, or this sees their change and
 /// gives the slot back.
-fn confirm_library_unchanged(
+pub(crate) fn confirm_library_unchanged(
     state: &AppState,
     job_id: &str,
     validated: Option<&str>,

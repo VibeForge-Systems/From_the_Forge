@@ -91,10 +91,10 @@ pub use progress::{
     SystemClock, VerifyPhase,
 };
 pub use reader::{
-    ArchiveInfo, ArchiveReader, ArchiveStats, BlobId, ImportBlock, ResumableSession, SessionCounts,
-    SessionInfo, SESSIONS_LIMIT,
+    ArchiveInfo, ArchiveReader, ArchiveStats, BlobId, ImportBlock, LastImport, ResumableSession,
+    SessionCounts, SessionInfo, SourceFacts, SESSIONS_LIMIT,
 };
-pub use schema::codes::{BlobVerifyState, VerifyOutcome};
+pub use schema::codes::{BlobVerifyState, Pass, QualifierBit, SessionState, VerifyOutcome};
 pub use schema::migrate::MigrationReport;
 pub use schema::{APPLICATION_ID, DECODER_VERSION, DERIVER_VERSION, SCHEMA_VERSION};
 pub use space::SpaceEstimate;

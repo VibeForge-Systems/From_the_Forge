@@ -103,7 +103,7 @@ pub fn report_dto(r: &ValidationReport, encrypted: bool) -> ValidationReportDto 
 /// [`PROGRESS_INTERVAL`] has passed and `done` has changed. One throttle
 /// serves both progress sources of a job (M3 §16.1): the backup crate's
 /// phases and the messages check's, which map one to one onto [`JobPhase`].
-struct Throttle<'a> {
+pub(crate) struct Throttle<'a> {
     job_id: &'a str,
     jobs: &'a Jobs,
     sink: &'a mut dyn JobEventSink,
@@ -112,8 +112,24 @@ struct Throttle<'a> {
     last_sent: Instant,
 }
 
-impl Throttle<'_> {
-    fn forward(&mut self, phase: JobPhase, done: u64, total: Option<u64>) {
+impl<'a> Throttle<'a> {
+    pub(crate) fn new(job_id: &'a str, jobs: &'a Jobs, sink: &'a mut dyn JobEventSink) -> Self {
+        Throttle {
+            job_id,
+            jobs,
+            sink,
+            last_phase: None,
+            last_done: 0,
+            last_sent: Instant::now(),
+        }
+    }
+
+    /// Send a non-progress event (the import's `importPreflight`).
+    pub(crate) fn send(&mut self, event: JobEvent) {
+        self.sink.send(event);
+    }
+
+    pub(crate) fn forward(&mut self, phase: JobPhase, done: u64, total: Option<u64>) {
         let phase_changed = self.last_phase != Some(phase);
         let due = self.last_sent.elapsed() >= PROGRESS_INTERVAL && done != self.last_done;
         if !(phase_changed || due) {
@@ -193,14 +209,7 @@ pub fn run(spec: JobSpec, jobs: &Jobs, sink: &mut dyn JobEventSink) {
     }
 
     let (ending, cleanup) = {
-        let mut throttle = Throttle {
-            job_id: &job_id,
-            jobs,
-            sink: &mut *sink,
-            last_phase: None,
-            last_done: 0,
-            last_sent: Instant::now(),
-        };
+        let mut throttle = Throttle::new(&job_id, jobs, &mut *sink);
         execute(
             kind,
             inspection,
@@ -306,7 +315,7 @@ pub fn run(spec: JobSpec, jobs: &Jobs, sink: &mut dyn JobEventSink) {
     sink.send(event);
 }
 
-fn nothing_staged() -> CleanupReport {
+pub(crate) fn nothing_staged() -> CleanupReport {
     CleanupReport {
         removed: true,
         attempts: 0,
@@ -353,6 +362,10 @@ fn execute(
     };
     let ending = match (kind, validated) {
         (_, Err(e)) => fail(e),
+        // Import and Verify jobs run in `archives::worker`, never here.
+        (JobKind::Import | JobKind::Verify, Ok(_)) => Ending::Failed(Failure::Backup(
+            BackupError::Internal("an archive job ran in the backup worker"),
+        )),
         (JobKind::Validate, Ok(report)) => Ending::Finished(Box::new(report), encrypted),
         (JobKind::ExtractionCheck, Ok(report)) if !report.importable() => {
             Ending::ExtractionFinished(
@@ -386,12 +399,28 @@ fn execute(
 pub fn spawn(
     spec: JobSpec,
     jobs: Arc<Jobs>,
-    mut sink: Box<dyn JobEventSink>,
+    sink: Box<dyn JobEventSink>,
     done: Sender<()>,
 ) -> std::io::Result<()> {
-    let name = format!("oma-{}", spec.job_id);
+    let job_id = spec.job_id.clone();
+    spawn_with(&job_id, jobs, sink, done, move |jobs, sink| {
+        run(spec, jobs, sink)
+    })
+}
+
+/// Start a worker thread named `oma-<job id>` running `work`, which must
+/// end by sending exactly one terminal event (backup jobs through [`run`],
+/// archive jobs through `archives::worker`).
+pub fn spawn_with(
+    job_id: &str,
+    jobs: Arc<Jobs>,
+    mut sink: Box<dyn JobEventSink>,
+    done: Sender<()>,
+    work: impl FnOnce(&Jobs, &mut dyn JobEventSink) + Send + 'static,
+) -> std::io::Result<()> {
+    let name = format!("oma-{job_id}");
     std::thread::Builder::new().name(name).spawn(move || {
-        run(spec, &jobs, sink.as_mut());
+        work(&jobs, sink.as_mut());
         drop(done);
     })?;
     Ok(())

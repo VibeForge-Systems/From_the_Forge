@@ -74,11 +74,11 @@ flowchart LR
 | Unit | Responsibility | State |
 |---|---|---|
 | `src/` | Vue 3 UI: views, Pinia stores, the typed IPC client, the shortcut registry, and the capability roadmap | M1, M2 (Backups page), M3 (extraction report) |
-| `src-tauri/` | Tauri shell. Holds IPC commands, application state, settings persistence, archive-location validation, the backup registry, job table and DTOs, and (M3) the report mapping and the panic hook. Contains no domain logic. | M1, M2, M3 |
+| `src-tauri/` | Tauri shell. Holds IPC commands, application state, settings persistence, archive-location validation, the backup registry, job table and DTOs, (M3) the report mapping and the panic hook, and (M4 slice 4l) the archive commands, the import gate and the import and verify jobs. Contains no domain logic. | M1, M2, M3, M4 (slice 4l) |
 | `crates/oma-fs` | Filesystem safety: filename sanitization, contained path resolution, and guards for backups, MobileSync, iMazing's default store and cloud sync. From M4: volume facts (`volume`: free space, network/virtualised/FAT detection), the Unix private-permission check (`perm::check_private`), and durable placement (`place`: `fsync_dir`, `create_dir_durable`, `place_noreplace`, `open_nofollow`). From slice 4d: `check_owned_unshared` (the library folder), `rename_dir_noreplace`, `create_new_private` and `total_space` | M1, M4 (slices 4a, 4d) |
 | `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them. From M4: `copy_file_to` streams one listed file's plaintext into a caller's writer, hashing it, under `Limits::attachment_bytes` and per-file stamps | ✔ M2, M3, M4 (slice 4b) |
 | `crates/oma-messages` | Scans and probes the sms.db schema by capability, streams typed records (handles, chats, the joins, messages, attachments, Recently Deleted links) as `Col<T>` values, decodes `attributedBody` with a clean-room typedstream decoder, and produces the aggregate `ExtractionReport`. Persists nothing. From M4: stable `KnownColumn` codes, raw values of unreadable cells (`raw_issues`), `payload_data` on request, the raw association columns, key-only passes and the storage class of text cells | ✔ M3, M4 (slice 4c) |
-| `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep; slices 4e–4j the import; slice 4k the report-only verifier and `open_blob`. Not yet used by the shell | M4 (slices 4d–4k; the shell follows) |
+| `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep; slices 4e–4j the import; slice 4k the report-only verifier and `open_blob`. Used by the shell since slice 4l | M4 (slices 4d–4l) |
 | `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX | planned, M6 |
 | `crates/oma-device` | Detects devices and creates backups behind a platform trait | planned, M7 |
 
@@ -131,6 +131,15 @@ converts between IPC types and library calls.
   key-based structural test walks every reachable DTO type (I7). Counters
   that are not recorded cross as `null`, never as 0 (I5), and integers
   outside ±(2⁵³ − 1) are clamped with a `saturated` flag.
+- **Archives (M4 slice 4l).** Six commands: `list_archives`,
+  `create_archive`, `get_archive_details`, `start_import`,
+  `confirm_import` and `verify_archive` (§"The archive commands and jobs"
+  below). They take archive ids (`a<32hex>`), backup ids, booleans, a
+  lineage number and an optional label; never a path. Two new job kinds,
+  `import` and `verify`, use the same channel and job table; the new
+  events are `importPreflight` (non-terminal), `importFinished` and
+  `verifyFinished`, each under 1 KiB, with reports and the preflight
+  fetched through `get_archive_details`.
 
 ## Settings
 
@@ -1150,7 +1159,8 @@ then runs finalize and writes the provenance file. Its outcome is
   **Decline writes nothing**: no write connection has been opened, and a
   test hashes the database, its `-wal`, `attachments/` and `imports/`
   before and after. A cancel while the gate waits is the same. The shell's
-  blocking gate with its 2-minute timeout is slice 4l; `ProceedWith` and
+  blocking gate with its 2-minute timeout came in slice 4l
+  (`src-tauri/src/archives/gate.rs`); `ProceedWith` and
   `ProceedWithSuggestion` are the fixed gates tests and tools use.
 - **What the preflight shows.** The resume plan: `Continue { session,
   lineage, from }` (the first pass not done, or `Finalize`) for an
@@ -1353,6 +1363,105 @@ owner decisions):
 - **The verify writes are not under the space guard.** They are one row
   and one small update per 512 blobs; a failure leaves `run: None`.
 
+### The archive commands and jobs (M4 slice 4l)
+
+The shell side of M4 (spec §15) lives in `src-tauri/src/archives/`
+(Tauri-free: listing, details, the gate, the workers, DTOs, sentences) and
+`src-tauri/src/commands/archives.rs` (the six commands, each wired through
+`generate_handler!`, `COMMANDS`, an `allow-<kebab>` grant and a wrapper in
+`src/services/ipc.ts`).
+
+| Command | Input (`deny_unknown_fields`) | Returns |
+|---|---|---|
+| `list_archives` | — | `ArchiveListingDto { entries, libraryState, libraryError }` |
+| `create_archive` | `{ label? }` (≤ 200 UTF-8 bytes, no control or bidi characters; empty means none), else `invalidInput` | `ArchiveSummaryDto` |
+| `get_archive_details` | `{ archiveId }` | `ArchiveDetailsDto`: summary, sessions, last import (state, stop reason, counts), last verify, active job, the preflight while the job waits, `resumable`, `matchingBackupIds` |
+| `start_import` | `{ backupId, archiveId, password?, options: { includeRecentlyDeleted, copyAttachments } }` and the channel | `JobStarted` |
+| `confirm_import` | `{ jobId, proceed, lineage?: { kind: "existing", lineageId } \| { kind: "new" } }` | `()`; `jobNotWaiting` when the job is not at the gate, `invalidInput` without a lineage or with one the preflight does not list |
+| `verify_archive` | `{ archiveId, depth: "quick" \| "full" }` and the channel | `JobStarted` |
+
+- **Jobs by subject (D73).** `ActiveJob` holds a `JobSubject` (a backup,
+  an archive, or both for an import). `reserve` answers `busy` when an
+  active job shares either, then applies the one slot (D7). An import's
+  reservation carries its `Gate`. Changing the archive location is refused
+  while any job runs (an archive is only open inside a job).
+- **The gate (D65).** `archives::gate::Gate` is a `Mutex` + `Condvar`;
+  its deadline comes from a `GateClock` (two minutes; tests inject a
+  clock and advance it), and the wait re-reads the clock and the cancel
+  token at least every 250 ms. The worker's `ImportGate` opens the gate,
+  publishes the preflight in the job table, sends `importPreflight` and
+  waits. `confirm_import`, `cancel_job` and the exit handler (which
+  cancels and wakes every gate, then waits up to 5 s) end the wait; every
+  ending but Proceed declines, and the crate writes nothing on Decline.
+- **The import job** (`archives::worker::run_import`): `prepare_job`'s
+  steps (re-inspect, the password, the location, the reservation,
+  `confirm_library_unchanged`) after a read-only look at the archive;
+  then the staging sweep, `Library::open` (read-only first, under the
+  lock), `OpenBackup::open` and validation, `Archive::import` with the
+  shell's gate, the backup's `close` (which removes the staging folder)
+  and the archive's `close`. Exactly one terminal event:
+  `importFinished` (`completed`, `stopped` with its reason, the
+  `cancelledAtGate` endings `declined`, `cancelled` and `timedOut`, and
+  `notImportable` with its reason and sentence), `cancelled` for a cancel
+  before the gate or during the passes, or `failed`.
+- **The verify job** (`run_verify`): `Library::open`, `Archive::verify`,
+  `close`; `verifyFinished { outcome, recorded }`.
+- **Phases.** `JobPhase` gains one phase per `ImportPhase` and three
+  verify phases (`verifyingDatabase`, `verifyingIndex`,
+  `verifyingFiles`, distinct from the validation phases). Both crate
+  enums are non-exhaustive: a phase this build does not know is not
+  forwarded, and a test pins every known one.
+- **The list** merges `ArchiveEntry::InUse` with the job table: an archive
+  this app is importing into or verifying shows `importing` or
+  `verifying`.
+- **DTOs** (`archives/dto.rs`) clamp every counter (with `saturated`),
+  send dates as Unix milliseconds, device facts as `modelDiffers`,
+  `nameDiffers` and `deviceMatches`, and have one free-text field,
+  `ArchiveSummaryDto.label`. A structural guard over the generated
+  declarations (shared with the Backups guard through
+  `src-tauri/src/ts_guard.rs`) fails on any other `string` field and on
+  keys such as `guid`, `digest`, `rank`, `rowid`, `cursor` or `path`.
+- **Error codes.** Sixteen new `ErrorCode`s, each with one fixed sentence
+  (`archives::messages`), mirrored in `services/ipc.ts`'s `ERROR_CODES`
+  (enforced by `src/types/error-codes-exhaustive.ts`); a test maps every
+  `ArchiveError` variant and every import outcome.
+- **The library additions.** `ArchiveReader::last_import` (the newest
+  session: state, lineage, counts, stop reason, provisional) and
+  `ArchiveReader::resume_matches`, which compares listed backups' Info.plist
+  device name, model and backup date (to the second) with the newest
+  unfinished session's source inside the crate, for
+  `matchingBackupIds`.
+
+**Readings and deviations this slice takes** (implementation readings, not
+owner decisions):
+
+- **`importPreflight` carries only the job id.** The preflight (up to
+  1,000 lineages) cannot be guaranteed under 1 KiB, so, as for the
+  extraction report (D47), it is fetched with `get_archive_details`,
+  which also re-shows it after a reload.
+- **The archive jobs run in `archives::worker`**, started through
+  `worker::spawn_with`, not inside `worker::run`; they keep its
+  guarantees (slot freed before the event, exactly one terminal event).
+- **`importFinished` carries more than §15.3 lists:** the gate ending,
+  the session number, the not-importable reason, and a `notice`
+  (`{ code, message }`) with the sentence for `stopped` and
+  `notImportable`. `plaintextRemoved` is `null` when no session ran.
+- **A refusal for space before the gate** (`ImportOutcome::InsufficientSpace`)
+  ends with `failed` and `insufficientSpace`; a validation that is not
+  importable ends with `importFinished` `notImportable`
+  (`backupNotImportable`).
+- **A verify cancelled before it starts** ends with `cancelled`; one
+  cancelled while it runs ends with `verifyFinished` `cancelled` (its run
+  is recorded).
+- **The verify's per-table foreign-key counts stay in the archive;** only
+  the total crosses, so no table name is a DTO string.
+- **An import job stores no validation report** in the backup's last
+  outcome (only its cleanup), so the Backups page keeps its own last
+  report.
+- **`matchingBackupIds` is a pre-selection** by device name, model and
+  Info.plist date; whether a session continues is still decided by the
+  crate's resume rules (content digest and framing).
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`
@@ -1457,7 +1566,7 @@ superseded by D22: sms.db is staged on disk.
 | D49 | Source values | `Col<T>` | `Option<T>` | M4 can tell "not recorded" from "NULL" from "bad" |
 | D50 | Lookup scope | Only `Library/SMS/Attachments/` and `StickerCache/` | Every `~/` and `/var/mobile` class | Never reaches non-Messages files; the other classes stay counts |
 
-### Milestone 4 decisions in force (slices 4d–4k)
+### Milestone 4 decisions in force (slices 4d–4l)
 
 The full M4 decision list (D51–D88) lands with the M4 documentation slice.
 These are the ones the archive skeleton and the import core already
@@ -1484,9 +1593,10 @@ owner's confirmation.
 | D62 | FTS | External content over `message_body.display_text`, unicode61 `remove_diacritics 2`, `detail=full`, guarded triggers, every version indexed, `secure-delete` | Writes from Rust; trigram now | Snippets, rebuild and drift checks; CJK limits stated |
 | D63 | Transactions | `IMMEDIATE` batches (1,000 rows / 32 MiB / 2 s), a savepoint per record, the importer's own cursor, `synchronous=FULL` | Per-row transactions | Durable and resumable at batch granularity |
 | D64 | Resume binding | Digest and framing, versions, read profile, options and lineage; otherwise supersede | Resume across any change | One rule set per session |
-| D65 | Confirmation | A gate inside the import job (`ImportGate`), after every preflight read and before the first write; Decline writes nothing | Two jobs | One staging and one password, versus a longer plaintext window (disclosed) |
-| D69 | Verifier (roadmap: a lean **awaiting the owner's confirmation**) | The library verifier ships in M4, report-only, quick and full (slice 4k); the job and its sentence per finding are the shell's (4l, 4m); repair stays in M8 | All verification in M8 | The M4 brief asks for integrity checks; nothing is repaired before M8 |
+| D65 | Confirmation | A gate inside the import job (`ImportGate`), after every preflight read and before the first write; the shell waits for `confirm_import` at most two minutes; Decline, cancel, exit and the timeout write nothing | Two jobs | One staging and one password, versus a longer plaintext window (disclosed) |
+| D69 | Verifier (roadmap: a lean **awaiting the owner's confirmation**) | The library verifier ships in M4, report-only, quick and full (slice 4k); the verify job is the shell's (4l) and its sentence per finding the UI's (4m); repair stays in M8 | All verification in M8 | The M4 brief asks for integrity checks; nothing is repaired before M8 |
 | D70 | Provenance file (product fields: a lean **awaiting the owner's confirmation**) | `imports/session-<n>.json`, content-free, best effort, written at each terminal state; it includes the product type and version | A full copy of the session row | Survives database damage without personal data |
+| D73 | Jobs | `reserve` by subject (backup, archive or both); `Import` and `Verify` kinds; one job at a time (D7) | Key jobs by backup only | An archive can never be double-booked |
 | D74 | Staged sms.db lifetime | The whole import, the gate and P6 included; removed after P8, before finalize | Re-stage per pass | One copy, versus a longer plaintext window (disclosed) |
 | D80 | Lineage | The user picks an existing lineage or a new one at the gate, with a suggestion and boolean device evidence; only the chosen lineage continues an unfinished session | Infer from device fields | No silent identity claim |
 | D81 | Rank | (dated, bounded date, content digest), memcmp-compared; undated below dated | Session id as tie-break | Order independence; no host-clock wins |

@@ -175,9 +175,10 @@ antivirus) applies to it as well. In addition:
 
 ## The archive (M4): decisions already taken
 
-Milestone 4 is in progress: the import is not reachable from the app yet,
-and this section lists only the decisions the owner has confirmed (on
-2026-10-18). The full write-up of what an archive holds comes with the
+Milestone 4 is in progress: since slice 4l the import and the verify run
+as jobs behind IPC commands, but no page offers them yet (slice 4m), and
+this section lists only the decisions the owner has confirmed (on
+2026-10-18) and what is implemented. The full write-up of what an archive holds comes with the
 milestone's documentation.
 
 - **Recently Deleted (D60).** Messages that are only in Recently Deleted
@@ -207,7 +208,7 @@ milestone's documentation.
   `message_summary_info` and `payload_data` bytes of each message (poll,
   app and link payloads included), within fixed size caps, so a newer
   version of the app can decode them again without the backup.
-- **Attachment files (implemented, not yet reachable from the app).** An
+- **Attachment files (implemented; reachable over IPC, no page yet).** An
   import copies each attachment file it finds in the backup into the
   archive's `attachments/` folder **as plaintext**, decrypted when the
   backup is encrypted (archive encryption is M8). Each file is named only
@@ -227,11 +228,11 @@ milestone's documentation.
   shows which device facts match earlier imports and you choose whether it
   is the same phone. The device name, model, iOS version and build are
   stored exactly as the backup records them. At the confirmation step
-  (implemented, not yet reachable from the app) the comparison is shown
+  (implemented; reachable over IPC, no page yet) the comparison is shown
   only as "matches" or "differs" for the model and the name; the values
   themselves are not passed out of the archive library.
-- **Import records (`imports/session-<n>.json`; implemented, not yet
-  reachable from the app).** Each import writes a small file per import
+- **Import records (`imports/session-<n>.json`; implemented; reachable
+  over IPC, no page yet).** Each import writes a small file per import
   session into the archive's `imports/` folder (0600 on Unix) when it
   completes, is cancelled, stops or fails, so the import history survives
   damage to the database. It holds the app and schema versions, the
@@ -243,7 +244,7 @@ milestone's documentation.
   address, GUID, content digest, backup date or path, and no archive
   label. Including the model and iOS version follows the spec's lean
   (D70), which still awaits the owner's confirmation.
-- **Integrity checks (implemented, not yet reachable from the app).** A
+- **Integrity checks (implemented; reachable over IPC, no page yet).** A
   verify reads the archive's database, every attachment file (a full
   verify reads each one to the end to re-hash it) and every
   `imports/` file, and changes none of them: it repairs, deletes and
@@ -256,7 +257,21 @@ milestone's documentation.
   the decrypted copy of sms.db in the library's staging folder lives from
   staging through the confirmation step and every pass, including the
   attachment copy, and is deleted after the last pass, before the archive
-  is finalized. A crash leaves it until the next staging sweep.
+  is finalized. A crash leaves it until the next staging sweep. The
+  confirmation step waits **at most two minutes**; declining, cancelling,
+  quitting the app or letting it time out writes nothing to the archive
+  and deletes the copy with the rest of the staging folder.
+- **The import and verify jobs (slice 4l).** `start_import` carries the
+  backup password exactly as the backup checks do ("Backup passwords"
+  above): it is zeroized in Rust and used once. The confirmation step
+  shows counts, closed kinds, booleans and dates only: device facts are
+  "matches" or "differs", never the values. `get_archive_details` returns
+  the archive's counts, states and dates, its sessions and its last
+  import and verify, and the archive's label (your own text); to
+  pre-select the backup an unfinished import came from it compares, inside
+  the archive library, the listed backups' device name, model and backup
+  date with the ones the archive stored, and returns only backup ids. The
+  logs record job ids, kinds and outcomes, never an archive id or label.
 
 ## Device identifiers (M2)
 

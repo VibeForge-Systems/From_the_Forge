@@ -16,7 +16,7 @@ const LABEL: Record<JobPhase, string> = {
   checkingFiles: 'Checking file records',
   checkingMessagesDb: 'Checking the Messages database',
   extracting: 'Extracting a file',
-  // The archive import (M4); counted in bytes.
+  // The archive import (M4); counted in attachment rows.
   copyingAttachments: 'Copying attachments',
   // The extraction check (M3 §17.3).
   stagingMessagesDb: 'Copying the Messages database',
@@ -29,6 +29,25 @@ const LABEL: Record<JobPhase, string> = {
   readingMessages: 'Reading messages',
   checkingAttachments: 'Checking attachments',
   summarising: 'Summarising',
+  // The import (M4 §8.12).
+  scanningRecentlyDeleted: 'Checking Recently Deleted',
+  scanningKeys: 'Checking message identifiers',
+  estimatingAttachments: 'Estimating the space needed',
+  awaitingConfirmation: 'Waiting for your confirmation',
+  preparingArchive: 'Preparing the archive',
+  importingHandles: 'Importing addresses',
+  importingChats: 'Importing chats',
+  importingMessages: 'Importing messages',
+  importingChatLinks: 'Importing chat links',
+  importingAttachmentLinks: 'Linking attachments',
+  importingRecentlyDeleted: 'Marking Recently Deleted messages',
+  finalizing: 'Finishing the import',
+  optimizingIndex: 'Optimising the search index',
+  checkpointing: 'Saving the archive',
+  // The verify (M4 §11).
+  verifyingDatabase: 'Checking the archive database',
+  verifyingIndex: 'Checking the search index',
+  verifyingFiles: 'Checking attachment files',
 };
 
 /** Phases whose `done` and `total` count items; the copy counts bytes. */
@@ -41,6 +60,13 @@ const COUNTED: ReadonlySet<JobPhase> = new Set<JobPhase>([
   'readingMessages',
   'checkingAttachments',
   'summarising',
+  'importingHandles',
+  'importingChats',
+  'importingMessages',
+  'importingChatLinks',
+  'copyingAttachments',
+  'importingAttachmentLinks',
+  'importingRecentlyDeleted',
 ]);
 
 const MIB = 1024 * 1024;

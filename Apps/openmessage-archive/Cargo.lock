@@ -2623,6 +2623,7 @@ name = "openmessage-archive"
 version = "0.1.0"
 dependencies = [
  "dunce",
+ "oma-archive",
  "oma-backup",
  "oma-fs",
  "oma-messages",

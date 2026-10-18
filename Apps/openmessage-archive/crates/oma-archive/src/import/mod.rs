@@ -44,7 +44,7 @@
 //! space and bounds `max_page_count`; a shortfall, or `SQLITE_FULL`, stops
 //! the session in a resumable state (6).
 //!
-//! The shell does not call this yet (slice 4l).
+//! The shell runs it in its import job (`src-tauri/src/archives/worker.rs`).
 
 mod attachments;
 mod batch;

@@ -373,6 +373,15 @@ Slice 4k (same container and method):
 | of which `resume.rs` | 6.0 s |
 | of which `verify.rs` (11 tests, one writes 10,001 files) | 2.1 s |
 
+Slice 4l (same container and method):
+
+| What | Time |
+|---|---|
+| `cargo test --workspace`, wall clock | 68 s |
+| Sum of all test binaries' run times | 65.1 s |
+| The shell's unit tests (240, the archive jobs over the import catalogue included) | 0.6 s |
+| The shell's `log_hygiene.rs` (now also an import and a full verify of every import catalogue entry) | 2.4 s |
+
 `tests/perf.rs` is ignored and not counted.
 
 All of `oma-archive` is M4 test time, so slice 4f is well inside the
