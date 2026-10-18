@@ -8,7 +8,9 @@ use std::fs;
 
 use common::*;
 use oma_archive::hooks::{install, Faults};
-use oma_archive::{ArchiveEntry, ArchiveError, ArchiveId, DamageKind, PermProblem, RefusalKind};
+#[cfg(unix)]
+use oma_archive::RefusalKind;
+use oma_archive::{ArchiveEntry, ArchiveError, ArchiveId, DamageKind, PermProblem};
 
 #[test]
 fn ids_with_separators_or_traversal_never_reach_the_file_system() {
