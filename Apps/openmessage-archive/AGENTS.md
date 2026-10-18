@@ -18,16 +18,25 @@ Work proceeds in milestones; the table and current state are in
 [`README.md`](README.md#roadmap). **Milestone 1 (the shell, settings and
 archive location) is done.** **Milestone 2 (backup discovery and
 validation) is implemented**: `crates/oma-backup`, the Backups page, six IPC
-commands and a channel-based job model. Its sign-off is pending the Windows
-CI run, the recorded review of the fixture generator, and the manual tests
-in `docs/compatibility.md`. Milestone 3 (extraction) is next.
+commands and a channel-based job model. Its sign-off is pending the
+recorded review of the fixture generator and the manual tests in
+`docs/compatibility.md`. **Milestone 3 (the extraction check) is
+implemented**: `crates/oma-messages` (schema probe, typed record passes, a
+clean-room typedstream decoder, the aggregate `ExtractionReport`), the
+`check_extraction` command and the report on the Backups page. It shows
+counts only and persists nothing. Its sign-off is pending CI on
+`ubuntu-22.04` and `windows-2022`, the clean-room review of the typedstream
+decoder and the fixture generators (`scripts/fixtures/PROVENANCE.md`), and
+the manual checklist in `docs/compatibility.md`. Milestone 4 (the archive
+database and import) is next.
 
 Read these before designing anything:
 
 | Doc | Read it for |
 |---|---|
-| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the planned crates, the IPC boundary, and key decisions |
-| [`docs/supported-formats.md`](docs/supported-formats.md) | Sourced research on the backup format, encryption, the sms.db schema through iOS 27, and device tooling. Items marked **UNVERIFIED** are hypotheses, not facts. |
+| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, and the decision records (D1–D50; D43 is how "do not fabricate" is read for the check) |
+| [`docs/supported-formats.md`](docs/supported-formats.md) | Sourced research on the backup format, encryption, the sms.db schema (columns with sources, timestamps, codes, typedstream) and device tooling. Items marked **UNVERIFIED** are hypotheses, not facts. |
+| [`docs/privacy.md`](docs/privacy.md) | What is copied, where and for how long, including the extraction check's plaintext copy of sms.db |
 | [`docs/compatibility.md`](docs/compatibility.md) | What has actually been tested |
 | [`docs/development.md`](docs/development.md) | Setup and every command |
 
@@ -103,8 +112,8 @@ Each one is enforced in code. Keep it that way.
 ## Where code goes
 
 - **Domain logic belongs in `crates/`.** `src-tauri/` stays a thin layer of
-  IPC commands and state. `oma-fs` and `oma-backup` (M2) are implemented;
-  the planned crates are `oma-messages` (M3), `oma-archive` (M4),
+  IPC commands and state. `oma-fs`, `oma-backup` (M2) and `oma-messages`
+  (M3) are implemented; the planned crates are `oma-archive` (M4),
   `oma-export` (M6) and `oma-device` (M7). Each must build and test without
   Tauri. The shell's `src-tauri/src/backups/` (registry, job table, worker,
   DTOs, messages) has no Tauri types either, so it is tested without a
@@ -198,6 +207,36 @@ Never hand-edit generated files.
   reports it when the dialog was meant to be open, so a stale event cannot
   close a dialog that was reopened in the meantime (the password dialog
   reopens immediately on a wrong password).
+- **`StagedConnection::conn()` is crate-private; the authorizer is the
+  read-only guard.** Staged sms.db connections are opened with an
+  authorizer that allows only reads, with DQS, triggers and views off, and
+  with op budgets (`with_op_budget`) on any statement whose cost grows with
+  the data. Do not add a way to reach the raw `rusqlite::Connection` from
+  outside `oma-backup`, and do not run an unbounded statement without a
+  budget. The end-of-check `total_changes() == 0` assertion is a check,
+  not the guard.
+- **`recoverable_message_part.part_text` is denied.** It holds deleted
+  message content. The authorizer refuses any statement that reads it; M3
+  only counts that table's rows. Never name its columns in SQL.
+- **Content types are `Redacted`, source fields are `Col<T>`.** Every
+  value read from sms.db is a `Col<T>` (absent, NULL, unreadable,
+  oversized, or the value), so "not recorded" stays distinct from NULL and
+  from 0. Content and identifiers are `Redacted<SqlText>` or
+  `Redacted<RawBlob>`: `Debug` prints only a length, and there is no
+  `Display` or `Serialize`. Read them with `expose()` and never log the
+  result. A report counter that depends on an optional column is
+  `Option<u64>`; never turn `None` into 0.
+- **Fixture generators refuse a different SQLite version.**
+  `make_synthetic_messages.py` writes only under the reference
+  `sqlite3` 3.45.1 (Python 3.13.16), unless `--allow-other-sqlite` is
+  passed, because SQLite file bytes depend on the version. Regenerate the
+  M3 catalogues only in that environment, and never change a byte of
+  `tests/fixtures/backups/` (its `SHA256SUMS` must stay
+  `c8e3d0bf…a0ae3`). The messages catalogue's `README.md` is generated;
+  do not edit it by hand.
+- **No `#[tracing::instrument]` without `skip_all`** in `oma-messages` or
+  `src-tauri`: it formats every argument with `Debug`.
+  `crates/oma-messages/tests/source_rules.rs` enforces this for that crate.
 - **Headless smoke testing works**, using `xvfb-run` with
   `WEBKIT_DISABLE_DMABUF_RENDERER=1` and `XDG_CONFIG_HOME` pointed at a
   scratch directory. However, the GTK folder picker cannot list directories

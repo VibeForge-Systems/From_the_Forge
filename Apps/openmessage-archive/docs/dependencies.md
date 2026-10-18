@@ -40,10 +40,14 @@ Two automated audits enforce the license policy:
 | rusqlite | 0.40.2 | MIT | Read-only access to staged copies of Manifest.db and (M3) sms.db. Features `bundled` (compiles SQLite 3.53.2, public-domain C source, through libsqlite3-sys 0.38.2, MIT), `limits` (`Connection::set_limit`) and `hooks` (the authorizer and progress handler that guard staged sms.db connections). `limits` and `hooks` are empty features that add no crates. `cache` (statement cache) stays off, because it adds `hashlink` |
 | pbkdf2 (dev only) | 0.13.0 | MIT OR Apache-2.0 | Differential tests against the in-crate PBKDF2; never linked into the app |
 
-`tracing-subscriber` (above) is also a dev-dependency of `oma-backup`, for
-its log-hygiene test. The shell (`src-tauri`) depends on the workspace crate
-`oma-backup` from M2; that adds no third-party crate beyond the list above.
-No JavaScript dependency was added in M2: `Channel` comes from
+`tracing-subscriber` (above) is also a dev-dependency of `oma-backup` and
+`oma-messages`, for their log-hygiene tests. The shell (`src-tauri`) depends
+on the workspace crates `oma-backup` (from M2) and `oma-messages` (from M3);
+neither adds a third-party crate beyond the list above. `oma-messages`
+depends only on crates already listed (`rusqlite`, `sha2`, `thiserror`,
+`tracing`, `zeroize`) and on the workspace crates `oma-backup` and
+`oma-fs`; its typedstream decoder is our own code, not a dependency. No
+JavaScript dependency was added in M2 or M3: `Channel` comes from
 `@tauri-apps/api` 2.12.4, which was already a dependency.
 
 The RustCrypto crates resolve to one `cipher` (0.5.2), one `digest` (0.11.3)
@@ -105,14 +109,22 @@ correct because Bootstrap's JavaScript is not used.
 ### Dev-only Python tooling
 
 Used only to generate and check the synthetic test fixtures in
-`tests/fixtures/backups/`. Nothing here is shipped, and CI runs no Python:
-the generated files are committed and checked by `SHA256SUMS`.
+`tests/fixtures/backups/`, `tests/fixtures/messages/` and
+`tests/fixtures/typedstream/`. Nothing here is shipped, and CI runs no
+Python: the generated files are committed and checked by `SHA256SUMS`.
+`make_synthetic_messages.py` needs only `requirements.txt`, and
+`make_synthetic_typedstream.py` only the standard library.
 
 | Package | Version | License | Use |
 |---|---|---|---|
 | cryptography | 50.0.2 | Apache-2.0 OR BSD-3-Clause | AES, key wrap and padding in `scripts/fixtures/make_synthetic_backups.py` (pinned in `scripts/fixtures/requirements.txt`) |
 | iphone_backup_decrypt | 0.11.2 | MIT | Independent oracle, run by hand through `scripts/fixtures/verify_with_oracle.py`. Used as a black box; not distributed and not ported. Pinned in `scripts/fixtures/requirements-oracle.txt` |
 | pycryptodome | 4.0.1 | BSD-2-Clause AND Unlicense | The oracle's own dependency (`Requires-Dist: pycryptodome>=3.23.0`); it performs the oracle's AES. Pinned in `scripts/fixtures/requirements-oracle.txt` at the version the recorded oracle run used |
+| pytypedstream | 0.1.0 | **LGPL-3.0-or-later** | Black-box oracle for the typedstream vectors (M3 oracle run 2), run as a subprocess through `scripts/fixtures/verify_typedstream_with_oracle.py` in its own virtual environment. Never imported by our code, never shipped, not run in CI. Pinned with its wheel hash in `scripts/fixtures/requirements-oracle-typedstream.txt` |
+
+Oracle runs 3 and 4 (M3) also use the imessage-exporter 4.3.0 release
+binary (GPL-3.0) as a black box from a scratch directory. It is not a
+dependency of anything here, and no wrapper for it is committed.
 
 ## System and platform components
 
@@ -142,6 +154,8 @@ them locally, is fine. See [supported-formats.md](supported-formats.md).
 | pyiosbackup | GPL-3.0 |
 | libimobiledevice (including `idevicebackup2`) | LGPL-2.1+ |
 | StackOverflow answer 13793043 (backup decryption) | CC BY-SA (the version depends on the revision date; not checked) |
+| pytypedstream (typedstream; black-box oracle only) | LGPL-3.0-or-later |
+| ChatExportKnowledge (sms.db facts, restated with attribution) | CC BY 4.0 |
 | heic (imazen) | AGPL-3.0 |
 
 ## Upgrade log

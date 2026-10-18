@@ -25,19 +25,27 @@ pass every test here. Nothing in milestone 2 has been run against a backup
 made by Apple Devices, iTunes, Finder or `idevicebackup2` from a real
 iPhone.
 
-Last updated: Milestone 2 (2026-10-18).
+**The same holds for milestone 3.** The extraction check has been run only
+against the synthetic messages catalogue in `tests/fixtures/messages/`,
+which is generated from our own reading of the sms.db format, and against
+two third-party sample databases (oracle run 4), both of which are macOS
+`chat.db` files, not iOS sms.db. No backup made from a real iPhone has been
+checked, so every real backup is reported with "This iOS version has not
+been tested". No column profile in the catalogue is an iOS version.
+
+Last updated: Milestone 3 (2026-10-18).
 
 ## Operating systems
 
-| Platform | Shell and settings (M1) | Backup discovery and validation (M2) | Direct device backup (M7) | Notes |
-|---|---|---|---|---|
-| Windows 11 x64 | CI | CI (synthetic fixtures only; windows-2022 runner, [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)). Default-location discovery: **Untested** until run on Windows 11. | Planned | Needs WebView2, which ships with Windows 11. CI builds bundled SQLite with MSVC and runs the Windows-only tests (junctions, a ~200-character library path). That long-path test found that bundled SQLite's default VFS cannot open a staged copy beyond MAX_PATH; staged databases are now opened through the `win32-longpath` VFS. Direct backup will need Apple's Mobile Device Service (Apple Devices app or iTunes). |
-| Windows 11 ARM64 | Untested | Untested | Planned | Not built in CI yet |
-| Ubuntu 22.04 x64 | CI | CI (synthetic fixtures only; [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)) | Planned | CI build baseline, which sets the glibc floor. Needs `libwebkit2gtk-4.1-0`. |
-| Ubuntu 24.04 x64 | Supported (built and unit-tested during M1 development) | Local run only (synthetic fixtures only): `cargo test --workspace` and `npm test` passed in an Ubuntu 24.04.5 LTS container on 2026-10-18. Not CI, not a desktop. | Planned | Ships libimobiledevice 1.3.0, which is old. M7 will not depend on it. |
-| Ubuntu 26.04.1 LTS x64 | **Supported** (built from source with `npm run tauri dev`, every M1 check done by hand on a real desktop, a QEMU VM; 2026-10-17/18) | Untested on a real desktop (see the headless smoke test below) | Planned | First manual run anywhere. The native picker chose an ordinary folder. A folder laid out like a backup (`Manifest.db` + `Info.plist`) was refused with the reason shown, and the previous location was kept. The choice survived a restart. Ships libimobiledevice 1.4.0. |
-| Debian 12, Fedora 40+ | Untested | Untested | Planned | Need WebKitGTK 4.1 |
-| macOS | Unsupported for now | — | — | The architecture keeps platform code behind interfaces so it can be added later |
+| Platform | Shell and settings (M1) | Backup discovery and validation (M2) | Extraction check (M3) | Direct device backup (M7) | Notes |
+|---|---|---|---|---|---|
+| Windows 11 x64 | CI | CI (synthetic fixtures only; windows-2022 runner, [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)). Default-location discovery: **Untested** until run on Windows 11. | **Not yet run on Windows at all**: CI has not run the milestone 3 branch on windows-2022, and nobody has run it on Windows 11 | Planned | Needs WebView2, which ships with Windows 11. CI builds bundled SQLite with MSVC and runs the Windows-only tests (junctions, a ~200-character library path). That long-path test found that bundled SQLite's default VFS cannot open a staged copy beyond MAX_PATH; staged databases are now opened through the `win32-longpath` VFS. Direct backup will need Apple's Mobile Device Service (Apple Devices app or iTunes). |
+| Windows 11 ARM64 | Untested | Untested | Untested | Planned | Not built in CI yet |
+| Ubuntu 22.04 x64 | CI | CI (synthetic fixtures only; [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)) | CI has not run the milestone 3 branch yet | Planned | CI build baseline, which sets the glibc floor. Needs `libwebkit2gtk-4.1-0`. |
+| Ubuntu 24.04 x64 | Supported (built and unit-tested during M1 development) | Local run only (synthetic fixtures only): `cargo test --workspace` and `npm test` passed in an Ubuntu 24.04.5 LTS container on 2026-10-18. Not CI, not a desktop. | Local run only (synthetic fixtures only): `cargo test --workspace`, `npm test`, `npm run typecheck`, clippy, `cargo deny check` and `npm run licenses` passed in an Ubuntu 24.04.5 LTS container on 2026-10-18, plus the headless smoke test below. Not CI, not a desktop. | Planned | Ships libimobiledevice 1.3.0, which is old. M7 will not depend on it. |
+| Ubuntu 26.04.1 LTS x64 | **Supported** (built from source with `npm run tauri dev`, every M1 check done by hand on a real desktop, a QEMU VM; 2026-10-17/18) | Untested on a real desktop (see the headless smoke test below) | Untested on a real desktop | Planned | First manual run anywhere. The native picker chose an ordinary folder. A folder laid out like a backup (`Manifest.db` + `Info.plist`) was refused with the reason shown, and the previous location was kept. The choice survived a restart. Ships libimobiledevice 1.4.0. |
+| Debian 12, Fedora 40+ | Untested | Untested | Untested | Planned | Need WebKitGTK 4.1 |
+| macOS | Unsupported for now | — | — | — | The architecture keeps platform code behind interfaces so it can be added later |
 
 "Supported (built and unit-tested)" on Ubuntu 24.04 means the release build,
 all unit tests, and the `.deb` bundle succeeded.
@@ -79,6 +87,55 @@ This exercises the CSP, the capability grants and the channel wiring. It is
 not a manual test on a real desktop, and it does not cover the folder
 picker. The manual checklist below has not been run.
 
+### Milestone 3 headless smoke test (Linux container, not a desktop)
+
+On 2026-10-18 the release binary of the milestone 3 branch, built with
+`npx tauri build --no-bundle`, ran under Xvfb (1360×860) in an Ubuntu
+24.04.5 LTS container, with `WEBKIT_DISABLE_DMABUF_RENDERER=1`,
+`WEBKIT_DISABLE_COMPOSITING_MODE=1`, `LIBGL_ALWAYS_SOFTWARE=1` and
+`OMA_LOG=debug`, driven with `xdotool`. As for M2, `settings.json` was
+pre-written with an archive folder and one added parent folder, because the
+GTK folder picker cannot list directories without D-Bus. The parent folder
+held scratch copies of five catalogue entries (`msgs-corrupt-plain`,
+`msgs-full-enc`, `msgs-full-plain`, `msgs-vtab-plain`, `msgs-wal-plain`),
+each moved up one level so that the backup folder sat directly in the
+parent. Observed:
+
+- The Backups page listed five backups (four Ready to check, one
+  Encrypted). Each showed **Run extraction check** (**Unlock and run
+  extraction check…** for the encrypted one), and **Import messages**
+  disabled with the badge "Planned · M4".
+- `msgs-full-plain`: "Messages can be read from this backup, with these
+  limits", listing "This iOS version has not been tested" and "1 column this
+  version does not understand". Message rows 33, chat rows 3, addresses
+  (handle rows) 5, attachment rows 5, messages in no chat 2, and a date
+  range; these counts equal the generator's model in
+  `msgs-full-plain.expected/report.json`. The report said the temporary
+  copy was deleted straight after reading.
+- `msgs-full-enc`: a wrong password reopened the password dialog with the
+  error; the right password ran the extraction check and gave the same
+  report as `msgs-full-plain`. **Observed wording problem:** the password
+  dialog's button reads "Unlock and validate" even when it runs the
+  extraction check (the log confirms the extraction check ran).
+- `msgs-corrupt-plain`: "This Messages database is damaged (its integrity
+  check failed). Nothing was read from it."
+- `msgs-vtab-plain`: "This Messages database has a layout this version
+  does not support", with "It contains a virtual table, which this version
+  does not read"; integrity "Not run".
+- `msgs-wal-plain`: readable, with only the untested-iOS qualifier; 7
+  message rows (the model's count), and "The pending-changes file (-wal)
+  was copied with the database".
+- After every check, `.oma-staging` in the archive folder was empty, and
+  the log reported `plaintext_removed=true` and `staging removed`. A grep
+  of the debug log for the fixtures' sentinel strings (`SYNTH`,
+  `example.invalid`, `+1555`) found nothing.
+
+This exercises the new IPC command, its capability grant, the
+`extractionFinished` event and the report fetch in the real webview. It is
+not a manual test on a real desktop, it did not observe the staged sms.db
+while it existed (each check took a few milliseconds), and it does not
+replace the manual checklist for milestone 3 below, which has not been run.
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI
@@ -87,28 +144,33 @@ generated stand-ins.
 
 ### Synthetic fixtures
 
-| Backup kind | Backup discovery and validation (M2) | Messages extraction (M3) |
-|---|---|---|
-Every row in this table passed in CI on Ubuntu 22.04 and Windows (windows-2022)
-in [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524), and locally in an Ubuntu 24.04.5 LTS container (2026-10-18). All of it
-is against synthetic fixtures; none of it is a real-device test.
+Every M2 cell in this table passed in CI on Ubuntu 22.04 and Windows
+(windows-2022) in [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524),
+and locally in an Ubuntu 24.04.5 LTS container (2026-10-18). The M3 cells
+have run **locally only**, in the same container; CI has not run them on
+either runner yet. All of it is against synthetic fixtures; none of it is a
+real-device test.
 
-| Backup kind | Backup discovery and validation (M2) | Messages extraction (M3) |
+| Backup kind | Backup discovery and validation (M2) | Extraction check (M3) |
 |---|---|---|
-| Format 3.x, unencrypted (binary and XML plists; WAL-mode Manifest.db) | CI (synthetic fixtures only, not real-device tested) | Planned |
-| Format 3.x, encrypted (two-stage PBKDF2 keybag; three EncryptionKey shapes, two of them Rust-only and UNVERIFIED) | CI (synthetic fixtures only, not real-device tested) | Planned |
+| Format 3.x, unencrypted (binary and XML plists; WAL-mode Manifest.db) | CI (synthetic fixtures only, not real-device tested) | Local run only (synthetic messages catalogue: five column profiles, scrambled, minimal, resume, WAL, hostile, damaged and unsupported entries; see "Messages catalogue" below) |
+| Format 3.x, encrypted (two-stage PBKDF2 keybag; three EncryptionKey shapes, two of them Rust-only and UNVERIFIED) | CI (synthetic fixtures only, not real-device tested) | Local run only (synthetic: `msgs-full-enc`, `msgs-attachments-enc`, `msgs-wal-enc`; decryption cross-checked by oracle run 1) |
 | Format 2.4 (`Manifest.mbdb`) | Detected and reported as unsupported (CI, synthetic stub) | — |
 | Incomplete (`SnapshotState` ≠ `finished`, or no Status.plist) | Detected and reported (CI, synthetic stub) | — |
 | Hostile inputs (plist reference bombs, oversized records, hostile iteration counts, truncated keybags, bad padding, symlinked blobs, hostile path names) | Refused or counted as specified (CI, synthetic fixtures) | — |
 
 ### Real backup (manual)
 
-| iOS | Backup format | Unencrypted | Encrypted | Messages extraction |
+| iOS | Backup format | Unencrypted | Encrypted | Extraction check (M3) |
 |---|---|---|---|---|
 | ≤ 9 | 2.4 (`Manifest.mbdb`) | Unsupported (detection tested on a synthetic stub only) | Unsupported | — |
-| 10 – 16 | 3.x (`Manifest.db`) | Untested | Untested | Planned (M3) |
-| 17 – 18 | 3.x | Untested | Untested | Planned (M3); RCS service from iOS 18 |
-| 26 – 27 | 3.x | Untested | Untested | Planned (M3); schema to be verified against real data |
+| 10 – 16 | 3.x (`Manifest.db`) | Untested | Untested | Untested |
+| 17 – 18 | 3.x | Untested | Untested | Untested; RCS service from iOS 18 |
+| 26 – 27 | 3.x | Untested | Untested | Untested; schema to be verified against real data |
+
+The extraction check is implemented, but it has not been run on any real
+backup, so every cell in the last column is Untested. Importing messages
+into an archive is milestone 4.
 
 A row changes only when a manual run is recorded here with the iOS version,
 the device model, how the backup was made, and the operating system.
@@ -234,6 +296,63 @@ data; real-backup timing, memory and sizes remain UNVERIFIED.**
 No aggregate went over its op budget. Peak RSS is the whole test process,
 including building the database. Release-mode and Windows runs are not yet
 recorded.
+
+## Manual checklist for milestone 3 (not yet run)
+
+Record each run here only once it has actually been done, with the date,
+the operating system and, for a real backup, the iOS version, the device
+model and how the backup was made. The milestone 2 checklist below is still
+open as well.
+
+**Linux (Ubuntu 26.04.1, real desktop):**
+
+1. Add a parent folder holding copies of `msgs-full-plain`,
+   `msgs-full-enc`, `msgs-wal-plain`, `msgs-attachments-enc`,
+   `msgs-corrupt-plain`, `msgs-vtab-plain` and `msgs-unsupported-plain`,
+   taken out of the repository (move each backup folder up one level).
+2. Run the extraction check on each. Confirm the outcome and its
+   qualifiers match `<name>.expected/report.json`, that every qualifier has
+   its own sentence, and that a count the database does not record reads
+   "not recorded", never 0.
+3. On `msgs-full-enc`, enter a wrong password, then the right one. Confirm
+   the dialog's wording for the extraction check (the headless run saw
+   "Unlock and validate").
+4. Cancel a check during each phase you can catch (use a larger synthetic
+   database, such as the one `perf_synthetic_large` builds, wrapped in a
+   backup), and confirm `.oma-staging` is empty afterwards.
+5. While a check runs on a large database, list
+   `<archive>/.oma-staging/s*/db/` and confirm the staged `sms.db` is there
+   with mode 0600 in a 0700 directory; confirm it is gone when the check
+   ends.
+6. Kill the app (`kill -9`) while a check on a large database is reading
+   rows. Confirm the plaintext copy is still on disk, then start the app
+   again after 5 minutes and confirm the sweep removed it.
+7. Confirm that no message text, address, chat name, GUID or file name
+   appears in the window, and none in the log with `OMA_LOG=debug`.
+
+**Windows 11:** the same steps, plus:
+
+- **Staging removal with Defender active.** With real-time protection on,
+  run the check on `msgs-full-enc` several times and confirm `.oma-staging`
+  is empty afterwards and the report says the copy was deleted. Record any
+  retry or failure to remove.
+- **File attributes.** While a check runs on a large database, confirm the
+  staged `sms.db` and `sms.db-wal` carry the temporary and
+  not-content-indexed attributes (`attrib` or `Get-Item … | Select
+  Attributes`).
+- **WAL on Windows.** Confirm `msgs-wal-plain` reports the `-wal` as copied
+  and counts 7 message rows, which needs the staged `-wal` to be read on
+  Windows (UNVERIFIED until run).
+- The release build: `npm run tauri build`, install the NSIS package, and
+  run one check.
+
+**Real backups** (one unencrypted, one encrypted; from a current iOS):
+record the iOS version, the model, the outcome, each qualifier, the counts
+of unknown tables and columns, the missing expected columns (by name, from
+the closed list), whether a `-wal` was listed, the check's duration, and
+answers to hardware questions 19–28 in supported-formats.md where the
+report gives them. **Record counts and kinds only; never commit anything
+from a real backup**, and never record message text, addresses or names.
 
 ## Manual checklist for milestone 2 (not yet run)
 

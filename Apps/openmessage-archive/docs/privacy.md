@@ -12,6 +12,8 @@ by milestone and are commitments the design is built around.
 | Preferences (theme, panel layout) and the archive library path | `settings.json` in the OS config directory. Linux: `~/.config/com.vibeforgesystems.openmessagearchive/`. Windows: `%APPDATA%\com.vibeforgesystems.openmessagearchive\` | M1 |
 | Backup folders you added (`backupFolders`: each folder's path and whether it is one backup or a folder of backups) | The same `settings.json`. A folder's path often ends in the device's identifier (UDID). | M2 |
 | Temporary copy of a backup's file index (Manifest.db, decrypted for an encrypted backup) | `<archive folder>/.oma-staging/`, only while a check runs; see below | M2 |
+| Temporary copy of the Messages database (`sms.db` and its `-wal`, decrypted for an encrypted backup) | `<archive folder>/.oma-staging/`, only during an extraction check, and deleted as soon as its rows have been read; see "The extraction check (M3)" | M3 |
+| The last extraction report (counts and a date range) | **Memory only**, until the app closes. It is never written to disk and never logged. | M3 |
 | Archives (messages, contacts metadata, attachments, indexes) | Only inside the archive library folder the user chooses | M4 |
 | Backup passwords | **Never stored, anywhere.** A password is asked for on each check, used once, and zeroized in Rust; see "Backup passwords" below. No OS credential store is used. Storing passwords there was dropped from M2 and no milestone is planned for it. | M2 |
 | Search history | Off by default. It can be cleared, and it is stored inside the archive. | M5 |
@@ -57,10 +59,11 @@ command line. Whether WebView2 offers to save it despite
 - **What is staged.** Validation copies the backup's file index,
   `Manifest.db`, and its `-wal` if present, into your archive folder. For an
   encrypted backup the copy is decrypted. Manifest.db holds the file names
-  and domains of everything in the backup, attachment names included. The
-  Messages database (`sms.db`) is **not** copied in M2: it is checked where
-  it is, by reading its first block (and, when encrypted, its last block)
-  in memory.
+  and domains of everything in the backup, attachment names included.
+  Validation does **not** copy the Messages database (`sms.db`): it is
+  checked where it is, by reading its first block (and, when encrypted, its
+  last block) in memory. The extraction check (M3) **does** copy it; see
+  the next section.
 - **Where.** `<archive folder>/.oma-staging/s<16 hex digits>/`, never the
   system temp folder. SQLite is told to keep its temporary data in memory.
   Staging is refused inside any backup, inside the MobileSync store and
@@ -101,6 +104,67 @@ command line. Whether WebView2 offers to save it despite
 - **Backups inside sync folders.** Reading a backup stored in a OneDrive or
   Dropbox folder may make the sync client download files that were stored
   online only. The details panel says so.
+
+## The extraction check (M3)
+
+**Check that messages can be read** runs validation first and then reads
+every row of the Messages database. Everything in the previous section
+(where copies go, the sweep, the 5-minute rule, synced and shared folders,
+antivirus) applies to it as well. In addition:
+
+- **A plaintext copy of the Messages database is written to disk.** The
+  check copies `sms.db`, and its `-wal` when the backup lists one, into
+  `<archive folder>/.oma-staging/s<16 hex digits>/db/<n>/`. For an
+  encrypted backup the copy is **decrypted**: for as long as it exists,
+  anyone who can read the archive folder can read your messages, including
+  messages in Recently Deleted. This replaces M2's statement that sms.db is
+  never copied, which still holds for validation.
+- **How long.** The copy is deleted as soon as its rows have been read;
+  the report says whether that succeeded.
+  Closing the session deletes anything left. **If the app crashes or is
+  killed during a check, the decrypted copy stays on disk** until the sweep
+  removes it at the next start or check (after the same 5-minute rule as
+  above). Release builds stop at once on an internal error (they abort on
+  panic), so a crash skips every cleanup step. If the app is never started
+  again, the copy remains until you delete `.oma-staging` yourself.
+- **Windows.** The staged files are created with the *temporary* and *not
+  content indexed* attributes, so Windows Search does not index them and
+  Windows prefers to keep them in its cache. Neither attribute stops an
+  antivirus scanner, a backup tool, a sync client or another user who can
+  read the archive folder from reading them. Whether Defender scans them
+  is part of the manual checklist in compatibility.md.
+- **Deleted is not securely erased**, as for any staged copy (see
+  "Deleting data").
+- **What is not copied.** Attachments are **not** copied, decrypted or
+  hashed. For each attachment the check looks up its entry in the backup's
+  file index and reads the file's metadata; for an encrypted backup it also
+  unwraps the file's key in memory, which writes nothing.
+- **What is never read.** The text of Recently Deleted messages
+  (`recoverable_message_part.part_text`) is refused by an SQLite authorizer
+  on the connection, so no query can read it. Poll and app payloads
+  (`payload_data`) are read only as "present or not". The check counts
+  Recently Deleted entries and nothing more; whether milestone 4 imports
+  them is still to be decided, and the current lean is to exclude them by
+  default.
+- **What the report contains.** Counts, closed kinds (such as "damaged" or
+  "unsupported" and their reasons), raw numeric codes in capped histograms,
+  and the date range of your messages. It contains no message text, no
+  address, no name, no chat title, no GUID and no file name. The date
+  range is shown in the app, kept in memory only, and never written to disk
+  or logged.
+- **What stays in memory, and what is wiped.** While the check runs, the
+  current record is in memory, plus bounded sets of truncated SHA-256
+  hashes of message GUIDs (used to count replies and reactions whose
+  target is missing). Text and blob values the app copies out of the
+  database, and decoded message bodies, are zeroized when dropped. **Not
+  wiped:** SQLite's page cache and internal buffers, rusqlite's
+  intermediate copies, and the property-list values parsed from
+  `message_summary_info`. They are freed normally when the check ends.
+- **Logs.** The check logs phase names, counts, kinds and durations. It
+  never logs any string from the database (table and column names
+  included), any GUID, timestamp or date range, attachment paths, or the
+  text of an internal error (panic). Automated tests check this over every
+  synthetic fixture, including the failure paths and a forced panic.
 
 ## Device identifiers (M2)
 
@@ -159,7 +223,7 @@ never logged.
 | What it protects | The backup folder written by Finder, iTunes or Apple Devices | The archive this application creates |
 | Who sets the password | The user, on the iPhone or in Apple's software | The user, in this application (planned) |
 | Effect of importing | The application decrypts what it needs, read-only. The backup stays encrypted on disk. | — |
-| Status | Unlocking and checking: M2. Importing: M3. | Planned, M8. The likely approach is SQLCipher for the database plus encrypted attachment storage. Until then, **archives are stored unencrypted** and rely on OS account security and full-disk encryption (BitLocker, LUKS). |
+| Status | Unlocking and checking: M2. Checking that messages can be read: M3. Importing: M4. | Planned, M8. The likely approach is SQLCipher for the database plus encrypted attachment storage. Until then, **archives are stored unencrypted** and rely on OS account security and full-disk encryption (BitLocker, LUKS). |
 
 Importing an encrypted backup produces a readable archive. The UI will say
 so at the point of import, and recommend full-disk encryption or (from M8)
@@ -185,6 +249,14 @@ Backups and their contents are treated as hostile:
   SQLite; only staged copies are.
 - SQL uses bound parameters only. Source databases are opened read-only,
   from copies.
+- The staged Messages database (M3) is opened under an SQLite authorizer
+  that allows only reads, with double-quoted string literals, triggers and
+  views turned off, and with operation budgets on every statement whose
+  cost grows with the data. A database with virtual tables is refused
+  before any integrity check runs, and a damaged one (failed
+  `quick_check`) is not read at all. Every value is read under a byte cap,
+  and the typedstream decoder for message bodies runs under fixed budgets
+  and fails closed.
 - Attachments are never executed. Previews will be generated only for
   formats with memory-safe decoders. Anything else is shown as a file to
   open with the user's own application.
@@ -198,7 +270,9 @@ record message bodies, contact names, phone numbers, email addresses,
 attachment contents or passwords. From M2 they also never record paths,
 folder names, device names, UDIDs, backup file names or identifiers, or
 SQLite message text; automated tests check this over every synthetic
-fixture. Set `OMA_LOG=debug` for more detail. That
+fixture. From M3 they also never record any string from the Messages
+database, GUIDs, timestamps, the date range, attachment paths or panic
+messages. Set `OMA_LOG=debug` for more detail. That
 setting changes how much is recorded, not which kinds of data.
 
 ## Deleting data

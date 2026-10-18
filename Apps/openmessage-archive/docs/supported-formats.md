@@ -363,49 +363,353 @@ container (2026-10-18): the crate's own implementation took 0.191 s and the
 
 ## Messages database: sms.db (Milestone 3)
 
-- sms.db is at `HomeDomain` / `Library/SMS/sms.db`.
-- Attachments: `attachment.filename` looks like
-  `~/Library/SMS/Attachments/xx/yy/<guid>/IMG_0001.HEIC`. Strip `~/` and
-  hash `MediaDomain-Library/SMS/Attachments/...`. The relative path is
-  untrusted and goes through `oma_fs::resolve_within`.
-- Core tables are `message`, `chat`, `handle`, `attachment`,
-  `chat_message_join`, `chat_handle_join` and `message_attachment_join`.
-  Recently Deleted is held in `chat_recoverable_message_join`.
-- **Timestamps** count from the Cocoa epoch, 2001-01-01 UTC. A value
-  ≥ 1,000,000,000,000 is nanoseconds; anything smaller is seconds. Detect
-  the unit by magnitude rather than by iOS version: the iOS version where
-  the unit switched is **UNVERIFIED**.
-  ([imessage-database dates.rs](https://github.com/ReagentX/imessage-exporter/blob/develop/imessage-database/src/util/dates.rs))
-  The canonical archive representation (M4) will be UTC milliseconds or
-  nanoseconds since the Unix epoch. The original raw value is kept
-  alongside it.
-- **Body text.** When `text` is NULL, the body is in `attributedBody`, a
-  typedstream (NSArchiver) blob. This always applies to edited or unsent
-  messages. A clean-room decoder is required, because the established Rust
-  decoder (`crabstep`) is GPL-3.0.
-  ([format writeup](https://chrissardegna.com/blog/reverse-engineering-apples-typedstream-format/))
-- **Edits and unsends** use `date_edited` plus the `message_summary_info`
-  plist: `ec` holds the edit history, `rp` the unsent parts, `otr` the
-  originals. Whether a `date_retracted` column exists is **UNVERIFIED**.
-- **Tapbacks** use `associated_message_guid` and `associated_message_type`.
-  Type codes:
-  - 2000–2005: love, like, dislike, laugh, emphasize, question.
-  - 2006: emoji tapback, with the emoji in `associated_message_emoji`.
-  - 2007: sticker.
-  - 3000–3007: removals, in the same order.
-  - 1000: sticker. 4000: poll vote.
-- **Replies** use `thread_originator_guid` and `thread_originator_part`.
-- **Service** may be `iMessage`, `SMS` or `RCS`. RCS was added in iOS 18,
-  and the case varies, so compare case-insensitively. Unknown values are
-  stored as-is and never mapped to a guess.
-- **iOS 26** added translations (`message_summary_info.tmp`), polls, and
-  chat backgrounds (`chat.properties`). iOS 27 was released 2026-09-14
-  ([MacRumors](https://macrumors.com/2026/09/09/apple-announces-ios-27-release-date/)).
-  The schema change notes come from imessage-exporter 4.3.0, which moved to
-  capability-based column handling because optional columns may be missing
-  or reordered. ([releases](https://github.com/ReagentX/imessage-exporter/releases))
-  **Decision:** probe with `PRAGMA table_info`, read columns by name, and
-  record which optional columns were present in the import provenance.
+Researched 2026-10-17 and 2026-10-18 for the extraction check. The rules
+below are what `crates/oma-messages` implements. Facts were taken from the
+sources listed here; **no code was copied** from any of them, and no GPL or
+LGPL implementation was opened while the code was written
+(`scripts/fixtures/PROVENANCE.md`). **UNVERIFIED** marks a claim not
+confirmed by a primary source, an observed artifact or a recorded run.
+
+### Sources
+
+| ID | Source | Licence | Used for |
+|---|---|---|---|
+| S1 | imessage-exporter releases, https://github.com/ReagentX/imessage-exporter/releases | GPL-3.0 | Facts only |
+| S2 | imessage-database source (`tables/messages/message.rs`, `columns.rs`, `tables/capabilities.rs`, `models/{group_action,service,filter_action}.rs`, `tables/{attachment,chat}.rs`, `message_types/{edited,variants,translation,polls}.rs`), read for facts only during research; not opened while M3 code was written | GPL-3.0 | Column names, codes and key names as facts |
+| S3 | imessage-exporter `test_data/db/test.db`, opened read-only in a scratch directory; structural and aggregate queries only | GPL-3.0 | Observation ("snapshot C") and oracle run 4; nothing copied |
+| S4 | Magnet Forensics, "iOS 16: What Digital Investigators Need to Know", https://www.magnetforensics.com/blog/ios-16-what-digital-investigators-need-to-know/ | Proprietary blog | Facts |
+| S5 | Magnet Forensics, "The Meaning of Messages", https://www.magnetforensics.com/blog/the-meaning-of-messages/ | Proprietary blog | Facts |
+| S6 | Magnet Forensics, "A look into iOS 18's changes", https://www.magnetforensics.com/blog/a-look-into-ios-18s-changes/ | Proprietary blog | Facts |
+| S8 | ChatExportKnowledge, https://github.com/ChatExport/ChatExportKnowledge (README, `attachments.md`, `message-summary-info.md`, `wal.md`, `transports.md`, `what-cannot-be-recovered.md`) | **CC BY 4.0** | Facts, restated in our own words, with this attribution. It is written by a vendor and says it was checked against iOS 11–26 backups |
+| S9 | d204n6, "iOS 14 Message Mentions and Threading", https://blog.d204n6.com/2020/09/ios-14-message-mentions-and-threading.html | Blog | Facts |
+| S10 | iLEAPP `scripts/artifacts/sms.py`, https://github.com/abrignoni/iLEAPP | MIT | Facts; not ported |
+| S12 | plaso `test_data/sqlite/imessage_chat.db`, https://github.com/log2timeline/plaso | Repository Apache-2.0; the file's own terms **UNVERIFIED** | Observation ("snapshot A") and oracle run 4; nothing copied |
+| S13 | Gist "sms.sql" (withzombies), https://gist.github.com/withzombies/d50012d14f88a24d7a915b2bb0042fbd | No licence | Column names as facts |
+| S15 | Apple, `CFAbsoluteTime` documentation, https://developer.apple.com/documentation/corefoundation/cfabsolutetime | Apple | The epoch |
+| S16 | Apple Support 104972 and 120930 | Apple | RCS and satellite features (no code mapping is claimed) |
+| S18 | SQLite, "Defense Against The Dark Arts", https://sqlite.org/security.html | Public domain | Hardening; run the integrity check first; triggers and views off |
+| S19 | SQLite, "Database File Format", https://sqlite.org/fileformat2.html | Public domain | WAL header, salts and checksums |
+| S20 | SQLite, "Quirks" (double-quoted strings) and "CREATE TABLE" (rowid; `INTEGER PRIMARY KEY DESC`) | Public domain | The read-only guard and the rowid-shape check |
+| S21 | SQLite, `sqlite3_set_authorizer` and `sqlite3_progress_handler` | Public domain | The authorizer and operation budgets |
+| T1 | C. Sardegna, "Inside imessage-exporter: Reverse Engineering Apple's typedstream Format" (2025-01-31), https://chrissardegna.com/blog/reverse-engineering-apples-typedstream-format/ | Not stated | Typedstream format facts; the published sample is used only as a hash anchor |
+| T2 | libmagic `magic/Magdir/apple` | BSD-2-Clause | Typedstream header facts |
+| T3 | Apple, Objective-C Runtime Programming Guide, "Type Encodings" | Apple | The type grammar |
+| T4 | Apple, `NSString.length`, `NSArchiver` and `NSCoder` documentation | Apple | UTF-16 lengths and API semantics |
+| T5 | pytypedstream 0.1.0 | LGPL-3.0-or-later | Black-box oracle only (oracle run 2) |
+| T6 | imessage-database 4.3.0 `body.rs` and `edited.rs` documentation (docs.rs), and the imessage-exporter 4.3.0 binary | GPL-3.0-or-later | Attribute key names as facts; black-box oracle (runs 3 and 4) |
+
+**Both schema snapshots are macOS.** Snapshot A (S12) is an old macOS
+`chat.db` (`_ClientVersion` 9005, dates in seconds). Snapshot C (S3) is a
+recent macOS `chat.db` (attachment paths under `~/Library/Messages/`).
+Whether iOS sms.db has the same columns as macOS `chat.db` of the same
+generation is **UNVERIFIED** (question 19). Neither snapshot is in the
+repository; the synthetic fixtures are hand-written from column-name facts.
+
+### Location and WAL
+
+- sms.db is `HomeDomain` / `Library/SMS/sms.db` (fileID
+  `3d0d7e5fb2ce288813306e4d4636395e047a3d28`).
+- `sms.db-wal` is "very often" present (S8). Its fileID is
+  `cd47480f213dba9bc38ee792775d17e3f5a73a59` (computed as
+  `SHA1("HomeDomain-Library/SMS/sms.db-wal")`; it matches S8). Ignoring it
+  would silently lose the newest messages (S8), so the check stages it
+  with the main file when the backup lists it. A `-shm` would be
+  `36ce215df2239f14660f11541cb64a3f790c95cd` (computed); it is never
+  copied, and whether it ever appears is **UNVERIFIED**.
+- The staged `-wal` header and frames are validated (magic, page size,
+  salts and checksums, S19). A `-wal` with bytes but an invalid header or
+  frames is the qualifier `WalFramesInvalid`; a zero-length `-wal` is a
+  normal state. A `-wal` that is not listed while the main file's header
+  says WAL mode is the qualifier `WalStateUnknown`. The report says the
+  `-wal` was *staged*, never *applied*.
+- Whether Apple checkpoints the WAL before a backup, and whether a main file
+  and `-wal` captured at different moments can be detected, are
+  **UNVERIFIED** (question 25).
+
+### Tables and columns, by source
+
+Columns are matched by **exact** name with `pragma_table_xinfo`; positional
+`SELECT *` is never used, because S1 says optional columns may be
+"reordered and omitted". "A" and "C" mean the column was observed in that
+snapshot (2026-10-18, by name only). S2 is the source of the column set as a
+whole, and treats exactly `ROWID`, `guid`, `date` and `is_from_me` as the
+required `message` columns.
+
+| Table | Columns | Sources |
+|---|---|---|
+| `message` (required) | **Required:** `ROWID`, `guid`, `date`, `is_from_me` | S2; A, C |
+| `message` | `text`, `attributedBody`, `service`, `handle_id`, `other_handle`, `subject`, `date_read`, `date_delivered`, `date_played`, `is_read`, `is_delivered`, `is_sent`, `is_audio_message`, `cache_has_attachments`, `item_type`, `group_action_type`, `group_title`, `share_status`, `share_direction`, `error`, `was_downgraded` | S2; A, C |
+| `message` | `associated_message_guid`, `associated_message_type`, `associated_message_range_location`, `associated_message_range_length`, `balloon_bundle_id`, `expressive_send_style_id`, `payload_data` (only `typeof` is read), `message_summary_info`, `destination_caller_id`, `reply_to_guid` | S2, S13; C |
+| `message` | `thread_originator_guid`, `thread_originator_part` (iOS 14, S8, S9) | S2, S8, S9, S13; C |
+| `message` | `date_edited`, `date_retracted`, `part_count` (edits and unsends from iOS 16, S4, S8) | S2, S4, S13; C |
+| `message` | `associated_message_emoji` (iOS 18, S8); `schedule_type`, `schedule_state` (iOS 18, S6) | S2, S6, S8; C |
+| `message` | `filter_action`, `filter_sub_action` | S2 only (read by imessage-exporter 4.3.0, S1); in neither snapshot, so **UNVERIFIED** in practice |
+| `handle` (required) | **Required:** `ROWID`, `id` | S2; A, C |
+| `handle` | `service`, `country`, `uncanonicalized_id`; `person_centric_id` (C only). One address can appear once per service (S5) | S2, S5; A, C |
+| `chat` (required) | **Required:** `ROWID`, `guid` | S2; A, C |
+| `chat` | `style`, `chat_identifier`, `service_name`, `display_name`, `room_name`, `group_id`, `properties` (presence and size only), `is_archived`, `is_filtered` | S2; A, C |
+| `chat` | `is_blackholed`, `is_recovered`, `last_read_message_timestamp` | S2; C |
+| `chat` | `is_pending_review` | S2 only; in neither snapshot, **UNVERIFIED** in practice |
+| `chat_message_join` (required) | **Required:** `chat_id`, `message_id`; optional `message_date` (C only) | S2, S10; A, C |
+| `chat_handle_join` (required) | **Required:** `chat_id`, `handle_id` | S2; A, C |
+| `message_attachment_join` (optional table) | `message_id`, `attachment_id` (required if the table exists) | S2, S5; A, C |
+| `attachment` (optional table) | **Required if the table exists:** `ROWID`, `guid`. Optional: `filename`, `uti`, `mime_type`, `transfer_name`, `total_bytes`, `is_outgoing`, `transfer_state`, `created_date`, `start_date` | S2; A, C |
+| `attachment` | `is_sticker`, `hide_attachment`, `original_guid`, `emoji_image_short_description` (Genmoji prompt) | S2; C |
+| `chat_recoverable_message_join` (optional table; Recently Deleted, iOS 16, S4, S8) | `chat_id`, `message_id` (required if the table exists), `delete_date`, `ck_sync_state` | S2, S4, S8; C |
+| `recoverable_message_part`, `deleted_messages`, `sync_deleted_messages`, `sync_deleted_chats`, `sync_deleted_attachments`, `unsynced_removed_recoverable_messages` (optional) | `count(*)` only. No column of `recoverable_message_part` is ever named, and the authorizer denies `part_text`, which holds deleted message content (S3 schema, S5) | S3, S5 |
+| `_SqliteDatabaseProperties` (optional) | The value for key `_ClientVersion`, stored as TEXT (`'9005'` in A), parsed as strict ASCII decimal. Its mapping to iOS versions is **UNVERIFIED** | A |
+
+Probe rules that follow from this list:
+
+- **A missing required table or column, or a required table that is a view
+  or virtual table, makes the database unsupported**, with the reason.
+  Unknown extra tables and columns are counted (never named) and stated as
+  qualifiers (D43 in architecture.md).
+- **A required column whose name differs only in case makes the database
+  unsupported** (`MissingRequiredColumn`), although SQLite's own lookup
+  would match it. Known columns are matched by exact name, and a
+  wrong-case known column is counted as `wrong_case_columns`. A known
+  generated column is treated as absent.
+- **Rowid shape.** `ROWID` must be a true rowid alias: declared `INTEGER`,
+  the only primary-key column, and with no `pk` index, which rejects
+  `INTEGER PRIMARY KEY DESC` (S20: that form is not an alias). Join tables
+  must not be `WITHOUT ROWID` and must not shadow `rowid`. Anything else is
+  `RowidShape`.
+- **Virtual tables anywhere refuse the database** before `quick_check`
+  runs (D44). Whether real iOS sms.db has FTS or R-tree tables is
+  **UNVERIFIED** (question 19).
+- **Byte caps** are applied in SQL before a value is read: 16 MiB for
+  `text` and `attributedBody`, 1 MiB for `message_summary_info`, 256 KiB for
+  `chat.properties`, 256 bytes for GUID columns, 4 KiB for `filename`,
+  `transfer_name` and identifier columns, and 64 KiB for other text. A
+  larger value is withheld and counted.
+- Snapshot C has Apple triggers that call Apple-only SQL functions
+  (`delete_attachment_path` and others, observed). The fixtures omit them,
+  and triggers are disabled on the connection in any case.
+
+### Timestamps: classified per value
+
+- The epoch is 2001-01-01T00:00:00Z (S15). One source's comment says "local
+  time zone"; S15 is the primary source and wins.
+- **The unit is decided per value, not per database or per iOS version.**
+  Snapshot C stores `attachment.created_date` in seconds next to
+  `message.date` in nanoseconds (observed). The switch from seconds to
+  nanoseconds was "roughly iOS 11" (S8); the exact version is
+  **UNVERIFIED**.
+- Unit windows (`crates/oma-messages/src/time.rs`):
+
+| Raw value | Interpretation |
+|---|---|
+| 0 | `Zero` |
+| below 0 | `Negative` |
+| 1 to below 3,124,137,600 (2100-01-01 in Cocoa seconds) | Seconds |
+| 3,124,137,600 to below 10¹² | `Ambiguous`; the value is withheld and counted |
+| 10¹² (2001-01-01T00:16:40Z as nanoseconds) to below 3,124,137,600 × 10⁹ | Nanoseconds |
+| 3,124,137,600 × 10⁹ and above | `Ambiguous` |
+
+  The 10¹² threshold is S8's (and earlier research's); iLEAPP uses 10¹⁵
+  (S10). Both separate real data.
+- **"Zero means unset" is recorded only for `date_delivered` and
+  `date_edited`** (observed in C). For every other column a zero is
+  reported as zero and claims nothing; in particular `message.date = 0` is
+  not "unset".
+- The units of `chat_message_join.message_date`,
+  `chat.last_read_message_timestamp` and
+  `chat_recoverable_message_join.delete_date` are **UNVERIFIED** (S4 says
+  `delete_date` is nanoseconds; no snapshot row confirms it). Each keeps its
+  own unit histogram in the report (question 24).
+- **`message_summary_info` `ec[*].d`** may be an integer, a real (seconds
+  with a fraction, S4) or a plist date (S8). A real is treated as seconds
+  and never reclassified; an integer uses the per-value rule; a date is
+  Cocoa seconds by definition. The whole rule is **UNVERIFIED**: no
+  snapshot row has `ec`.
+- Scheduled messages store the planned send time in `date` (S6), so the
+  report's date range leaves out rows with a non-zero `schedule_type`, and
+  dates before 2007-01-01 (a display floor, not a fact from any source) or
+  after the check.
+
+### Coded values: sourced mappings only
+
+Every record keeps the raw integer next to any mapped value. A value with
+no cited meaning stays raw and goes into a capped histogram.
+
+**`associated_message_type`** (S2, ranges corroborated by S8):
+
+| Value | Meaning |
+|---|---|
+| 0 | No association |
+| 1000 | Sticker (older form) |
+| 2000–2005 | Love, like, dislike, laugh, emphasize, question |
+| 2006 | Emoji tapback; the emoji is in `associated_message_emoji` (iOS 18, S8) |
+| 2007 | Sticker tapback |
+| 3000–3007 | Removal of the matching 2000–2007 |
+| 4000 | Poll vote |
+| Anything else, **including 2 and 3** | Unknown, kept raw. S2 treats 2 and 3 as normal messages; their meaning is **UNVERIFIED** (question 21) |
+
+- `associated_message_guid` targets: `p:N/<guid>` names body part N,
+  `bp:<guid>` a bubble payload (S2). A bare GUID is counted; that shape is
+  **UNVERIFIED**. "Only the latest tapback state is stored" (S2) is
+  **UNVERIFIED**, since separate removal rows exist (question 21).
+- **Replies:** a reply is a row with a non-empty `thread_originator_guid`
+  (S9). `reply_to_guid` is also set on rows that are not replies (two rows
+  in C), so it is counted separately. `thread_originator_part` is kept raw;
+  its format is **UNVERIFIED** (question 22).
+
+**`item_type` and `group_action_type`** (S2, `group_action.rs`; `item_type`
+0 is a real message, S8):
+
+| `item_type` | `group_action_type` | Kind |
+|---|---|---|
+| 0 | not read | Message |
+| 1 | 0 | Participant added; "own number changed" is derived only when `handle_id` and `other_handle` are both present, non-zero and equal |
+| 1 | 1 | Participant removed |
+| 2 | not read | Group renamed |
+| 3 | 0 / 1 / 2 / 4 / 6 | Participant left / group photo changed / group photo removed / background changed / background removed |
+| 4 | not read | Legacy shared location |
+| 5 | not read | Audio message kept |
+| 6 | not read | SharePlay |
+| anything else, or a combination not listed | | Unknown, kept raw |
+
+**`service`** is matched literally, ASCII case-insensitively, against
+`iMessage`, `SMS`, `RCS` (iOS 18, S16) and `iMessageLite` (satellite
+messages per S2; the app labels it "iMessageLite", never "satellite"). An
+empty value is its own class; anything else is "other", counted and never
+echoed. MMS is stored as `SMS` (S8, inferred).
+
+**Kept raw, never interpreted:** `chat.style` (the common claim that 43
+means a group chat has no primary source; in A all seven chats were 45,
+each with one participant), `chat.is_filtered`, `filter_action`,
+`filter_sub_action`, `transfer_state`, `share_status`, `schedule_type`,
+`schedule_state` and `error` (question 20). S2 gives meanings for
+`filter_action` and `is_filtered`, but whether they hold across iOS
+versions is **UNVERIFIED**, so no mapping is shipped.
+
+**Direction and sender.** `is_from_me` is kept raw. S2's shared-location
+exception (`item_type = 4`, `other_handle ≠ 0`, `share_direction` false) is
+exposed only as a separate derived flag. **`handle_id` is not the sender on
+rows from the owner:** in C a row with `is_from_me = 1` has `handle_id` set
+to the other party, and 0 is a placeholder. `is_read`, `is_delivered` and
+`is_sent` are counted, never shown as states; their semantics by direction
+and service are **UNVERIFIED** (question 27). `cache_has_attachments` is set
+by a trigger and never cleared (C's schema), so it is a cache flag, not a
+fact.
+
+### `message_summary_info`
+
+A binary plist (S4), read through the same budgeted reader as the backup
+plists (depth 16, arrays capped at 4,096 entries). A bad field spoils only
+itself.
+
+| Key | Content | Source |
+|---|---|---|
+| `otr` | Original parts; its entry count is used. Read as a dictionary keyed by part index; its exact shape is **UNVERIFIED** | S2, S8 |
+| `ec` | Edit history: `{ "<part index>": [ { d: time, t: typedstream, … }, … ] }`. Entries are kept in stored order; "oldest first, entry 0 is the original" is **UNVERIFIED**. The `t` bodies are not decoded in M3 | S2, S4, S8 |
+| `rp` | Unsent part indexes (integers) | S2, S8 |
+| `tmp` | Translation (iOS 26). Only its presence is recorded | S2 |
+| `ust`, `ams`, `amc`, `euh` and any other key | Counted as unknown keys; no source found (question 22) | — |
+
+- **Edits and unsends** are labelled by an ordered list of neutral rules
+  (`EditLabel`): unsent parts and edit history come from `rp` and `ec`
+  only. A row with `date_edited` set, an empty or NULL `text`, a NULL
+  `attributedBody` and no `ec` or `rp` is a heuristic match for an unsent
+  message (S4), labelled as such and **never** called "unsent" in the UI.
+  The text of an unsent message is not stored anywhere (S8).
+- **`date_retracted` exists in the macOS snapshot C (S3).** On iOS it is
+  still **UNVERIFIED**. S4 says Apple "doesn't seem to be using it", so it
+  is read and counted but drives no label.
+- **Polls** (iOS 26) live in `payload_data` (S2); M3 reads only its storage
+  class. Poll votes use associated type 4000.
+
+### Message bodies and typedstream
+
+- A body may be in `text`, in `attributedBody`, or both. **Neither is
+  preferred:** in C, two of three rows have `text = ''` (empty, not NULL)
+  next to an `attributedBody` blob, so a rule like "the text column, else
+  the decoded body" would drop the decoded body. The report counts every
+  combination, and whether the two always agree (U+FFFC included) and
+  which is current after an edit are **UNVERIFIED** (question 27).
+- `text` is NULL for edited messages (S4) and often from iOS 16 on (S8);
+  iOS 17 audio transcripts are also in `attributedBody`.
+- **Typedstream summary** (T1–T5; the decoder is clean room):
+  - Header: `04`, then a length-prefixed `streamtyped`, then system version
+    1000 (`81 e8 03`) (T1, T2). Anything else is `UnsupportedHeader`.
+    Whether every Messages blob uses this header is **UNVERIFIED**.
+  - Integers: a literal byte, or `0x81` + 2 bytes, `0x82` + 4 bytes, `0x87`
+    + 8 bytes (little-endian); `0x83` introduces a float (T1). `0x84` marks
+    a new entry, `0x85` is nil or the end of a class chain, and `0x86` ends
+    an object (T1).
+  - References are the head decoded as a signed integer plus 110, into
+    tables of shared strings and objects numbered in order of first
+    appearance (T1). Every reference is bounds-checked.
+  - Types follow Apple's encodings (T3): `c i s l q C I S L Q f d B`, `+`,
+    `*`, `:`, `%`, `#`, `@`, `[Nc]` and structs. Messages' observed
+    vocabulary is `@ + * i I d [Nc]` (T1).
+  - The root is an `NSMutableAttributedString`; its string's `+` bytes are
+    the text, decoded as strict UTF-8; then come runs of (dictionary
+    number, length in UTF-16 units, T4) with an attribute dictionary per
+    new run (T1). Consecutive runs with the same
+    `__kIMMessagePartAttributeName` form a part. Attachment runs carry
+    `__kIMFileTransferGUIDAttributeName`, and mentions
+    `__kIMMentionConfirmedMention` (T6 names). Whether the file-transfer
+    GUID always equals `attachment.guid` is **UNVERIFIED** (question 23).
+  - Run problems (a bad index, a run past the end, a boundary inside a
+    surrogate pair, a total that differs from the text length) keep the
+    text and mark the runs; nothing is clamped silently. Index 0 and a nil
+    dictionary are treated as bad indexes; whether they occur is
+    **UNVERIFIED**.
+  - Budgets: input 16 MiB, depth 64, 262,144 objects, 65,536 shared
+    strings, 1,048,576 nodes and runs, and materialised bytes at most
+    twice the input plus 64 KiB.
+  - pytypedstream 0.1.0 (T5) agrees with our decoder on every compared
+    synthetic vector (oracle run 2). It rejects the `0x87` form, which T1
+    observed from Apple's encoder; those vectors are exempt. Nothing has
+    been checked against Apple's own encoder (question 26).
+
+### Attachments
+
+- `attachment.filename` is an untrusted lookup key, never a path. The
+  common form is `~/Library/SMS/Attachments/xx/yy/<guid>/<name>` (S8).
+- **The file is in `MediaDomain`, not `HomeDomain`.** Looking in
+  `HomeDomain` silently finds nothing (S8). The fileID is
+  `SHA1("MediaDomain-" + path without "~/")` (S2, S8, S10).
+
+| Prefix | Looked up? | Status |
+|---|---|---|
+| `~/Library/SMS/Attachments/` | Yes, in `MediaDomain` | Sourced (S2, S8). A miss is reported as "not in this backup" |
+| `~/Library/SMS/StickerCache/` | Yes, in `MediaDomain` | Domain **UNVERIFIED**; a miss claims nothing |
+| `~/Library/Messages/` | No, counted | The macOS form (3 of 4 attachments in C); on iOS **UNVERIFIED** |
+| any other `~/…` | No, counted | **UNVERIFIED** |
+| `/var/mobile/…`, `/private/var/mobile/…` | No, counted | Whether these occur is **UNVERIFIED** |
+| NULL, empty, anything else | No, counted | |
+
+- A candidate path is looked up only if it passes `oma_fs::resolve_within`
+  and has no NUL, backslash or `..` component; otherwise it is counted as
+  an unusual name.
+- An NFC/NFD or case difference between `filename` and Manifest.db's
+  `relativePath` would read as a miss; how often that happens is
+  **UNVERIFIED** (question 23).
+- A missing file is a normal outcome (S8): never downloaded, purged, or
+  kept only in iCloud. A row stays after its file is gone (S5, S8).
+- When `mime_type` is NULL, the UTI `com.apple.coreaudio-format` marks an
+  audio message (S2).
+
+### Recently Deleted
+
+Deleted messages stay in sms.db for about 30 days (S4, S8):
+`chat_recoverable_message_join` links them, and `recoverable_message_part`
+holds their content. M3 counts both and never reads `part_text`.
+
+### Other iOS 26 and later features
+
+iOS 26 added translations (`message_summary_info.tmp`), polls
+(`payload_data`) and chat backgrounds (`chat.properties`) (S1, S2). iOS 27
+was released 2026-09-14
+([MacRumors](https://macrumors.com/2026/09/09/apple-announces-ios-27-release-date/));
+imessage-exporter 4.3.0, its "iOS 27 Support" release, moved to
+capability-based column handling (S1). No published iOS 27 schema diff was
+found (question 6). M3 records which optional columns are present and
+derives features from them, labelled "derived" and never mapped to an iOS
+version.
 
 ## Licensing constraints found
 
@@ -420,6 +724,10 @@ container (2026-10-18): the crate's own implementation took 0.191 s and the
 | libimobiledevice (`idevicebackup2`) | LGPL-2.1+ | Reference only (behaviour, such as the SnapshotState check) |
 | `imessage-core` (typedstream) | MIT | Candidate. It is young (0.1.0, 2026) with unstated provenance, so audit it before use. |
 | iphone_backup_decrypt | MIT | May be ported with attribution |
+| pytypedstream | LGPL-3.0-or-later | Black-box oracle for the typedstream vectors (run as a subprocess); never imported or shipped |
+| ChatExportKnowledge (S8) | CC BY 4.0 | Facts, restated in our own words, with attribution; no text copied |
+| iLEAPP (S10) | MIT | Facts; could be ported with attribution, but nothing was |
+| plaso `imessage_chat.db` (S12) | Repository Apache-2.0; file terms UNVERIFIED | Observed in scratch and used as an oracle sample; never committed |
 | libheif / libde265 | LGPL-3.0 | Avoid static linking |
 | `heic` (imazen) | AGPL-3.0 | Not allowed |
 | `heic-rs` | MIT OR Apache-2.0 | Candidate for HEIC thumbnails (M5), behind a feature flag. It is very new and grants no HEVC patent rights. |
@@ -465,3 +773,53 @@ Open after milestone 2 (each **UNVERIFIED** above):
     uses the singular `iMazing\Backup`; the meaning of `BackupState`
     (`"empty"` observed in one interrupted backup); and whether a finished
     iMazing backup reads exactly like one from Apple Devices or iTunes.
+
+Open after milestone 3 (each **UNVERIFIED** in the sms.db section above;
+questions 4, 6 and 16 also stay open):
+
+19. Whether iOS sms.db has the same columns as macOS `chat.db` in each
+    generation (both schema snapshots are macOS), and whether real iOS
+    sms.db contains virtual tables (FTS or R-tree), which the check
+    refuses (D44).
+20. The values and meanings of `chat.style`, `chat.is_filtered`,
+    `filter_action`, `filter_sub_action` and `transfer_state`; the first
+    iOS version with `filter_action`; how `_ClientVersion` maps to iOS
+    versions.
+21. The meaning of associated types 2 and 3, and whether only the latest
+    tapback state is stored.
+22. The format of `thread_originator_part`; the `message_summary_info` keys
+    `ust`, `ams`, `amc` and `euh`; the shape of `otr`; the order of `ec`
+    entries and the unit of an integer `ec.d`.
+23. Attachments: whether absolute `/var/mobile` paths occur; the domain of
+    `StickerCache`; normalisation or case differences between `filename`
+    and `relativePath`; whether the file-transfer GUID in `attributedBody`
+    always equals `attachment.guid`.
+24. The units of `chat_message_join.message_date`,
+    `chat.last_read_message_timestamp` and
+    `chat_recoverable_message_join.delete_date`, and whether zero means
+    "unset" in columns other than `date_delivered` and `date_edited`.
+25. Whether sms.db `-wal` and `-shm` appear in real backups; whether Apple
+    checkpoints before a backup; whether a main file and `-wal` can be
+    captured at different moments; whether a staged sms.db `-wal` is read
+    on Windows (the Windows CI run of `msgs-wal-plain` will show this for
+    synthetic data).
+26. Confirmation from Apple's own encoder (`NSArchiver` on a Mac) of the
+    typedstream facts the decoder relies on: references for indexes of 110
+    and above; the unsigned 128–255 form; when `0x87` is used; `+` holding
+    UTF-8; run index 0 or a nil dictionary; the link and data-detector
+    attribute layouts; a constant header across iOS versions.
+27. Whether `text` always equals the decoded `attributedBody` (U+FFFC
+    included) and which is current after an edit; the delivery and read
+    semantics of `is_delivered`, `is_read` and `is_sent` by direction and
+    service.
+28. The text encoding of real sms.db (UTF-8 is assumed; a UTF-16 database
+    is a qualifier) and SQLite's handling of invalid UTF-16; real sms.db
+    sizes, check durations, peak memory, and whether the operation-budget
+    constants fit real data; the licence terms of the Digital Corpora iOS
+    images (a possible source of iOS DDL) and of the S12 file.
+
+Two questions from the M3 research were settled by tests rather than
+hardware: a schema with double-quoted string literals still loads with
+`DQS_DDL` off (`crates/oma-backup/tests/staged_db.rs`), and table-valued
+pragma functions are authorized as reads and pragmas
+(`crates/oma-backup/src/staged_conn.rs`).

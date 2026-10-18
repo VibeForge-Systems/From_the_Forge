@@ -84,5 +84,31 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+Messages database and typedstream (milestone 3)
+-----------------------------------------------
+
+The Messages-database code in crates/oma-messages, including its
+typedstream (NSArchiver) decoder, is a clean-room implementation written
+from the facts recorded in docs/supported-formats.md; the sources consulted
+for each file are listed in scripts/fixtures/PROVENANCE.md. No code was
+copied from any of the projects below, and none of them is distributed
+with this product:
+
+- imessage-exporter and imessage-database (GPL-3.0): column names, numeric
+  codes and key names were taken as facts from its source and
+  documentation, and its release binary was run as a black-box test
+  oracle.
+- pytypedstream (LGPL-3.0-or-later): run as a black-box test oracle
+  against the synthetic typedstream vectors.
+- C. Sardegna, "Inside imessage-exporter: Reverse Engineering Apple's
+  typedstream Format" (2025): format facts.
+- The libmagic "Apple/NeXT typedstream" entry (BSD-2-Clause): header facts.
+
+Some facts about the Messages database were taken from ChatExportKnowledge
+(https://github.com/ChatExport/ChatExportKnowledge), licensed under the
+Creative Commons Attribution 4.0 International licence
+(https://creativecommons.org/licenses/by/4.0/). They are restated in our
+own words in docs/supported-formats.md (source S8); no text was copied.
+
 "iPhone", "iMessage", and "iOS" are trademarks of Apple Inc. OpenMessage
 Archive is not affiliated with or endorsed by Apple Inc.
