@@ -48,6 +48,13 @@ tauri-build = "=2.7.3"
 tauri-plugin-dialog = "=2.8.3"
 tauri-plugin-opener = "=2.7.2"
 
+# Milestone 4: volume facts and durable placement (crates/oma-fs).
+# fs4: free space only, so its default `sync` feature (file locking) is off.
+# rustix: Linux only, for statfs, renameat2(RENAME_NOREPLACE), O_NOFOLLOW
+# opens and geteuid; `std` is its default and stays on.
+fs4 = { version = "=1.1.0", default-features = false }
+rustix = { version = "=1.1.5", features = ["fs", "process"] }
+
 oma-fs = { path = "crates/oma-fs" }
 oma-backup = { path = "crates/oma-backup" }
 oma-messages = { path = "crates/oma-messages" }

@@ -162,6 +162,18 @@ pub fn inspect_location(path: &Path) -> ArchiveLocationStatus {
         "The folder is not inside an iPhone backup.",
     ));
 
+    // A volume kind that cannot be read adds nothing: the checks below
+    // still run, and archives re-check the volume when they are opened.
+    if let Ok(kind) = oma_fs::volume_kind(&canonical) {
+        if let Some(check) = local_volume_check(kind) {
+            let is_error = check.level == CheckLevel::Error;
+            checks.push(check);
+            if is_error {
+                return finish(display, checks);
+            }
+        }
+    }
+
     match probe_writable(&canonical) {
         Ok(()) => checks.push(ok("writable", "The folder is writable.")),
         Err(e) => {
@@ -216,6 +228,43 @@ pub fn inspect_location(path: &Path) -> ArchiveLocationStatus {
     }
 
     finish(display, checks)
+}
+
+/// The `local-volume` check for a volume kind, or `None` when the kind is
+/// not known and there is nothing to say.
+///
+/// - Network: an error. SQLite's write-ahead log, which archives use, "does
+///   not work over a network filesystem" (sqlite.org/wal.html), and staging
+///   needs file locks.
+/// - Virtualised (FUSE, 9P, VirtualBox shared folders): a warning. Backup
+///   checks keep working there, as before, but archives refuse such a
+///   folder because file locks and the write-ahead log are unreliable on it.
+/// - FAT and exFAT: a warning. No hard links, and FAT's 4 GiB file limit.
+fn local_volume_check(kind: oma_fs::VolumeKind) -> Option<LocationCheck> {
+    use oma_fs::VolumeKind;
+    let label = kind.label();
+    match kind {
+        VolumeKind::Local => Some(ok("local-volume", "The folder is on a local drive.")),
+        VolumeKind::Network(_) => Some(error(
+            "local-volume",
+            format!(
+                "This folder is on a network drive ({label}). The archive database cannot work reliably over a network file system, and checking backups needs file locks. Choose a folder on a drive inside this computer."
+            ),
+        )),
+        VolumeKind::Virtualised(_) => Some(warning(
+            "local-volume",
+            format!(
+                "This folder is on a shared or user-space file system ({label}), such as a virtual machine's shared folder. Backups can be checked here, but archives will not be created in it, because file locks and the database's write-ahead log are unreliable there. Choose a folder on a drive inside this computer to keep archives."
+            ),
+        )),
+        VolumeKind::Fat(_) => Some(warning(
+            "local-volume",
+            format!(
+                "This folder is on a {label} drive. Such drives cannot hold files of 4 GiB or more (FAT) and do not support hard links, so very large attachments may not be archived here."
+            ),
+        )),
+        _ => None,
+    }
 }
 
 /// Create, write, and remove a uniquely named file. Proves write access the
@@ -300,6 +349,12 @@ mod tests {
         for id in ["exists", "outside-backup", "writable", "local-only"] {
             assert_eq!(level_of(&status, id), Some(CheckLevel::Ok), "{id}");
         }
+        // Ok on a recognised local file system; absent where the kind is
+        // unknown (every drive letter on Windows).
+        assert!(matches!(
+            level_of(&status, "local-volume"),
+            Some(CheckLevel::Ok) | None
+        ));
         assert_eq!(
             fs::read_dir(tmp.path()).expect("read_dir").count(),
             0,
@@ -316,6 +371,48 @@ mod tests {
         assert!(!is_private_mode(0o040755));
         assert!(!is_private_mode(0o040777));
         assert!(!is_private_mode(0o040770));
+    }
+
+    #[test]
+    fn local_volume_levels_follow_the_volume_kind() {
+        use oma_fs::{FatKind, NetworkKind, VirtKind, VolumeKind};
+        let level = |kind| local_volume_check(kind).map(|c| c.level);
+        assert_eq!(level(VolumeKind::Local), Some(CheckLevel::Ok));
+        for kind in [
+            VolumeKind::Network(NetworkKind::Nfs),
+            VolumeKind::Network(NetworkKind::Smb),
+            VolumeKind::Network(NetworkKind::Unc),
+        ] {
+            assert_eq!(level(kind), Some(CheckLevel::Error), "{kind:?}");
+        }
+        for kind in [
+            VolumeKind::Virtualised(VirtKind::Fuse),
+            VolumeKind::Virtualised(VirtKind::NineP),
+            VolumeKind::Virtualised(VirtKind::VboxSf),
+            VolumeKind::Fat(FatKind::Msdos),
+            VolumeKind::Fat(FatKind::ExFat),
+        ] {
+            assert_eq!(level(kind), Some(CheckLevel::Warning), "{kind:?}");
+        }
+        assert_eq!(level(VolumeKind::Unknown), None);
+        let check = local_volume_check(VolumeKind::Network(NetworkKind::Smb)).expect("check");
+        assert_eq!(check.id, "local-volume");
+        assert!(check.message.contains("SMB/CIFS"), "{}", check.message);
+    }
+
+    /// A UNC path is a network volume before any disk access, so the check
+    /// stops there: no write probe is made on the share.
+    #[cfg(windows)]
+    #[test]
+    fn a_unc_location_is_refused_as_a_network_volume() {
+        let status = inspect_location(Path::new(r"\\localhost\C$\Windows"));
+        // The administrative share may not be reachable on every machine;
+        // then `exists` fails first, which is also a refusal.
+        assert_eq!(status.state, LocationState::Error);
+        if level_of(&status, "exists") == Some(CheckLevel::Ok) {
+            assert_eq!(level_of(&status, "local-volume"), Some(CheckLevel::Error));
+        }
+        assert_eq!(level_of(&status, "writable"), None);
     }
 
     #[test]

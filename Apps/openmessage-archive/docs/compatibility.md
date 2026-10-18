@@ -138,6 +138,29 @@ not a manual test on a real desktop, it did not observe the staged sms.db
 while it existed (each check took a few milliseconds), and it does not
 replace the manual checklist for milestone 3 below, which has not been run.
 
+### Milestone 4 file-system primitives (slice 4a)
+
+Observed by the `oma-fs` tests in a Linux container (ext4, running as root)
+on 2026-10-18; not CI, not a desktop:
+
+- `fsync_dir` on a directory returned `Synced`.
+- `place_noreplace` placed with `renameat2(RENAME_NOREPLACE)` (`Renamed`).
+  The hard-link and checked-rename fallbacks were exercised directly; none
+  replaced an existing file, directory or link.
+- `open_nofollow` refused a symbolic link, a directory and a FIFO.
+- `volume_kind` classified the temp volume (ext4) as `Local`. The
+  `local-volume` check's levels for every kind are unit-tested; no non-local
+  volume was mounted.
+
+**Not yet observed:** the Windows results that `crates/oma-fs/tests/windows.rs`
+prints (lines starting `RECORD`): whether `fsync_dir` returns `Synced` or
+`Unsupported` on NTFS, `CreateHardLinkW` refusing an existing target,
+`open_nofollow` and `check_private` on a junction, and what std's
+`is_symlink` says about a junction. The mapped-drive `canonicalize` probe is
+an ignored test, not run anywhere yet. No network, FUSE, 9P, VirtualBox or
+FAT volume has been tried; their detection rests on the `statfs` magic table
+and its unit test.
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI
