@@ -5,6 +5,29 @@ OpenMessage Archive. It does not depend on Tauri, and it persists nothing.
 The design is the Milestone 3 spec; the crate-level documentation in
 `src/lib.rs` describes the flow.
 
+## Message records
+
+`SmsDb::for_each_message` reads each `message` row into a `MessageRecord`:
+both body sources (the `text` column and the decoded `attributedBody`, with
+neither preferred), the association (`assoc.rs`: tapbacks, stickers and poll
+votes, with the `p:N/`, `bp:` and bare target forms), the reply facts, the
+parsed `message_summary_info` (`summary.rs`: `otr`, `ec`, `rp` and `tmp`,
+where a bad field spoils only itself) and a derived `EditLabel` (an ordered
+list of rules with neutral labels). Coded values (`codes.rs`) are mapped
+only where a source documents them, and the raw value is always kept.
+`GuidSets` (`guidset.rs`) counts reply originators and association targets
+that match no message, in Rust rather than SQL.
+
+These modules were written from the facts recorded in the Milestone 3 spec
+and `docs/supported-formats.md`; no GPL implementation was opened. The
+summary is read through `oma_backup::bplist`, under its budgets.
+
+Tests: `tests/messages.rs` (the pass on rows built in the test),
+`tests/summary.rs` (plist shapes and bombs, through the test-only binary
+plist writer in `tests/common/bplist.rs`), `tests/parser_mutation.rs`
+(seeded mutations of summaries, association targets and every `message`
+column through SQLite) and `tests/resume.rs`.
+
 ## Typedstream decoder (clean room)
 
 `src/typedstream/` decodes the typedstream (`NSArchiver`) blobs in

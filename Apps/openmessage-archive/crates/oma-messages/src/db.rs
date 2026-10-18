@@ -41,19 +41,21 @@ use rusqlite::types::ValueRef;
 use rusqlite::{Row, Statement};
 
 use crate::col::Col;
+use crate::col::IssueKind;
 use crate::error::{BackupStage, MessagesError, Stage};
+use crate::guidset::GuidSets;
 use crate::progress::{BackupSinkAdapter, MessagesCtx, MessagesPhase};
 use crate::records::{
     ChatHandleLink, ChatMessageLink, ChatRecord, HandleRecord, MessageAttachmentLink,
-    RecoverableLink,
+    MessageReadOptions, MessageRecord, RecoverableLink,
 };
-use crate::redact::{Redacted, SqlText};
+use crate::redact::{RawBlob, Redacted, SqlText};
 use crate::schema::{
     self, Capabilities, ColumnKind, DamageReason, IncompleteReason, Integrity, KnownColumn,
     KnownTable, Probe, TableCaps, TableLayout, Unsupported, UnsupportedReason,
 };
 use crate::time::CocoaTime;
-use crate::value::{self, BlobSize, ValueIssues};
+use crate::value::{self, BlobSize, SqlType, ValueIssues};
 
 /// The SQLite limits for the staged sms.db (§7.4). Each is clamped to
 /// `StagedDbLimits::ceiling()`, so it can only tighten the hardened open.
@@ -355,6 +357,29 @@ impl<'a> RowReader<'a, '_> {
         }
     }
 
+    pub(crate) fn blob(&mut self, index: u8) -> Result<Col<Redacted<RawBlob>>, MessagesError> {
+        match self.sel.at(index) {
+            None => Ok(Col::Absent),
+            Some(i) => {
+                let (v, len) = self.pair(i)?;
+                Ok(value::blob(v, len, self.column(index), self.issues))
+            }
+        }
+    }
+
+    pub(crate) fn type_only(&mut self, index: u8) -> Result<Col<SqlType>, MessagesError> {
+        match self.sel.at(index) {
+            None => Ok(Col::Absent),
+            Some(i) => Ok(value::type_only(self.get(i)?, self.issues)),
+        }
+    }
+
+    /// A value found unreadable after it was read (for example a property
+    /// list that does not parse), counted with the pass's issues.
+    pub(crate) fn unreadable<T>(&mut self, kind: IssueKind) -> Col<T> {
+        self.issues.unreadable(kind)
+    }
+
     pub(crate) fn blob_size(&mut self, index: u8) -> Result<Col<BlobSize>, MessagesError> {
         match self.sel.at(index) {
             None => Ok(Col::Absent),
@@ -376,6 +401,14 @@ pub(crate) trait FromRow: Sized {
     const STAGE: Stage;
     /// Build the record. `rowid` is the row's key, already read strictly.
     fn from_row(rowid: i64, r: &mut RowReader<'_, '_>) -> Result<Self, MessagesError>;
+}
+
+/// Which table a pass reads, and how it reports.
+#[derive(Clone, Copy)]
+struct PassSpec {
+    table: KnownTable,
+    phase: MessagesPhase,
+    stage: Stage,
 }
 
 /// A staged sms.db that passed the probe: the gate and the streaming API.
@@ -527,6 +560,32 @@ impl<'s> SmsDb<'s> {
         self.pass(from, ctx, f)
     }
 
+    /// Every `message` row, with its body decoded, its association, reply
+    /// and summary parsed, and its edit label derived (§9–§11). With
+    /// `guids`, the row's message, reply-originator and association-target
+    /// GUIDs are collected for the "not found" counts (§7.3).
+    pub fn for_each_message<B>(
+        &self,
+        from: Cursor,
+        opts: &MessageReadOptions,
+        guids: Option<&mut GuidSets>,
+        ctx: &mut MessagesCtx<'_>,
+        f: impl FnMut(MessageRecord) -> ControlFlow<B>,
+    ) -> Result<PassOutcome<B>, MessagesError> {
+        let mut guids = guids;
+        self.pass_with(
+            PassSpec {
+                table: KnownTable::Message,
+                phase: MessagesPhase::ReadingMessages,
+                stage: Stage::Messages,
+            },
+            from,
+            ctx,
+            |key, r| MessageRecord::from_row(key, r, opts, guids.as_deref_mut()),
+            f,
+        )
+    }
+
     /// Every `message_attachment_join` row. An empty pass when the optional
     /// table is absent.
     pub fn for_each_message_attachment<B>(
@@ -555,23 +614,41 @@ impl<'s> SmsDb<'s> {
             .map_err(|e| MessagesError::from_conn(e, stage))
     }
 
-    /// The pass engine: keyset pages, one row at a time to `f`.
+    /// A pass over a [`FromRow`] record.
     fn pass<R: FromRow, B>(
         &self,
         from: Cursor,
         ctx: &mut MessagesCtx<'_>,
+        f: impl FnMut(R) -> ControlFlow<B>,
+    ) -> Result<PassOutcome<B>, MessagesError> {
+        let spec = PassSpec {
+            table: R::TABLE,
+            phase: R::PHASE,
+            stage: R::STAGE,
+        };
+        self.pass_with(spec, from, ctx, R::from_row, f)
+    }
+
+    /// The pass engine: keyset pages, one row at a time through `build` to
+    /// `f`.
+    fn pass_with<R, B>(
+        &self,
+        spec: PassSpec,
+        from: Cursor,
+        ctx: &mut MessagesCtx<'_>,
+        mut build: impl FnMut(i64, &mut RowReader<'_, '_>) -> Result<R, MessagesError>,
         mut f: impl FnMut(R) -> ControlFlow<B>,
     ) -> Result<PassOutcome<B>, MessagesError> {
         let mut out = PassOutcome::empty();
-        let Some(sel) = self.selects.iter().find(|s| s.table == R::TABLE) else {
+        let Some(sel) = self.selects.iter().find(|s| s.table == spec.table) else {
             // An absent optional table; required tables always have a query.
             return Ok(out);
         };
-        let total = self.caps.table(R::TABLE).and_then(|t| t.rows);
-        let stage = R::STAGE;
+        let total = self.caps.table(spec.table).and_then(|t| t.rows);
+        let stage = spec.stage;
         let err = |e: rusqlite::Error| MessagesError::from_conn(self.conn.sqlite_error(&e), stage);
         ctx.check()?;
-        ctx.report(R::PHASE, 0, total);
+        ctx.report(spec.phase, 0, total);
 
         let limit = i64::from(self.opts.page_rows);
         let mut start: Option<Statement<'s>> = None;
@@ -613,13 +690,13 @@ impl<'s> SmsDb<'s> {
                         sel,
                         issues: &mut out.value_issues,
                     };
-                    let record = R::from_row(key, &mut reader)?;
+                    let record = build(key, &mut reader)?;
                     out.rows = out.rows.saturating_add(1);
                     out.last = Some(key);
                     in_page = in_page.saturating_add(1);
                     if out.rows.is_multiple_of(CHECK_EVERY_ROWS) {
                         ctx.check()?;
-                        ctx.report(R::PHASE, out.rows, total);
+                        ctx.report(spec.phase, out.rows, total);
                     }
                     if let ControlFlow::Break(b) = f(record) {
                         out.broke = Some(b);
@@ -636,7 +713,7 @@ impl<'s> SmsDb<'s> {
                     .ok_or(MessagesError::Internal("page without a key"))?,
             );
         }
-        ctx.report(R::PHASE, out.rows, total);
+        ctx.report(spec.phase, out.rows, total);
         Ok(out)
     }
 }

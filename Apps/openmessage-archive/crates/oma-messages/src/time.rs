@@ -9,6 +9,9 @@
 //! no normalised value.
 //!
 //! The windows decide the unit, not whether a date is plausible.
+//!
+//! [`SummaryTime`] reads the `d` of an edit entry in `message_summary_info`
+//! (§8.2). That rule is **UNVERIFIED** throughout: no sourced row has `ec`.
 #![deny(
     clippy::arithmetic_side_effects,
     clippy::cast_possible_truncation,
@@ -35,6 +38,8 @@ pub const SECONDS_MAX: i64 = 3_124_137_600;
 pub const NS_MAX: i64 = 3_124_137_600_000_000_000;
 
 const NS_PER_S: i64 = 1_000_000_000;
+
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// A raw Cocoa timestamp and how it was read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -113,6 +118,113 @@ impl CocoaTime {
             _ => None,
         }
     }
+}
+
+/// The raw form of an edit entry's `d` (§8.2).
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub enum SummaryTimeRaw {
+    /// A plist integer, classified by the per-value rule of
+    /// [`CocoaTime::classify`].
+    Integer(i64),
+    /// A plist real, read as Cocoa seconds with a fraction (S4). It must be
+    /// finite and inside the seconds window; it is never reclassified as
+    /// nanoseconds.
+    Real(f64),
+    /// A plist date: Cocoa seconds by definition of the format.
+    Date,
+}
+
+/// An edit entry's `d`, and how it was read. The unit rule is
+/// **UNVERIFIED**.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SummaryTime {
+    /// The raw value.
+    pub raw: SummaryTimeRaw,
+    /// How it was classified. `Nanoseconds` occurs only for integers.
+    pub interp: TimeInterp,
+}
+
+impl SummaryTime {
+    /// An integer `d`: the per-value rule of §8.1.
+    pub fn from_integer(raw: i64) -> Self {
+        SummaryTime {
+            raw: SummaryTimeRaw::Integer(raw),
+            interp: CocoaTime::classify(raw).interp,
+        }
+    }
+
+    /// A real `d`: finite, Cocoa seconds with a fraction, inside
+    /// `0 < r < SECONDS_MAX`; otherwise `Ambiguous` (or `Zero` /
+    /// `Negative`).
+    pub fn from_real(r: f64) -> Self {
+        let interp = if !r.is_finite() {
+            TimeInterp::Ambiguous
+        } else if r == 0.0 {
+            TimeInterp::Zero
+        } else if r < 0.0 {
+            TimeInterp::Negative
+        } else {
+            real_seconds_to_unix_ns(r).map_or(TimeInterp::Ambiguous, |unix_ns| {
+                TimeInterp::Seconds { unix_ns }
+            })
+        };
+        SummaryTime {
+            raw: SummaryTimeRaw::Real(r),
+            interp,
+        }
+    }
+
+    /// A plist date, already converted to a `SystemTime` by the plist
+    /// reader. It is in seconds by definition; outside the seconds window
+    /// it is `Ambiguous`.
+    pub fn from_date(t: SystemTime) -> Self {
+        let unix_ns = match t.duration_since(UNIX_EPOCH) {
+            Ok(d) => i64::try_from(d.as_nanos()).ok(),
+            Err(e) => i64::try_from(e.duration().as_nanos())
+                .ok()
+                .and_then(i64::checked_neg),
+        };
+        let cocoa_ns = unix_ns.and_then(|u| {
+            COCOA_EPOCH_UNIX_S
+                .checked_mul(NS_PER_S)
+                .and_then(|epoch| u.checked_sub(epoch))
+        });
+        let window_ns = SECONDS_MAX.checked_mul(NS_PER_S);
+        let interp = match (unix_ns, cocoa_ns, window_ns) {
+            (_, Some(0), _) => TimeInterp::Zero,
+            (_, Some(c), _) if c < 0 => TimeInterp::Negative,
+            (Some(unix_ns), Some(c), Some(w)) if c < w => TimeInterp::Seconds { unix_ns },
+            _ => TimeInterp::Ambiguous,
+        };
+        SummaryTime {
+            raw: SummaryTimeRaw::Date,
+            interp,
+        }
+    }
+
+    /// The instant in Unix nanoseconds, when the value is in a unit window.
+    pub fn unix_ns(&self) -> Option<i64> {
+        match self.interp {
+            TimeInterp::Seconds { unix_ns } | TimeInterp::Nanoseconds { unix_ns } => Some(unix_ns),
+            _ => None,
+        }
+    }
+}
+
+/// `0 < r < SECONDS_MAX` Cocoa seconds as Unix nanoseconds, rounded.
+fn real_seconds_to_unix_ns(r: f64) -> Option<i64> {
+    // Both bounds are exact in f64 (they are below 2^53).
+    #[allow(clippy::cast_precision_loss)]
+    let (max, epoch) = (SECONDS_MAX as f64, COCOA_EPOCH_UNIX_S as f64);
+    if !(r > 0.0 && r < max) {
+        return None;
+    }
+    // (r + epoch) < 4.2e9 s, so the product is below 4.2e18 < i64::MAX: the
+    // conversion cannot truncate or wrap, and the value is positive.
+    let ns = ((r + epoch) * 1e9).round();
+    #[allow(clippy::cast_possible_truncation)]
+    Some(ns as i64)
 }
 
 #[cfg(test)]
@@ -197,5 +309,54 @@ mod tests {
         #[expect(clippy::string_slice, reason = "proves the lint fires (§19.1)")]
         let tail = &s[1..];
         assert_eq!(tail, "b");
+    }
+
+    /// §19.1 `time`: the summary `d` as an integer, a real and a plist date.
+    #[test]
+    fn summary_times() {
+        let i = SummaryTime::from_integer(NS_THRESHOLD);
+        assert_eq!(i.raw, SummaryTimeRaw::Integer(NS_THRESHOLD));
+        assert_eq!(i.unix_ns(), Some(EPOCH_NS + NS_THRESHOLD));
+        assert_eq!(SummaryTime::from_integer(0).interp, TimeInterp::Zero);
+        assert_eq!(SummaryTime::from_integer(-1).interp, TimeInterp::Negative);
+
+        for (r, want) in [
+            (f64::NAN, TimeInterp::Ambiguous),
+            (f64::INFINITY, TimeInterp::Ambiguous),
+            (f64::NEG_INFINITY, TimeInterp::Ambiguous),
+            (0.0, TimeInterp::Zero),
+            (-0.0, TimeInterp::Zero),
+            (-1.5, TimeInterp::Negative),
+            (1e12, TimeInterp::Ambiguous),
+            (SECONDS_MAX as f64, TimeInterp::Ambiguous),
+        ] {
+            assert_eq!(SummaryTime::from_real(r).interp, want, "{r}");
+        }
+        let frac = SummaryTime::from_real(1.25);
+        assert_eq!(frac.unix_ns(), Some(EPOCH_NS + 1_250_000_000));
+        let near = SummaryTime::from_real(700_000_000.5);
+        assert_eq!(
+            near.unix_ns(),
+            Some((COCOA_EPOCH_UNIX_S + 700_000_000) * NS_PER_S + 500_000_000)
+        );
+
+        let at = |unix_s: i64| {
+            let t = if unix_s >= 0 {
+                UNIX_EPOCH + std::time::Duration::from_secs(unix_s.unsigned_abs())
+            } else {
+                UNIX_EPOCH - std::time::Duration::from_secs(unix_s.unsigned_abs())
+            };
+            SummaryTime::from_date(t)
+        };
+        let d = at(COCOA_EPOCH_UNIX_S + 10);
+        assert_eq!(d.raw, SummaryTimeRaw::Date);
+        assert_eq!(d.unix_ns(), Some(EPOCH_NS + 10 * NS_PER_S));
+        assert_eq!(at(COCOA_EPOCH_UNIX_S).interp, TimeInterp::Zero);
+        assert_eq!(at(0).interp, TimeInterp::Negative);
+        assert_eq!(at(-5).interp, TimeInterp::Negative);
+        assert_eq!(
+            at(COCOA_EPOCH_UNIX_S + SECONDS_MAX).interp,
+            TimeInterp::Ambiguous
+        );
     }
 }

@@ -8,11 +8,15 @@
 mod chat;
 mod handle;
 mod joins;
+mod message;
 mod recoverable;
 
 pub use chat::ChatRecord;
 pub use handle::HandleRecord;
 pub use joins::{ChatHandleLink, ChatMessageLink, MessageAttachmentLink};
+pub use message::{
+    AttributedOutcome, Body, EditLabel, MessageReadOptions, MessageRecord, ReplyInfo,
+};
 pub use recoverable::RecoverableLink;
 
 /// `Debug` for a record: the rowid, then each listed field's

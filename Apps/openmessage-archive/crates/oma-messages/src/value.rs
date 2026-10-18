@@ -70,6 +70,13 @@ pub struct ValueIssues {
     pub type_mismatch: u64,
     /// Boolean values other than 0 and 1 ([`IssueKind::BoolOutOfRange`]).
     pub bool_out_of_range: u64,
+    /// Property lists that do not parse ([`IssueKind::PlistInvalid`]).
+    pub plist_invalid: u64,
+    /// Property lists over a reading budget ([`IssueKind::PlistOverBudget`]).
+    pub plist_over_budget: u64,
+    /// Property lists whose root is not a dictionary
+    /// ([`IssueKind::PlistNotDictionary`]).
+    pub plist_not_dictionary: u64,
     /// Values over their column's cap, in total.
     pub value_oversized: u64,
     /// Values over their column's cap, per column.
@@ -104,6 +111,13 @@ impl ValueIssues {
         self.bool_out_of_range = self
             .bool_out_of_range
             .saturating_add(other.bool_out_of_range);
+        self.plist_invalid = self.plist_invalid.saturating_add(other.plist_invalid);
+        self.plist_over_budget = self
+            .plist_over_budget
+            .saturating_add(other.plist_over_budget);
+        self.plist_not_dictionary = self
+            .plist_not_dictionary
+            .saturating_add(other.plist_not_dictionary);
         self.value_oversized = self.value_oversized.saturating_add(other.value_oversized);
         for (c, n) in &other.oversized_by_column {
             let e = self.oversized_by_column.entry(*c).or_insert(0);
@@ -111,10 +125,13 @@ impl ValueIssues {
         }
     }
 
-    fn unreadable<T>(&mut self, kind: IssueKind) -> Col<T> {
+    pub(crate) fn unreadable<T>(&mut self, kind: IssueKind) -> Col<T> {
         match kind {
             IssueKind::TypeMismatch => bump(&mut self.type_mismatch),
             IssueKind::BoolOutOfRange => bump(&mut self.bool_out_of_range),
+            IssueKind::PlistInvalid => bump(&mut self.plist_invalid),
+            IssueKind::PlistOverBudget => bump(&mut self.plist_over_budget),
+            IssueKind::PlistNotDictionary => bump(&mut self.plist_not_dictionary),
         }
         Col::Unreadable(kind)
     }
@@ -206,8 +223,6 @@ pub(crate) fn text(
 }
 
 /// The "Blob" row, from the same capped pair as [`text`].
-// Used by the message pass (a later slice); covered by the matrix test now.
-#[allow(dead_code)]
 pub(crate) fn blob(
     v: ValueRef<'_>,
     len: ValueRef<'_>,
@@ -252,8 +267,6 @@ pub(crate) fn blob_size(
 }
 
 /// A column read for its storage class only, from `typeof("c")`.
-// Used by the message pass (`payload_data`, a later slice).
-#[allow(dead_code)]
 pub(crate) fn type_only(ty: ValueRef<'_>, issues: &mut ValueIssues) -> Col<SqlType> {
     match sql_type(ty) {
         Some(None) => Col::Null,

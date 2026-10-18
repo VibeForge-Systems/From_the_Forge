@@ -5,6 +5,7 @@
 //! The committed fixtures are never written. Every value is synthetic.
 #![allow(dead_code, clippy::disallowed_types, clippy::disallowed_methods)]
 
+pub mod bplist;
 pub mod mutate;
 pub mod ts_writer;
 

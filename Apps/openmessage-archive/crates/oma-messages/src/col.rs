@@ -32,6 +32,14 @@ pub enum IssueKind {
     TypeMismatch,
     /// A boolean column holds an integer other than 0 or 1.
     BoolOutOfRange,
+    /// A property-list column (`message_summary_info`) is not a valid
+    /// property list.
+    PlistInvalid,
+    /// A property list went over a reading budget (events, bytes, depth or
+    /// array length).
+    PlistOverBudget,
+    /// A property list whose root is not a dictionary.
+    PlistNotDictionary,
 }
 
 /// The shape of a [`Col`], without its value. Records print shapes from

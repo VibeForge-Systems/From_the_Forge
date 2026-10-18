@@ -25,8 +25,14 @@
 //! for the typedstream blobs in `message.attributedBody`. It returns the text
 //! with its runs and parts, or one of a closed set of [`TsErrorKind`]s.
 //!
-//! The message, attachment and aggregate passes and the report land in
-//! later slices of Milestone 3.
+//! [`SmsDb::for_each_message`] reads each message with its body (the `text`
+//! column and the decoded `attributedBody`, both kept), its association
+//! (tapbacks, stickers, poll votes), its reply facts, its parsed
+//! `message_summary_info` and a derived [`EditLabel`]. [`GuidSets`] counts
+//! reply originators and association targets that match no message.
+//!
+//! The attachment and aggregate passes and the report land in later slices
+//! of Milestone 3.
 #![cfg_attr(
     not(test),
     deny(
@@ -37,41 +43,53 @@
     )
 )]
 
+mod assoc;
 mod caps;
 mod codes;
 mod col;
 mod db;
 mod error;
+mod guidset;
 mod progress;
 mod records;
 mod redact;
 mod schema;
+mod summary;
 mod time;
 mod typedstream;
 mod value;
 
+pub use assoc::{AssocTarget, Association};
 pub use caps::{
     CAP_ATTRIBUTED_BODY, CAP_GUID, CAP_IDENTIFIER, CAP_OTHER_TEXT, CAP_PROPERTIES, CAP_SUMMARY,
     CAP_TEXT, INTEGER_BYTES, ROW_BYTES_BUDGET,
 };
-pub use codes::ServiceClass;
+pub use codes::{AssociatedKind, ItemKind, Reaction, ServiceClass};
 pub use col::{Col, ColShape, IssueKind};
 pub use db::{
     connect, stage, Connect, Cursor, PassOutcome, ProbeOptions, SmsDb, PAGE_ROWS_DEFAULT,
     PAGE_ROWS_MAX, PAGE_ROWS_MIN, SMS_DB_LIMITS, SMS_READ_POLICY,
 };
 pub use error::{BackupStage, MessagesError, Stage};
+pub use guidset::{GuidCounts, GuidSets, GUID_SET_CAP};
 pub use progress::{MessagesCtx, MessagesPhase, MessagesProgress, MessagesSink};
 pub use records::{
-    ChatHandleLink, ChatMessageLink, ChatRecord, HandleRecord, MessageAttachmentLink,
-    RecoverableLink,
+    AttributedOutcome, Body, ChatHandleLink, ChatMessageLink, ChatRecord, EditLabel, HandleRecord,
+    MessageAttachmentLink, MessageReadOptions, MessageRecord, RecoverableLink, ReplyInfo,
 };
 pub use redact::{ByteLen, RawBlob, Redacted, SqlText};
 pub use schema::{
     Capabilities, ColumnKind, DamageReason, Features, IncompleteReason, KnownColumn,
     KnownColumnSet, KnownTable, Probe, TableCaps, Unsupported, UnsupportedReason,
 };
-pub use time::{CocoaTime, TimeInterp, COCOA_EPOCH_UNIX_S, NS_MAX, NS_THRESHOLD, SECONDS_MAX};
+pub use summary::{
+    EditEntry, EditedPart, FieldOutcome, ShapeError, SummaryInfo, SUMMARY_ARRAY_CAP,
+    SUMMARY_MAX_DEPTH,
+};
+pub use time::{
+    CocoaTime, SummaryTime, SummaryTimeRaw, TimeInterp, COCOA_EPOCH_UNIX_S, NS_MAX, NS_THRESHOLD,
+    SECONDS_MAX,
+};
 pub use typedstream::{
     decode_attributed_body, decode_attributed_body_with_stats, AttrFlag, AttrFlags, AttrKey,
     AttrKeysPresent, AttributedBody, BodyPart, BodyRun, RunAttrs, RunIssue, SharedValue, TsBudget,
