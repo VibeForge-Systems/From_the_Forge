@@ -747,7 +747,8 @@ cannot list directories without D-Bus. Observed:
   privacy sentences (stored unencrypted; the temporary decrypted copy).
   While it waited, `.oma-staging/s<id>/db/0/sms.db` existed. At 1360×860
   the dialog's Cancel and Import buttons were below the fold until the
-  dialog was scrolled. **Import** completed: 21 messages, 21 text versions,
+  dialog was scrolled. (Since fixed: dialogs now cap their height and scroll
+  only their body, so the buttons stay visible. Not re-observed in the app.) **Import** completed: 21 messages, 21 text versions,
   3 chats, 4 addresses, 5 chat members, 21 messages in chats, 6 attachments
   and 6 files copied, "The temporary copy of the Messages database was
   deleted: yes"; these equal the model in
