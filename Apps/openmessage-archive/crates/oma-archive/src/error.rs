@@ -202,6 +202,10 @@ pub enum ArchiveError {
     /// means the archive is damaged.
     #[error("query too broad")]
     QueryTooBroad,
+    /// A viewer anchor is not a message of the conversation asked for
+    /// (M5 §3.5), or the message does not exist.
+    #[error("anchor not found")]
+    AnchorNotFound,
     /// A bug.
     #[error("internal")]
     Internal(&'static str),

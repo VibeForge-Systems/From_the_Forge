@@ -236,6 +236,38 @@ fn logs_errors_and_debug_output_hold_no_label_id_or_path() {
     }
     let e = ArchiveError::QueryTooBroad;
     shown.push(format!("{e} {e:?}"));
+    // Thread pages and reply threads (M5 §3.5, slice 5b2): their Debug
+    // output, codes revealed included, and their errors carry no content.
+    let index = reader
+        .conversation_index(oma_archive::ConversationSort::Recent, None)
+        .expect("index");
+    let mut items = 0;
+    for chat in &index.ids {
+        let page = reader
+            .thread_page(
+                *chat,
+                oma_archive::Anchor::Newest,
+                oma_archive::Direction::Older,
+                100,
+                None,
+                oma_archive::Reveal {
+                    earlier_text: true,
+                    one_time_code: true,
+                },
+            )
+            .expect("page");
+        items += page.items.len();
+        for m in page.items.iter().take(5) {
+            let t = reader
+                .reply_thread(m.id, oma_archive::Reveal::default())
+                .expect("reply thread");
+            shown.push(format!("{t:?}"));
+        }
+        shown.push(format!("{page:?} {page:#?} {:?}", page.served_keys()));
+    }
+    assert!(items > 0, "the catalogue has thread items");
+    let e = ArchiveError::AnchorNotFound;
+    shown.push(format!("{e} {e:?}"));
     drop(reader);
     for depth in [
         oma_archive::VerifyDepth::Quick,

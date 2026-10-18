@@ -16,7 +16,6 @@ pub(crate) const DATED_TAG: u8 = 0x00;
 pub(crate) const UNDATED_PREFIX: u8 = 0x01;
 /// The exclusive upper bound of the dated range (and the inclusive lower
 /// bound of the undated one): `X'01'`.
-#[allow(dead_code)] // seeks and day counts (5b3) bound parameters with it
 pub(crate) const DATED_END: [u8; 1] = [UNDATED_PREFIX];
 
 /// `v XOR 2^63`, big-endian: signed order as unsigned byte order.
@@ -63,7 +62,6 @@ pub(crate) fn decode_dated(key: &[u8]) -> Option<i64> {
 }
 
 /// `true` when `key` lies in the dated range (`key < X'01'`).
-#[allow(dead_code)] // thread pages (5b2) split dated and undated anchors with it
 pub(crate) fn is_dated(key: &[u8]) -> bool {
     key < DATED_END.as_slice()
 }

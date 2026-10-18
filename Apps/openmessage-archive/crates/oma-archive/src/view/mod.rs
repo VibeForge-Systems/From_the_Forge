@@ -14,15 +14,26 @@
 //!   (`sort_key < X'01'`, [`crate::sortkey`]): an undated row never poses
 //!   as the newest.
 //!
-//! Slice 5b1 adds the conversation list ([`conversations`]); thread pages,
-//! details, dates, search and media follow in later slices.
+//! Slice 5b1 adds the conversation list ([`conversations`]); slice 5b2 the
+//! keyset thread pages and the reply thread ([`thread`]) over one assembly
+//! layer ([`assemble`]); details, dates, search and media follow in later
+//! slices.
 
+pub mod assemble;
 pub mod conversations;
 pub mod text;
+pub mod thread;
 
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OptionalExtension};
 
+pub use assemble::{
+    AssembledMessage, AssocVisibility, AssociationFacts, AttachmentRef, BodyText, BodyView,
+    ChipSender, ChipState, EarlierText, EditFacts, Formatting, GroupEvent, MessageLabel, NoText,
+    ReactionChip, ReactionKind, ReactionSummary, RecentlyDeletedMarker, RecordedBy, RecordedTime,
+    ReplyRef, Reveal, Segment, SegmentKind, SenderReason, WithheldReason, EMOJI_BYTES, PAGE_BYTES,
+    QUOTE_UTF16,
+};
 pub use conversations::{
     ChatLabel, ChatStatsFacts, Conversation, ConversationIndex, ConversationSort, NameFilter,
     NameFilterError, Participant, Preview, PreviewBody, CONVERSATIONS_PER_CALL,
@@ -31,6 +42,10 @@ pub use conversations::{
 pub use text::{
     ContentText, MaskKind, OptContent, TextPiece, UrlRun, BODY_PAGE_UTF16, IDENTIFIER_UTF16,
     PREVIEW_UTF16,
+};
+pub use thread::{
+    Anchor, Direction, Focus, FocusReason, PageRange, SortKeyHint, ThreadPage, PAGE_HANDLES,
+    PAGE_ITEMS, REPLY_THREAD_LIMIT,
 };
 
 use crate::schema::codes::{AssocKindCode, Entity};
@@ -66,6 +81,14 @@ row_id! {
 row_id! {
     /// The id of a `handle` row: one recorded address and service.
     HandleId
+}
+row_id! {
+    /// The id of a `message_body` row: one stored version of a body.
+    BodyId
+}
+row_id! {
+    /// The id of an `attachment` row.
+    AttachmentId
 }
 
 /// A count read with a `LIMIT` of one more than its cap: `capped` when
@@ -211,6 +234,8 @@ pub(crate) fn plan_statements() -> Vec<(&'static str, String)> {
         ("viewer timeline membership", SQL_IN_CHAT.to_owned()),
     ];
     v.extend(conversations::plan_statements());
+    v.extend(thread::plan_statements());
+    v.extend(assemble::plan_statements());
     v
 }
 

@@ -108,11 +108,17 @@ pub use verify::{
     IMPORTS_SCAN_SLACK, SQLITE_CHECK_ROWS, STORE_WALK_SLACK,
 };
 pub use view::{
-    CappedCount, ChatId, ChatLabel, ChatStatsFacts, ContentText, Conversation, ConversationIndex,
-    ConversationSort, DirectionCode, HandleId, MaskKind, MessageId, NameFilter, NameFilterError,
-    OptContent, Participant, Preview, PreviewBody, TextPiece, UrlRun, BODY_PAGE_UTF16,
-    CONVERSATIONS_PER_CALL, CONVERSATION_INDEX_LIMIT, IDENTIFIER_UTF16, LABEL_PARTICIPANTS,
-    PREVIEW_SCAN_ROWS, PREVIEW_UTF16,
+    Anchor, AssembledMessage, AssocVisibility, AssociationFacts, AttachmentId, AttachmentRef,
+    BodyId, BodyText, BodyView, CappedCount, ChatId, ChatLabel, ChatStatsFacts, ChipSender,
+    ChipState, ContentText, Conversation, ConversationIndex, ConversationSort, Direction,
+    DirectionCode, EarlierText, EditFacts, Focus, FocusReason, Formatting, GroupEvent, HandleId,
+    MaskKind, MessageId, MessageLabel, NameFilter, NameFilterError, NoText, OptContent, PageRange,
+    Participant, Preview, PreviewBody, ReactionChip, ReactionKind, ReactionSummary,
+    RecentlyDeletedMarker, RecordedBy, RecordedTime, ReplyRef, Reveal, Segment, SegmentKind,
+    SenderReason, SortKeyHint, TextPiece, ThreadPage, UrlRun, WithheldReason, BODY_PAGE_UTF16,
+    CONVERSATIONS_PER_CALL, CONVERSATION_INDEX_LIMIT, EMOJI_BYTES, IDENTIFIER_UTF16,
+    LABEL_PARTICIPANTS, PAGE_BYTES, PAGE_HANDLES, PAGE_ITEMS, PREVIEW_SCAN_ROWS, PREVIEW_UTF16,
+    QUOTE_UTF16, REPLY_THREAD_LIMIT,
 };
 
 /// The app version recorded in `archive_meta.created_by`,

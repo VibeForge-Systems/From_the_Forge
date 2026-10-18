@@ -270,7 +270,7 @@ const SQL_FIRST_DATED_FROM: &str = "SELECT sort_key FROM chat_message \
      ORDER BY sort_key, message_id LIMIT 1";
 const SQL_COUNT_BEFORE: &str = "SELECT count(*) FROM (SELECT 1 FROM chat_message \
      WHERE chat_id = ?1 AND sort_key < ?2 LIMIT ?3)";
-const SQL_COUNT_UNDATED: &str = "SELECT count(*) FROM (SELECT 1 FROM chat_message \
+pub(crate) const SQL_COUNT_UNDATED: &str = "SELECT count(*) FROM (SELECT 1 FROM chat_message \
      WHERE chat_id = ?1 AND sort_key >= X'01' LIMIT ?2)";
 const SQL_PREVIEW_ROW: &str = "SELECT m.item_kind, m.is_from_me, m.is_from_me_st, \
        m.assoc_present, m.assoc_kind, b.id, b.display_text, b.display_source, \
@@ -546,6 +546,7 @@ fn masked_preview(
     text: &str,
     source: Option<i64>,
     run_issue: Option<i64>,
+    cap: u32,
 ) -> rusqlite::Result<Vec<TextPiece>> {
     let mut st = c.prepare(SQL_FLAGGED_PARTS)?;
     let ranges: Vec<(i64, i64)> = st
@@ -557,7 +558,7 @@ fn masked_preview(
     let blob = matches!(source, Some(2 | 3))
         && stored_as_blob(c, Entity::MessageBody, body, COL_BODY_TEXT_RAW)?;
     if ranges.is_empty() {
-        let t = ContentText::from_str(text, PREVIEW_UTF16)
+        let t = ContentText::from_str(text, cap)
             .lossy(lossy)
             .stored_as_blob(blob);
         return Ok(vec![TextPiece::Text(t)]);
@@ -570,15 +571,13 @@ fn masked_preview(
         .into_iter()
         .map(|(a, b)| (clamp(a), clamp(b)))
         .collect();
-    Ok(
-        mask_utf16(text, &ranges, MaskKind::OneTimeCode, PREVIEW_UTF16)
-            .into_iter()
-            .map(|p| match p {
-                TextPiece::Text(t) => TextPiece::Text(t.lossy(lossy).stored_as_blob(blob)),
-                masked => masked,
-            })
-            .collect(),
-    )
+    Ok(mask_utf16(text, &ranges, MaskKind::OneTimeCode, cap)
+        .into_iter()
+        .map(|p| match p {
+            TextPiece::Text(t) => TextPiece::Text(t.lossy(lossy).stored_as_blob(blob)),
+            masked => masked,
+        })
+        .collect())
 }
 
 type PreviewRow = (
@@ -594,7 +593,15 @@ type PreviewRow = (
     Option<i64>,
 );
 
-fn preview_of(c: &Connection, message: i64, utc_ns: i64) -> rusqlite::Result<Option<Preview>> {
+/// The preview of `message` (also a reply's quote): its kind, direction
+/// and current body, with every one-time code withheld, the text capped at
+/// `cap` UTF-16 units.
+pub(crate) fn preview_of(
+    c: &Connection,
+    message: i64,
+    utc_ns: i64,
+    cap: u32,
+) -> rusqlite::Result<Option<Preview>> {
     let row: Option<PreviewRow> = c
         .prepare(SQL_PREVIEW_ROW)?
         .query_row([message], |r| {
@@ -634,6 +641,7 @@ fn preview_of(c: &Connection, message: i64, utc_ns: i64) -> rusqlite::Result<Opt
                 text.as_deref().unwrap_or(""),
                 source,
                 run_issue,
+                cap,
             )?),
             Some(_) => PreviewBody::NoText {
                 reason: none.and_then(DisplayNoneReason::from_code),
@@ -721,7 +729,7 @@ fn conversation(
             continue;
         }
         if let Some(ns) = sortkey::decode_dated(key) {
-            preview = preview_of(c, *id, ns)?;
+            preview = preview_of(c, *id, ns, PREVIEW_UTF16)?;
         }
         break;
     }

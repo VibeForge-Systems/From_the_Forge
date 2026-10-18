@@ -1665,6 +1665,98 @@ The first M5 reads, in `crates/oma-archive` (`sortkey.rs`, `conn.rs`,
   every viewer statement (`hooks::viewer_statements`) and checks that only
   the conversation list scans `chat` or sorts.
 
+### Viewer reads: thread pages and the assembly layer (M5 slice 5b2)
+
+Keyset thread pages, the reply thread and the one assembly layer, in
+`crates/oma-archive` (`view/thread.rs`, `view/assemble.rs`). Nothing here
+changes the schema or writes a file.
+
+- **Keyset pages** (`thread_page(chat, anchor, dir, want, hint, reveal)`,
+  D91): rows come from `chat_message_timeline` with a row-value bound
+  `(sort_key, message_id) < (?, ?)` (or `>`), in batches of `2 × want`,
+  bounded to **one range**: dated (`sort_key < X'01'`) or undated
+  (`sort_key >= X'01'`). `Anchor::Newest` and `Oldest` read the dated
+  range; the undated section is reachable only through `Anchor::Undated`.
+  A page stops at `want` visible items (at most 100), at `8 × want` rows
+  scanned, or at the `Scan` budget; a scan that trips after an item
+  returns `partial`, before one `QueryTooBroad`. Items come oldest first;
+  `older_anchor` and `newer_anchor` are the outermost rows scanned (valid
+  anchors even when folded), with `has_older` and `has_newer`. Dated pages
+  carry the chat's undated row count to offer the undated section.
+- **Remembered keys.** Anchors are message ids; sort keys never leave the
+  crate. A page returns the keys it served for its anchors and focus as
+  opaque `SortKeyHint`s (no `Debug` content, no serialisation). Passed
+  back with the anchor, paging continues from the remembered key, so when
+  a higher-ranked import moved the anchor (the `message_sort_au` trigger),
+  no row between its old and new positions is skipped, and `anchor_moved`
+  tells the UI to reload around it. `Around` centres on the anchor (focus
+  `anchor`), on a folded reaction's target (`reactionTarget`), or on the
+  next visible item (`nextVisible`). An anchor that is not in the chat is
+  `ArchiveError::AnchorNotFound`.
+- **Folding** (D93): only reactions (`assoc_kind` 10–17, 20–27,
+  `assoc_present = 1`) whose target resolves through `message_guid`
+  (`key_kind = 1`) to a timeline item of the same chat. Every other row
+  stays an item with an `AssocVisibility` code: undeterminable, no kind,
+  not a reaction (legacy sticker, poll vote, unknown), target unreadable,
+  target not unique, or target in another chat.
+- **Assembly** (`view/assemble.rs`, §3.11) turns one message id into an
+  `AssembledMessage` under `Caps` (the page caps: 8,192 UTF-16 units per
+  body, 2,000 segments, 200 reaction rows, 50 chips, 100 attachments,
+  replies counted to 1,000; M6 will run the same layer without them). It
+  runs as a second phase (`Assembly`) in the same read transaction,
+  nearest items first: `base` (direction, sender reason, service, the date
+  quad, item and group event, association, body, edits, labels,
+  Recently Deleted markers, attachments) then `extras` (chips, the reply
+  reference with a masked two-line quote, the reply count). A trip keeps
+  the items assembled so far, marks `extras_incomplete`, and moves the far
+  anchor to the last kept item. The page also stops before a running
+  upper bound of its serialised size (6 bytes per UTF-16 unit plus a
+  fixed cost per field, handles included) passes 1 MiB.
+- **Facts, never fabricated** (§3.6): the sender is a closed
+  `SenderReason` and is never taken from a chat's participants; the
+  direction names the backup set when more than one lineage recorded the
+  message; chips are grouped per (kind or emoji, sender) and their state
+  is derived from the recorded rows (latest by key wins; undated or tied
+  rows give "cannot be determined"; an undeterminable sender stands
+  alone; an emoji removal without an emoji is unpaired); replies resolve
+  through `key_kind = 1` only, and counts exclude association rows.
+  Labels: undated, before 2007, unkeyed, `schedule_type`, app content,
+  effect, "not in the newest complete import" per lineage (against each
+  lineage's newest full observation), and provisional (the scalars' or
+  the current body's session ran an untested iOS version). Recently
+  Deleted markers list later completed sessions of the same lineage that
+  no longer list the message.
+- **Bodies.** Formatting ranges apply only when `display_source = 1` and
+  there is no `run_issue`; the text is split into segments (styles,
+  mention, transcription, URL runs with their `hidden` fact, inline
+  emoji, attachments placed by GUID, unmatched placeholders). Over 2,000
+  segments the body is plain text with a note.
+- **Masking and retraction (D115; owner-confirmed, Q3b).** One-time codes
+  are `Withheld` segments, by range when the formatting applies and the
+  whole body otherwise, unless the request carries
+  `Reveal::one_time_code`. Earlier text is `Withheld` (with its reason:
+  unsent, an earlier version for edit code 6, or no current text) unless
+  the request carries `Reveal::earlier_text`; a reply quote never
+  reveals. The setting that reveals earlier text by default is the
+  shell's (5e) and is off by default.
+- **The reply thread** (`reply_thread`): the originator, then at most 500
+  replies across conversations in timeline order; an unkeyed originator
+  has none.
+- **Tests.** `tests/viewer_threads.rs` pages every chat of every
+  catalogue entry and scenario from both ends and through the undated
+  section, and checks the order and every item's facts against the
+  Python model; it checks that no masked string reaches a page unless
+  revealed and that `Debug` prints no content; pages a bulk archive
+  against an SQL oracle (every visible row once, `Around` from many
+  anchors); moves an anchor under the reader (every row between its
+  positions exactly once, `anchor_moved` set); reads during an import's
+  write transaction (the committed snapshot, never `Locked`); truncates
+  the WAL once a call has returned; and trips the budgets
+  (`QueryTooBroad`, `extras_incomplete`). The plans of every new
+  statement are pinned; only the conversation list and a message's
+  attachments sort in a temporary B-tree, and only the conversation list
+  and the session table are scanned.
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`

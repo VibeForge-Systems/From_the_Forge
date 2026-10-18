@@ -216,7 +216,6 @@ fn starts_url(rest: &str) -> bool {
 }
 
 /// Every URL run in `text`, in order.
-#[allow(dead_code)] // body segments (5b2) carry the runs
 pub(crate) fn url_runs(text: &str) -> Vec<UrlRun> {
     let mut out = Vec::new();
     let mut units = 0u32;

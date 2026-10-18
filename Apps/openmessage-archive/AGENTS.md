@@ -335,6 +335,14 @@ Never hand-edit generated files.
   one-time codes masked unless the caller reveals them. Every viewer
   statement is listed in `view::plan_statements` and pinned in
   `tests/query_plans.rs`. Only `conn.rs` may call `interrupt()`.
+- **Thread pages are keysets bounded to one range (M5 slice 5b2).** Page
+  with row-value bounds on `chat_message_timeline`, never `OFFSET`; keep
+  the dated (`< X'01'`) and undated (`>= X'01'`) ranges apart; anchor on
+  message ids and hand sort keys out only as opaque `SortKeyHint`s.
+  Everything a page or the reply thread shows is built by
+  `view/assemble.rs` under `Caps`, masks one-time codes and earlier text
+  unless the request's `Reveal` asks, and never reads read, delivery or
+  sent state (D94).
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush
