@@ -6,20 +6,26 @@
 //! - [`sweep_incoming`]: removes `attachments/.incoming/<n>.partial` files a
 //!   crash left behind (`begin_write`, §5.3).
 //! - [`reconcile_intents`]: for each `blob_intent`, deletes the placed file
-//!   if no `blob` row claims it, then the intent (§9.1, "Reconcile").
+//!   if no `blob` row claims it, flushes its directory, then deletes the
+//!   intent (§9.1, "Reconcile").
+//! - [`store_dir`]: the one check every store path goes through before a
+//!   file under `attachments/<hh>/` is touched.
 //!
 //! The copy procedure itself (phases A–D) arrives with the attachment pass.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::io;
 use std::path::Path;
 
+use oma_fs::{check_private, Expect, PermProblem};
 use rusqlite::TransactionBehavior;
 
 use crate::conn::WriteConn;
 use crate::error::{ArchiveError, IoOp, Stage};
 use crate::id::to_hex;
 use crate::layout::ArchiveDir;
+use crate::store_fs::StoreFs;
 
 /// A storage name: 64 lowercase hex characters (name scheme 1).
 #[derive(Clone, PartialEq, Eq)]
@@ -126,14 +132,56 @@ pub(crate) struct Reconciled {
     pub(crate) committed: u32,
     /// Intents without a blob row: placed file removed (if present).
     pub(crate) rolled_back: u32,
-    /// Placed files that could not be removed (the intent stays).
+    /// Placed files that could not be removed, or whose removal could not
+    /// be made durable, or whose `<hh>` directory is not a private real
+    /// directory: the intent stays.
     pub(crate) files_left: u32,
 }
 
-/// The reconcile of §9.1, in one transaction.
+/// The fan-out directory `attachments/<hh>/` of `name`, if it is safe to
+/// work in: `attachments/` and `attachments/<hh>/` are each a real
+/// directory (not a link, junction or other reparse point) and, on Unix,
+/// owned by the effective user with no group or other bits
+/// ([`oma_fs::check_private`]). `Ok(None)` when `<hh>` does not exist.
+/// Every store path is resolved through this check before a file in it is
+/// touched, so a planted link never leads outside the archive.
+pub(crate) fn store_dir(
+    dir: &ArchiveDir,
+    name: &StorageName,
+) -> Result<Option<std::path::PathBuf>, PermProblem> {
+    check_private(&dir.attachments(), Expect::Dir)?;
+    let file = name.path_in(dir);
+    let Some(hh) = file.parent() else {
+        return Err(PermProblem::WrongType {
+            expected: Expect::Dir,
+        });
+    };
+    match check_private(hh, Expect::Dir) {
+        Ok(()) => Ok(Some(hh.to_path_buf())),
+        Err(PermProblem::Io(io::ErrorKind::NotFound)) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// What one intent comes to.
+enum IntentEnd {
+    /// The blob row exists; the intent is dropped.
+    Committed,
+    /// The placed file is gone (removed now, or never there); the intent is
+    /// dropped once `hh` (if any) is flushed.
+    RolledBack { hh: Option<std::path::PathBuf> },
+    /// Left as it is: the intent stays.
+    Left,
+}
+
+/// The reconcile of §9.1, in one transaction, in the store's order: remove
+/// the placed files, flush each `<hh>` directory a file was removed from
+/// (through `store`), and only then delete the intents and commit. A power
+/// loss can then never keep the intent's deletion but lose the unlink.
 pub(crate) fn reconcile_intents(
     w: &mut WriteConn,
     dir: &ArchiveDir,
+    store: &dyn StoreFs,
 ) -> Result<Reconciled, ArchiveError> {
     let sql = |e: rusqlite::Error| ArchiveError::sqlite(Stage::Recovery, &e);
     let tx =
@@ -151,18 +199,57 @@ pub(crate) fn reconcile_intents(
             .map_err(sql)?;
         rows.collect::<Result<_, _>>().map_err(sql)?
     };
+
+    // 1. The file operations.
+    let mut ends = Vec::with_capacity(intents.len());
+    let mut to_flush: BTreeSet<std::path::PathBuf> = BTreeSet::new();
+    for (sha, _, has_blob) in &intents {
+        if *has_blob {
+            ends.push(IntentEnd::Committed);
+            continue;
+        }
+        // A stored intent always has 32 bytes (the schema checks it), but a
+        // crafted file is not trusted: without a name there is no file.
+        let end = match StorageName::of_sha256(sha) {
+            None => IntentEnd::RolledBack { hh: None },
+            Some(name) => match store_dir(dir, &name) {
+                Ok(None) => IntentEnd::RolledBack { hh: None },
+                Ok(Some(hh)) => match remove_regular(&name.path_in(dir)) {
+                    Ok(true) => {
+                        to_flush.insert(hh.clone());
+                        IntentEnd::RolledBack { hh: Some(hh) }
+                    }
+                    Ok(false) => IntentEnd::RolledBack { hh: None },
+                    Err(_) => IntentEnd::Left,
+                },
+                Err(_) => IntentEnd::Left,
+            },
+        };
+        ends.push(end);
+    }
+
+    // 2. Flush every directory a file was removed from.
+    let mut unflushed: BTreeSet<std::path::PathBuf> = BTreeSet::new();
+    for hh in to_flush {
+        if store.fsync_dir(&hh).is_err() {
+            unflushed.insert(hh);
+        }
+    }
+
+    // 3. The intents, then the commit.
     let mut out = Reconciled::default();
-    for (sha, session, has_blob) in intents {
-        if !has_blob {
-            if let Some(name) = StorageName::of_sha256(&sha) {
-                if remove_regular(&name.path_in(dir)).is_err() {
-                    out.files_left = out.files_left.saturating_add(1);
-                    continue;
-                }
+    for ((sha, session, _), end) in intents.iter().zip(ends) {
+        match end {
+            IntentEnd::Committed => out.committed = out.committed.saturating_add(1),
+            IntentEnd::RolledBack { hh } if hh.as_ref().is_some_and(|h| unflushed.contains(h)) => {
+                out.files_left = out.files_left.saturating_add(1);
+                continue;
             }
-            out.rolled_back = out.rolled_back.saturating_add(1);
-        } else {
-            out.committed = out.committed.saturating_add(1);
+            IntentEnd::RolledBack { .. } => out.rolled_back = out.rolled_back.saturating_add(1),
+            IntentEnd::Left => {
+                out.files_left = out.files_left.saturating_add(1);
+                continue;
+            }
         }
         tx.execute(
             "DELETE FROM blob_intent WHERE sha256 = ?1 AND session_id = ?2",

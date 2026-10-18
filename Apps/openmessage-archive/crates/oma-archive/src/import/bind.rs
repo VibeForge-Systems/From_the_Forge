@@ -496,6 +496,100 @@ mod tests {
         }
     }
 
+    /// The persisted unkeyed fingerprints, pinned byte for byte: one handle
+    /// row and one chat row with every cell state (Value, Null, Absent,
+    /// Oversized, Unreadable with and without a kept raw value, BLOB-class
+    /// text). The expected digests were computed outside this crate from
+    /// the documented encoding (Python hashlib over the tagged fields), so
+    /// a change to `fp_encode`, the column codes or the domain fails here.
+    /// Such a change would make a re-import insert a second copy of every
+    /// unkeyed row.
+    #[test]
+    fn unkeyed_fingerprints_are_pinned_byte_for_byte() {
+        use crate::import::keys::fingerprint;
+        use crate::schema::codes::{Entity, ARCHIVE_COLUMNS};
+        use oma_messages::{CocoaTime, RawSql};
+        use sha2::{Digest, Sha256};
+        let unreadable = |raw: Option<RawSql>| {
+            let mut c = Cell::text(&Col::Unreadable(IssueKind::TypeMismatch));
+            if let Some(r) = raw {
+                c.keep_raw(&r);
+            }
+            c
+        };
+        let codes = |e: Entity| -> Vec<u16> {
+            ARCHIVE_COLUMNS
+                .iter()
+                .filter(|c| c.entity == e)
+                .map(|c| c.code)
+                .collect()
+        };
+        let encode_row = |codes: &[u16], cells: &[Cell]| {
+            assert_eq!(codes.len(), cells.len());
+            let mut out = Vec::new();
+            for (code, cell) in codes.iter().zip(cells) {
+                cell.fp_encode(*code, &mut out);
+            }
+            out
+        };
+        let handle_codes = codes(Entity::Handle);
+        assert_eq!(handle_codes, [101, 102, 103, 104, 105]);
+        let handle = [
+            Cell::text(&Col::Null),
+            Cell::text(&text(b"SMS", TextClass::Text)),
+            Cell::text(&Col::Oversized { bytes: 300 }),
+            unreadable(Some(RawSql::Integer(7))),
+            Cell::text(&text(b"p", TextClass::Blob)),
+        ];
+        let chat_codes = codes(Entity::Chat);
+        assert_eq!(chat_codes, (201..=214).collect::<Vec<u16>>());
+        let chat = [
+            Cell::text(&Col::Absent),
+            Cell::int(&Col::Value(45)),
+            Cell::text(&text(b"", TextClass::Text)),
+            unreadable(Some(RawSql::Real(1.5))),
+            Cell::text(&Col::Null),
+            Cell::text(&text(b"r\xff", TextClass::Text)),
+            unreadable(Some(RawSql::Text(Redacted::new(SqlText::from_bytes(b"t"))))),
+            Cell::blob_size(&Col::Oversized { bytes: 5000 }),
+            Cell::boolean(&Col::Value(true)),
+            Cell::boolean(&Col::Absent),
+            Cell::boolean(&Col::Null),
+            Cell::boolean(&Col::Value(false)),
+            Cell::boolean(&Col::Unreadable(IssueKind::BoolOutOfRange)),
+            Cell::time(&Col::Value(CocoaTime::classify(0))),
+        ];
+        let hex = |b: &[u8]| crate::id::to_hex(b);
+        for (entity, enc, len, enc_sha, fp) in [
+            (
+                Entity::Handle,
+                encode_row(&handle_codes, &handle),
+                62,
+                "7c79fe442ffbfae9788aa75a71fea8d8667f20e337f97c873bcbea4014ba7a3f",
+                "18bfd2acdbfc95ac5567aa0c9109b3077c7e8eb43fa08796e178df25db805f83",
+            ),
+            (
+                Entity::Chat,
+                encode_row(&chat_codes, &chat),
+                149,
+                "855713b2a4cc67dc5250a7a2fcbf1cc8a6f22b63845860fa5ec7dca1b0c0e4c2",
+                "dd731250156acdc25375d3b32482a8217b79cbad01f9accf84e02aeac83d6218",
+            ),
+        ] {
+            assert_eq!(enc.len(), len, "{entity:?}");
+            assert_eq!(hex(&Sha256::digest(&enc)), enc_sha, "{entity:?} fp_encode");
+            let code = u8::try_from(entity.code()).expect("code");
+            assert_eq!(hex(&fingerprint(code, &enc)), fp, "{entity:?} fingerprint");
+        }
+        // The handle row's bytes, spelled out: code, tag, class, raw.
+        let h = encode_row(&handle_codes, &handle);
+        assert_eq!(&h[..5], [0, 101, 1, 0, 0xff]);
+        assert_eq!(
+            &h[h.len() - 14..],
+            [0, 105, 4, 0, 0, 0, 0, 0, 0, 0, 1, b'p', 1, 0xff]
+        );
+    }
+
     #[test]
     fn every_known_issue_kind_has_its_own_code() {
         let kinds = [

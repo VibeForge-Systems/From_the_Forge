@@ -139,12 +139,30 @@ pub(crate) trait PassWriter {
     fn rowid(r: &Self::Record) -> i64;
     /// Content bytes, for the batch byte budget.
     fn size(r: &Self::Record) -> u64;
+    /// Read records from `from` on. It takes `&self`, so a pass can hold
+    /// what its reader needs at run time (P6's attachment locator, which
+    /// borrows the opened backup).
     fn read(
+        &self,
         db: &SmsDb<'_>,
         from: Cursor,
         ctx: &mut MessagesCtx<'_>,
         f: &mut dyn FnMut(Self::Record) -> ControlFlow<Brk>,
     ) -> Result<PassOutcome<Brk>, MessagesError>;
+    /// Work a pass must make durable **before** its batch, in transactions
+    /// of its own on `conn` (no batch is open). The default does nothing.
+    /// P6 commits its blob intents and places the files here, so that the
+    /// batch then commits the blob rows after the placement (spec §9.1). An
+    /// error fails the pass like a batch error; nothing of the batch has
+    /// been written.
+    fn before_batch(
+        &self,
+        _conn: &mut Connection,
+        _run: &Run,
+        _records: &[Self::Record],
+    ) -> rusqlite::Result<()> {
+        Ok(())
+    }
     /// Write the records, one savepoint each, inside the open batch.
     fn write(
         &self,
@@ -263,6 +281,9 @@ fn commit_batch<W: PassWriter>(
             )?;
         }
         point(FaultPoint::BatchBeforeCommit);
+        if let Some(e) = crate::fault::batch_error() {
+            return Err(e);
+        }
         tx.commit()
     })();
     if result.is_err() && !conn.is_autocommit() {
@@ -311,7 +332,7 @@ pub(crate) fn run_pass<W: PassWriter>(
         let clock = ctx.clock;
         let started = clock.now_ns();
         let from = cursor.map_or(Cursor::Start, Cursor::After);
-        let read = W::read(db, from, mctx, &mut |rec| {
+        let read = w.read(db, from, mctx, &mut |rec| {
             point(FaultPoint::Record);
             if cancel.is_cancelled() {
                 return ControlFlow::Break(Brk::Cancelled);
@@ -345,6 +366,9 @@ pub(crate) fn run_pass<W: PassWriter>(
             let last = buf.last().map(W::rowid).or(cursor);
             let n = u64::try_from(buf.len()).unwrap_or(u64::MAX);
             let new_rows = rows_done.saturating_add(n);
+            if !buf.is_empty() {
+                w.before_batch(conn, run, &buf).map_err(PassError::Batch)?;
+            }
             commit_batch(w, conn, run, &buf, last, new_rows, done, counts)
                 .map_err(PassError::Batch)?;
             cursor = last;

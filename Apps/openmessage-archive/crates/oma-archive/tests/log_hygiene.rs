@@ -12,7 +12,7 @@ mod common;
 use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
 
-use common::import::{import, import_with, open_entry, opts};
+use common::import::{import, import_with, open_entry, opts, ENTRIES, PASSWORD};
 use common::*;
 use oma_archive::hooks::{install, Faults, TestSchema};
 use oma_archive::{
@@ -150,16 +150,13 @@ fn logs_errors_and_debug_output_hold_no_label_id_or_path() {
     shown.push(format!("{newer} {newer:?} {:?}", lib.list().expect("list")));
     shown.push(format!("{:?}", lib.sweep()));
 
-    // An import of the hostile and the baseline entries, its outcomes and
-    // its errors.
+    // An import of every catalogue entry (the encrypted one with its
+    // password), its outcomes and its errors (spec §18.9). Each import is a
+    // new lineage, so each supersedes the session before it.
     let (itmp, ilib) = library();
     let iid = ilib.create(None).expect("create");
     let mut a = ilib.open(&iid).expect("open");
-    for entry in [
-        "imp-keys-hostile-plain",
-        "imp-dev1-v1-plain",
-        "imp-dev2-plain",
-    ] {
+    for entry in ENTRIES {
         let src = open_entry(entry);
         let s = import(&mut a, &src, &opts(16), LineageChoice::New);
         shown.push(format!("{s:?}"));
@@ -178,6 +175,20 @@ fn logs_errors_and_debug_output_hold_no_label_id_or_path() {
         shown.push(format!("{c:?}"));
         src.ob.close();
     }
+    // The Recently Deleted option, continuing then superseding a session.
+    for entry in ["imp-rd-plain", "imp-dev1-v1-plain"] {
+        let src = open_entry(entry);
+        let first = import(&mut a, &src, &opts(16), LineageChoice::New);
+        let mut rd = opts(16);
+        rd.include_recently_deleted = true;
+        let s = import(&mut a, &src, &rd, LineageChoice::Existing(first.lineage));
+        assert_eq!(s.superseded, 1, "{entry}");
+        shown.push(format!("{first:?} {s:?}"));
+        let again = import(&mut a, &src, &rd, LineageChoice::Existing(first.lineage));
+        assert!(again.resumed, "{entry}");
+        shown.push(format!("{again:?}"));
+        src.ob.close();
+    }
     shown.push(format!(
         "{a:?} {:?}",
         a.reader().sessions().expect("sessions")
@@ -188,6 +199,7 @@ fn logs_errors_and_debug_output_hold_no_label_id_or_path() {
     let mut banned = vec![LABEL.to_owned(), id.as_str().to_owned(), root_text, iroot];
     banned.push(iid.as_str().to_owned());
     banned.extend(SENTINELS.iter().map(|s| (*s).to_owned()));
+    banned.push(PASSWORD.to_owned());
     banned.push(id.as_str()[1..].to_owned());
     let logs = capture.0.lock().expect("lock").clone();
     assert!(

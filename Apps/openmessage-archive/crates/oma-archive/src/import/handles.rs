@@ -82,6 +82,7 @@ impl PassWriter for Handles {
     }
 
     fn read(
+        &self,
         db: &SmsDb<'_>,
         from: Cursor,
         ctx: &mut MessagesCtx<'_>,

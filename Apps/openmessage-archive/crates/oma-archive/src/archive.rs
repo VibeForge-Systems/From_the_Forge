@@ -23,6 +23,7 @@ use crate::schema::fingerprint;
 use crate::schema::migrate::{run_step, MigrationReport};
 use crate::schema::SchemaPlan;
 use crate::space::{migration_needs, reserve_for, SpaceProbe};
+use crate::store_fs::StoreFs;
 use crate::APP_VERSION;
 
 /// Whether [`Archive::begin_write`] runs the crash cleanup.
@@ -90,6 +91,7 @@ pub struct Archive {
     plan: SchemaPlan,
     space: Arc<dyn SpaceProbe>,
     clock: Arc<dyn Clock>,
+    store: Arc<dyn StoreFs>,
 }
 
 impl std::fmt::Debug for Archive {
@@ -109,6 +111,7 @@ impl Archive {
         plan: SchemaPlan,
         space: Arc<dyn SpaceProbe>,
         clock: Arc<dyn Clock>,
+        store: Arc<dyn StoreFs>,
     ) -> Archive {
         Archive {
             writer: None,
@@ -119,6 +122,7 @@ impl Archive {
             plan,
             space,
             clock,
+            store,
         }
     }
 
@@ -166,6 +170,7 @@ impl Archive {
         let already_recovered = self.recovered;
         let now = self.clock.now_ns();
         let dir = self.dir.clone();
+        let store = Arc::clone(&self.store);
         let w = self.ensure_writer()?;
         let mut report = RecoveryReport::default();
         if recovery == Recovery::Skip || already_recovered {
@@ -179,7 +184,7 @@ impl Archive {
         report.provenance_tmp_removed = tmp.removed;
         report.provenance_tmp_left = tmp.left;
         crate::fault::point(crate::fault::FaultPoint::RecoverySwept);
-        let reconciled = reconcile_intents(w, &dir)?;
+        let reconciled = reconcile_intents(w, &dir, store.as_ref())?;
         crate::fault::point(crate::fault::FaultPoint::RecoveryReconciled);
         report.intents_committed = reconciled.committed;
         report.intents_rolled_back = reconciled.rolled_back;
@@ -270,24 +275,14 @@ impl Archive {
             let sql = |e: rusqlite::Error| ArchiveError::sqlite(Stage::Migrate, &e);
             let tx = rusqlite::Transaction::new(w.conn_mut(), TransactionBehavior::Immediate)
                 .map_err(sql)?;
-            let n = tx
-                .execute(
-                    "UPDATE import_session SET state = ?1, ended_at_ns = coalesce(ended_at_ns, ?2) \
-                     WHERE state IN (?3, ?4, ?5, ?6)",
-                    rusqlite::params![
-                        SessionState::Superseded.code(),
-                        now,
-                        SessionState::Running.code(),
-                        SessionState::Cancelled.code(),
-                        SessionState::Interrupted.code(),
-                        SessionState::Stopped.code()
-                    ],
-                )
-                .map_err(sql)?;
+            // The same supersede as an import's (§8.3 step 3): state 5,
+            // `full_observation = 0`, and the session-local rows deleted.
+            let ids = crate::import::unfinished_sessions(&tx).map_err(sql)?;
+            let n = crate::import::supersede_sessions(&tx, &ids, now).map_err(sql)?;
             tx.commit().map_err(sql)?;
             n
         };
-        report.sessions_superseded = u32::try_from(superseded).unwrap_or(u32::MAX);
+        report.sessions_superseded = superseded;
 
         // 4. The steps.
         for step in chain {

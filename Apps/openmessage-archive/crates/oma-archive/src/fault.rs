@@ -140,6 +140,9 @@ pub mod hooks {
         pub skew_shadow_ddl: bool,
         /// Replace the read op budget (VM operations per statement group).
         pub read_op_budget: Option<u64>,
+        /// Fail every import batch just before its `COMMIT` with this
+        /// SQLite primary result code (the batch then rolls back).
+        pub batch_error: Option<i32>,
     }
 
     thread_local! {
@@ -365,5 +368,20 @@ pub(crate) fn read_op_budget(ops: u64) -> u64 {
     #[cfg(not(feature = "fault-injection"))]
     {
         ops
+    }
+}
+
+/// The error an import batch must fail with, if a test set one.
+#[inline]
+pub(crate) fn batch_error() -> Option<rusqlite::Error> {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current()
+            .batch_error
+            .map(|code| rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None))
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        None
     }
 }

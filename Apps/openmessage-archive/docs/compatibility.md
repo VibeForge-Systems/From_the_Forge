@@ -152,6 +152,16 @@ on 2026-10-18; not CI, not a desktop:
   `local-volume` check's levels for every kind are unit-tested; no non-local
   volume was mounted.
 
+**Behaviour change for existing users.** From M4, a library folder on a
+network volume is **refused**: NFS, SMB/CIFS, AFS, Ceph and Coda on Linux,
+and a UNC path (or one that `canonicalize` reveals as `\\?\UNC\…`) on
+Windows. Someone who chose such a folder before M4 must choose a local one
+after upgrading. Folders on FUSE, 9P and VirtualBox shared folders, and on
+FAT or exFAT (Linux only), are warned about: backup checks keep working
+there, but archives refuse the virtualised ones, and an archive cannot be
+created on a FAT or exFAT drive whose mount does not keep private modes.
+The release notes must say this when they exist.
+
 **Not yet observed:** the Windows results that `crates/oma-fs/tests/windows.rs`
 prints (lines starting `RECORD`): whether `fsync_dir` returns `Synced` or
 `Unsupported` on NTFS, `CreateHardLinkW` refusing an existing target,
@@ -256,7 +266,10 @@ not a desktop, synthetic fixtures only:
   byte-identical trees: `SHA256SUMS` hashes to
   `74a82a95bc1580864d8dd09c72e7223196fe1e4586decf048be6cb564a1ed113` and
   `EXPECTED.SHA256SUMS` to
-  `258ac5c472796873151546de2efa12f1c1eb19b50425cfe93790c13e1f6ea547`. The
+  `258ac5c472796873151546de2efa12f1c1eb19b50425cfe93790c13e1f6ea547`
+  (**superseded** by slice 4f's regeneration, below: the inputs are
+  unchanged, the expectations gained `import.json` and the scenario
+  counts). The
   generator's own assertions held: every scenario that lists two orders
   gave equal content, and the two Recently Deleted orders differed only
   in markers and in "not in the latest import".
@@ -277,14 +290,27 @@ manifests have not yet been compared with an archive (from slice 4f on).
 Run in the same Linux container on 2026-10-18 (ext4 on virtio, bundled
 SQLite 3.53.2); not CI, not a desktop, synthetic data only:
 
+- **The catalogue's expectations were regenerated** for this slice (it
+  added `import.json` and the per-step scenario counts). Re-running
+  `make_synthetic_imports.py --seed 1` (Python 3.13.16, `sqlite3` 3.45.1,
+  cryptography 50.0.1) into an empty scratch directory gave a tree
+  byte-identical to the committed one: `SHA256SUMS` still hashes to
+  `74a82a95bc1580864d8dd09c72e7223196fe1e4586decf048be6cb564a1ed113`, and
+  `EXPECTED.SHA256SUMS` now hashes to
+  `7c3d549bb6b2f6181e877bbc559a19df6e186f3ad533ae32a812ac3202e78dfd`, the
+  value pinned in `tests/import_fixtures.rs`.
+
 - **Handles and chats against the model.** Each of the 12 catalogue
   entries, imported alone into a new archive, gave exactly the handles and
   chats of its `content.json` (keys, sampled columns, `Col` states, BLOB
   storage class, history) and the counts of its `import.json`. All ten
   scenarios, in every order they list, gave their manifest's handles and
-  chats; every scenario with distinct contents per step gave equal content
-  snapshots in both orders, and the per-step counts of
-  `scenarios/*.counts.json`. `integrity_check`, `foreign_key_check` and the
+  chats, equal content snapshots in both orders, and the per-step counts
+  of `scenarios/*.counts.json`. Between steps the test stands in for
+  finalize (it marks the session completed), so the four scenarios that
+  repeat a content digest re-import it in a fresh session; the hostile
+  entry imported twice in two sessions inserted nothing and found every
+  handle and chat already present. `integrity_check`, `foreign_key_check` and the
   FTS rank-1 check were clean after every import.
 - **Crash by kill.** `tests/crash.rs` killed a child import (16-row
   batches, 70 handles and 45 chats) at every batch commit point (before and
@@ -301,6 +327,23 @@ SQLite 3.53.2); not CI, not a desktop, synthetic data only:
   result. Twelve runs with panics at random batch boundaries (rowids
   `i64::MIN` and `i64::MAX`, duplicated keys and identical keyless rows on
   both sides of boundaries) all ended equal to one uninterrupted run.
+
+- **Review fixes (same container, same day).** A session cancelled with
+  the clock years behind its backup date (stored undated) and continued at
+  the model's clock wrote every handle, chat and `lineage_seen` row at its
+  stored rank. A failed session and sessions superseded by `migrate()`
+  kept no map, occurrence or duplicate-key rows. A kill right after a
+  cancelled session's terminal commit continued to the uninterrupted
+  result; after every kill the `-wal` was still present and unchanged when
+  the resume started (the checks ran on a copy). The intent reconcile
+  flushed each store directory after its file was gone and before the
+  intents' deletion committed (a recording `StoreFs`), and left a planted
+  `attachments/<hh>` symbolic link and a 0755 `<hh>` alone with their
+  intents. Creation with directories forced to 0755 (standing in for a
+  vfat or exFAT mount, which was not tried) failed and left nothing; a
+  failed library flush after the rename returned the archive, which
+  listed as ready. The log-hygiene capture covered all 12 entries, the
+  Recently Deleted option and a supersede.
 
 **Crash consistency was tested by process kill only; power loss was not
 tested.** Nothing of this slice has run on Windows yet; its crash plan

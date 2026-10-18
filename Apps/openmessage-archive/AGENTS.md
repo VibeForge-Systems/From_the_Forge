@@ -268,7 +268,10 @@ Never hand-edit generated files.
 - **Crash points are `fault::point(FaultPoint::…)` calls.** They compile
   to nothing without the feature. `tests/crash.rs` re-runs its own binary
   with `OMA_TEST_FAULT=<point>:<n>` and kills the child there; add a point
-  to `FaultPoint::ALL` and to that test's plan together.
+  to `FaultPoint::ALL` and a kill at it in that test together. Its checks
+  after a kill run on a copy of the database files: a read-write
+  connection closing on the original would checkpoint and delete the
+  `-wal` the resume must see.
 - **Headless smoke testing works**, using `xvfb-run` with
   `WEBKIT_DISABLE_DMABUF_RENDERER=1` and `XDG_CONFIG_HOME` pointed at a
   scratch directory. However, the GTK folder picker cannot list directories

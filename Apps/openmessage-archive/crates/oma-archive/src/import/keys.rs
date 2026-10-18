@@ -198,10 +198,15 @@ mod tests {
             handle_natural_key(b"a", Field::Null),
             [4, 0, 0, 0, 0, 0, 0, 0, 1, b'a', 1]
         );
-        // Pinned digest of one key, so the truncation never changes.
+        // Pinned digest of one key, so the truncation never changes: the
+        // first 16 bytes of SHA-256([4, 0, 0, 0, 0, 0, 0, 0, 1, 'G']),
+        // computed outside this crate (Python hashlib).
         assert_eq!(
             key_digest(&guid_key_encoding(b"G")),
-            key_digest(&[4, 0, 0, 0, 0, 0, 0, 0, 1, b'G'])
+            [
+                0x2b, 0xa4, 0x00, 0xfa, 0x27, 0x56, 0x0f, 0x0c, 0x82, 0x18, 0x1f, 0xd9, 0xb4, 0xa9,
+                0x1f, 0x89
+            ]
         );
         let d = key_digest(b"");
         assert_eq!(

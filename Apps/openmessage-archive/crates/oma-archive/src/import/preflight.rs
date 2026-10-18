@@ -21,7 +21,7 @@ use oma_messages::{Cursor, HandleKeyRow, KeyRow, MessagesCtx, MessagesError, Sms
 use rusqlite::Connection;
 
 use super::bind::Cell;
-use super::keys::{guid_key_encoding, handle_natural_key, key_digest};
+use super::keys::{guid_key_encoding, handle_natural_key, key_digest, Rank};
 use crate::schema::codes::{Entity, SessionState};
 
 /// The most rows of one keyed table the key scan reads (the D46 cap).
@@ -226,23 +226,37 @@ pub(crate) struct Binding {
     pub(crate) lineage: Option<i64>,
 }
 
+/// A session to continue.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Resume {
+    pub(crate) id: i64,
+    /// Its stored counts JSON.
+    pub(crate) counts: Option<String>,
+    /// Its stored rank. A continued session writes every row at this rank,
+    /// never at the one computed for this attempt: the order key is not
+    /// part of the binding (spec §8.2 step 1), and a session merges at one
+    /// rank (§8.7).
+    pub(crate) rank: Rank,
+}
+
 /// The resume decision.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ResumeDecision {
-    /// The session to continue, with its stored counts JSON.
-    pub(crate) resume: Option<(i64, Option<String>)>,
+    /// The session to continue.
+    pub(crate) resume: Option<Resume>,
     /// Unfinished sessions to supersede.
     pub(crate) supersede: Vec<i64>,
 }
 
 /// Decide whether an unfinished session continues (§8.2 step 1). The
 /// newest matching candidate is continued; every other candidate is
-/// superseded. A failed session (3) is never a candidate.
+/// superseded. A failed session (3) is never a candidate. A candidate
+/// whose stored rank cannot be read is superseded.
 pub(crate) fn decide_resume(conn: &Connection, want: &Binding) -> rusqlite::Result<ResumeDecision> {
     let mut stmt = conn.prepare(
         "SELECT id, lineage_id, content_digest, main_len, wal_outcome, wal_len, app_version, \
                 schema_version, deriver_version, decoder_version, read_profile, \
-                include_recently_deleted, copy_attachments, counts \
+                include_recently_deleted, copy_attachments, counts, rank \
          FROM import_session WHERE state IN (?1, ?2, ?3, ?4) ORDER BY id DESC",
     )?;
     let mut rows = stmt.query(rusqlite::params![
@@ -261,7 +275,9 @@ pub(crate) fn decide_resume(conn: &Connection, want: &Binding) -> rusqlite::Resu
         let digest: Vec<u8> = r.get(2)?;
         let app: String = r.get(6)?;
         let profile: Vec<u8> = r.get(10)?;
+        let rank: Option<Rank> = Rank::from_slice(&r.get::<_, Vec<u8>>(14)?);
         let matches = out.resume.is_none()
+            && rank.is_some()
             && want.lineage == Some(lineage)
             && digest.as_slice() == want.digest.as_slice()
             && r.get::<_, i64>(3)? == want.main_len
@@ -274,10 +290,15 @@ pub(crate) fn decide_resume(conn: &Connection, want: &Binding) -> rusqlite::Resu
             && profile.as_slice() == want.read_profile.as_slice()
             && r.get::<_, i64>(11)? == i64::from(want.include_recently_deleted)
             && r.get::<_, i64>(12)? == i64::from(want.copy_attachments);
-        if matches {
-            out.resume = Some((id, r.get(13)?));
-        } else {
-            out.supersede.push(id);
+        match (matches, rank) {
+            (true, Some(rank)) => {
+                out.resume = Some(Resume {
+                    id,
+                    counts: r.get(13)?,
+                    rank,
+                });
+            }
+            _ => out.supersede.push(id),
         }
     }
     Ok(out)

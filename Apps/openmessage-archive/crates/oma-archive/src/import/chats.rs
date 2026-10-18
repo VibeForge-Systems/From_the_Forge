@@ -98,6 +98,7 @@ impl PassWriter for Chats {
     }
 
     fn read(
+        &self,
         db: &SmsDb<'_>,
         from: Cursor,
         ctx: &mut MessagesCtx<'_>,

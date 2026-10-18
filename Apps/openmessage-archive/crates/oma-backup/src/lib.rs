@@ -59,7 +59,8 @@ pub use manifest_db::{EntryKind, ManifestEntry, OpenMode};
 pub use mbfile::MbFile;
 pub use open::{OpenBackup, OpenError};
 pub use plists::{
-    BackupFile, InfoPlist, ManifestPlist, NoteKind, ParseNote, SnapshotState, Sourced, StatusPlist,
+    BackupFile, InfoPlist, InfoRaw, ManifestPlist, NoteKind, ParseNote, RawText, SnapshotState,
+    Sourced, StatusPlist, StatusRaw, RAW_TEXT_MAX_BYTES,
 };
 pub use prober::{BlobProbe, FileProber};
 pub use schema_sql::sql_declares_virtual_table;

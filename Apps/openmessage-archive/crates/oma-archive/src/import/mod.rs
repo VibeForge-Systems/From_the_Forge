@@ -6,8 +6,8 @@
 //! 1. stage sms.db (and its `-wal`, best effort) and probe it;
 //! 2. compute the session's facts: the content digest and its framing, the
 //!    read profile, the rank (§8.7), the qualifiers;
-//! 3. the resume decision (§8.2 step 1) and, for a new session, the
-//!    duplicate-key scan (step 3);
+//! 3. the duplicate-key scan (§8.2 step 3), which always runs, then the
+//!    resume decision (step 1);
 //! 4. the archive's first write ([`Archive::begin_write`] with recovery),
 //!    then the session bookkeeping transaction (§8.3);
 //! 5. **P1 handles and P2 chats**, in batches (§8.5), each committing its
@@ -37,13 +37,14 @@ mod session;
 
 use oma_backup::{OpenBackup, WalPolicy};
 use oma_messages::{
-    connect, stage, Connect, MessagesCtx, MessagesError, MessagesProgress, Probe, ProbeOptions,
-    ServiceClass, SmsDb,
+    connect, stage, Connect, MessagesCtx, MessagesError, MessagesPhase, MessagesProgress, Probe,
+    ProbeOptions, ServiceClass, SmsDb,
 };
 
 pub use batch::BatchBudget;
 pub use counts::{EntityCounts, ImportCounts};
 pub use preflight::KEY_SCAN_CAP;
+pub(crate) use session::{supersede_sessions, unfinished_sessions};
 pub use session::{ORDER_KEY_FLOOR_NS, ORDER_KEY_SLACK_NS};
 
 use crate::archive::{Archive, Recovery};
@@ -223,18 +224,28 @@ impl Archive {
             return Err(ArchiveError::NewerRules);
         }
         let cancel = ctx.cancel;
+        // Staging reports its bytes as the import's staging phase (§8.12;
+        // `stage` reports its start, with `done: 0`).
+        let staged = {
+            let progress = &mut *ctx.progress;
+            let mut forward = |p: MessagesProgress| {
+                if p.phase == MessagesPhase::StagingMessagesDb {
+                    progress.event(ArchiveEvent::Import {
+                        phase: ImportPhase::StagingMessagesDb,
+                        done: p.done,
+                        total: p.total,
+                    });
+                }
+            };
+            let mut sctx = MessagesCtx::new(cancel, &mut forward);
+            match stage(ob, opts.wal, &mut sctx) {
+                Ok(s) => s,
+                Err(MessagesError::Cancelled) => return Ok(CoreOutcome::Cancelled(None)),
+                Err(e) => return Err(messages_err(e)),
+            }
+        };
         let mut msink = |_: MessagesProgress| {};
         let mut mctx = MessagesCtx::new(cancel, &mut msink);
-        ctx.progress.event(ArchiveEvent::Import {
-            phase: ImportPhase::StagingMessagesDb,
-            done: 0,
-            total: None,
-        });
-        let staged = match stage(ob, opts.wal, &mut mctx) {
-            Ok(s) => s,
-            Err(MessagesError::Cancelled) => return Ok(CoreOutcome::Cancelled(None)),
-            Err(e) => return Err(messages_err(e)),
-        };
         let result = self.import_staged(ob, &staged, opts, lineage, ctx, &mut mctx);
         if staged.remove().is_err() {
             tracing::warn!("the staged sms.db was not removed; closing the backup removes it");
@@ -302,35 +313,34 @@ impl Archive {
                 }))
             }
         };
+        // The key scan always runs, before the resume decision: the gate
+        // (slice 4j) shows its evidence before the lineage is chosen. A
+        // continued session keeps its stored duplicate set, which is the
+        // same set, because the binding includes the content digest.
+        ctx.progress.event(ArchiveEvent::Import {
+            phase: ImportPhase::ScanningKeys,
+            done: 0,
+            total: None,
+        });
+        let scanned = match scan_keys(&db, mctx) {
+            Ok(KeyScan::Done(d)) => d,
+            Ok(KeyScan::OverLimit(e)) => {
+                let t = match e {
+                    Entity::Handle => KeyScanTable::Handles,
+                    Entity::Chat => KeyScanTable::Chats,
+                    Entity::Message => KeyScanTable::Messages,
+                    _ => KeyScanTable::Attachments,
+                };
+                return Ok(CoreOutcome::NotImportable(NotImportable::OverKeyScanCap(t)));
+            }
+            Err(MessagesError::Cancelled) => return Ok(CoreOutcome::Cancelled(None)),
+            Err(e) => return Err(messages_err(e)),
+        };
         let decision = self
             .reader()
             .budgeted(READ_OP_BUDGET, Stage::Preflight, |c| {
                 decide_resume(c, &facts.binding)
             })?;
-        let scanned = match decision.resume {
-            Some(_) => None,
-            None => {
-                ctx.progress.event(ArchiveEvent::Import {
-                    phase: ImportPhase::ScanningKeys,
-                    done: 0,
-                    total: None,
-                });
-                match scan_keys(&db, mctx) {
-                    Ok(KeyScan::Done(d)) => Some(d),
-                    Ok(KeyScan::OverLimit(e)) => {
-                        let t = match e {
-                            Entity::Handle => KeyScanTable::Handles,
-                            Entity::Chat => KeyScanTable::Chats,
-                            Entity::Message => KeyScanTable::Messages,
-                            _ => KeyScanTable::Attachments,
-                        };
-                        return Ok(CoreOutcome::NotImportable(NotImportable::OverKeyScanCap(t)));
-                    }
-                    Err(MessagesError::Cancelled) => return Ok(CoreOutcome::Cancelled(None)),
-                    Err(e) => return Err(messages_err(e)),
-                }
-            }
-        };
         if ctx.cancel.is_cancelled() {
             return Ok(CoreOutcome::Cancelled(None));
         }
@@ -344,13 +354,15 @@ impl Archive {
         self.begin_write(Recovery::Run)?;
         let w = self.ensure_writer()?;
         let wc = w.conn_mut();
-        let dups = match (scanned, &decision.resume) {
-            (Some(d), _) => d,
-            (None, Some((id, _))) => {
-                load_dup_keys(wc, *id).map_err(|e| ArchiveError::sqlite(Stage::Session, &e))?
+        let dups = match &decision.resume {
+            Some(r) => {
+                load_dup_keys(wc, r.id).map_err(|e| ArchiveError::sqlite(Stage::Session, &e))?
             }
-            (None, None) => return Err(ArchiveError::Internal("no duplicate set")),
+            None => scanned,
         };
+        // A continued session merges at its stored rank (spec §8.7: one
+        // session, one rank), whatever this attempt's dates give.
+        let rank = decision.resume.as_ref().map_or(facts.rank, |r| r.rank);
         let started = session::begin_session(
             wc,
             &facts,
@@ -364,14 +376,14 @@ impl Archive {
             session = started.session,
             resumed = started.resumed,
             superseded = started.superseded,
-            dated = facts.rank.is_dated(),
+            dated = rank.is_dated(),
             qualifiers = facts.qualifiers,
             "import session started"
         );
         let run = Run {
             session: started.session,
             lineage: started.lineage,
-            rank: facts.rank,
+            rank,
             dups,
             budget: opts.batch,
         };

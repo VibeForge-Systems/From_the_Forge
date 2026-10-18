@@ -262,6 +262,7 @@ impl Library {
             plan,
             Arc::clone(&self.space),
             Arc::clone(&self.clock),
+            Arc::clone(&self.store),
         ))
     }
 
@@ -382,9 +383,13 @@ impl Library {
     /// the header pragmas, the meta row and the FTS `secure-delete` option
     /// in one transaction, then a TRUNCATE checkpoint), then `attachments/`,
     /// `attachments/.incoming/` and `imports/`, each flushed. The directory
-    /// is flushed, every handle is closed, and it is renamed to `a<32hex>`
-    /// without replacing anything; then the library is flushed. A failure
-    /// before the rename removes the creation directory.
+    /// is flushed, its permissions are checked as an open checks them
+    /// (so a drive that ignores modes fails here, not on every later open),
+    /// every handle is closed, and it is renamed to `a<32hex>` without
+    /// replacing anything; then the library is flushed. A failure before
+    /// the rename removes the creation directory. Once the rename has
+    /// succeeded the id is returned: a failed library flush is logged as a
+    /// durability warning.
     pub fn create(&self, label: Option<Label>) -> Result<ArchiveId, ArchiveError> {
         let (root, _) = check_root(&self.root)?;
         if root != self.root {
@@ -463,6 +468,14 @@ impl Library {
         self.store
             .fsync_dir(creating.root())
             .map_err(|e| ArchiveError::io(IoOp::Sync, &e))?;
+        // What every later open checks (§5.3 step 2), checked before the
+        // archive becomes visible: a drive that ignores the requested modes
+        // (vfat or exFAT mounted with the usual umask reports 0755 and
+        // 0644) would otherwise give an archive that can never be opened.
+        // The guard removes the creation directory.
+        creating
+            .check_private_all(true)
+            .map_err(ArchiveError::Permissions)?;
         drop(lock);
 
         crate::fault::point(crate::fault::FaultPoint::CreateBeforeRename);
@@ -470,11 +483,18 @@ impl Library {
             .map_err(|e| ArchiveError::io(IoOp::Rename, &e))?;
         cleanup.0 = None;
         crate::fault::point(crate::fault::FaultPoint::CreateAfterRename);
-        let synced = self
-            .store
-            .fsync_dir(&self.root)
-            .map_err(|e| ArchiveError::io(IoOp::Sync, &e))?;
-        tracing::info!(?placed, ?synced, "archive created");
+        // The archive is complete and visible now, so a failed flush of the
+        // library is a durability warning, not a failed creation: a caller
+        // told "failed" would retry and orphan this archive.
+        match self.store.fsync_dir(&self.root) {
+            Ok(synced) => tracing::info!(?placed, ?synced, "archive created"),
+            Err(e) => tracing::warn!(
+                ?placed,
+                kind = ?e.kind(),
+                "archive created; flushing the library folder failed, so a power loss may \
+                 undo the creation"
+            ),
+        }
         Ok(id)
     }
 

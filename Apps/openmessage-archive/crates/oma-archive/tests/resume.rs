@@ -10,6 +10,9 @@
 //!   duplicated keys and same-fingerprint rows on both sides of the batch
 //!   boundaries. The result equals one uninterrupted run.
 //!
+//! - A resumed session writes every row at the rank stored on its session
+//!   row, even when this attempt's clock or dates would give another.
+//!
 //! Process kills are in `crash.rs`.
 #![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
@@ -21,7 +24,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use common::import::*;
 use common::*;
 use oma_archive::hooks::{arm, count, hits, FaultPoint};
-use oma_archive::{CancelToken, CoreOutcome, LineageChoice};
+use oma_archive::{CancelToken, CoreOutcome, LineageChoice, ORDER_KEY_FLOOR_NS};
 
 /// The source rowids of each pass of a finished session, in pass order.
 fn pass_rowids(db: &std::path::Path, session: i64) -> Vec<Vec<i64>> {
@@ -285,4 +288,80 @@ fn random_crashes_at_batch_boundaries_never_change_the_result() {
         total_crashes >= runs,
         "{total_crashes} crashes in {runs} runs"
     );
+}
+
+/// Segment 1 runs with the host clock years behind the backup date, so the
+/// date is out of range and the session is stored undated; it is
+/// cancelled. Segment 2 runs at the model's clock, where the same date is in
+/// range. The continued session still writes at its stored (undated) rank:
+/// one session, one rank (spec §8.7).
+#[test]
+fn a_resumed_session_writes_at_its_stored_rank_when_the_clock_changes() {
+    let entry = "imp-dev1-v1-plain";
+    let (tmp, lib) = library();
+    let id = lib.create(None).expect("create");
+    let mut a = lib.open(&id).expect("open");
+    let src = open_entry(entry);
+    let token = CancelToken::new();
+    let t = token.clone();
+    let guard = arm(FaultPoint::Record, 3, Box::new(move |_, _| t.cancel()));
+    // 2007-01-01 plus one second: every catalogue date lies more than 48 h
+    // later.
+    let early = ORDER_KEY_FLOOR_NS + 1_000_000_000;
+    let out =
+        import_at(&mut a, &src, &opts(16), LineageChoice::New, &token, early).expect("import");
+    drop(guard);
+    let CoreOutcome::Cancelled(Some(s)) = out else {
+        panic!("not cancelled: {out:?}");
+    };
+    assert_eq!(s.counts.handles.seen, 2);
+    drop(a);
+    let mut a = lib.open(&id).expect("open");
+    let s2 = import(&mut a, &src, &opts(16), LineageChoice::Existing(s.lineage));
+    assert!(s2.resumed);
+    assert_eq!(s2.session, s.session);
+    drop(a);
+    src.ob.close();
+    let db = db_path(&tmp, &id);
+    assert_consistent(&db);
+    let c = read_only(&db);
+    let (rank, class, qualifiers): (Vec<u8>, i64, i64) = c
+        .query_row(
+            "SELECT rank, order_class, qualifiers FROM import_session WHERE id = ?1",
+            [s.session],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .expect("session");
+    assert_eq!(class, 0, "stored undated");
+    assert_eq!(rank[0], 0);
+    assert_ne!(qualifiers & 1, 0, "backupDateOutOfRange");
+    for (table, sql) in [
+        (
+            "handle",
+            "SELECT count(*), sum(first_rank <> ?1 OR last_rank <> ?1) FROM handle",
+        ),
+        (
+            "chat",
+            "SELECT count(*), sum(first_rank <> ?1 OR last_rank <> ?1) FROM chat",
+        ),
+        (
+            "lineage_seen",
+            "SELECT count(*), sum(last_rank <> ?1) FROM lineage_seen",
+        ),
+        (
+            "value_history",
+            "SELECT count(*), coalesce(sum(first_rank <> ?1), 0) FROM value_history",
+        ),
+    ] {
+        let (n, other): (i64, Option<i64>) = c
+            .query_row(sql, [rank.as_slice()], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect(table);
+        assert!(n > 0 || table == "value_history", "{table}: no rows");
+        assert_eq!(other.unwrap_or(0), 0, "{table}: rows at another rank");
+    }
+    // The continued session kept its own source_backup row.
+    let sources: i64 = c
+        .query_row("SELECT count(*) FROM source_backup", [], |r| r.get(0))
+        .expect("count");
+    assert_eq!(sources, 1);
 }

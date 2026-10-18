@@ -13,7 +13,11 @@ use std::fs;
 
 use common::import::*;
 use common::*;
-use oma_archive::{ArchiveError, CancelToken, CoreOutcome, LineageChoice, LineageId, Recovery};
+use oma_archive::hooks::{arm, install, FaultPoint, Faults, TestSchema};
+use oma_archive::{
+    ArchiveCtx, ArchiveError, CancelToken, CoreOutcome, FixedClock, LineageChoice, LineageId,
+    NoProgress, Recovery,
+};
 use serde_json::Value;
 
 fn manifest_of(rel: &str) -> Value {
@@ -82,15 +86,33 @@ fn every_entry_imports_its_handles_and_chats_as_the_model_says() {
     }
 }
 
+/// Stand in for finalize (slice 4j), which does not exist yet: mark the
+/// running session completed and empty its session-local tables, so the
+/// next import of the same content starts a **fresh** session instead of
+/// continuing this one (spec §8.2 step 1 resumes only unfinished ones).
+fn finish_sessions(db: &std::path::Path) {
+    let c = raw(db);
+    c.execute_batch(
+        "DELETE FROM import_rowid_map WHERE session_id IN \
+             (SELECT id FROM import_session WHERE state = 0); \
+         DELETE FROM import_occurrence WHERE session_id IN \
+             (SELECT id FROM import_session WHERE state = 0); \
+         DELETE FROM import_dup_key WHERE session_id IN \
+             (SELECT id FROM import_session WHERE state = 0); \
+         UPDATE import_session SET state = 1, ended_at_ns = started_at_ns, \
+             full_observation = (qualifiers & 2) = 0 WHERE state = 0;",
+    )
+    .expect("finish");
+}
+
 /// Every scenario's content, in every order it lists; the orders give equal
-/// content snapshots; each step's counts match the model's, except a step
-/// whose staged content equals an earlier step's.
+/// content snapshots; each step's counts match the model's.
 ///
-/// That exception is the import core's: until finalize exists (slice 4j) a
-/// session never completes, so an import of the same content **continues**
-/// the earlier session (spec §8.2 step 1) and has nothing left to do. The
-/// content is the same either way, because both backups hold the same
-/// rows.
+/// Each step's session is completed before the next step
+/// ([`finish_sessions`]), so a step whose staged content equals an earlier
+/// step's is a fresh session that re-observes it, as it will be once
+/// finalize exists: unkeyed rows must be idempotent and an equal or
+/// undated rank must merge as the model says.
 #[test]
 fn every_scenario_holds_in_every_order() {
     let mut names: Vec<String> = fs::read_dir(imports_root().join("scenarios"))
@@ -102,15 +124,16 @@ fn every_scenario_holds_in_every_order() {
     names.sort();
     assert_eq!(names.len(), 10);
     let mut history_values = 0;
+    let mut repeated_steps = 0;
     for name in &names {
         let m = manifest_of(&format!("scenarios/{name}.content.json"));
         let counts = manifest_of(&format!("scenarios/{name}.counts.json"));
         let orders = m["orders"].as_array().expect("orders");
         let mut snapshots = Vec::new();
-        let mut repeats_content = false;
         for (oi, order) in orders.iter().enumerate() {
             let (tmp, lib) = library();
             let id = lib.create(None).expect("create");
+            let db = db_path(&tmp, &id);
             let mut labels: BTreeMap<String, LineageId> = BTreeMap::new();
             let mut digests: BTreeSet<String> = BTreeSet::new();
             for (si, step) in order.as_array().expect("steps").iter().enumerate() {
@@ -125,15 +148,14 @@ fn every_scenario_holds_in_every_order() {
                 labels.insert(label.to_owned(), s.lineage);
                 drop(a);
                 assert!(src.ob.close().removed);
+                finish_sessions(&db);
+                assert!(!s.resumed, "{name} order {oi} step {si}");
                 let digest = m["sessions"][entry]["contentDigest"]
                     .as_str()
                     .expect("digest")
                     .to_owned();
-                let fresh = digests.insert(digest);
-                assert_eq!(s.resumed, !fresh, "{name} order {oi} step {si}");
-                if !fresh {
-                    repeats_content = true;
-                    continue;
+                if !digests.insert(digest) {
+                    repeated_steps += 1;
                 }
                 let want = &counts["orders"][oi][si];
                 assert_eq!(want["entry"], entry);
@@ -145,22 +167,60 @@ fn every_scenario_holds_in_every_order() {
                     );
                 }
             }
-            let db = db_path(&tmp, &id);
             assert_consistent(&db);
             history_values += assert_view(&db, &m, &format!("{name} order {oi}")).0;
             snapshots.push(logical_snapshot(&db, Scope::Content));
         }
-        // Order independence (spec §8.7): equal content snapshots. Orders
-        // whose steps share content continue one session instead, so their
-        // ranks differ and only the manifest comparison above applies.
-        if !repeats_content {
-            for s in &snapshots[1..] {
-                assert_eq!(s, &snapshots[0], "{name}: the orders differ");
-            }
+        // Order independence (spec §8.7): equal content snapshots.
+        for s in &snapshots[1..] {
+            assert_eq!(s, &snapshots[0], "{name}: the orders differ");
         }
     }
     // dev1-v1-v2 (both orders) and lineages carry history values.
     assert!(history_values >= 3, "{history_values}");
+    // keys-hostile-twice, dev1-v1-undated, dev1-v1-baddate and
+    // dev1-v2-plain-enc each repeat a digest.
+    assert!(repeated_steps >= 4, "{repeated_steps}");
+}
+
+/// Unkeyed rows are idempotent across sessions: the hostile entry imported
+/// twice, in two distinct sessions, leaves the content unchanged and finds
+/// every row already present.
+#[test]
+fn a_second_session_of_the_same_content_inserts_nothing() {
+    let (tmp, lib) = library();
+    let id = lib.create(None).expect("create");
+    let db = db_path(&tmp, &id);
+    let src = open_entry("imp-keys-hostile-plain");
+    let mut a = lib.open(&id).expect("open");
+    let first = import(&mut a, &src, &opts(16), LineageChoice::New);
+    drop(a);
+    finish_sessions(&db);
+    let before = logical_snapshot(&db, Scope::Content);
+    let mut a = lib.open(&id).expect("open");
+    let second = import(
+        &mut a,
+        &src,
+        &opts(16),
+        LineageChoice::Existing(first.lineage),
+    );
+    drop(a);
+    src.ob.close();
+    assert!(!second.resumed);
+    assert_ne!(second.session, first.session);
+    assert!(first.counts.handles.unkeyed > 0 && first.counts.chats.unkeyed > 0);
+    for (got, seen) in [
+        (&second.counts.handles, first.counts.handles.seen),
+        (&second.counts.chats, first.counts.chats.seen),
+    ] {
+        assert_eq!(got.seen, seen);
+        assert_eq!(got.inserted, 0, "{got:?}");
+        assert_eq!(got.already_present, seen, "{got:?}");
+    }
+    let after = logical_snapshot(&db, Scope::Content);
+    for t in ["handle", "chat", "value_issue", "value_history"] {
+        assert_eq!(before[t], after[t], "{t}");
+    }
 }
 
 /// rank, order_class, order_key, order_key_source, qualifiers, state,
@@ -443,4 +503,114 @@ fn a_migration_pending_or_newer_rules_refuse_the_import() {
     assert!(matches!(err, ArchiveError::NewerRules), "{err:?}");
     drop(a);
     src.ob.close();
+}
+
+/// The rows of the session-local tables that belong to `session`.
+fn session_local_rows(db: &std::path::Path, session: i64) -> i64 {
+    read_only(db)
+        .query_row(
+            "SELECT (SELECT count(*) FROM import_rowid_map WHERE session_id = ?1) \
+                  + (SELECT count(*) FROM import_occurrence WHERE session_id = ?1) \
+                  + (SELECT count(*) FROM import_dup_key WHERE session_id = ?1)",
+            [session],
+            |r| r.get(0),
+        )
+        .expect("count")
+}
+
+/// A cancelled import of the hostile entry (map rows, occurrence counters
+/// and duplicate keys committed): its summary.
+fn cancelled_hostile(
+    lib: &oma_archive::Library,
+    id: &oma_archive::ArchiveId,
+) -> oma_archive::ImportSummary {
+    let mut a = lib.open(id).expect("open");
+    let src = open_entry("imp-keys-hostile-plain");
+    let token = CancelToken::new();
+    let t = token.clone();
+    let guard = arm(FaultPoint::Record, 9, Box::new(move |_, _| t.cancel()));
+    let out = import_with(&mut a, &src, &opts(16), LineageChoice::New, &token).expect("import");
+    drop(guard);
+    drop(a);
+    src.ob.close();
+    match out {
+        CoreOutcome::Cancelled(Some(s)) => s,
+        other => panic!("not cancelled: {other:?}"),
+    }
+}
+
+/// A failed session (3) is never resumed, so its map rows, occurrence
+/// counters and duplicate keys go with the state that ends it.
+#[test]
+fn a_failed_session_keeps_no_session_local_rows() {
+    let (tmp, lib) = library();
+    let id = lib.create(None).expect("create");
+    let db = db_path(&tmp, &id);
+    let first = cancelled_hostile(&lib, &id);
+    assert!(session_local_rows(&db, first.session) > 0);
+    // Continue it with every batch failing on an I/O error.
+    let mut a = lib.open(&id).expect("open");
+    let src = open_entry("imp-keys-hostile-plain");
+    let err = {
+        let _faults = install(Faults {
+            batch_error: Some(10),
+            ..Faults::default()
+        });
+        import_with(
+            &mut a,
+            &src,
+            &opts(16),
+            LineageChoice::Existing(first.lineage),
+            &CancelToken::new(),
+        )
+        .expect_err("fails")
+    };
+    assert!(matches!(err, ArchiveError::Sqlite { .. }), "{err:?}");
+    drop(a);
+    src.ob.close();
+    let state: i64 = read_only(&db)
+        .query_row(
+            "SELECT state FROM import_session WHERE id = ?1",
+            [first.session],
+            |r| r.get(0),
+        )
+        .expect("state");
+    assert_eq!(state, 3);
+    assert_eq!(session_local_rows(&db, first.session), 0);
+    assert_consistent(&db);
+}
+
+/// A migration supersedes unfinished sessions as an import does: state 5,
+/// `full_observation = 0`, and no session-local rows left.
+#[test]
+fn a_migration_supersedes_sessions_like_an_import() {
+    let (tmp, lib) = library();
+    let id = lib.create(None).expect("create");
+    let db = db_path(&tmp, &id);
+    let first = cancelled_hostile(&lib, &id);
+    assert!(session_local_rows(&db, first.session) > 0);
+    {
+        let _faults = install(Faults {
+            schema: Some(TestSchema::V2),
+            ..Faults::default()
+        });
+        let mut a = lib.open(&id).expect("open");
+        let r = a
+            .migrate(&mut ArchiveCtx {
+                cancel: &CancelToken::new(),
+                progress: &mut NoProgress,
+                clock: &FixedClock(MODEL_NOW_NS),
+            })
+            .expect("migrates");
+        assert_eq!(r.sessions_superseded, 1);
+    }
+    let (state, full): (i64, Option<i64>) = read_only(&db)
+        .query_row(
+            "SELECT state, full_observation FROM import_session WHERE id = ?1",
+            [first.session],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .expect("session");
+    assert_eq!((state, full), (5, Some(0)));
+    assert_eq!(session_local_rows(&db, first.session), 0);
 }

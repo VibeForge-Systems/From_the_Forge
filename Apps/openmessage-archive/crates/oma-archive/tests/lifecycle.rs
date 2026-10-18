@@ -366,11 +366,9 @@ fn begin_write_recovery_sweeps_reconciles_and_marks_interrupted() {
     // placed file on disk.
     let committed = [0x11u8; 32];
     let rolled_back = [0x22u8; 32];
-    let placed = dir.join("attachments").join("22").join(hex(&rolled_back));
-    fs::create_dir_all(placed.parent().expect("parent")).expect("mkdir");
+    let placed = store_hh(&dir, "22").join(hex(&rolled_back));
     fs::write(&placed, b"orphan").expect("placed");
-    let kept_blob = dir.join("attachments").join("11").join(hex(&committed));
-    fs::create_dir_all(kept_blob.parent().expect("parent")).expect("mkdir");
+    let kept_blob = store_hh(&dir, "11").join(hex(&committed));
     fs::write(&kept_blob, b"kept").expect("blob file");
     {
         let c = raw(&db_path(&tmp, &id));

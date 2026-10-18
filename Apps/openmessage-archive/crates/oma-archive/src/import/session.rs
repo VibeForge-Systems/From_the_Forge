@@ -14,7 +14,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use oma_backup::{OpenBackup, StagedDatabase, WalOutcome};
+use oma_backup::{OpenBackup, RawText, StagedDatabase, WalOutcome};
 use oma_messages::{Capabilities, KnownTable, TextEncoding};
 use rusqlite::{Connection, TransactionBehavior};
 use serde_json::{Map, Value};
@@ -22,11 +22,11 @@ use sha2::{Digest, Sha256};
 
 use super::counts::ImportCounts;
 use super::keys::{encode, Field, Rank};
-use super::preflight::{Binding, DupSet};
+use super::preflight::{Binding, DupSet, Resume};
 use super::LineageChoice;
 use crate::schema::codes::{
     IssueCode, OrderClass, OrderKeySource, QualifierBit, SessionState, TextEncodingCode,
-    WalOutcomeCode,
+    UnreadableKind, WalOutcomeCode,
 };
 use crate::schema::{DECODER_VERSION, DERIVER_VERSION, SCHEMA_VERSION};
 use crate::APP_VERSION;
@@ -46,41 +46,116 @@ fn unix_ns(t: SystemTime) -> Option<i64> {
     }
 }
 
+/// The bits of `source_backup.wrong_type_fields` and `oversized_fields`
+/// (v1.sql). A field with no value and neither bit was absent.
+pub(crate) mod source_field {
+    pub(crate) const DEVICE_NAME: i64 = 1;
+    pub(crate) const PRODUCT_TYPE: i64 = 2;
+    pub(crate) const PRODUCT_VERSION: i64 = 4;
+    pub(crate) const BUILD_VERSION: i64 = 8;
+    pub(crate) const SNAPSHOT_STATE: i64 = 16;
+    pub(crate) const INFO_LAST_BACKUP_DATE: i64 = 32;
+    pub(crate) const STATUS_DATE: i64 = 64;
+    pub(crate) const IS_FULL_BACKUP: i64 = 128;
+}
+
 /// The `source_backup` facts: no UDID, serial, phone number or path (D14).
+///
+/// The strings are the plist values **as recorded** ([`RawText`]): not
+/// sanitised and not truncated. A string over the cap or of the wrong type
+/// is not stored, and its bit in `oversized_fields` or `wrong_type_fields`
+/// says so; display sanitising happens only when shown (I5).
 #[derive(Clone, Default)]
 pub(crate) struct SourceBackup {
-    device_name: Option<String>,
-    product_type: Option<String>,
-    product_version: Option<String>,
-    build_version: Option<String>,
+    device_name: RawText,
+    product_type: RawText,
+    product_version: RawText,
+    build_version: RawText,
     info_last_backup_ns: Option<i64>,
+    info_last_backup_wrong_type: bool,
     status_date_ns: Option<i64>,
-    snapshot_state_raw: Option<String>,
+    status_date_wrong_type: bool,
+    snapshot_state_raw: RawText,
     is_full_backup: Option<bool>,
+    is_full_backup_wrong_type: bool,
     encrypted: bool,
 }
 
 impl SourceBackup {
-    /// SHA-256 over the tagged encoding of every field.
+    fn texts(&self) -> [(&RawText, i64); 5] {
+        [
+            (&self.device_name, source_field::DEVICE_NAME),
+            (&self.product_type, source_field::PRODUCT_TYPE),
+            (&self.product_version, source_field::PRODUCT_VERSION),
+            (&self.build_version, source_field::BUILD_VERSION),
+            (&self.snapshot_state_raw, source_field::SNAPSHOT_STATE),
+        ]
+    }
+
+    /// `source_backup.wrong_type_fields`.
+    pub(crate) fn wrong_type_fields(&self) -> i64 {
+        let mut bits = self
+            .texts()
+            .iter()
+            .filter(|(t, _)| **t == RawText::WrongType)
+            .fold(0, |b, (_, bit)| b | bit);
+        for (wrong, bit) in [
+            (
+                self.info_last_backup_wrong_type,
+                source_field::INFO_LAST_BACKUP_DATE,
+            ),
+            (self.status_date_wrong_type, source_field::STATUS_DATE),
+            (self.is_full_backup_wrong_type, source_field::IS_FULL_BACKUP),
+        ] {
+            if wrong {
+                bits |= bit;
+            }
+        }
+        bits
+    }
+
+    /// `source_backup.oversized_fields`.
+    pub(crate) fn oversized_fields(&self) -> i64 {
+        self.texts()
+            .iter()
+            .filter(|(t, _)| matches!(t, RawText::Oversized { .. }))
+            .fold(0, |b, (_, bit)| b | bit)
+    }
+
+    /// SHA-256 over the tagged encoding of every field, each in its state
+    /// (absent, wrong type, oversized with its length, or the value).
     fn observed_key(&self) -> [u8; 32] {
+        let unreadable =
+            Field::Unreadable(u8::try_from(UnreadableKind::TypeMismatch.code()).unwrap_or(u8::MAX));
         let mut out = Vec::new();
-        let text = |out: &mut Vec<u8>, v: &Option<String>| match v {
-            Some(s) => encode(out, Field::Bytes(s.as_bytes())),
-            None => encode(out, Field::Null),
+        let text = |out: &mut Vec<u8>, v: &RawText| match v {
+            RawText::Value(s) => encode(out, Field::Bytes(s.as_bytes())),
+            RawText::Oversized { bytes } => encode(out, Field::Oversized(*bytes)),
+            RawText::WrongType => encode(out, unreadable),
+            _ => encode(out, Field::Absent),
         };
-        let int = |out: &mut Vec<u8>, v: Option<i64>| match v {
-            Some(i) => encode(out, Field::Int(i)),
-            None => encode(out, Field::Null),
+        let int = |out: &mut Vec<u8>, v: Option<i64>, wrong: bool| match (v, wrong) {
+            (Some(i), _) => encode(out, Field::Int(i)),
+            (None, true) => encode(out, unreadable),
+            (None, false) => encode(out, Field::Absent),
         };
         text(&mut out, &self.device_name);
         text(&mut out, &self.product_type);
         text(&mut out, &self.product_version);
         text(&mut out, &self.build_version);
-        int(&mut out, self.info_last_backup_ns);
-        int(&mut out, self.status_date_ns);
+        int(
+            &mut out,
+            self.info_last_backup_ns,
+            self.info_last_backup_wrong_type,
+        );
+        int(&mut out, self.status_date_ns, self.status_date_wrong_type);
         text(&mut out, &self.snapshot_state_raw);
-        int(&mut out, self.is_full_backup.map(i64::from));
-        int(&mut out, Some(i64::from(self.encrypted)));
+        int(
+            &mut out,
+            self.is_full_backup.map(i64::from),
+            self.is_full_backup_wrong_type,
+        );
+        int(&mut out, Some(i64::from(self.encrypted)), false);
         Sha256::digest(&out).into()
     }
 }
@@ -173,18 +248,22 @@ pub(crate) fn facts(
     let ins = ob.inspection();
     let info = ins.info.as_ref();
     let status = ins.status.as_ref();
-    let text = |t: Option<&oma_backup::DisplayText>| t.map(|t| t.as_str().to_owned());
     let status_date = status.and_then(|s| s.date).map(SystemTime::from);
     let info_date = info.and_then(|i| i.last_backup_date).map(SystemTime::from);
+    let info_raw = info.map(|i| i.raw.clone()).unwrap_or_default();
+    let status_raw = status.map(|s| s.raw.clone()).unwrap_or_default();
     let source = SourceBackup {
-        device_name: text(info.and_then(|i| i.device_name.as_ref())),
-        product_type: text(info.and_then(|i| i.product_type.as_ref())),
-        product_version: text(info.and_then(|i| i.product_version.as_ref())),
-        build_version: text(info.and_then(|i| i.build_version.as_ref())),
+        device_name: info_raw.device_name,
+        product_type: info_raw.product_type,
+        product_version: info_raw.product_version,
+        build_version: info_raw.build_version,
         info_last_backup_ns: info_date.and_then(unix_ns),
+        info_last_backup_wrong_type: info_raw.last_backup_date_wrong_type,
         status_date_ns: status_date.and_then(unix_ns),
-        snapshot_state_raw: text(status.and_then(|s| s.snapshot_state_raw.as_ref())),
+        status_date_wrong_type: status_raw.date_wrong_type,
+        snapshot_state_raw: status_raw.snapshot_state,
         is_full_backup: status.and_then(|s| s.is_full_backup),
+        is_full_backup_wrong_type: status_raw.is_full_backup_wrong_type,
         encrypted: ob.is_encrypted(),
     };
 
@@ -296,48 +375,141 @@ fn sql(e: rusqlite::Error) -> crate::ArchiveError {
     crate::ArchiveError::sqlite(crate::Stage::Session, &e)
 }
 
+/// The session-local tables: "for the running session only; emptied when
+/// it ends" (v1.sql).
+const SESSION_LOCAL_TABLES: [&str; 3] = ["import_rowid_map", "import_occurrence", "import_dup_key"];
+
+/// Delete one session's rows from the session-local tables. Every path
+/// that ends a session for good (superseded at import or by a migration,
+/// failed) calls this in the transaction that records the state, so the
+/// two paths cannot drift apart.
+pub(crate) fn drop_session_local(conn: &Connection, session: i64) -> rusqlite::Result<()> {
+    for table in SESSION_LOCAL_TABLES {
+        conn.execute(
+            &format!("DELETE FROM {table} WHERE session_id = ?1"),
+            [session],
+        )?;
+    }
+    Ok(())
+}
+
+/// Delete the session-local rows of every failed (3) or superseded (5)
+/// session: a backstop for rows an earlier build left behind.
+fn drop_finished_session_local(conn: &Connection) -> rusqlite::Result<()> {
+    for table in SESSION_LOCAL_TABLES {
+        conn.execute(
+            &format!(
+                "DELETE FROM {table} WHERE session_id IN \
+                 (SELECT id FROM import_session WHERE state IN (?1, ?2))"
+            ),
+            rusqlite::params![SessionState::Failed.code(), SessionState::Superseded.code()],
+        )?;
+    }
+    Ok(())
+}
+
+/// Mark `ids` superseded (state 5) with `full_observation = 0`, and delete
+/// their session-local rows: spec §8.3 step 3, shared by the import and by
+/// [`crate::Archive::migrate`]. Only unfinished sessions (0, 2, 4, 6)
+/// change. Returns how many sessions were marked.
+pub(crate) fn supersede_sessions(
+    conn: &Connection,
+    ids: &[i64],
+    now_ns: i64,
+) -> rusqlite::Result<u32> {
+    let mut superseded = 0u32;
+    for id in ids {
+        let n = conn.execute(
+            "UPDATE import_session SET state = ?1, ended_at_ns = coalesce(ended_at_ns, ?2), \
+                 full_observation = 0 \
+             WHERE id = ?3 AND state IN (?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                SessionState::Superseded.code(),
+                now_ns,
+                id,
+                SessionState::Running.code(),
+                SessionState::Cancelled.code(),
+                SessionState::Interrupted.code(),
+                SessionState::Stopped.code()
+            ],
+        )?;
+        drop_session_local(conn, *id)?;
+        superseded = superseded.saturating_add(u32::try_from(n).unwrap_or(0));
+    }
+    Ok(superseded)
+}
+
+/// The unfinished sessions (0, 2, 4, 6), for a migration to supersede.
+pub(crate) fn unfinished_sessions(conn: &Connection) -> rusqlite::Result<Vec<i64>> {
+    let mut stmt =
+        conn.prepare("SELECT id FROM import_session WHERE state IN (?1, ?2, ?3, ?4) ORDER BY id")?;
+    let rows = stmt.query_map(
+        rusqlite::params![
+            SessionState::Running.code(),
+            SessionState::Cancelled.code(),
+            SessionState::Interrupted.code(),
+            SessionState::Stopped.code()
+        ],
+        |r| r.get(0),
+    )?;
+    rows.collect()
+}
+
+/// The source_backup row for these facts (upserted on `observed_key`).
+fn source_backup_id(tx: &Connection, s: &SourceBackup) -> Result<i64, crate::ArchiveError> {
+    let key = s.observed_key();
+    tx.execute(
+        "INSERT INTO source_backup (observed_key, device_name, product_type, product_version, \
+             build_version, info_last_backup_ns, status_date_ns, snapshot_state_raw, \
+             is_full_backup, encrypted, wrong_type_fields, oversized_fields) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) \
+         ON CONFLICT (observed_key) DO NOTHING",
+        rusqlite::params![
+            key.as_slice(),
+            s.device_name.as_str(),
+            s.product_type.as_str(),
+            s.product_version.as_str(),
+            s.build_version.as_str(),
+            s.info_last_backup_ns,
+            s.status_date_ns,
+            s.snapshot_state_raw.as_str(),
+            s.is_full_backup.map(i64::from),
+            i64::from(s.encrypted),
+            s.wrong_type_fields(),
+            s.oversized_fields()
+        ],
+    )
+    .map_err(sql)?;
+    tx.query_row(
+        "SELECT id FROM source_backup WHERE observed_key = ?1",
+        [key.as_slice()],
+        |r| r.get(0),
+    )
+    .map_err(sql)
+}
+
 /// The bookkeeping transaction of §8.3.
+///
+/// On resume the continued session keeps its own `source_backup` row and
+/// rank: nothing about the source is re-recorded, and its rows keep being
+/// written at the stored rank ([`Resume::rank`]).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn begin_session(
     conn: &mut Connection,
     facts: &SessionFacts,
     lineage: LineageChoice,
-    resume: Option<(i64, Option<String>)>,
+    resume: Option<Resume>,
     supersede: &[i64],
     dups: &DupSet,
     now_ns: i64,
 ) -> Result<Started, crate::ArchiveError> {
     let tx = rusqlite::Transaction::new(conn, TransactionBehavior::Immediate).map_err(sql)?;
 
-    // 1. source_backup.
-    let key = facts.source.observed_key();
-    let s = &facts.source;
-    tx.execute(
-        "INSERT INTO source_backup (observed_key, device_name, product_type, product_version, \
-             build_version, info_last_backup_ns, status_date_ns, snapshot_state_raw, \
-             is_full_backup, encrypted) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) ON CONFLICT (observed_key) DO NOTHING",
-        rusqlite::params![
-            key.as_slice(),
-            s.device_name,
-            s.product_type,
-            s.product_version,
-            s.build_version,
-            s.info_last_backup_ns,
-            s.status_date_ns,
-            s.snapshot_state_raw,
-            s.is_full_backup.map(i64::from),
-            i64::from(s.encrypted)
-        ],
-    )
-    .map_err(sql)?;
-    let source_id: i64 = tx
-        .query_row(
-            "SELECT id FROM source_backup WHERE observed_key = ?1",
-            [key.as_slice()],
-            |r| r.get(0),
-        )
-        .map_err(sql)?;
+    // 1. source_backup (a new session only).
+    let source_id = match resume {
+        Some(_) => None,
+        None => Some(source_backup_id(&tx, &facts.source)?),
+    };
 
     // 2. The lineage.
     let lineage_id = match lineage {
@@ -359,37 +531,15 @@ pub(crate) fn begin_session(
         }
     };
 
-    // 3. Supersede.
-    let mut superseded = 0u32;
-    for id in supersede {
-        let n = tx
-            .execute(
-                "UPDATE import_session SET state = ?1, ended_at_ns = coalesce(ended_at_ns, ?2), \
-                     full_observation = 0 \
-                 WHERE id = ?3 AND state IN (?4, ?5, ?6, ?7)",
-                rusqlite::params![
-                    SessionState::Superseded.code(),
-                    now_ns,
-                    id,
-                    SessionState::Running.code(),
-                    SessionState::Cancelled.code(),
-                    SessionState::Interrupted.code(),
-                    SessionState::Stopped.code()
-                ],
-            )
-            .map_err(sql)?;
-        for table in ["import_rowid_map", "import_occurrence", "import_dup_key"] {
-            tx.execute(&format!("DELETE FROM {table} WHERE session_id = ?1"), [id])
-                .map_err(sql)?;
-        }
-        superseded = superseded.saturating_add(u32::try_from(n).unwrap_or(0));
-    }
+    // 3. Supersede, and drop what failed or superseded sessions left.
+    let superseded = supersede_sessions(&tx, supersede, now_ns).map_err(sql)?;
+    drop_finished_session_local(&tx).map_err(sql)?;
 
     // 4. The new session, or the continued one.
     let b = &facts.binding;
-    let (session, resumed, counts) = match resume {
-        Some((id, stored)) => {
-            let mut counts = stored
+    let (session, resumed, counts) = match (resume, source_id) {
+        (Some(Resume { id, counts, .. }), _) => {
+            let mut counts = counts
                 .as_deref()
                 .and_then(ImportCounts::from_json)
                 .unwrap_or_default();
@@ -403,7 +553,8 @@ pub(crate) fn begin_session(
             .map_err(sql)?;
             (id, true, counts)
         }
-        None => {
+        (None, source_id) => {
+            let source_id = source_id.ok_or(crate::ArchiveError::Internal("no source_backup"))?;
             let counts = ImportCounts::default();
             tx.execute(
                 "INSERT INTO import_session (source_backup_id, lineage_id, state, started_at_ns, \
@@ -483,7 +634,8 @@ pub(crate) fn begin_session(
 
 /// Record a terminal state other than completed: cancelled (2), failed (3)
 /// or stopped (6), with the counts committed so far and, for a stop or
-/// failure, its reason in `import_issue`. Best effort: if this fails, the
+/// failure, its reason in `import_issue`. A failed session's session-local
+/// rows are deleted in the same transaction. Best effort: if this fails, the
 /// session stays running and the next write open marks it interrupted,
 /// which is just as resumable.
 pub(crate) fn end_session(
@@ -499,7 +651,7 @@ pub(crate) fn end_session(
             conn.execute_batch("ROLLBACK")?;
         }
         let tx = rusqlite::Transaction::new(conn, TransactionBehavior::Immediate)?;
-        tx.execute(
+        let n = tx.execute(
             "UPDATE import_session SET state = ?1, ended_at_ns = ?2, full_observation = 0, \
                  counts = ?3 WHERE id = ?4 AND state = ?5",
             rusqlite::params![
@@ -516,6 +668,11 @@ pub(crate) fn end_session(
                  ON CONFLICT (session_id, pass, kind) DO UPDATE SET count = count + 1",
                 rusqlite::params![session, pass, code.code()],
             )?;
+        }
+        // A failed session is never resumed (§8.2 step 1): its session-local
+        // rows go with the state that ends it.
+        if state == SessionState::Failed && n == 1 {
+            drop_session_local(&tx, session)?;
         }
         tx.commit()
     };
@@ -559,10 +716,56 @@ mod tests {
             ..SourceBackup::default()
         };
         let c = SourceBackup {
-            device_name: Some(String::new()),
+            device_name: RawText::Value(String::new()),
             ..SourceBackup::default()
         };
         assert_ne!(a.observed_key(), b.observed_key());
         assert_ne!(a.observed_key(), c.observed_key());
+        // Absent, wrong type, oversized and a value never share a key, and
+        // names that differ only after 127 characters or by a control or
+        // bidi mark stay distinct (nothing is sanitised or truncated).
+        let name = |t: RawText| SourceBackup {
+            device_name: t,
+            ..SourceBackup::default()
+        };
+        let long = "n".repeat(200);
+        let mut longer = long.clone();
+        longer.push('m');
+        let keys = [
+            name(RawText::Absent).observed_key(),
+            name(RawText::WrongType).observed_key(),
+            name(RawText::Oversized { bytes: 5000 }).observed_key(),
+            name(RawText::Value(long)).observed_key(),
+            name(RawText::Value(longer)).observed_key(),
+            name(RawText::Value("Phone".into())).observed_key(),
+            name(RawText::Value("Pho\u{202E}ne".into())).observed_key(),
+        ];
+        for (i, k) in keys.iter().enumerate() {
+            for l in keys.iter().skip(i + 1) {
+                assert_ne!(k, l);
+            }
+        }
+        let wrong_date = SourceBackup {
+            status_date_wrong_type: true,
+            ..SourceBackup::default()
+        };
+        assert_ne!(a.observed_key(), wrong_date.observed_key());
+        // The marker columns.
+        let marked = SourceBackup {
+            device_name: RawText::WrongType,
+            build_version: RawText::Oversized { bytes: 5000 },
+            snapshot_state_raw: RawText::Oversized { bytes: 5000 },
+            is_full_backup_wrong_type: true,
+            ..SourceBackup::default()
+        };
+        assert_eq!(
+            marked.wrong_type_fields(),
+            source_field::DEVICE_NAME | source_field::IS_FULL_BACKUP
+        );
+        assert_eq!(
+            marked.oversized_fields(),
+            source_field::BUILD_VERSION | source_field::SNAPSHOT_STATE
+        );
+        assert_eq!((a.wrong_type_fields(), a.oversized_fields()), (0, 0));
     }
 }

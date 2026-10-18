@@ -9,8 +9,17 @@
 //! time budget is off, so batch boundaries are deterministic.
 //!
 //! After every kill the parent opens the archive read-only first, checks
-//! `integrity_check`, `foreign_key_check` and the FTS index, continues the
-//! import, and compares the result with an uninterrupted import.
+//! `integrity_check`, `foreign_key_check` and the FTS index **on a copy**
+//! of the database, its `-wal` and its `-shm` (a read-write check would
+//! checkpoint and delete the `-wal`), asserts that the `-wal` the kill left
+//! is still there unchanged, continues the import against those files, and
+//! compares the result with an uninterrupted import. Each child stages
+//! under a directory the parent removes (a killed child never cleans up).
+//!
+//! Every point in `FaultPoint::ALL` is killed at: the batch, record,
+//! session and recovery points by the import plan, the terminal commit by
+//! a child that cancels during the chat pass, and the two creation points
+//! by the creation test.
 //!
 //! What this shows: consistency after a **process kill**. A kill leaves the
 //! kernel's page cache intact, so it does not exercise fsync ordering;
@@ -27,7 +36,28 @@ use std::time::Duration;
 use common::import::*;
 use common::*;
 use oma_archive::hooks::{arm, count, hits, FaultPoint};
-use oma_archive::{ArchiveEntry, ArchiveId, CancelToken, Library, LineageChoice, LineageId};
+use oma_archive::{
+    ArchiveCtx, ArchiveEntry, ArchiveEvent, ArchiveId, ArchiveSink, CancelToken, FixedClock,
+    ImportPhase, Library, LineageChoice, LineageId,
+};
+
+/// Cancels `token` once the chat pass has committed a batch.
+struct CancelInChats(CancelToken);
+
+impl ArchiveSink for CancelInChats {
+    fn event(&mut self, event: ArchiveEvent) {
+        if let ArchiveEvent::Import {
+            phase: ImportPhase::ImportingChats,
+            done,
+            ..
+        } = event
+        {
+            if done > 0 {
+                self.0.cancel();
+            }
+        }
+    }
+}
 
 const ENV_FAULT: &str = "OMA_TEST_FAULT";
 const ENV_SCENARIO: &str = "OMA_TEST_SCENARIO";
@@ -35,6 +65,8 @@ const ENV_LIBRARY: &str = "OMA_TEST_LIBRARY";
 const ENV_ARCHIVE: &str = "OMA_TEST_ARCHIVE";
 const ENV_BACKUP: &str = "OMA_TEST_BACKUP";
 const ENV_LINEAGE: &str = "OMA_TEST_LINEAGE";
+/// Set: the child cancels its import once the chat pass committed a batch.
+const ENV_CANCEL: &str = "OMA_TEST_CANCEL_IN_CHATS";
 
 /// How long a child may take to reach its fault point or finish.
 const CHILD_TIMEOUT: Duration = Duration::from_secs(120);
@@ -78,7 +110,20 @@ fn crash_child() {
             };
             let mut a = lib.open(&id).expect("open");
             let src = open_dir(&backup, None);
-            import_with(&mut a, &src, &opts(16), lineage, &CancelToken::new()).expect("import");
+            let token = CancelToken::new();
+            if std::env::var_os(ENV_CANCEL).is_some() {
+                let clock = FixedClock(MODEL_NOW_NS);
+                let mut sink = CancelInChats(token.clone());
+                let mut ctx = ArchiveCtx {
+                    cancel: &token,
+                    progress: &mut sink,
+                    clock: &clock,
+                };
+                a.import_core(&src.ob, &opts(16), lineage, &mut ctx)
+                    .expect("import");
+            } else {
+                import_with(&mut a, &src, &opts(16), lineage, &token).expect("import");
+            }
             drop(a);
             src.ob.close();
         }
@@ -192,31 +237,58 @@ fn fixture() -> Fixture {
 }
 
 /// Kill an import at the n-th hit of `point` (after `before`, a list of
-/// earlier kills), then check, continue and compare.
-fn kill_import_and_resume(fx: &Fixture, kills: &[(FaultPoint, u32)]) {
+/// earlier kills), then check, continue and compare. With `cancel`, each
+/// child cancels once the chat pass committed a batch.
+fn kill_import_and_resume(fx: &Fixture, kills: &[(FaultPoint, u32)], cancel: bool) {
     let (tmp, lib) = library();
+    let staging = tempfile::tempdir().expect("staging");
     let id = lib.create(None).expect("create");
     let db = db_path(&tmp, &id);
-    for (point, n) in kills {
-        let envs = [
+    for (i, (point, n)) in kills.iter().enumerate() {
+        let mut envs = vec![
             (ENV_FAULT, format!("{}:{n}", point.name())),
             (ENV_SCENARIO, "import".to_owned()),
             (ENV_LIBRARY, tmp.path().display().to_string()),
             (ENV_ARCHIVE, id.as_str().to_owned()),
             (ENV_BACKUP, fx.backup.display().to_string()),
             (ENV_LINEAGE, lineage_arg(&db)),
+            (ENV_STAGING, staging.path().display().to_string()),
         ];
+        if cancel {
+            envs.push((ENV_CANCEL, "1".to_owned()));
+        }
         assert_eq!(
             run_child(&envs),
             Child::Killed,
             "{} {n} not reached",
             point.name()
         );
-        // Read-only first: the archive opens, then the file checks.
+        // The killed child's staging is left in the parent's directory,
+        // which removes it; nothing else stages there.
+        let leftovers = std::fs::read_dir(staging.path()).expect("staging").count();
+        assert!(leftovers <= i + 1, "{leftovers} staging directories");
+        // The kill left a -wal; nothing below may change it.
+        let wal = wal_state(&db);
+        assert!(
+            wal.is_some(),
+            "no -wal after a kill at {} {n}",
+            point.name()
+        );
+        // Read-only first: the archive opens, then the file checks on a
+        // copy.
         let a = lib.open(&id).expect("open after a kill");
         drop(a);
-        assert_consistent(&db);
+        assert_consistent_copy(&db);
+        if cancel {
+            let state: i64 = read_only(&db)
+                .query_row("SELECT max(state) FROM import_session", [], |r| r.get(0))
+                .expect("state");
+            assert_eq!(state, 2, "the cancel committed before the kill");
+        }
+        assert_eq!(wal_state(&db), wal, "the checks changed the -wal");
     }
+    // The resume runs against the hot -wal (and the dead child's -shm).
+    assert!(wal_state(&db).is_some());
     let mut a = lib.open(&id).expect("open");
     let src = open_dir(&fx.backup, None);
     import(&mut a, &src, &opts(16), lineage_choice(&lineage_arg(&db)));
@@ -271,7 +343,7 @@ fn plan(fx: &Fixture) -> Vec<(FaultPoint, u32)> {
 fn a_kill_at_any_import_fault_point_resumes_to_the_uninterrupted_result() {
     let fx = fixture();
     for kill in plan(&fx) {
-        kill_import_and_resume(&fx, &[kill]);
+        kill_import_and_resume(&fx, &[kill], false);
     }
 }
 
@@ -287,7 +359,17 @@ fn kills_in_a_row_including_during_recovery_still_resume() {
             (FaultPoint::RecoveryMarked, 1),
             (FaultPoint::BatchBeforeCommit, 3),
         ],
+        false,
     );
+}
+
+/// A kill right after a cancelled session's terminal state committed: the
+/// session is cancelled (state 2), resumable, and continues to the
+/// uninterrupted result.
+#[test]
+fn a_kill_after_the_terminal_commit_resumes() {
+    let fx = fixture();
+    kill_import_and_resume(&fx, &[(FaultPoint::TerminalCommitted, 1)], true);
 }
 
 #[test]

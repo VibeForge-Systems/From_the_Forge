@@ -51,6 +51,63 @@ fn is_literal_or_const(arg: &str) -> bool {
                 .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'))
 }
 
+/// Every rule violation in one source file. Only a `#[cfg(test)]` that is
+/// followed by a `mod` item starts the exempt test section; an item-level
+/// `#[cfg(test)]` (on a function or an impl) exempts nothing, so production
+/// code after it is still checked.
+fn violations(name: &str, text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let lines: Vec<&str> = text.lines().collect();
+    let mut in_tests = false;
+    for (n, line) in lines.iter().enumerate() {
+        let code = line.trim_start();
+        if code.starts_with("//") {
+            continue;
+        }
+        if code.starts_with("#[cfg(test)]") {
+            let next = lines
+                .iter()
+                .skip(n + 1)
+                .map(|l| l.trim_start())
+                .find(|l| !l.is_empty() && !l.starts_with("//") && !l.starts_with("#["));
+            if next.is_some_and(|l| l.starts_with("mod ") || l.starts_with("pub(crate) mod ")) {
+                in_tests = true;
+            }
+        }
+        let at = format!("{name}:{}", n + 1);
+        if code.contains("instrument") && !code.contains("skip_all") {
+            out.push(format!("{at}: instrument needs skip_all"));
+        }
+        if code.to_ascii_uppercase().contains("INSERT OR REPLACE") {
+            out.push(format!("{at}: INSERT OR REPLACE"));
+        }
+        if code.contains("RETURNING") {
+            out.push(format!("{at}: RETURNING"));
+        }
+        if code.contains("interrupt()") {
+            out.push(format!("{at}: interrupt()"));
+        }
+        if in_tests {
+            continue;
+        }
+        if !["lock.rs", "blobs.rs", "provenance.rs"].contains(&name) {
+            for banned in ["File::open", "OpenOptions", "fs::copy"] {
+                if code.contains(banned) {
+                    out.push(format!("{at}: {banned}"));
+                }
+            }
+        }
+        if !["layout.rs", "blobs.rs"].contains(&name) {
+            for arg in join_args(code) {
+                if !is_literal_or_const(arg) {
+                    out.push(format!("{at}: Path::join with a computed argument ({arg})"));
+                }
+            }
+        }
+    }
+    out
+}
+
 #[test]
 fn source_rules() {
     let mut files = Vec::new();
@@ -59,46 +116,40 @@ fn source_rules() {
         &mut files,
     );
     assert!(files.len() >= 28, "{}", files.len());
+    let mut found = Vec::new();
     for f in &files {
-        let name = file_name(f);
         let text = fs::read_to_string(f).expect("read");
-        let mut in_tests = false;
-        for (n, line) in text.lines().enumerate() {
-            let code = line.trim_start();
-            if code.starts_with("//") {
-                continue;
-            }
-            if code.starts_with("#[cfg(test)]") {
-                in_tests = true;
-            }
-            let at = format!("{}:{}", f.display(), n + 1);
-            if code.contains("instrument") {
-                assert!(code.contains("skip_all"), "{at}: instrument needs skip_all");
-            }
-            assert!(
-                !code.to_ascii_uppercase().contains("INSERT OR REPLACE"),
-                "{at}: INSERT OR REPLACE"
-            );
-            assert!(!code.contains("RETURNING"), "{at}: RETURNING");
-            assert!(!code.contains("interrupt()"), "{at}: interrupt()");
-            if in_tests {
-                continue;
-            }
-            if !["lock.rs", "blobs.rs", "provenance.rs"].contains(&name.as_str()) {
-                for banned in ["File::open", "OpenOptions", "fs::copy"] {
-                    assert!(!code.contains(banned), "{at}: {banned}");
-                }
-            }
-            if !["layout.rs", "blobs.rs"].contains(&name.as_str()) {
-                for arg in join_args(code) {
-                    assert!(
-                        is_literal_or_const(arg),
-                        "{at}: Path::join with a computed argument ({arg})"
-                    );
-                }
-            }
+        for v in violations(&file_name(f), &text) {
+            found.push(format!("{} ({v})", f.display()));
         }
     }
+    assert!(found.is_empty(), "{found:#?}");
+}
+
+/// The scanner itself: an item-level `#[cfg(test)]` exempts nothing after
+/// it, and `#[cfg(test)] mod tests` exempts the rest of the file.
+#[test]
+fn the_scanner_checks_code_after_an_item_level_cfg_test() {
+    let snippet = "\
+fn a() {}
+#[cfg(test)]
+fn only_in_tests() {}
+fn b(dir: &Path, name: &str) {
+    let _ = dir.join(name);
+}
+#[cfg(test)]
+mod tests {
+    fn c(dir: &Path, name: &str) {
+        let _ = dir.join(name);
+        let _ = File::open(name);
+    }
+}
+";
+    let v = violations("preflight.rs", snippet);
+    assert_eq!(v.len(), 1, "{v:?}");
+    assert!(v[0].starts_with("preflight.rs:5: Path::join"), "{v:?}");
+    // The exempt files keep their exemption.
+    assert!(violations("layout.rs", snippet).is_empty());
 }
 
 #[test]

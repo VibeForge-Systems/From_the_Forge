@@ -168,6 +168,14 @@ pub fn insert_session(c: &rusqlite::Connection, state: i64) -> i64 {
     c.last_insert_rowid()
 }
 
+/// `attachments/<hh>/` of an archive directory, created as the store
+/// creates it (0700 on Unix).
+pub fn store_hh(archive: &Path, hh: &str) -> PathBuf {
+    let p = archive.join("attachments").join(hh);
+    oma_fs::create_dir_durable(&p).expect("store dir");
+    p
+}
+
 #[cfg(unix)]
 pub fn chmod(path: &Path, mode: u32) {
     use std::os::unix::fs::PermissionsExt;

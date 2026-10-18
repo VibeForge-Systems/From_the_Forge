@@ -73,10 +73,19 @@ pub struct Source {
     _staging: tempfile::TempDir,
 }
 
+/// Where a test's staging libraries go when set (the crash harness points
+/// its children inside a directory the parent removes, because a killed
+/// child never drops its own).
+pub const ENV_STAGING: &str = "OMA_TEST_STAGING";
+
 /// Open the backup in `dir` (the `<UDID>` folder), staging in a temporary
-/// library. The backup itself is never written.
+/// library (under [`ENV_STAGING`] when that is set). The backup itself is
+/// never written.
 pub fn open_dir(dir: &Path, password: Option<&str>) -> Source {
-    let staging = tempfile::tempdir().expect("tempdir");
+    let staging = match std::env::var_os(ENV_STAGING) {
+        Some(parent) => tempfile::tempdir_in(parent).expect("tempdir"),
+        None => tempfile::tempdir().expect("tempdir"),
+    };
     let limits = Limits::default();
     let mut n = 0;
     let candidate = Candidate::for_dir(dir).expect("candidate");
@@ -141,7 +150,19 @@ pub fn import_with(
     lineage: LineageChoice,
     cancel: &CancelToken,
 ) -> Result<CoreOutcome, ArchiveError> {
-    let clock = FixedClock(MODEL_NOW_NS);
+    import_at(archive, src, opts, lineage, cancel, MODEL_NOW_NS)
+}
+
+/// Run the import core with the clock fixed at `now_ns`.
+pub fn import_at(
+    archive: &mut Archive,
+    src: &Source,
+    opts: &ImportOptions,
+    lineage: LineageChoice,
+    cancel: &CancelToken,
+    now_ns: i64,
+) -> Result<CoreOutcome, ArchiveError> {
+    let clock = FixedClock(now_ns);
     let mut progress = NoProgress;
     let mut ctx = ArchiveCtx {
         cancel,
@@ -178,7 +199,36 @@ pub fn read_only(db: &Path) -> rusqlite::Connection {
         .expect("open")
 }
 
-/// `integrity_check`, `foreign_key_check` and the FTS rank-1 check.
+/// The archive database files a crash can leave: the main file, `-wal`
+/// and `-shm`.
+pub const DB_SIDES: [&str; 3] = ["", "-wal", "-shm"];
+
+/// [`assert_consistent`] on a copy of the database, its `-wal` and its
+/// `-shm`, so the checks change nothing the next open sees (the last
+/// read-write connection to close checkpoints and deletes the `-wal`).
+/// Only for a database no connection has open.
+pub fn assert_consistent_copy(db: &Path) {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let name = db.file_name().expect("name").to_string_lossy().into_owned();
+    for side in DB_SIDES {
+        let from = db.with_file_name(format!("{name}{side}"));
+        if from.exists() {
+            fs::copy(&from, scratch.path().join(format!("{name}{side}"))).expect("copy");
+        }
+    }
+    assert_consistent(&scratch.path().join(&name));
+}
+
+/// The `-wal` next to `db`, if it exists: its bytes' hash.
+pub fn wal_state(db: &Path) -> Option<String> {
+    let name = db.file_name().expect("name").to_string_lossy().into_owned();
+    super::file_hash(&db.with_file_name(format!("{name}-wal")))
+}
+
+/// `integrity_check`, `foreign_key_check` and the FTS rank-1 check. The
+/// FTS check opens a read-write connection, which checkpoints and deletes
+/// the `-wal` when it closes: use [`assert_consistent_copy`] where the next
+/// step must see the files as they are.
 pub fn assert_consistent(db: &Path) {
     let c = read_only(db);
     let ok: String = c

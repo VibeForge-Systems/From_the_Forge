@@ -203,3 +203,53 @@ fn a_schema_padded_with_thousands_of_objects_is_rejected_after_a_few_rows() {
         Err(ArchiveError::Damaged(DamageKind::SchemaMismatch))
     ));
 }
+
+/// A planted `attachments/<hh>` link and a dangling intent: the reconcile
+/// never follows the link, so a file with a store-like name outside the
+/// archive survives, and the intent stays for the verifier (spec §4.5).
+#[cfg(unix)]
+#[test]
+fn a_linked_store_directory_is_never_followed_by_the_reconcile() {
+    let (tmp, lib) = library();
+    let id = lib.create(None).expect("create");
+    let dir = archive_dir(&tmp, &id);
+    let elsewhere = tempfile::tempdir().expect("elsewhere");
+    let sha = [0xabu8; 32];
+    let victim = elsewhere.path().join(hex(&sha));
+    fs::write(&victim, b"not the archive's").expect("victim");
+    std::os::unix::fs::symlink(elsewhere.path(), dir.join("attachments").join("ab"))
+        .expect("symlink");
+    // A loose (but real) store directory is refused as well.
+    let loose_sha = [0xcdu8; 32];
+    let loose = store_hh(&dir, "cd");
+    chmod(&loose, 0o755);
+    fs::write(loose.join(hex(&loose_sha)), b"placed").expect("placed");
+    {
+        let c = raw(&db_path(&tmp, &id));
+        let s = insert_session(&c, 4);
+        for sha in [sha, loose_sha] {
+            c.execute(
+                "INSERT INTO blob_intent (sha256, session_id) VALUES (?1, ?2)",
+                rusqlite::params![sha.as_slice(), s],
+            )
+            .expect("intent");
+        }
+    }
+    let mut a = lib.open(&id).expect("open");
+    let r = a.begin_write(oma_archive::Recovery::Run).expect("recover");
+    assert_eq!(
+        (
+            r.intents_committed,
+            r.intents_rolled_back,
+            r.intent_files_left
+        ),
+        (0, 0, 2)
+    );
+    drop(a);
+    assert_eq!(fs::read(&victim).expect("victim"), b"not the archive's");
+    assert!(loose.join(hex(&loose_sha)).exists());
+    let left: i64 = raw(&db_path(&tmp, &id))
+        .query_row("SELECT count(*) FROM blob_intent", [], |r| r.get(0))
+        .expect("count");
+    assert_eq!(left, 2);
+}

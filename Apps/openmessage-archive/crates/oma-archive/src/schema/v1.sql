@@ -35,6 +35,11 @@ CREATE TABLE schema_migration (
 ) STRICT;
 
 -- One row per distinct backup observed. No UDID, serial, phone number or path (D14).
+-- The strings are the plist values exactly as recorded: not sanitised, not truncated.
+-- A value that is absent, of the wrong type or over 4096 bytes is NULL; the two field
+-- bitmasks say which (bits: 1 device_name, 2 product_type, 4 product_version,
+-- 8 build_version, 16 snapshot_state_raw, 32 info_last_backup_ns, 64 status_date_ns,
+-- 128 is_full_backup). NULL with neither bit set means absent.
 CREATE TABLE source_backup (
   id                     INTEGER PRIMARY KEY,
   observed_key           BLOB    NOT NULL UNIQUE CHECK (length(observed_key) = 32),
@@ -47,7 +52,9 @@ CREATE TABLE source_backup (
   status_date_ns         INTEGER,                  -- Status.plist "Date", Unix ns
   snapshot_state_raw     TEXT,
   is_full_backup         INTEGER CHECK (is_full_backup IN (0, 1)),
-  encrypted              INTEGER NOT NULL CHECK (encrypted IN (0, 1))
+  encrypted              INTEGER NOT NULL CHECK (encrypted IN (0, 1)),
+  wrong_type_fields      INTEGER NOT NULL DEFAULT 0 CHECK (wrong_type_fields BETWEEN 0 AND 255),
+  oversized_fields       INTEGER NOT NULL DEFAULT 0 CHECK (oversized_fields BETWEEN 0 AND 31)
 ) STRICT;
 
 -- "Newer backups of the same phone" share a lineage; chosen by the user at the gate (D80).
