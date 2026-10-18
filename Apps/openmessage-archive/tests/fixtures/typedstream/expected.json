@@ -1638,7 +1638,7 @@
    "sha256": "894b09afdaa6dc9e6a77d892eca3fa979e5163b733df167f126cd4acb8273bab"
   },
   {
-   "file": "int_I_c8.bin",
+   "file": "int_uI_c8.bin",
    "generic": {
     "groups": [
      [
@@ -1648,7 +1648,7 @@
      ]
     ]
    },
-   "name": "int_I_c8",
+   "name": "int_uI_c8",
    "oracle": {
     "check": "compare",
     "view": {
@@ -1663,7 +1663,7 @@
    "sha256": "03eb1579d8b6f5a9c79c9c500f1669d9beb11bcfba513c104c4933e39a344192"
   },
   {
-   "file": "int_I_ff.bin",
+   "file": "int_uI_ff.bin",
    "generic": {
     "groups": [
      [
@@ -1673,7 +1673,7 @@
      ]
     ]
    },
-   "name": "int_I_ff",
+   "name": "int_uI_ff",
    "oracle": {
     "check": "compare",
     "view": {
@@ -1688,7 +1688,7 @@
    "sha256": "be461b8abb9e356da3808f4f5b0249006201657127591acaf3282dce1648d3da"
   },
   {
-   "file": "int_I_81c800.bin",
+   "file": "int_uI_81c800.bin",
    "generic": {
     "groups": [
      [
@@ -1698,7 +1698,7 @@
      ]
     ]
    },
-   "name": "int_I_81c800",
+   "name": "int_uI_81c800",
    "oracle": {
     "check": "compare",
     "view": {
@@ -1713,7 +1713,7 @@
    "sha256": "acef258508074d7ac947edb1141f89d87135b8a697ed00464bd779e6f4aed7fd"
   },
   {
-   "file": "int_I_81ffff.bin",
+   "file": "int_uI_81ffff.bin",
    "generic": {
     "groups": [
      [
@@ -1723,7 +1723,7 @@
      ]
     ]
    },
-   "name": "int_I_81ffff",
+   "name": "int_uI_81ffff",
    "oracle": {
     "check": "compare",
     "view": {
@@ -1763,7 +1763,7 @@
    "sha256": "3fe2ccb4ba97c80a6b97d7f5ca171277d94af2dab75a37608f134a90c72ad5c2"
   },
   {
-   "file": "int_C_ff.bin",
+   "file": "int_uC_ff.bin",
    "generic": {
     "groups": [
      [
@@ -1773,7 +1773,7 @@
      ]
     ]
    },
-   "name": "int_C_ff",
+   "name": "int_uC_ff",
    "oracle": {
     "check": "compare",
     "view": {
@@ -1809,7 +1809,7 @@
    "sha256": "ccda2f2a2f64d55a21c1924a23d1014818ae71349644adeee25ada37034ec464"
   },
   {
-   "file": "int_Q_87ffffffffffffffff.bin",
+   "file": "int_uQ_87ffffffffffffffff.bin",
    "generic": {
     "groups": [
      [
@@ -1819,7 +1819,7 @@
      ]
     ]
    },
-   "name": "int_Q_87ffffffffffffffff",
+   "name": "int_uQ_87ffffffffffffffff",
    "oracle": {
     "check": "exempt",
     "reason": "pytypedstream 0.1.0 rejects 0x87; T1 observed it from Apple's encoder"
@@ -2020,7 +2020,7 @@
    "sha256": "449c53c7fb4ba15a0dcefbbaaa1ac493269fbc6f17cd07bd10a2c1362e811a09"
   },
   {
-   "file": "int_B_01.bin",
+   "file": "int_uB_01.bin",
    "generic": {
     "groups": [
      [
@@ -2030,7 +2030,7 @@
      ]
     ]
    },
-   "name": "int_B_01",
+   "name": "int_uB_01",
    "oracle": {
     "check": "compare",
     "view": {

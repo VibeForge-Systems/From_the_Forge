@@ -217,10 +217,23 @@ about real Messages data, which remains untested.
 
 | Date | Versions | SHA-256 of `SHA256SUMS` checked | Result |
 |---|---|---|---|
-| 2026-10-18 | pytypedstream 0.1.0 (wheel SHA-256 `499920d4cb8bec8fd9d9cdd4c6312765eb418c398c10371ab1c9c0051104d278`, installed with `--require-hashes`), Python 3.13.16, Linux | `43a9f7f612976ad9d51097a86552c7eaa4718095747981dde556deafd62de0d9` | ALL ORACLE CHECKS PASSED: 46 compared, 24 rejected as expected, 10 exempt (run twice that day, with the same result) |
+| 2026-10-18 | pytypedstream 0.1.0 (wheel SHA-256 `499920d4cb8bec8fd9d9cdd4c6312765eb418c398c10371ab1c9c0051104d278`, installed with `--require-hashes`), Python 3.13.16, Linux | `43a9f7f612976ad9d51097a86552c7eaa4718095747981dde556deafd62de0d9` | ALL ORACLE CHECKS PASSED: 46 compared, 24 rejected as expected, 10 exempt (run twice that day, with the same result). **Superseded** on 2026-10-18 by the row below: a rename-only regeneration, because three pairs of vector file names differed only by case and collided on Windows |
+| 2026-10-18 | pytypedstream 0.1.0 (wheel SHA-256 `499920d4cb8bec8fd9d9cdd4c6312765eb418c398c10371ab1c9c0051104d278`, installed with `--require-hashes` into a fresh virtual environment), Python 3.13.16, Linux | `d3792a1f6c95255453f9b6336361470d4a90f90078463c37f290816121506f82` | ALL ORACLE CHECKS PASSED: 46 compared, 24 rejected as expected, 10 exempt (run twice, with the same result) |
 
-The `fixtures_integrity` test in `crates/oma-messages` pins this checksum,
-so a change to any vector fails until the run is repeated and recorded.
+The second row is a rename-only regeneration. Windows filesystems are
+case-insensitive, so `int_I_ff.bin` and `int_i_ff.bin` (and the pairs
+`int_C_ff`/`int_c_ff` and `int_I_81c800`/`int_i_81c800`) collided in the
+`windows-2022` checkout, and one vector was read in place of the other. The
+generator now writes every upper-case type letter with a `u` prefix
+(`int_uI_ff.bin`), which renames seven vectors. Every vector's bytes are
+unchanged: each renamed file has the same SHA-256 as the file it replaces,
+and `expected.json` differs only in those vectors' `name` and `file` fields.
+The oracle was nevertheless run again against the new checksum.
+
+The `fixtures_integrity` test in `crates/oma-messages` pins the current
+checksum, so a change to any vector fails until the run is repeated and
+recorded. It also fails if two paths under `tests/fixtures/` differ only by
+ASCII case.
 
 ## Messages catalogue (M3, synthetic)
 

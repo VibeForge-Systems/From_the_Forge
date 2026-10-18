@@ -421,7 +421,9 @@ VECTORS = []
 
 
 def add(name, data, public, generic=None, oracle=None, note=""):
-    assert not any(v["name"] == name for v in VECTORS), name
+    # Names must differ case-insensitively: Windows and macOS checkouts
+    # cannot hold two files whose names differ only by case.
+    assert not any(v["name"].lower() == name.lower() for v in VECTORS), name
     VECTORS.append({"name": name, "data": data, "public": public,
                     "generic": generic, "oracle": oracle or {"check": "exempt",
                                                              "reason": "not set"},
@@ -519,7 +521,10 @@ def build_catalogue():
     ]
     assert len(ints) == 31
     for t, hx, want in ints:
-        name = f"int_{t}_{hx.replace(' ', '')}"[:30]
+        # An upper-case type letter (B, C, I, Q) gets a "u" prefix, so that
+        # int_uI_ff and int_i_ff stay distinct on case-insensitive filesystems.
+        letter = "u" + t if t.isupper() else t
+        name = f"int_{letter}_{hx.replace(' ', '')}"[:30]
         data = HDR + b"\x84\x01" + t.encode() + bytes.fromhex(hx)
         if isinstance(want, str):
             add(name, data, err(want), generic={"error": want},
@@ -755,7 +760,9 @@ SHA256SUMS      every file except this one and README.md
 ```
 
 Vector families: `v*` attributed strings, `int_*` the 31 integer-head
-probes, `ref_*` references (including indexes of 110 and above),
+probes (named `int_<type>_<hex>`; an upper-case type letter, `B`, `C`,
+`I` or `Q`, is written with a `u` prefix, as in `int_uI_ff`, so that no two
+names differ only by case), `ref_*` references (including indexes of 110 and above),
 `nsdata_5c`, `array_5c`, `struct_nsrange`, and `h_*` hostile inputs. The
 largest hostile inputs (16 MiB + 1, zero-width type elements, a type string
 referenced a million times, 300,000 references to one object, half a million

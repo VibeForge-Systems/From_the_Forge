@@ -7,15 +7,20 @@
 //! change to any vector fails here until the run is repeated and recorded.
 //! The same holds for the messages catalogue, whose oracle runs 1 and 3 are
 //! valid only for the pinned checksum of its `SHA256SUMS`.
-use std::collections::BTreeSet;
+//!
+//! No two paths under `tests/fixtures/` may differ only by ASCII case:
+//! Windows (and default macOS) filesystems would check them out as one
+//! file, and a test would silently read the wrong vector.
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
 
 use sha2::{Digest, Sha256};
 
-/// Recorded with oracle run 2 (pytypedstream 0.1.0).
+/// Recorded with oracle run 2 (pytypedstream 0.1.0), repeated after the
+/// rename-only regeneration that removed case collisions.
 const TYPEDSTREAM_SUMS_SHA256: &str =
-    "43a9f7f612976ad9d51097a86552c7eaa4718095747981dde556deafd62de0d9";
+    "d3792a1f6c95255453f9b6336361470d4a90f90078463c37f290816121506f82";
 
 /// Recorded with oracle runs 1 and 3 (`docs/compatibility.md`).
 const MESSAGES_SUMS_SHA256: &str =
@@ -105,4 +110,44 @@ fn messages_sha256sums() {
     present.remove("README.md");
     assert_eq!(present, listed, "files and SHA256SUMS differ");
     assert!(listed.len() > 100, "{}", listed.len());
+}
+
+/// Collects every file and directory below `dir`, relative to `root`.
+fn walk_all(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<String>) {
+    for e in fs::read_dir(dir).expect("dir").flatten() {
+        let p = e.path();
+        let rel = p
+            .strip_prefix(root)
+            .expect("under root")
+            .to_string_lossy()
+            .replace('\\', "/");
+        out.push(rel);
+        if p.is_dir() {
+            walk_all(&p, root, out);
+        }
+    }
+}
+
+/// A case-insensitive checkout (Windows) cannot hold two names that differ
+/// only by case. This runs on case-sensitive filesystems, where both still
+/// exist, and fails before such a pair reaches a Windows runner.
+#[test]
+fn fixture_paths_unique_ignoring_ascii_case() {
+    let root = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures"));
+    let mut paths = Vec::new();
+    walk_all(&root, &root, &mut paths);
+    assert!(paths.len() > 200, "{}", paths.len());
+    let mut seen: BTreeMap<String, String> = BTreeMap::new();
+    let mut clashes = Vec::new();
+    for p in paths {
+        if let Some(prev) = seen.get(&p.to_ascii_lowercase()) {
+            clashes.push(format!("{prev} / {p}"));
+        } else {
+            seen.insert(p.to_ascii_lowercase(), p);
+        }
+    }
+    assert!(
+        clashes.is_empty(),
+        "paths under tests/fixtures differ only by case: {clashes:?}"
+    );
 }

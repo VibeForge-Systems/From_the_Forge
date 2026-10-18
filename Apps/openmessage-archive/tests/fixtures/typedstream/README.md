@@ -22,7 +22,9 @@ SHA256SUMS      every file except this one and README.md
 ```
 
 Vector families: `v*` attributed strings, `int_*` the 31 integer-head
-probes, `ref_*` references (including indexes of 110 and above),
+probes (named `int_<type>_<hex>`; an upper-case type letter, `B`, `C`,
+`I` or `Q`, is written with a `u` prefix, as in `int_uI_ff`, so that no two
+names differ only by case), `ref_*` references (including indexes of 110 and above),
 `nsdata_5c`, `array_5c`, `struct_nsrange`, and `h_*` hostile inputs. The
 largest hostile inputs (16 MiB + 1, zero-width type elements, a type string
 referenced a million times, 300,000 references to one object, half a million
