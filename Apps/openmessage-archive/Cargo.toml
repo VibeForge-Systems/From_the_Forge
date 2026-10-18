@@ -58,6 +58,7 @@ rustix = { version = "=1.1.5", features = ["fs", "process"] }
 oma-fs = { path = "crates/oma-fs" }
 oma-backup = { path = "crates/oma-backup" }
 oma-messages = { path = "crates/oma-messages" }
+oma-archive = { path = "crates/oma-archive" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -91,4 +92,6 @@ opt-level = 3
 [profile.dev.package.libsqlite3-sys]
 opt-level = 3
 [profile.dev.package.oma-messages]
+opt-level = 3
+[profile.dev.package.oma-archive]
 opt-level = 3

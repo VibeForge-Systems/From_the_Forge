@@ -26,11 +26,12 @@ pub use location::{
     cloud_sync_provider, enclosing_backup_dir, is_filesystem_root, is_within_imazing_backups,
     is_within_mobilesync, looks_like_backup_dir,
 };
-pub use perm::{check_private, Expect, PermProblem};
+pub use perm::{check_owned_unshared, check_private, Expect, PermProblem};
 pub use place::{
-    create_dir_durable, fsync_dir, open_nofollow, open_refusal, place_noreplace, DirSync,
-    OpenRefusal, Placed,
+    create_dir_durable, create_new_private, fsync_dir, open_nofollow, open_refusal,
+    place_noreplace, rename_dir_noreplace, DirSync, OpenRefusal, Placed,
 };
 pub use volume::{
-    available_space, kind_from_fs_magic, volume_kind, FatKind, NetworkKind, VirtKind, VolumeKind,
+    available_space, kind_from_fs_magic, total_space, volume_kind, FatKind, NetworkKind, VirtKind,
+    VolumeKind,
 };

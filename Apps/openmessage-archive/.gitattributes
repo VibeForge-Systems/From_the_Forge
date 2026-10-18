@@ -2,3 +2,8 @@
 # Without this, core.autocrlf on Windows would rewrite the XML plists and
 # other NUL-free files on checkout.
 tests/fixtures/** binary
+
+# The schema text is stored verbatim in every archive's sqlite_schema and
+# compared byte for byte by the fingerprint, so an archive created on
+# Windows must carry the same LF text as one created on Linux.
+crates/oma-archive/src/schema/*.sql text eol=lf

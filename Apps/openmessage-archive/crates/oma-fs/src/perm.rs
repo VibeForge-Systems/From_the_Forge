@@ -87,6 +87,66 @@ pub fn check_private(path: &Path, kind: Expect) -> Result<(), PermProblem> {
     owner_and_mode(&meta)
 }
 
+/// Check that `path` is a real `kind` (not a link), and, on Unix, that it
+/// is owned by the effective user and **not writable** by group or others.
+/// Read and search bits for others are allowed.
+///
+/// This is the rule for a folder that holds private items without being
+/// private itself, such as the archive library: other users may be able to
+/// list it, but they cannot add, rename or remove its entries. On Windows it
+/// checks only the link and the type, as [`check_private`] does.
+pub fn check_owned_unshared(path: &Path, kind: Expect) -> Result<(), PermProblem> {
+    let meta = fs::symlink_metadata(path).map_err(|e| PermProblem::Io(e.kind()))?;
+    if meta.file_type().is_symlink() {
+        return Err(PermProblem::Link);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if meta.file_attributes() & crate::place::FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(PermProblem::Link);
+        }
+    }
+    let type_ok = match kind {
+        Expect::Dir => meta.is_dir(),
+        Expect::File => meta.is_file(),
+    };
+    if !type_ok {
+        return Err(PermProblem::WrongType { expected: kind });
+    }
+    owner_and_write_bits(&meta)
+}
+
+#[cfg(target_os = "linux")]
+fn owner_and_write_bits(meta: &fs::Metadata) -> Result<(), PermProblem> {
+    use std::os::unix::fs::MetadataExt;
+    let euid = rustix::process::geteuid().as_raw();
+    unshared_verdict(meta.mode(), meta.uid(), euid)
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn owner_and_write_bits(_meta: &fs::Metadata) -> Result<(), PermProblem> {
+    Err(PermProblem::Unsupported)
+}
+
+#[cfg(not(unix))]
+fn owner_and_write_bits(_meta: &fs::Metadata) -> Result<(), PermProblem> {
+    Ok(())
+}
+
+/// The Unix rule of [`check_owned_unshared`]: owner first, then the group
+/// and other write bits.
+#[cfg_attr(not(unix), allow(dead_code))]
+fn unshared_verdict(mode: u32, uid: u32, euid: u32) -> Result<(), PermProblem> {
+    if uid != euid {
+        return Err(PermProblem::WrongOwner);
+    }
+    if mode & 0o022 != 0 {
+        return Err(PermProblem::Loose { mode });
+    }
+    Ok(())
+}
+
 #[cfg(target_os = "linux")]
 fn owner_and_mode(meta: &fs::Metadata) -> Result<(), PermProblem> {
     use std::os::unix::fs::MetadataExt;
@@ -136,6 +196,46 @@ mod tests {
         assert_eq!(
             mode_and_owner_verdict(0o040700, 0, 1000),
             Err(PermProblem::WrongOwner)
+        );
+    }
+
+    #[test]
+    fn the_unshared_rule_as_a_table() {
+        for mode in [0o040700, 0o040755, 0o040750, 0o040705] {
+            assert_eq!(unshared_verdict(mode, 1000, 1000), Ok(()), "{mode:o}");
+        }
+        for mode in [0o040775, 0o040757, 0o040777, 0o040722] {
+            assert_eq!(
+                unshared_verdict(mode, 1000, 1000),
+                Err(PermProblem::Loose { mode }),
+                "{mode:o}"
+            );
+        }
+        assert_eq!(
+            unshared_verdict(0o040755, 0, 1000),
+            Err(PermProblem::WrongOwner)
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn unshared_accepts_a_readable_folder_and_refuses_a_writable_one_on_disk() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path().join("library");
+        fs::create_dir(&dir).expect("mkdir");
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).expect("chmod");
+        assert_eq!(check_owned_unshared(&dir, Expect::Dir), Ok(()));
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o775)).expect("chmod");
+        assert!(matches!(
+            check_owned_unshared(&dir, Expect::Dir),
+            Err(PermProblem::Loose { .. })
+        ));
+        let link = tmp.path().join("l");
+        std::os::unix::fs::symlink(&dir, &link).expect("symlink");
+        assert_eq!(
+            check_owned_unshared(&link, Expect::Dir),
+            Err(PermProblem::Link)
         );
     }
 

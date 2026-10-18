@@ -36,6 +36,14 @@ pub fn available_space(path: &Path) -> io::Result<u64> {
     fs4::available_space(path)
 }
 
+/// The total size in bytes of the volume holding `path`, which must exist
+/// (`f_blocks × f_frsize` on Unix, `GetDiskFreeSpaceExW`'s total on
+/// Windows, both through `fs4`). The same long-path caveat as
+/// [`available_space`] applies; callers treat an error as "unknown".
+pub fn total_space(path: &Path) -> io::Result<u64> {
+    fs4::total_space(path)
+}
+
 /// A network file system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]

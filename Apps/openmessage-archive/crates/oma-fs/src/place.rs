@@ -259,6 +259,49 @@ fn checked_rename(from: &Path, to: &Path) -> io::Result<Placed> {
     }
 }
 
+/// Rename the directory `from` to `to`, never replacing an existing `to`.
+///
+/// - **Linux:** `renameat2` with `RENAME_NOREPLACE`. A file system without
+///   the flag (`EINVAL`, `ENOSYS`) falls back to the checked rename below.
+/// - **Elsewhere:** an existence check (`symlink_metadata`), then
+///   `fs::rename`. That is not atomic against a concurrent creator of `to`,
+///   so callers name `to` with a fresh random id. Windows refuses to rename
+///   a directory over an existing one in any case.
+///
+/// An existing target (a file, directory or link) is an error of kind
+/// [`io::ErrorKind::AlreadyExists`] and `from` is left in place. The result
+/// is [`Placed::Renamed`] or [`Placed::CheckedRename`]. Hard links are never
+/// tried: directories cannot be hard-linked.
+pub fn rename_dir_noreplace(from: &Path, to: &Path) -> io::Result<Placed> {
+    #[cfg(target_os = "linux")]
+    {
+        match rename_noreplace(from, to) {
+            Ok(()) => return Ok(Placed::Renamed),
+            Err(e) if noreplace_unsupported(&e) => {}
+            Err(e) => return Err(e),
+        }
+    }
+    checked_rename(from, to)
+}
+
+/// Create a new file at `path` for writing, failing with
+/// [`io::ErrorKind::AlreadyExists`] if anything (a link included) is there.
+///
+/// On Unix the file is created with mode 0600, so it is private from the
+/// first byte; files SQLite later creates beside a database (`-wal`,
+/// `-shm`) take that database file's mode. On Windows the file inherits the
+/// directory's ACL and carries no extra attributes.
+pub fn create_new_private(path: &Path) -> io::Result<File> {
+    let mut o = fs::OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600);
+    }
+    o.open(path)
+}
+
 /// Why [`open_nofollow`] refused a path that exists. Carried inside the
 /// returned `io::Error`; read it with [`open_refusal`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -663,6 +706,64 @@ mod tests {
             assert_eq!(open_refusal(&err), Some(OpenRefusal::NotRegular));
         } else {
             eprintln!("skipped the FIFO case: mkfifo is not available");
+        }
+    }
+
+    #[test]
+    fn rename_dir_noreplace_moves_a_tree_and_never_replaces() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let from = tmp.path().join(".new");
+        fs::create_dir(&from).expect("mkdir");
+        write(&from.join("inner"), b"kept");
+        let to = tmp.path().join("final");
+        let placed = rename_dir_noreplace(&from, &to).expect("rename");
+        #[cfg(target_os = "linux")]
+        assert_eq!(placed, Placed::Renamed);
+        let _ = placed;
+        assert_eq!(read(&to.join("inner")), b"kept");
+        assert!(!from.exists());
+
+        // An existing directory, file or link at the target is never replaced.
+        fs::create_dir(&from).expect("mkdir again");
+        for occupied in ["dir", "file"] {
+            let target = tmp.path().join(occupied);
+            if occupied == "dir" {
+                fs::create_dir(&target).expect("mkdir");
+            } else {
+                write(&target, b"x");
+            }
+            let err = rename_dir_noreplace(&from, &target).expect_err("occupied");
+            assert_eq!(err.kind(), io::ErrorKind::AlreadyExists, "{occupied}");
+            assert!(from.is_dir(), "{occupied}");
+        }
+        let err = checked_rename(&from, &to).expect_err("checked, occupied");
+        assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+    }
+
+    #[test]
+    fn create_new_private_creates_once_with_a_private_mode() {
+        use std::io::Write;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("archive.sqlite");
+        let mut f = create_new_private(&path).expect("create");
+        f.write_all(b"x").expect("write");
+        drop(f);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&path).expect("meta").permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "{mode:o}");
+        }
+        let err = create_new_private(&path).expect_err("exists");
+        assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(read(&path), b"x");
+        #[cfg(unix)]
+        {
+            let link = tmp.path().join("link");
+            std::os::unix::fs::symlink(tmp.path().join("nowhere"), &link).expect("symlink");
+            let err = create_new_private(&link).expect_err("dangling link");
+            assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+            assert!(!tmp.path().join("nowhere").exists());
         }
     }
 

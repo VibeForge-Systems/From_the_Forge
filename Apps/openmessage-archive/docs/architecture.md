@@ -57,13 +57,14 @@ flowchart LR
     Shell --> FS["oma-fs ✔"]
     Shell --> Backup["oma-backup ✔"]
     Shell --> Messages["oma-messages ✔"]
-    Shell -.-> Archive["oma-archive (M4)"]
+    Shell -.-> Archive["oma-archive (M4, in progress)"]
     Shell -.-> Export["oma-export (M6)"]
     Shell -.-> Device["oma-device (M7)"]
     Backup --> FS
     Messages --> Backup
     Messages --> FS
     Archive --> FS
+    Archive --> Backup
     Export --> Archive
   end
   Backup -. read-only .-> SRC[("iPhone backup")]
@@ -74,10 +75,10 @@ flowchart LR
 |---|---|---|
 | `src/` | Vue 3 UI: views, Pinia stores, the typed IPC client, the shortcut registry, and the capability roadmap | M1, M2 (Backups page), M3 (extraction report) |
 | `src-tauri/` | Tauri shell. Holds IPC commands, application state, settings persistence, archive-location validation, the backup registry, job table and DTOs, and (M3) the report mapping and the panic hook. Contains no domain logic. | M1, M2, M3 |
-| `crates/oma-fs` | Filesystem safety: filename sanitization, contained path resolution, and guards for backups, MobileSync, iMazing's default store and cloud sync. From M4: volume facts (`volume`: free space, network/virtualised/FAT detection), the Unix private-permission check (`perm::check_private`), and durable placement (`place`: `fsync_dir`, `create_dir_durable`, `place_noreplace`, `open_nofollow`) | M1, M4 (slice 4a) |
+| `crates/oma-fs` | Filesystem safety: filename sanitization, contained path resolution, and guards for backups, MobileSync, iMazing's default store and cloud sync. From M4: volume facts (`volume`: free space, network/virtualised/FAT detection), the Unix private-permission check (`perm::check_private`), and durable placement (`place`: `fsync_dir`, `create_dir_durable`, `place_noreplace`, `open_nofollow`). From slice 4d: `check_owned_unshared` (the library folder), `rename_dir_noreplace`, `create_new_private` and `total_space` | M1, M4 (slices 4a, 4d) |
 | `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them. From M4: `copy_file_to` streams one listed file's plaintext into a caller's writer, hashing it, under `Limits::attachment_bytes` and per-file stamps | ✔ M2, M3, M4 (slice 4b) |
 | `crates/oma-messages` | Scans and probes the sms.db schema by capability, streams typed records (handles, chats, the joins, messages, attachments, Recently Deleted links) as `Col<T>` values, decodes `attributedBody` with a clean-room typedstream decoder, and produces the aggregate `ExtractionReport`. Persists nothing. From M4: stable `KnownColumn` codes, raw values of unreadable cells (`raw_issues`), `payload_data` on request, the raw association columns, key-only passes and the storage class of text cells | ✔ M3, M4 (slice 4c) |
-| `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity | planned, M4 |
+| `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep. Not yet used by the shell | M4 (slice 4d; import, verify and the shell follow) |
 | `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX | planned, M6 |
 | `crates/oma-device` | Detects devices and creates backups behind a platform trait | planned, M7 |
 
@@ -167,21 +168,29 @@ re-checked:
 | `writable` | error | A probe file is created, written, `fsync`ed and removed. This catches ACLs, read-only mounts and quota problems. |
 | `local-only` | warning | The folder is inside a known sync client's folder (OneDrive, Dropbox, iCloud Drive and others). **Invariant 2**: the user must know the data will leave the machine. This is a name heuristic, so it warns and never blocks. |
 
-### Archive layout (planned, M4)
+### Archive layout (M4)
 
 ```
 <library>/
-  <archive-id>/                 one per device or user-defined archive
-    archive.sqlite              versioned schema; FTS5 tables; WAL mode
-    attachments/ab/<sha256>     content-addressed original bytes
-    thumbnails/ab/<sha256>.webp derived; deletable and rebuildable
-    imports/<session-id>.json   provenance: source backup, versions, counts, errors
+  .oma-staging/                   M2/M3 staging (unchanged)
+  .oma-new-<32hex>/               an archive being created; swept when stale
+  a<32hex>/                       one archive; 0700 on Unix
+    archive.lock                  sidecar lock file; created once, never deleted
+    archive.sqlite                schema v1, WAL, FTS5; 0600 on Unix
+    archive.sqlite-wal, -shm      SQLite's own files; same mode as the database
+    attachments/
+      .incoming/                  <n>.partial while a copy is in flight
+      <hh>/<64 hex>               content-addressed plaintext (from slice 4i)
+    imports/
+      session-<n>.json            content-free provenance (from slice 4j)
 ```
 
-Attachments are content-addressed by SHA-256. Duplicate detection and
-integrity verification therefore come from the storage layout itself. The
-original filename is kept in the database and used only on export, after
-`sanitize_filename`.
+The directory name is a random id (`a` and 32 lowercase hex characters);
+the user's label lives only in the database (D52). There is no
+`thumbnails/` directory in M4 (D72). Attachments are content-addressed by
+SHA-256, and a stored name is parsed against `^[0-9a-f]{64}$` before any
+path is built from it. The original filename stays in the database and is
+used only on export, after `sanitize_filename`.
 
 ## Data flow
 
@@ -528,6 +537,100 @@ every new read is off unless asked for.
 - **Not done here:** `chat.properties` raw bytes (R5) are deferred
   (M4 §21.2); the property list is still read for presence and size only.
 
+### The archive skeleton (M4 slice 4d)
+
+`crates/oma-archive` is a library with no Tauri dependency. Slice 4d ships
+everything an import needs before it writes a row (spec §4, §5, §6, §7):
+
+- **`Library::new`** canonicalises the folder and refuses a file, a
+  file-system root, anything inside a backup, `MobileSync/Backup` or
+  `iMazing/Backups` (I1), a network or virtualised volume (D54), and on
+  Unix a folder owned by someone else or writable by group or others.
+- **`Library::create`** builds the archive in `.oma-new-<32hex>` under its
+  own lock: the database is created empty with mode 0600, switched to WAL,
+  and filled in one transaction (the v1 DDL, `application_id` "OMA1",
+  `user_version`, the meta row, FTS `secure-delete`), then checkpointed.
+  The store directories are created and flushed, the directory is flushed,
+  every handle is closed, and it is renamed to `a<32hex>` without replacing
+  anything (`renameat2(RENAME_NOREPLACE)` on Linux; a checked rename with
+  retries on Windows), and the library is flushed. Creation needs 64 MiB
+  free; unknown free space does not block it.
+- **`Library::open` writes nothing** (§5.3). In order: the id is parsed;
+  the directory must be real; on Unix the directory, database, `-wal`,
+  `-shm`, lock and store directories must be private (links and wrong
+  types are refused everywhere); the volume is checked; the lock is taken
+  (five retries at 200 ms, then `Locked`) and self-tested (a second handle
+  must be refused, otherwise `LockUnreliable`); a ReadOnly connection reads
+  `application_id` and `user_version`, then the schema fingerprint, then
+  `archive_meta`. A newer schema is `NewerSchema`; a newer
+  `max_deriver_version` or `max_decoder_version` sets
+  `ImportBlock::NewerRules` (read and verify only); an older schema opens
+  with `needs_migration()` set. The only exception to "writes nothing" is a
+  missing lock file, which is recreated.
+- **`ArchiveReader`** (`Library::open_read`) takes no lock, so details can
+  be read while an import holds the archive; in WAL mode it sees only
+  committed state. It refuses an older schema with `NeedsMigration`. It
+  reads the label (re-validated; an invalid one is `Unreadable`), stats,
+  session counts and the newest unfinished session.
+- **`Library::list`** reports every real `a<32hex>` directory as `Ready`,
+  `InUse` (lock held; never waits), `NeedsMigration`, `NewerSchema`,
+  `NotAnArchive`, `Damaged` or `Refused`, and never writes archive data.
+- **`Library::sweep`** removes creation directories at least five minutes
+  old that are unlocked and hold only what creation makes; anything else is
+  counted and left alone.
+- **`conn.rs` is the one opener** (§5.5), so M8 can add a key pragma in one
+  place. Both profiles set `DEFENSIVE`, `TRUSTED_SCHEMA` off, DQS off, views
+  off, `foreign_keys` on, `temp_store` MEMORY, `mmap_size` 0,
+  `SQLITE_LIMIT_ATTACHED` 0 and length limits, and use the `win32-longpath`
+  VFS with a verbatim path on Windows. ReadOnly adds `query_only`, triggers
+  off and an op budget (progress handler; an exhausted budget is
+  `Damaged(WorkBudget)`). ReadWrite adds `synchronous` FULL,
+  `secure_delete`, `journal_size_limit` 64 MiB, and checks that the file is
+  in WAL mode. The database path is reachable only through a key type that
+  module alone can make, and clippy forbids `File::open`, `OpenOptions`,
+  `fs::copy` and other connection openers in the crate.
+- **The fingerprint** (§7.3) builds the expected objects in memory from
+  `v1.sql` plus the migrations up to the file's version, and compares
+  `(type, name, tbl_name, sql)` exactly; FTS5 shadow tables by name and
+  type only; `sqlite_stat1`/`sqlite_stat4` are tolerated and reported.
+  At most a few rows more than expected are read.
+- **Codes** (`schema::codes`) are closed numeric codes for every value
+  `v1.sql` constrains, pinned by tests, and the column-rule table of §8.7:
+  each of the 81 source-value columns gets a stable code and its rule
+  (key, raw, history, time, body raw). A test checks the table against
+  `v1.sql` in both directions; the history columns are D82's closed list.
+- **Migrations** run only through `Archive::migrate()` (D87): the current
+  fingerprint is checked, free space must be at least three times the
+  database plus the reserve (unknown space does not block), unfinished
+  sessions are superseded, then each step runs with `foreign_keys` off in
+  one `BEGIN IMMEDIATE` with a foreign-key check, the fingerprint of the
+  target version and the FTS rank-1 integrity check before `user_version`,
+  `archive_meta.schema_version` and a `schema_migration` row are written.
+  Any failure rolls back and drops the write connection. M4 ships no real
+  migration; a step not marked test-only is refused until the
+  pre-migration copy exists (it ships with the first real migration).
+- **`Archive::begin_write(Recovery::Run)`** is the first write: it sweeps
+  `attachments/.incoming/<n>.partial` and `imports/session-<n>.json.tmp`,
+  reconciles `blob_intent` (a placed file without a `blob` row is removed),
+  and marks running sessions interrupted. `Recovery::Skip` opens the writer
+  only. `Archive::close` checkpoints with TRUNCATE if a writer was opened.
+- **Test hooks** (a failed lock self-test, test-only v2 schema plans, a
+  skewed expected shadow DDL, a smaller op budget) exist only with the
+  non-default `fault-injection` feature (D85), which only the crate's own
+  tests enable.
+
+**Owner decisions.** `owner-decisions.md` did not exist when this slice was
+written, so `v1.sql` and the codes follow the spec's leans, which still
+await the owner's confirmation: D51 (the archive is the de-duplication
+scope), D59 (`attributedBody`, `message_summary_info` and `payload_data`
+are kept raw within caps), D60 (Recently Deleted excluded by default),
+D61 (text captured before an unsend is kept), D69, D70, D71, D79 and D82
+(the closed history-column list in `schema::codes`).
+
+**Not in this slice:** the import (4f–4j), `open_blob` and the verifier
+(4k), the `StoreFs` trait, the `max_page_count` guard during a migration
+step, provenance files, and any use from the shell.
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`
@@ -632,6 +735,24 @@ superseded by D22: sms.db is staged on disk.
 | D49 | Source values | `Col<T>` | `Option<T>` | M4 can tell "not recorded" from "NULL" from "bad" |
 | D50 | Lookup scope | Only `Library/SMS/Attachments/` and `StickerCache/` | Every `~/` and `/var/mobile` class | Never reaches non-Messages files; the other classes stay counts |
 
+### Milestone 4 decisions in force (slice 4d)
+
+The full M4 decision list (D51–D88) lands with the M4 documentation slice.
+These are the ones the archive skeleton already implements.
+
+| # | Topic | Choice | Main alternative | Trade-off |
+|---|---|---|---|---|
+| D52 | Archive naming | `a<32hex>`; label in the database; created through `.oma-new-*` with a no-replace rename | Label as directory name | No untrusted names on disk |
+| D53 | Locking | Sidecar `archive.lock` + `try_lock` + self-test; NORMAL locking with WAL; lock-free `ArchiveReader` | `locking_mode=EXCLUSIVE` | Details can be read during imports; external tools can still read the database |
+| D54 | Volumes | Network and virtualised volumes refused for archives; FAT warned | Warn on virtualised | WAL and locks are unreliable there |
+| D75 | `application_id` | `0x4F4D4131` ("OMA1"), unregistered | Register it | Registration is optional |
+| D76 | Views | None in v1; views are disabled on every connection | Read views | `highlight()` fails in views with `TRUSTED_SCHEMA` off |
+| D78 | Permissions | 0700/0600 on Unix, re-checked at every open; the library itself must be ours and not writable by others | Leave the umask | Plaintext archive; ACL inheritance on Windows is disclosed with the privacy write-up |
+| D84 | Reader | `ArchiveReader`: lock-free, query-only, fingerprint first | Read through the locked `Archive` | Details during imports |
+| D85 | Fault injection | Non-default `fault-injection` feature, per-thread hooks | Environment variables in release builds | No test hooks in shipped code |
+| D86 | Windows long paths | `win32-longpath` with a verbatim path; if WAL and `-shm` fail there in CI, refuse library paths whose deepest archive path exceeds 240 characters | `EXCLUSIVE` locking | Keeps D53's reader. **UNVERIFIED** until the Windows run |
+| D87 | Migrations | Explicit `migrate()` only; fingerprint first; space checked before anything changes; unfinished sessions superseded; a real migration refused until the pre-migration copy exists | Migrate on open | No surprise writes; reads never migrate |
+
 ## Logging
 
 `tracing` writes to stderr, filtered by `OMA_LOG` (default `info`). Log
@@ -673,4 +794,14 @@ in `src-tauri` it is a review rule, and no `instrument` is used there today. The
 `crates/oma-messages/tests/` and `src-tauri/tests/` run every catalogue
 entry, including the failure paths, and a forced panic.
 
-The persistent, redacted diagnostic log file is deferred to M4 (D15).
+Milestone 4's `oma-archive` logs, at `info`, archive creation, a write
+open's recovery counts and migration steps (versions only); at `debug`,
+placement and directory-sync outcomes, checkpoint results and unknown free
+space. It never logs a path, an archive id, the label or SQLite error
+text, and its errors carry codes and kinds only.
+`crates/oma-archive/tests/log_hygiene.rs` checks logs, `Debug` and
+`Display` against the label, the id, the library path and any 32-hex run;
+`tests/source_rules.rs` bans `instrument` without `skip_all`.
+
+The persistent, redacted diagnostic log file is deferred to M4 (D15); the
+M4 spec defers it again, to M8 (D71, awaiting the owner).

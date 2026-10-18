@@ -210,6 +210,42 @@ the M3 catalogue only:
 
 **Not yet observed:** any of this on Windows, or on a real sms.db.
 
+### Milestone 4 archive skeleton (slice 4d)
+
+Observed by the `crates/oma-archive` tests in the same Linux container
+(ext4, running as root) on 2026-10-18, with the bundled SQLite 3.53.2; not
+CI, not a desktop, synthetic archives only:
+
+- `v1.sql` loads under the hardening of spec §5.5 (`DEFENSIVE`,
+  `TRUSTED_SCHEMA` off, DQS off, `SQLITE_LIMIT_ATTACHED` 0), with the FTS
+  `secure-delete` option readable as `1` in `message_fts_config`. A new,
+  empty archive's database is 290,816 bytes.
+- Creation used `renameat2(RENAME_NOREPLACE)` for the `.oma-new-*`
+  directory. Directories were 0700, and `archive.sqlite`, `archive.lock`,
+  `-wal` and `-shm` were 0600.
+- The `flock` lock self-test passed (a second handle in the same process
+  was refused); a lock held by a child process gave `Locked` and listing
+  gave `InUse` without waiting.
+- A read-only open of a closed archive left `archive.sqlite` byte-identical
+  but created an empty `-wal` and a 32 KiB `-shm`, which stay after the
+  connection closes. A read-only open of a crash-left WAL database showed
+  every committed row and left the main file and the `-wal`
+  byte-identical (re-checking the scratch observation on 3.53.2).
+- Extra triggers, views, indexes and tables, a dropped index and a changed
+  trigger were all `Damaged(SchemaMismatch)` with the files untouched;
+  `sqlite_stat1` was tolerated and reported.
+- The test-only v1 → v2 migration applied and recorded itself; a failure
+  mid-step, a foreign-key violation, an FTS rank-1 integrity failure and a
+  wrong target schema each rolled back to version 1.
+
+**Not yet observed:** anything on Windows. `crates/oma-archive/tests/windows.rs`
+must run first on the `windows-2022` runner: whether WAL and `-shm` work on
+the `win32-longpath` VFS under a library path of about 230 characters
+(decision D86 names the fallback if they do not), the archive files'
+attributes, UNC refusal, a junction in place of an archive directory, and
+renaming a creation directory with a handle left open. Their `RECORD` lines
+go here once that run exists.
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI
