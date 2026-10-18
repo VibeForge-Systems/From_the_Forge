@@ -63,9 +63,9 @@ pub use plists::{
 pub use prober::{BlobProbe, FileProber};
 pub use schema_sql::sql_declares_virtual_table;
 pub use staged_conn::{Budgeted, ReadPolicy, StagedConnection, TextEncoding, OPS_PER_TICK};
-pub use staging::{sweep_stale, CleanupReport, StagingRoot, StagingSession, SweepReport};
 #[cfg(windows)]
-pub use staging::{FILE_ATTRIBUTE_NOT_CONTENT_INDEXED, FILE_ATTRIBUTE_TEMPORARY};
+pub use staging::FILE_ATTRIBUTE_TEMPORARY;
+pub use staging::{sweep_stale, CleanupReport, StagingRoot, StagingSession, SweepReport};
 pub use text::DisplayText;
 pub use validate::{
     Check, CheckId, CheckLevel, Finding, ManifestStats, SmsDbStatus, ValidationReport,

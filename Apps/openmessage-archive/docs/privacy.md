@@ -127,9 +127,14 @@ antivirus) applies to it as well. In addition:
   above). Release builds stop at once on an internal error (they abort on
   panic), so a crash skips every cleanup step. If the app is never started
   again, the copy remains until you delete `.oma-staging` yourself.
-- **Windows.** The staged files are created with the *temporary* and *not
-  content indexed* attributes, so Windows Search does not index them and
-  Windows prefers to keep them in its cache. Neither attribute stops an
+- **Windows.** The staged files are created with the *temporary* attribute,
+  so Windows prefers to keep them in its cache. They are **not** excluded
+  from Windows Search: `CreateFileW` ignores the *not content indexed*
+  attribute (observed on the Windows CI runner), and setting it afterwards
+  needs a Win32 call the app does not make yet. If the archive folder is in
+  an indexed location such as Documents, the indexer could read a staged
+  copy while it exists. Exclude the archive folder from indexing (Indexing
+  Options) if that matters to you. The attribute does not stop an
   antivirus scanner, a backup tool, a sync client or another user who can
   read the archive folder from reading them. Whether Defender scans them
   is part of the manual checklist in compatibility.md.

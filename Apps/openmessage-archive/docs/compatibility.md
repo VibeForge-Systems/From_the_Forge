@@ -339,9 +339,9 @@ open as well.
   is empty afterwards and the report says the copy was deleted. Record any
   retry or failure to remove.
 - **File attributes.** While a check runs on a large database, confirm the
-  staged `sms.db` and `sms.db-wal` carry the temporary and
-  not-content-indexed attributes (`attrib` or `Get-Item … | Select
-  Attributes`).
+  staged `sms.db` and `sms.db-wal` carry the temporary attribute
+  (`Get-Item … | Select Attributes`). They are not marked
+  not-content-indexed; see privacy.md.
 - **WAL on Windows.** Confirm `msgs-wal-plain` reports the `-wal` as copied
   and counts 7 message rows, which needs the staged `-wal` to be read on
   Windows (UNVERIFIED until run).

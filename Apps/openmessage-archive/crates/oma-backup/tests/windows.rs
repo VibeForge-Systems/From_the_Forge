@@ -8,7 +8,7 @@ use std::process::Command;
 use common::*;
 use oma_backup::{
     CancelToken, CheckId, CheckLevel, Finding, JobCtx, Progress, WalPolicy,
-    FILE_ATTRIBUTE_NOT_CONTENT_INDEXED, FILE_ATTRIBUTE_TEMPORARY, SMS_DB_DOMAIN, SMS_DB_PATH,
+    FILE_ATTRIBUTE_TEMPORARY, SMS_DB_DOMAIN, SMS_DB_PATH,
 };
 
 #[test]
@@ -81,9 +81,9 @@ fn junction_blob_dir() {
     assert!(!format!("{report:?}").contains("OUTSIDE-SENTINEL"));
 }
 
-/// M3 §3.9: staged files are temporary and not content-indexed, the
-/// attributes survive the `.partial` rename, and `remove` succeeds once the
-/// connection is dropped.
+/// M3 §3.9: staged files are marked temporary, the attribute survives the
+/// `.partial` rename, and `remove` succeeds once the connection is dropped.
+/// (Not content-indexed cannot be set at creation; see `create_new_file`.)
 #[test]
 fn staged_file_attributes_and_remove() {
     use std::os::windows::fs::MetadataExt;
@@ -96,7 +96,7 @@ fn staged_file_attributes_and_remove() {
         let db = ob
             .extract_database_with(SMS_DB_DOMAIN, SMS_DB_PATH, WalPolicy::BestEffort, &mut ctx)
             .expect("extract");
-        let want = FILE_ATTRIBUTE_TEMPORARY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+        let want = FILE_ATTRIBUTE_TEMPORARY;
         let attrs = fs::metadata(&db.path).expect("metadata").file_attributes();
         assert_eq!(attrs & want, want, "{name}: {attrs:#x}");
         let entry = ob

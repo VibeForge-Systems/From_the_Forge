@@ -72,14 +72,14 @@ fn new_dir(path: &Path) -> io::Result<()> {
 /// `FILE_ATTRIBUTE_TEMPORARY`: a hint to keep the file in the cache.
 #[cfg(windows)]
 pub const FILE_ATTRIBUTE_TEMPORARY: u32 = 0x100;
-/// `FILE_ATTRIBUTE_NOT_CONTENT_INDEXED`: keep the file out of Windows Search.
-#[cfg(windows)]
-pub const FILE_ATTRIBUTE_NOT_CONTENT_INDEXED: u32 = 0x2000;
 
 /// Create a new file that must not exist yet: mode 0600 on Unix. On Windows
-/// the file is marked temporary and not content-indexed (M3 §3.9); the
-/// attributes survive the `.partial` rename. Antivirus scanning is not
-/// prevented.
+/// the file is marked temporary; the attribute survives the `.partial`
+/// rename. `CreateFileW` ignores `FILE_ATTRIBUTE_NOT_CONTENT_INDEXED` (the
+/// Windows CI runner showed 0x120, without 0x2000), so staged files are not
+/// excluded from Windows Search; setting it would need `SetFileAttributesW`,
+/// which this crate cannot call without `unsafe`. Antivirus scanning is not
+/// prevented either.
 pub(crate) fn create_new_file(path: &Path) -> io::Result<File> {
     let mut o = OpenOptions::new();
     o.write(true).create_new(true);
@@ -91,7 +91,7 @@ pub(crate) fn create_new_file(path: &Path) -> io::Result<File> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
-        o.attributes(FILE_ATTRIBUTE_TEMPORARY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED);
+        o.attributes(FILE_ATTRIBUTE_TEMPORARY);
     }
     o.open(path)
 }
