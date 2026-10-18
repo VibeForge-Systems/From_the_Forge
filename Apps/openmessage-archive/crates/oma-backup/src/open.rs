@@ -4,6 +4,7 @@
 use std::fs;
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::SystemTime;
 
 use crate::cancel::{JobCtx, Phase};
@@ -41,7 +42,7 @@ pub(crate) struct CopyFacts {
 pub(crate) struct Stamp(Option<(u64, Option<SystemTime>)>);
 
 impl Stamp {
-    fn of(path: &Path) -> Stamp {
+    pub(crate) fn of(path: &Path) -> Stamp {
         Stamp(
             fs::symlink_metadata(path)
                 .ok()
@@ -76,6 +77,9 @@ pub struct OpenBackup {
     pub(crate) limits: Limits,
     pub(crate) copy: CopyFacts,
     pub(crate) before: ChangeStamp,
+    /// Stamps of blobs staged since open (sms.db and its `-wal`), taken
+    /// before each was copied (M3 §3.2).
+    pub(crate) extra_stamps: Mutex<Vec<(PathBuf, Stamp)>>,
 }
 
 impl std::fmt::Debug for OpenBackup {
@@ -183,6 +187,7 @@ impl OpenBackup {
             limits: limits.clone(),
             copy: CopyFacts::default(),
             before,
+            extra_stamps: Mutex::new(Vec::new()),
         };
         match ob.open_inner(password, ctx) {
             Ok(()) => {
@@ -379,6 +384,30 @@ impl OpenBackup {
         relative_path: &str,
     ) -> Result<Option<ManifestEntry>, BackupError> {
         self.db()?.find(domain, relative_path, &self.limits)
+    }
+
+    /// `true` when `Status.plist`, `Manifest.db` and every blob staged
+    /// through [`OpenBackup::extract_database_with`] (sms.db and its `-wal`)
+    /// still have the length and modification time they had before they
+    /// were read. The stamps themselves are not exposed.
+    pub fn unchanged_since_open(&self) -> Result<bool, BackupError> {
+        if ChangeStamp::take(self.inspection.dir()) != self.before {
+            return Ok(false);
+        }
+        let extra = self
+            .extra_stamps
+            .lock()
+            .map_err(|_| BackupError::Internal("stamp list poisoned"))?;
+        Ok(extra.iter().all(|(path, stamp)| Stamp::of(path) == *stamp))
+    }
+
+    /// Remember the stamps of blobs that were just staged.
+    pub(crate) fn record_stamps(&self, stamps: Vec<(PathBuf, Stamp)>) -> Result<(), BackupError> {
+        self.extra_stamps
+            .lock()
+            .map_err(|_| BackupError::Internal("stamp list poisoned"))?
+            .extend(stamps);
+        Ok(())
     }
 
     /// Close the connection and its interrupt watcher, zeroize the keys,

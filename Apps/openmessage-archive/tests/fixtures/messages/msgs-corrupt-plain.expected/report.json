@@ -1,0 +1,39 @@
+{
+ "attachments": null,
+ "chats": null,
+ "database": {
+  "header_says_wal": false,
+  "integrity": "problems",
+  "size_matches": true,
+  "staged_bytes": 24576,
+  "wal_bytes": null,
+  "wal_frames_after_first_invalid": null,
+  "wal_listed": false,
+  "wal_outcome": "not_listed",
+  "wal_size_matches": null,
+  "wal_valid_committed_frames": null
+ },
+ "dates": null,
+ "failures": null,
+ "handles": null,
+ "links": null,
+ "messages": null,
+ "recently_deleted": null,
+ "schema": {
+  "client_version": null,
+  "client_version_parsed": false,
+  "encoding": null,
+  "features": [],
+  "indexes": 0,
+  "internal_objects": 0,
+  "stat_tables": 0,
+  "tables": [],
+  "triggers": 0,
+  "unknown_tables": 0,
+  "views": 0
+ },
+ "status": {
+  "kind": "damaged",
+  "reason": "integrity_problems"
+ }
+}

@@ -1,0 +1,6694 @@
+{
+ "format": 1,
+ "generator": "scripts/fixtures/make_synthetic_typedstream.py",
+ "vectors": [
+  {
+   "file": "v1_hello.bin",
+   "generic": null,
+   "name": "v1_hello",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "dicts": [
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 0
+        }
+       ]
+      ]
+     ],
+     "kind": "attributed",
+     "runs": [
+      [
+       1,
+       5
+      ]
+     ],
+     "text": "Hello"
+    }
+   },
+   "public": {
+    "ok": {
+     "parts": [
+      {
+       "flags": [],
+       "guid": null,
+       "keys": [
+        "__kIMMessagePartAttributeName"
+       ],
+       "mention": null,
+       "part": 0,
+       "runs": [
+        0,
+        1
+       ],
+       "text_effect": null,
+       "utf16": [
+        0,
+        5
+       ],
+       "utf8": [
+        0,
+        5
+       ]
+      }
+     ],
+     "run_issue": null,
+     "runs": [
+      {
+       "attrs": {
+        "flags": [],
+        "guid": null,
+        "keys": [
+         "__kIMMessagePartAttributeName"
+        ],
+        "mention": null,
+        "part": 0,
+        "text_effect": null
+       },
+       "utf16": [
+        0,
+        5
+       ],
+       "utf8": [
+        0,
+        5
+       ]
+      }
+     ],
+     "text": "Hello",
+     "unknown_attribute_classes": 0,
+     "unknown_attribute_keys": 0,
+     "unreadable_attribute_values": 0
+    }
+   },
+   "sha256": "b28cff120e4220b372140d087e615a883d8f5f775dd08e7c28471184787d3188"
+  },
+  {
+   "file": "v2_emoji.bin",
+   "generic": null,
+   "name": "v2_emoji",
+   "note": "non-BMP characters and a skin-tone modifier: 12 UTF-8 bytes, 8 UTF-16 units",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "dicts": [
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 0
+        }
+       ]
+      ]
+     ],
+     "kind": "attributed",
+     "runs": [
+      [
+       1,
+       8
+      ]
+     ],
+     "text": "Hi \ud83d\udc4b\ud83c\udffd!"
+    }
+   },
+   "public": {
+    "ok": {
+     "parts": [
+      {
+       "flags": [],
+       "guid": null,
+       "keys": [
+        "__kIMMessagePartAttributeName"
+       ],
+       "mention": null,
+       "part": 0,
+       "runs": [
+        0,
+        1
+       ],
+       "text_effect": null,
+       "utf16": [
+        0,
+        8
+       ],
+       "utf8": [
+        0,
+        12
+       ]
+      }
+     ],
+     "run_issue": null,
+     "runs": [
+      {
+       "attrs": {
+        "flags": [],
+        "guid": null,
+        "keys": [
+         "__kIMMessagePartAttributeName"
+        ],
+        "mention": null,
+        "part": 0,
+        "text_effect": null
+       },
+       "utf16": [
+        0,
+        8
+       ],
+       "utf8": [
+        0,
+        12
+       ]
+      }
+     ],
+     "text": "Hi \ud83d\udc4b\ud83c\udffd!",
+     "unknown_attribute_classes": 0,
+     "unknown_attribute_keys": 0,
+     "unreadable_attribute_values": 0
+    }
+   },
+   "sha256": "3dea24cee8f26bc73d8bcd8829851df08d8bf5cba4f4e5d7dcb28765b753f265"
+  },
+  {
+   "file": "v3_attachment_then_text.bin",
+   "generic": null,
+   "name": "v3_attachment_then_text",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "dicts": [
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 0
+        }
+       ],
+       [
+        "__kIMFileTransferGUIDAttributeName",
+        {
+         "str": "at_0_00000000-0000-4000-8000-000000000001"
+        }
+       ],
+       [
+        "__kIMFilenameAttributeName",
+        {
+         "str": "SYNTH_0001.HEIC"
+        }
+       ]
+      ],
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 1
+        }
+       ]
+      ]
+     ],
+     "kind": "attributed",
+     "runs": [
+      [
+       1,
+       1
+      ],
+      [
+       2,
+       4
+      ]
+     ],
+     "text": "\ufffcLook"
+    }
+   },
+   "public": {
+    "ok": {
+     "parts": [
+      {
+       "flags": [],
+       "guid": "at_0_00000000-0000-4000-8000-000000000001",
+       "keys": [
+        "__kIMMessagePartAttributeName",
+        "__kIMFileTransferGUIDAttributeName",
+        "__kIMFilenameAttributeName"
+       ],
+       "mention": null,
+       "part": 0,
+       "runs": [
+        0,
+        1
+       ],
+       "text_effect": null,
+       "utf16": [
+        0,
+        1
+       ],
+       "utf8": [
+        0,
+        3
+       ]
+      },
+      {
+       "flags": [],
+       "guid": null,
+       "keys": [
+        "__kIMMessagePartAttributeName"
+       ],
+       "mention": null,
+       "part": 1,
+       "runs": [
+        1,
+        2
+       ],
+       "text_effect": null,
+       "utf16": [
+        1,
+        5
+       ],
+       "utf8": [
+        3,
+        7
+       ]
+      }
+     ],
+     "run_issue": null,
+     "runs": [
+      {
+       "attrs": {
+        "flags": [],
+        "guid": "at_0_00000000-0000-4000-8000-000000000001",
+        "keys": [
+         "__kIMMessagePartAttributeName",
+         "__kIMFileTransferGUIDAttributeName",
+         "__kIMFilenameAttributeName"
+        ],
+        "mention": null,
+        "part": 0,
+        "text_effect": null
+       },
+       "utf16": [
+        0,
+        1
+       ],
+       "utf8": [
+        0,
+        3
+       ]
+      },
+      {
+       "attrs": {
+        "flags": [],
+        "guid": null,
+        "keys": [
+         "__kIMMessagePartAttributeName"
+        ],
+        "mention": null,
+        "part": 1,
+        "text_effect": null
+       },
+       "utf16": [
+        1,
+        5
+       ],
+       "utf8": [
+        3,
+        7
+       ]
+      }
+     ],
+     "text": "\ufffcLook",
+     "unknown_attribute_classes": 0,
+     "unknown_attribute_keys": 0,
+     "unreadable_attribute_values": 0
+    }
+   },
+   "sha256": "6984505a42a6929d106340e34b1271cf9e4b3eb51b428ed41aea3b69664cf305"
+  },
+  {
+   "file": "v4_mention_reuse.bin",
+   "generic": null,
+   "name": "v4_mention_reuse",
+   "note": "the third run reuses dictionary 1; no dictionary follows it",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "dicts": [
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 0
+        }
+       ]
+      ],
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 0
+        }
+       ],
+       [
+        "__kIMMentionConfirmedMention",
+        {
+         "str": "+15555550100"
+        }
+       ]
+      ]
+     ],
+     "kind": "attributed",
+     "runs": [
+      [
+       1,
+       4
+      ],
+      [
+       2,
+       4
+      ],
+      [
+       1,
+       7
+      ]
+     ],
+     "text": "Hey Alex \u00e9t\u00e9 \ud83d\ude00"
+    }
+   },
+   "public": {
+    "ok": {
+     "parts": [
+      {
+       "flags": [],
+       "guid": null,
+       "keys": [
+        "__kIMMessagePartAttributeName",
+        "__kIMMentionConfirmedMention"
+       ],
+       "mention": "+15555550100",
+       "part": 0,
+       "runs": [
+        0,
+        3
+       ],
+       "text_effect": null,
+       "utf16": [
+        0,
+        15
+       ],
+       "utf8": [
+        0,
+        19
+       ]
+      }
+     ],
+     "run_issue": null,
+     "runs": [
+      {
+       "attrs": {
+        "flags": [],
+        "guid": null,
+        "keys": [
+         "__kIMMessagePartAttributeName"
+        ],
+        "mention": null,
+        "part": 0,
+        "text_effect": null
+       },
+       "utf16": [
+        0,
+        4
+       ],
+       "utf8": [
+        0,
+        4
+       ]
+      },
+      {
+       "attrs": {
+        "flags": [],
+        "guid": null,
+        "keys": [
+         "__kIMMessagePartAttributeName",
+         "__kIMMentionConfirmedMention"
+        ],
+        "mention": "+15555550100",
+        "part": 0,
+        "text_effect": null
+       },
+       "utf16": [
+        4,
+        8
+       ],
+       "utf8": [
+        4,
+        8
+       ]
+      },
+      {
+       "attrs": {
+        "flags": [],
+        "guid": null,
+        "keys": [
+         "__kIMMessagePartAttributeName"
+        ],
+        "mention": null,
+        "part": 0,
+        "text_effect": null
+       },
+       "utf16": [
+        8,
+        15
+       ],
+       "utf8": [
+        8,
+        19
+       ]
+      }
+     ],
+     "text": "Hey Alex \u00e9t\u00e9 \ud83d\ude00",
+     "unknown_attribute_classes": 0,
+     "unknown_attribute_keys": 0,
+     "unreadable_attribute_values": 0
+    }
+   },
+   "sha256": "b97fcc0e14fcb9930ce0c41b24bf45ef47bc956d4cdfb3ee047d2e6e63895ed3"
+  },
+  {
+   "file": "v5_long.bin",
+   "generic": null,
+   "name": "v5_long",
+   "note": "`+` and run lengths over 127 use the 0x81 form",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "dicts": [
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 0
+        }
+       ]
+      ]
+     ],
+     "kind": "attributed",
+     "runs": [
+      [
+       1,
+       300
+      ]
+     ],
+     "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+   },
+   "public": {
+    "ok": {
+     "parts": [
+      {
+       "flags": [],
+       "guid": null,
+       "keys": [
+        "__kIMMessagePartAttributeName"
+       ],
+       "mention": null,
+       "part": 0,
+       "runs": [
+        0,
+        1
+       ],
+       "text_effect": null,
+       "utf16": [
+        0,
+        300
+       ],
+       "utf8": [
+        0,
+        300
+       ]
+      }
+     ],
+     "run_issue": null,
+     "runs": [
+      {
+       "attrs": {
+        "flags": [],
+        "guid": null,
+        "keys": [
+         "__kIMMessagePartAttributeName"
+        ],
+        "mention": null,
+        "part": 0,
+        "text_effect": null
+       },
+       "utf16": [
+        0,
+        300
+       ],
+       "utf8": [
+        0,
+        300
+       ]
+      }
+     ],
+     "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     "unknown_attribute_classes": 0,
+     "unknown_attribute_keys": 0,
+     "unreadable_attribute_values": 0
+    }
+   },
+   "sha256": "8af3d751892f5959d7c84620cc3a91cca38e8b2f822cd8f44d3533bb2f5cf4da"
+  },
+  {
+   "file": "v6_mention_after_emoji.bin",
+   "generic": null,
+   "name": "v6_mention_after_emoji",
+   "note": "mention placement after a non-BMP character (UTF-16 run lengths)",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "dicts": [
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 0
+        }
+       ]
+      ],
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 0
+        }
+       ],
+       [
+        "__kIMMentionConfirmedMention",
+        {
+         "str": "+15555550100"
+        }
+       ]
+      ]
+     ],
+     "kind": "attributed",
+     "runs": [
+      [
+       1,
+       3
+      ],
+      [
+       2,
+       4
+      ],
+      [
+       1,
+       8
+      ]
+     ],
+     "text": "\ud83d\ude00 Alex \ud83d\udc4b\ud83c\udffd ok"
+    }
+   },
+   "public": {
+    "ok": {
+     "parts": [
+      {
+       "flags": [],
+       "guid": null,
+       "keys": [
+        "__kIMMessagePartAttributeName",
+        "__kIMMentionConfirmedMention"
+       ],
+       "mention": "+15555550100",
+       "part": 0,
+       "runs": [
+        0,
+        3
+       ],
+       "text_effect": null,
+       "utf16": [
+        0,
+        15
+       ],
+       "utf8": [
+        0,
+        21
+       ]
+      }
+     ],
+     "run_issue": null,
+     "runs": [
+      {
+       "attrs": {
+        "flags": [],
+        "guid": null,
+        "keys": [
+         "__kIMMessagePartAttributeName"
+        ],
+        "mention": null,
+        "part": 0,
+        "text_effect": null
+       },
+       "utf16": [
+        0,
+        3
+       ],
+       "utf8": [
+        0,
+        5
+       ]
+      },
+      {
+       "attrs": {
+        "flags": [],
+        "guid": null,
+        "keys": [
+         "__kIMMessagePartAttributeName",
+         "__kIMMentionConfirmedMention"
+        ],
+        "mention": "+15555550100",
+        "part": 0,
+        "text_effect": null
+       },
+       "utf16": [
+        3,
+        7
+       ],
+       "utf8": [
+        5,
+        9
+       ]
+      },
+      {
+       "attrs": {
+        "flags": [],
+        "guid": null,
+        "keys": [
+         "__kIMMessagePartAttributeName"
+        ],
+        "mention": null,
+        "part": 0,
+        "text_effect": null
+       },
+       "utf16": [
+        7,
+        15
+       ],
+       "utf8": [
+        9,
+        21
+       ]
+      }
+     ],
+     "text": "\ud83d\ude00 Alex \ud83d\udc4b\ud83c\udffd ok",
+     "unknown_attribute_classes": 0,
+     "unknown_attribute_keys": 0,
+     "unreadable_attribute_values": 0
+    }
+   },
+   "sha256": "cbc2a9d9bac66e8c4551c791bca18e7752c388979b247baa43487eaaf96bb065"
+  },
+  {
+   "file": "v7_cstring_ptr_reuse.bin",
+   "generic": null,
+   "name": "v7_cstring_ptr_reuse",
+   "note": "the second NSNumber's objCType is a reference to the first char * pointer",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "dicts": [
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 0
+        }
+       ]
+      ],
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 1
+        }
+       ]
+      ]
+     ],
+     "kind": "attributed",
+     "runs": [
+      [
+       1,
+       4
+      ],
+      [
+       2,
+       4
+      ]
+     ],
+     "text": "Hey Alex"
+    }
+   },
+   "public": {
+    "ok": {
+     "parts": [
+      {
+       "flags": [],
+       "guid": null,
+       "keys": [
+        "__kIMMessagePartAttributeName"
+       ],
+       "mention": null,
+       "part": 0,
+       "runs": [
+        0,
+        1
+       ],
+       "text_effect": null,
+       "utf16": [
+        0,
+        4
+       ],
+       "utf8": [
+        0,
+        4
+       ]
+      },
+      {
+       "flags": [],
+       "guid": null,
+       "keys": [
+        "__kIMMessagePartAttributeName"
+       ],
+       "mention": null,
+       "part": 1,
+       "runs": [
+        1,
+        2
+       ],
+       "text_effect": null,
+       "utf16": [
+        4,
+        8
+       ],
+       "utf8": [
+        4,
+        8
+       ]
+      }
+     ],
+     "run_issue": null,
+     "runs": [
+      {
+       "attrs": {
+        "flags": [],
+        "guid": null,
+        "keys": [
+         "__kIMMessagePartAttributeName"
+        ],
+        "mention": null,
+        "part": 0,
+        "text_effect": null
+       },
+       "utf16": [
+        0,
+        4
+       ],
+       "utf8": [
+        0,
+        4
+       ]
+      },
+      {
+       "attrs": {
+        "flags": [],
+        "guid": null,
+        "keys": [
+         "__kIMMessagePartAttributeName"
+        ],
+        "mention": null,
+        "part": 1,
+        "text_effect": null
+       },
+       "utf16": [
+        4,
+        8
+       ],
+       "utf8": [
+        4,
+        8
+       ]
+      }
+     ],
+     "text": "Hey Alex",
+     "unknown_attribute_classes": 0,
+     "unknown_attribute_keys": 0,
+     "unreadable_attribute_values": 0
+    }
+   },
+   "sha256": "465f48b241105a616664fcb1fe5594c267fbcc535a0474bb5fea446d731708d5"
+  },
+  {
+   "file": "v8_formatting.bin",
+   "generic": null,
+   "name": "v8_formatting",
+   "note": "flags from NSNumber values; key presence; an unknown key; an unknown value class",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "dicts": [
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 0
+        }
+       ]
+      ],
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 0
+        }
+       ],
+       [
+        "__kIMTextBoldAttributeName",
+        {
+         "int": 1
+        }
+       ],
+       [
+        "__kIMTextItalicAttributeName",
+        {
+         "int": 0
+        }
+       ],
+       [
+        "__kIMTextEffectAttributeName",
+        {
+         "int": 5
+        }
+       ]
+      ],
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 0
+        }
+       ],
+       [
+        "__kIMOneTimeCodeAttributeName",
+        {
+         "int": 1
+        }
+       ],
+       [
+        "__kSYNTHUnknownKey",
+        {
+         "str": "x"
+        }
+       ]
+      ],
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 0
+        }
+       ],
+       [
+        "__kIMLinkAttributeName",
+        {
+         "class": "SYNTHUnknownValue"
+        }
+       ]
+      ]
+     ],
+     "kind": "attributed",
+     "runs": [
+      [
+       1,
+       6
+      ],
+      [
+       2,
+       4
+      ],
+      [
+       3,
+       7
+      ],
+      [
+       4,
+       5
+      ]
+     ],
+     "text": "SYNTH bold 123456 link"
+    }
+   },
+   "public": {
+    "ok": {
+     "parts": [
+      {
+       "flags": [
+        "bold",
+        "one_time_code"
+       ],
+       "guid": null,
+       "keys": [
+        "__kIMMessagePartAttributeName",
+        "__kIMLinkAttributeName",
+        "__kIMTextEffectAttributeName",
+        "__kIMTextBoldAttributeName",
+        "__kIMTextItalicAttributeName",
+        "__kIMOneTimeCodeAttributeName"
+       ],
+       "mention": null,
+       "part": 0,
+       "runs": [
+        0,
+        4
+       ],
+       "text_effect": 5,
+       "utf16": [
+        0,
+        22
+       ],
+       "utf8": [
+        0,
+        22
+       ]
+      }
+     ],
+     "run_issue": null,
+     "runs": [
+      {
+       "attrs": {
+        "flags": [],
+        "guid": null,
+        "keys": [
+         "__kIMMessagePartAttributeName"
+        ],
+        "mention": null,
+        "part": 0,
+        "text_effect": null
+       },
+       "utf16": [
+        0,
+        6
+       ],
+       "utf8": [
+        0,
+        6
+       ]
+      },
+      {
+       "attrs": {
+        "flags": [
+         "bold"
+        ],
+        "guid": null,
+        "keys": [
+         "__kIMMessagePartAttributeName",
+         "__kIMTextEffectAttributeName",
+         "__kIMTextBoldAttributeName",
+         "__kIMTextItalicAttributeName"
+        ],
+        "mention": null,
+        "part": 0,
+        "text_effect": 5
+       },
+       "utf16": [
+        6,
+        10
+       ],
+       "utf8": [
+        6,
+        10
+       ]
+      },
+      {
+       "attrs": {
+        "flags": [
+         "one_time_code"
+        ],
+        "guid": null,
+        "keys": [
+         "__kIMMessagePartAttributeName",
+         "__kIMOneTimeCodeAttributeName"
+        ],
+        "mention": null,
+        "part": 0,
+        "text_effect": null
+       },
+       "utf16": [
+        10,
+        17
+       ],
+       "utf8": [
+        10,
+        17
+       ]
+      },
+      {
+       "attrs": {
+        "flags": [],
+        "guid": null,
+        "keys": [
+         "__kIMMessagePartAttributeName",
+         "__kIMLinkAttributeName"
+        ],
+        "mention": null,
+        "part": 0,
+        "text_effect": null
+       },
+       "utf16": [
+        17,
+        22
+       ],
+       "utf8": [
+        17,
+        22
+       ]
+      }
+     ],
+     "text": "SYNTH bold 123456 link",
+     "unknown_attribute_classes": 1,
+     "unknown_attribute_keys": 1,
+     "unreadable_attribute_values": 0
+    }
+   },
+   "sha256": "57f0e87baab7f9db21a7cb0794059ead5d986dacd49a98ef0b598907131d75ec"
+  },
+  {
+   "file": "v9_multipart.bin",
+   "generic": null,
+   "name": "v9_multipart",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "dicts": [
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 0
+        }
+       ],
+       [
+        "__kIMFileTransferGUIDAttributeName",
+        {
+         "str": "at_0_00000000-0000-4000-8000-000000000001"
+        }
+       ]
+      ],
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 1
+        }
+       ]
+      ],
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 2
+        }
+       ],
+       [
+        "__kIMFileTransferGUIDAttributeName",
+        {
+         "str": "at_2_00000000-0000-4000-8000-000000000002"
+        }
+       ]
+      ]
+     ],
+     "kind": "attributed",
+     "runs": [
+      [
+       1,
+       1
+      ],
+      [
+       2,
+       7
+      ],
+      [
+       3,
+       1
+      ]
+     ],
+     "text": "\ufffccaption\ufffc"
+    }
+   },
+   "public": {
+    "ok": {
+     "parts": [
+      {
+       "flags": [],
+       "guid": "at_0_00000000-0000-4000-8000-000000000001",
+       "keys": [
+        "__kIMMessagePartAttributeName",
+        "__kIMFileTransferGUIDAttributeName"
+       ],
+       "mention": null,
+       "part": 0,
+       "runs": [
+        0,
+        1
+       ],
+       "text_effect": null,
+       "utf16": [
+        0,
+        1
+       ],
+       "utf8": [
+        0,
+        3
+       ]
+      },
+      {
+       "flags": [],
+       "guid": null,
+       "keys": [
+        "__kIMMessagePartAttributeName"
+       ],
+       "mention": null,
+       "part": 1,
+       "runs": [
+        1,
+        2
+       ],
+       "text_effect": null,
+       "utf16": [
+        1,
+        8
+       ],
+       "utf8": [
+        3,
+        10
+       ]
+      },
+      {
+       "flags": [],
+       "guid": "at_2_00000000-0000-4000-8000-000000000002",
+       "keys": [
+        "__kIMMessagePartAttributeName",
+        "__kIMFileTransferGUIDAttributeName"
+       ],
+       "mention": null,
+       "part": 2,
+       "runs": [
+        2,
+        3
+       ],
+       "text_effect": null,
+       "utf16": [
+        8,
+        9
+       ],
+       "utf8": [
+        10,
+        13
+       ]
+      }
+     ],
+     "run_issue": null,
+     "runs": [
+      {
+       "attrs": {
+        "flags": [],
+        "guid": "at_0_00000000-0000-4000-8000-000000000001",
+        "keys": [
+         "__kIMMessagePartAttributeName",
+         "__kIMFileTransferGUIDAttributeName"
+        ],
+        "mention": null,
+        "part": 0,
+        "text_effect": null
+       },
+       "utf16": [
+        0,
+        1
+       ],
+       "utf8": [
+        0,
+        3
+       ]
+      },
+      {
+       "attrs": {
+        "flags": [],
+        "guid": null,
+        "keys": [
+         "__kIMMessagePartAttributeName"
+        ],
+        "mention": null,
+        "part": 1,
+        "text_effect": null
+       },
+       "utf16": [
+        1,
+        8
+       ],
+       "utf8": [
+        3,
+        10
+       ]
+      },
+      {
+       "attrs": {
+        "flags": [],
+        "guid": "at_2_00000000-0000-4000-8000-000000000002",
+        "keys": [
+         "__kIMMessagePartAttributeName",
+         "__kIMFileTransferGUIDAttributeName"
+        ],
+        "mention": null,
+        "part": 2,
+        "text_effect": null
+       },
+       "utf16": [
+        8,
+        9
+       ],
+       "utf8": [
+        10,
+        13
+       ]
+      }
+     ],
+     "text": "\ufffccaption\ufffc",
+     "unknown_attribute_classes": 0,
+     "unknown_attribute_keys": 0,
+     "unreadable_attribute_values": 0
+    }
+   },
+   "sha256": "d3b610ad5ede83d32752203cc744fad5dd50a54913487a5f2c2f5794450dc8b1"
+  },
+  {
+   "file": "v10_empty.bin",
+   "generic": null,
+   "name": "v10_empty",
+   "note": "an empty string with no runs",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "dicts": [],
+     "kind": "attributed",
+     "runs": [],
+     "text": ""
+    }
+   },
+   "public": {
+    "ok": {
+     "parts": [],
+     "run_issue": null,
+     "runs": [],
+     "text": "",
+     "unknown_attribute_classes": 0,
+     "unknown_attribute_keys": 0,
+     "unreadable_attribute_values": 0
+    }
+   },
+   "sha256": "51b61cffa3e903abd2535a8bf391f4371b681ce08086f9df88209d97dcb281ee"
+  },
+  {
+   "file": "v11_immutable_classes.bin",
+   "generic": null,
+   "name": "v11_immutable_classes",
+   "note": "NSAttributedString holding an NSString",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "dicts": [
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 0
+        }
+       ]
+      ]
+     ],
+     "kind": "attributed",
+     "runs": [
+      [
+       1,
+       5
+      ]
+     ],
+     "text": "plain"
+    }
+   },
+   "public": {
+    "ok": {
+     "parts": [
+      {
+       "flags": [],
+       "guid": null,
+       "keys": [
+        "__kIMMessagePartAttributeName"
+       ],
+       "mention": null,
+       "part": 0,
+       "runs": [
+        0,
+        1
+       ],
+       "text_effect": null,
+       "utf16": [
+        0,
+        5
+       ],
+       "utf8": [
+        0,
+        5
+       ]
+      }
+     ],
+     "run_issue": null,
+     "runs": [
+      {
+       "attrs": {
+        "flags": [],
+        "guid": null,
+        "keys": [
+         "__kIMMessagePartAttributeName"
+        ],
+        "mention": null,
+        "part": 0,
+        "text_effect": null
+       },
+       "utf16": [
+        0,
+        5
+       ],
+       "utf8": [
+        0,
+        5
+       ]
+      }
+     ],
+     "text": "plain",
+     "unknown_attribute_classes": 0,
+     "unknown_attribute_keys": 0,
+     "unreadable_attribute_values": 0
+    }
+   },
+   "sha256": "00ebe3cf32b447062f1c259136713a93b44d28339e37a3898918c69750861ff6"
+  },
+  {
+   "file": "int_i_00.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": 0
+      }
+     ]
+    ]
+   },
+   "name": "int_i_00",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "i",
+     "value": 0
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "80cce3c0718705191ca45708db6af9814a22d4a074ffbb6e472782dbcd1a24a5"
+  },
+  {
+   "file": "int_i_7f.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": 127
+      }
+     ]
+    ]
+   },
+   "name": "int_i_7f",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "i",
+     "value": 127
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "db9a90cdb8ad68dfb4f7bb710684981ea917e435918b8409974b7892c1dce21e"
+  },
+  {
+   "file": "int_i_80.bin",
+   "generic": {
+    "error": "UnexpectedTag"
+   },
+   "name": "int_i_80",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "not a valid integer head for this type"
+   },
+   "public": {
+    "error": "UnexpectedTag"
+   },
+   "sha256": "332427dc95fdaa309a23325aad2f970f1220ac62aaa3532ca91bc29f0876dc93"
+  },
+  {
+   "file": "int_i_92.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": -110
+      }
+     ]
+    ]
+   },
+   "name": "int_i_92",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "i",
+     "value": -110
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "1c5d4cdbe37efcf33b3dd1827ef93f36dc8b9654b29dfd42395e9e41ff6fec95"
+  },
+  {
+   "file": "int_i_a0.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": -96
+      }
+     ]
+    ]
+   },
+   "name": "int_i_a0",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "i",
+     "value": -96
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "7c1c31a78362b2b3064c7ae2fc551d70e3b471c50a03e3c9f5004cbeb1c21dd0"
+  },
+  {
+   "file": "int_i_ff.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": -1
+      }
+     ]
+    ]
+   },
+   "name": "int_i_ff",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "i",
+     "value": -1
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "b141dd63ce54cb9ccd2c02c08628a7159d2b1119e09a904e8f13753745d4401b"
+  },
+  {
+   "file": "int_i_81c800.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": 200
+      }
+     ]
+    ]
+   },
+   "name": "int_i_81c800",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "i",
+     "value": 200
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "c245cea5583bcca83b39084fa82b8b840c18e03a93f190647da6138668bb3b8e"
+  },
+  {
+   "file": "int_i_8188ff.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": -120
+      }
+     ]
+    ]
+   },
+   "name": "int_i_8188ff",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "i",
+     "value": -120
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "432c564fc79b4e751fdaf9d100d77b2792cb9401c9913859fb64e18b566fc533"
+  },
+  {
+   "file": "int_i_8200001000.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": 1048576
+      }
+     ]
+    ]
+   },
+   "name": "int_i_8200001000",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "i",
+     "value": 1048576
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "f893150be992c8f40217f00b58c19d455e928d207a6ed561815074eb5e1950d9"
+  },
+  {
+   "file": "int_i_8700e68ee7fdffffff.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": -9000000000
+      }
+     ]
+    ]
+   },
+   "name": "int_i_8700e68ee7fdffffff",
+   "oracle": {
+    "check": "exempt",
+    "reason": "pytypedstream 0.1.0 rejects 0x87; T1 observed it from Apple's encoder"
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "894b09afdaa6dc9e6a77d892eca3fa979e5163b733df167f126cd4acb8273bab"
+  },
+  {
+   "file": "int_uI_c8.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": 200
+      }
+     ]
+    ]
+   },
+   "name": "int_uI_c8",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "I",
+     "value": 200
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "03eb1579d8b6f5a9c79c9c500f1669d9beb11bcfba513c104c4933e39a344192"
+  },
+  {
+   "file": "int_uI_ff.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": 255
+      }
+     ]
+    ]
+   },
+   "name": "int_uI_ff",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "I",
+     "value": 255
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "be461b8abb9e356da3808f4f5b0249006201657127591acaf3282dce1648d3da"
+  },
+  {
+   "file": "int_uI_81c800.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": 200
+      }
+     ]
+    ]
+   },
+   "name": "int_uI_81c800",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "I",
+     "value": 200
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "acef258508074d7ac947edb1141f89d87135b8a697ed00464bd779e6f4aed7fd"
+  },
+  {
+   "file": "int_uI_81ffff.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": 65535
+      }
+     ]
+    ]
+   },
+   "name": "int_uI_81ffff",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "I",
+     "value": 65535
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "406bc6987a72329f9ce439ac7090f97c40be24d7a2f685278e4ef87511897254"
+  },
+  {
+   "file": "int_c_ff.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": -1
+      }
+     ]
+    ]
+   },
+   "name": "int_c_ff",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "c",
+     "value": -1
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "3fe2ccb4ba97c80a6b97d7f5ca171277d94af2dab75a37608f134a90c72ad5c2"
+  },
+  {
+   "file": "int_uC_ff.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": 255
+      }
+     ]
+    ]
+   },
+   "name": "int_uC_ff",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "C",
+     "value": 255
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "758fff554c3816a34e287efab36f992226e80f16520ea5c5c8d9d19366386b8a"
+  },
+  {
+   "file": "int_q_8700e68ee7fdffffff.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": -9000000000
+      }
+     ]
+    ]
+   },
+   "name": "int_q_8700e68ee7fdffffff",
+   "oracle": {
+    "check": "exempt",
+    "reason": "pytypedstream 0.1.0 rejects 0x87; T1 observed it from Apple's encoder"
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "ccda2f2a2f64d55a21c1924a23d1014818ae71349644adeee25ada37034ec464"
+  },
+  {
+   "file": "int_uQ_87ffffffffffffffff.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": 18446744073709551615
+      }
+     ]
+    ]
+   },
+   "name": "int_uQ_87ffffffffffffffff",
+   "oracle": {
+    "check": "exempt",
+    "reason": "pytypedstream 0.1.0 rejects 0x87; T1 observed it from Apple's encoder"
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "0275e9957ccad20703dbeafa3ed7912f4a2253f20c9ffc84cdbf8a914468334b"
+  },
+  {
+   "file": "int_f_8300006040.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "real": 3.5
+      }
+     ]
+    ]
+   },
+   "name": "int_f_8300006040",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "f",
+     "value": 3.5
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "751b51921e183d6fd480de9754e0dd8a08392b7bade5ddac18bcd2393c2eb160"
+  },
+  {
+   "file": "int_d_830000000000205940.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "real": 100.5
+      }
+     ]
+    ]
+   },
+   "name": "int_d_830000000000205940",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "d",
+     "value": 100.5
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "288dac7e46d7e94473ec354122a4e30f0799f8ad9beaacafc78cd0595102c76f"
+  },
+  {
+   "file": "int_d_05.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "real": 5.0
+      }
+     ]
+    ]
+   },
+   "name": "int_d_05",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "d",
+     "value": 5.0
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "6e9690c385dc837a2cca8783f4d4f7ea051048d22b2d4c31c23681ef33a09463"
+  },
+  {
+   "file": "int_f_81e803.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "real": 1000.0
+      }
+     ]
+    ]
+   },
+   "name": "int_f_81e803",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "f",
+     "value": 1000.0
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "a7031ba41629c4cfb3831d9d2e9fb575c1c1d072acb6e8e83d079d213cb1241d"
+  },
+  {
+   "file": "int_i_8300006040.bin",
+   "generic": {
+    "error": "UnexpectedTag"
+   },
+   "name": "int_i_8300006040",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "not a valid integer head for this type"
+   },
+   "public": {
+    "error": "UnexpectedTag"
+   },
+   "sha256": "c417af78a6ff1f95920aaf3b32127aa1b6522f877b2b17555a38e0ec12c3baf8"
+  },
+  {
+   "file": "int_i_84.bin",
+   "generic": {
+    "error": "UnexpectedTag"
+   },
+   "name": "int_i_84",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "not a valid integer head for this type"
+   },
+   "public": {
+    "error": "UnexpectedTag"
+   },
+   "sha256": "bfb305cd318f6d187d5beb9fb70160a283e0370d3903719b7434fdd43ee167bb"
+  },
+  {
+   "file": "int_i_85.bin",
+   "generic": {
+    "error": "UnexpectedTag"
+   },
+   "name": "int_i_85",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "not a valid integer head for this type"
+   },
+   "public": {
+    "error": "UnexpectedTag"
+   },
+   "sha256": "6ce6913783f103f16949f21e9106c0301ddb9d493890f07a1cbf5d045649d212"
+  },
+  {
+   "file": "int_i_86.bin",
+   "generic": {
+    "error": "UnexpectedTag"
+   },
+   "name": "int_i_86",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "not a valid integer head for this type"
+   },
+   "public": {
+    "error": "UnexpectedTag"
+   },
+   "sha256": "df09a95d8aa319cfc04dca5046ea1d3095a3577fbb9bd4e58ee7aed74d7b69f1"
+  },
+  {
+   "file": "int_i_88.bin",
+   "generic": {
+    "error": "UnexpectedTag"
+   },
+   "name": "int_i_88",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "not a valid integer head for this type"
+   },
+   "public": {
+    "error": "UnexpectedTag"
+   },
+   "sha256": "da8ada6cb16cb6a5cddcfce2a0320a29231d0820a467da2abd6446670476c56c"
+  },
+  {
+   "file": "int_i_91.bin",
+   "generic": {
+    "error": "UnexpectedTag"
+   },
+   "name": "int_i_91",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "not a valid integer head for this type"
+   },
+   "public": {
+    "error": "UnexpectedTag"
+   },
+   "sha256": "449c53c7fb4ba15a0dcefbbaaa1ac493269fbc6f17cd07bd10a2c1362e811a09"
+  },
+  {
+   "file": "int_uB_01.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": 1
+      }
+     ]
+    ]
+   },
+   "name": "int_uB_01",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "B",
+     "value": true
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "d0b9c0c6a3566e496a3794b95767f1f0a97c0bc925cd819f826df33061aecd26"
+  },
+  {
+   "file": "int_s_810080.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": -32768
+      }
+     ]
+    ]
+   },
+   "name": "int_s_810080",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "s",
+     "value": -32768
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "02b286474a79a19dc3b2fd317ea05d0e9f90c916e70c79431c4839bc0d15e0de"
+  },
+  {
+   "file": "int_l_82ffffff7f.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": 2147483647
+      }
+     ]
+    ]
+   },
+   "name": "int_l_82ffffff7f",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "scalar",
+     "type": "l",
+     "value": 2147483647
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "37c05a847d548bd77e9924ff1e0f1d7bfca76d85f0ebcc5d3bfed95bc3a2b6cd"
+  },
+  {
+   "file": "ref_small_obj3.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "nsstring": "s0"
+      }
+     ],
+     [
+      {
+       "nsstring": "s1"
+      }
+     ],
+     [
+      {
+       "nsstring": "s2"
+      }
+     ],
+     [
+      {
+       "nsstring": "s3"
+      }
+     ],
+     [
+      {
+       "nsstring": "s4"
+      }
+     ],
+     [
+      {
+       "nsstring": "s1"
+      }
+     ]
+    ]
+   },
+   "name": "ref_small_obj3",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "strings",
+     "strings": [
+      "s0",
+      "s1",
+      "s2",
+      "s3",
+      "s4",
+      "s1"
+     ]
+    }
+   },
+   "public": {
+    "error": "TrailingBytes"
+   },
+   "sha256": "5168eb9227cad6276f0e8fe074cba1fe8be47f3683b4a50774f58671d3e6ac29"
+  },
+  {
+   "file": "ref_obj120_i8.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "nsstring": "s0"
+      }
+     ],
+     [
+      {
+       "nsstring": "s1"
+      }
+     ],
+     [
+      {
+       "nsstring": "s2"
+      }
+     ],
+     [
+      {
+       "nsstring": "s3"
+      }
+     ],
+     [
+      {
+       "nsstring": "s4"
+      }
+     ],
+     [
+      {
+       "nsstring": "s5"
+      }
+     ],
+     [
+      {
+       "nsstring": "s6"
+      }
+     ],
+     [
+      {
+       "nsstring": "s7"
+      }
+     ],
+     [
+      {
+       "nsstring": "s8"
+      }
+     ],
+     [
+      {
+       "nsstring": "s9"
+      }
+     ],
+     [
+      {
+       "nsstring": "s10"
+      }
+     ],
+     [
+      {
+       "nsstring": "s11"
+      }
+     ],
+     [
+      {
+       "nsstring": "s12"
+      }
+     ],
+     [
+      {
+       "nsstring": "s13"
+      }
+     ],
+     [
+      {
+       "nsstring": "s14"
+      }
+     ],
+     [
+      {
+       "nsstring": "s15"
+      }
+     ],
+     [
+      {
+       "nsstring": "s16"
+      }
+     ],
+     [
+      {
+       "nsstring": "s17"
+      }
+     ],
+     [
+      {
+       "nsstring": "s18"
+      }
+     ],
+     [
+      {
+       "nsstring": "s19"
+      }
+     ],
+     [
+      {
+       "nsstring": "s20"
+      }
+     ],
+     [
+      {
+       "nsstring": "s21"
+      }
+     ],
+     [
+      {
+       "nsstring": "s22"
+      }
+     ],
+     [
+      {
+       "nsstring": "s23"
+      }
+     ],
+     [
+      {
+       "nsstring": "s24"
+      }
+     ],
+     [
+      {
+       "nsstring": "s25"
+      }
+     ],
+     [
+      {
+       "nsstring": "s26"
+      }
+     ],
+     [
+      {
+       "nsstring": "s27"
+      }
+     ],
+     [
+      {
+       "nsstring": "s28"
+      }
+     ],
+     [
+      {
+       "nsstring": "s29"
+      }
+     ],
+     [
+      {
+       "nsstring": "s30"
+      }
+     ],
+     [
+      {
+       "nsstring": "s31"
+      }
+     ],
+     [
+      {
+       "nsstring": "s32"
+      }
+     ],
+     [
+      {
+       "nsstring": "s33"
+      }
+     ],
+     [
+      {
+       "nsstring": "s34"
+      }
+     ],
+     [
+      {
+       "nsstring": "s35"
+      }
+     ],
+     [
+      {
+       "nsstring": "s36"
+      }
+     ],
+     [
+      {
+       "nsstring": "s37"
+      }
+     ],
+     [
+      {
+       "nsstring": "s38"
+      }
+     ],
+     [
+      {
+       "nsstring": "s39"
+      }
+     ],
+     [
+      {
+       "nsstring": "s40"
+      }
+     ],
+     [
+      {
+       "nsstring": "s41"
+      }
+     ],
+     [
+      {
+       "nsstring": "s42"
+      }
+     ],
+     [
+      {
+       "nsstring": "s43"
+      }
+     ],
+     [
+      {
+       "nsstring": "s44"
+      }
+     ],
+     [
+      {
+       "nsstring": "s45"
+      }
+     ],
+     [
+      {
+       "nsstring": "s46"
+      }
+     ],
+     [
+      {
+       "nsstring": "s47"
+      }
+     ],
+     [
+      {
+       "nsstring": "s48"
+      }
+     ],
+     [
+      {
+       "nsstring": "s49"
+      }
+     ],
+     [
+      {
+       "nsstring": "s50"
+      }
+     ],
+     [
+      {
+       "nsstring": "s51"
+      }
+     ],
+     [
+      {
+       "nsstring": "s52"
+      }
+     ],
+     [
+      {
+       "nsstring": "s53"
+      }
+     ],
+     [
+      {
+       "nsstring": "s54"
+      }
+     ],
+     [
+      {
+       "nsstring": "s55"
+      }
+     ],
+     [
+      {
+       "nsstring": "s56"
+      }
+     ],
+     [
+      {
+       "nsstring": "s57"
+      }
+     ],
+     [
+      {
+       "nsstring": "s58"
+      }
+     ],
+     [
+      {
+       "nsstring": "s59"
+      }
+     ],
+     [
+      {
+       "nsstring": "s60"
+      }
+     ],
+     [
+      {
+       "nsstring": "s61"
+      }
+     ],
+     [
+      {
+       "nsstring": "s62"
+      }
+     ],
+     [
+      {
+       "nsstring": "s63"
+      }
+     ],
+     [
+      {
+       "nsstring": "s64"
+      }
+     ],
+     [
+      {
+       "nsstring": "s65"
+      }
+     ],
+     [
+      {
+       "nsstring": "s66"
+      }
+     ],
+     [
+      {
+       "nsstring": "s67"
+      }
+     ],
+     [
+      {
+       "nsstring": "s68"
+      }
+     ],
+     [
+      {
+       "nsstring": "s69"
+      }
+     ],
+     [
+      {
+       "nsstring": "s70"
+      }
+     ],
+     [
+      {
+       "nsstring": "s71"
+      }
+     ],
+     [
+      {
+       "nsstring": "s72"
+      }
+     ],
+     [
+      {
+       "nsstring": "s73"
+      }
+     ],
+     [
+      {
+       "nsstring": "s74"
+      }
+     ],
+     [
+      {
+       "nsstring": "s75"
+      }
+     ],
+     [
+      {
+       "nsstring": "s76"
+      }
+     ],
+     [
+      {
+       "nsstring": "s77"
+      }
+     ],
+     [
+      {
+       "nsstring": "s78"
+      }
+     ],
+     [
+      {
+       "nsstring": "s79"
+      }
+     ],
+     [
+      {
+       "nsstring": "s80"
+      }
+     ],
+     [
+      {
+       "nsstring": "s81"
+      }
+     ],
+     [
+      {
+       "nsstring": "s82"
+      }
+     ],
+     [
+      {
+       "nsstring": "s83"
+      }
+     ],
+     [
+      {
+       "nsstring": "s84"
+      }
+     ],
+     [
+      {
+       "nsstring": "s85"
+      }
+     ],
+     [
+      {
+       "nsstring": "s86"
+      }
+     ],
+     [
+      {
+       "nsstring": "s87"
+      }
+     ],
+     [
+      {
+       "nsstring": "s88"
+      }
+     ],
+     [
+      {
+       "nsstring": "s89"
+      }
+     ],
+     [
+      {
+       "nsstring": "s90"
+      }
+     ],
+     [
+      {
+       "nsstring": "s91"
+      }
+     ],
+     [
+      {
+       "nsstring": "s92"
+      }
+     ],
+     [
+      {
+       "nsstring": "s93"
+      }
+     ],
+     [
+      {
+       "nsstring": "s94"
+      }
+     ],
+     [
+      {
+       "nsstring": "s95"
+      }
+     ],
+     [
+      {
+       "nsstring": "s96"
+      }
+     ],
+     [
+      {
+       "nsstring": "s97"
+      }
+     ],
+     [
+      {
+       "nsstring": "s98"
+      }
+     ],
+     [
+      {
+       "nsstring": "s99"
+      }
+     ],
+     [
+      {
+       "nsstring": "s100"
+      }
+     ],
+     [
+      {
+       "nsstring": "s101"
+      }
+     ],
+     [
+      {
+       "nsstring": "s102"
+      }
+     ],
+     [
+      {
+       "nsstring": "s103"
+      }
+     ],
+     [
+      {
+       "nsstring": "s104"
+      }
+     ],
+     [
+      {
+       "nsstring": "s105"
+      }
+     ],
+     [
+      {
+       "nsstring": "s106"
+      }
+     ],
+     [
+      {
+       "nsstring": "s107"
+      }
+     ],
+     [
+      {
+       "nsstring": "s108"
+      }
+     ],
+     [
+      {
+       "nsstring": "s109"
+      }
+     ],
+     [
+      {
+       "nsstring": "s110"
+      }
+     ],
+     [
+      {
+       "nsstring": "s111"
+      }
+     ],
+     [
+      {
+       "nsstring": "s112"
+      }
+     ],
+     [
+      {
+       "nsstring": "s113"
+      }
+     ],
+     [
+      {
+       "nsstring": "s114"
+      }
+     ],
+     [
+      {
+       "nsstring": "s115"
+      }
+     ],
+     [
+      {
+       "nsstring": "s116"
+      }
+     ],
+     [
+      {
+       "nsstring": "s117"
+      }
+     ],
+     [
+      {
+       "nsstring": "s118"
+      }
+     ],
+     [
+      {
+       "nsstring": "s119"
+      }
+     ],
+     [
+      {
+       "nsstring": "s120"
+      }
+     ],
+     [
+      {
+       "nsstring": "s121"
+      }
+     ],
+     [
+      {
+       "nsstring": "s122"
+      }
+     ],
+     [
+      {
+       "nsstring": "s123"
+      }
+     ],
+     [
+      {
+       "nsstring": "s124"
+      }
+     ],
+     [
+      {
+       "nsstring": "s125"
+      }
+     ],
+     [
+      {
+       "nsstring": "s126"
+      }
+     ],
+     [
+      {
+       "nsstring": "s127"
+      }
+     ],
+     [
+      {
+       "nsstring": "s128"
+      }
+     ],
+     [
+      {
+       "nsstring": "s129"
+      }
+     ],
+     [
+      {
+       "nsstring": "s130"
+      }
+     ],
+     [
+      {
+       "nsstring": "s131"
+      }
+     ],
+     [
+      {
+       "nsstring": "s132"
+      }
+     ],
+     [
+      {
+       "nsstring": "s133"
+      }
+     ],
+     [
+      {
+       "nsstring": "s134"
+      }
+     ],
+     [
+      {
+       "nsstring": "s135"
+      }
+     ],
+     [
+      {
+       "nsstring": "s136"
+      }
+     ],
+     [
+      {
+       "nsstring": "s137"
+      }
+     ],
+     [
+      {
+       "nsstring": "s138"
+      }
+     ],
+     [
+      {
+       "nsstring": "s139"
+      }
+     ],
+     [
+      {
+       "nsstring": "s140"
+      }
+     ],
+     [
+      {
+       "nsstring": "s141"
+      }
+     ],
+     [
+      {
+       "nsstring": "s142"
+      }
+     ],
+     [
+      {
+       "nsstring": "s143"
+      }
+     ],
+     [
+      {
+       "nsstring": "s144"
+      }
+     ],
+     [
+      {
+       "nsstring": "s145"
+      }
+     ],
+     [
+      {
+       "nsstring": "s146"
+      }
+     ],
+     [
+      {
+       "nsstring": "s147"
+      }
+     ],
+     [
+      {
+       "nsstring": "s148"
+      }
+     ],
+     [
+      {
+       "nsstring": "s149"
+      }
+     ],
+     [
+      {
+       "nsstring": "s118"
+      }
+     ]
+    ]
+   },
+   "name": "ref_obj120_i8",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "strings",
+     "strings": [
+      "s0",
+      "s1",
+      "s2",
+      "s3",
+      "s4",
+      "s5",
+      "s6",
+      "s7",
+      "s8",
+      "s9",
+      "s10",
+      "s11",
+      "s12",
+      "s13",
+      "s14",
+      "s15",
+      "s16",
+      "s17",
+      "s18",
+      "s19",
+      "s20",
+      "s21",
+      "s22",
+      "s23",
+      "s24",
+      "s25",
+      "s26",
+      "s27",
+      "s28",
+      "s29",
+      "s30",
+      "s31",
+      "s32",
+      "s33",
+      "s34",
+      "s35",
+      "s36",
+      "s37",
+      "s38",
+      "s39",
+      "s40",
+      "s41",
+      "s42",
+      "s43",
+      "s44",
+      "s45",
+      "s46",
+      "s47",
+      "s48",
+      "s49",
+      "s50",
+      "s51",
+      "s52",
+      "s53",
+      "s54",
+      "s55",
+      "s56",
+      "s57",
+      "s58",
+      "s59",
+      "s60",
+      "s61",
+      "s62",
+      "s63",
+      "s64",
+      "s65",
+      "s66",
+      "s67",
+      "s68",
+      "s69",
+      "s70",
+      "s71",
+      "s72",
+      "s73",
+      "s74",
+      "s75",
+      "s76",
+      "s77",
+      "s78",
+      "s79",
+      "s80",
+      "s81",
+      "s82",
+      "s83",
+      "s84",
+      "s85",
+      "s86",
+      "s87",
+      "s88",
+      "s89",
+      "s90",
+      "s91",
+      "s92",
+      "s93",
+      "s94",
+      "s95",
+      "s96",
+      "s97",
+      "s98",
+      "s99",
+      "s100",
+      "s101",
+      "s102",
+      "s103",
+      "s104",
+      "s105",
+      "s106",
+      "s107",
+      "s108",
+      "s109",
+      "s110",
+      "s111",
+      "s112",
+      "s113",
+      "s114",
+      "s115",
+      "s116",
+      "s117",
+      "s118",
+      "s119",
+      "s120",
+      "s121",
+      "s122",
+      "s123",
+      "s124",
+      "s125",
+      "s126",
+      "s127",
+      "s128",
+      "s129",
+      "s130",
+      "s131",
+      "s132",
+      "s133",
+      "s134",
+      "s135",
+      "s136",
+      "s137",
+      "s138",
+      "s139",
+      "s140",
+      "s141",
+      "s142",
+      "s143",
+      "s144",
+      "s145",
+      "s146",
+      "s147",
+      "s148",
+      "s149",
+      "s118"
+     ]
+    }
+   },
+   "public": {
+    "error": "TrailingBytes"
+   },
+   "sha256": "cace64406e19a6937fc2d261cf880097bea8d3ea6d97dd2db66b660e6e39fb9a"
+  },
+  {
+   "file": "ref_obj120_81i16.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "nsstring": "s0"
+      }
+     ],
+     [
+      {
+       "nsstring": "s1"
+      }
+     ],
+     [
+      {
+       "nsstring": "s2"
+      }
+     ],
+     [
+      {
+       "nsstring": "s3"
+      }
+     ],
+     [
+      {
+       "nsstring": "s4"
+      }
+     ],
+     [
+      {
+       "nsstring": "s5"
+      }
+     ],
+     [
+      {
+       "nsstring": "s6"
+      }
+     ],
+     [
+      {
+       "nsstring": "s7"
+      }
+     ],
+     [
+      {
+       "nsstring": "s8"
+      }
+     ],
+     [
+      {
+       "nsstring": "s9"
+      }
+     ],
+     [
+      {
+       "nsstring": "s10"
+      }
+     ],
+     [
+      {
+       "nsstring": "s11"
+      }
+     ],
+     [
+      {
+       "nsstring": "s12"
+      }
+     ],
+     [
+      {
+       "nsstring": "s13"
+      }
+     ],
+     [
+      {
+       "nsstring": "s14"
+      }
+     ],
+     [
+      {
+       "nsstring": "s15"
+      }
+     ],
+     [
+      {
+       "nsstring": "s16"
+      }
+     ],
+     [
+      {
+       "nsstring": "s17"
+      }
+     ],
+     [
+      {
+       "nsstring": "s18"
+      }
+     ],
+     [
+      {
+       "nsstring": "s19"
+      }
+     ],
+     [
+      {
+       "nsstring": "s20"
+      }
+     ],
+     [
+      {
+       "nsstring": "s21"
+      }
+     ],
+     [
+      {
+       "nsstring": "s22"
+      }
+     ],
+     [
+      {
+       "nsstring": "s23"
+      }
+     ],
+     [
+      {
+       "nsstring": "s24"
+      }
+     ],
+     [
+      {
+       "nsstring": "s25"
+      }
+     ],
+     [
+      {
+       "nsstring": "s26"
+      }
+     ],
+     [
+      {
+       "nsstring": "s27"
+      }
+     ],
+     [
+      {
+       "nsstring": "s28"
+      }
+     ],
+     [
+      {
+       "nsstring": "s29"
+      }
+     ],
+     [
+      {
+       "nsstring": "s30"
+      }
+     ],
+     [
+      {
+       "nsstring": "s31"
+      }
+     ],
+     [
+      {
+       "nsstring": "s32"
+      }
+     ],
+     [
+      {
+       "nsstring": "s33"
+      }
+     ],
+     [
+      {
+       "nsstring": "s34"
+      }
+     ],
+     [
+      {
+       "nsstring": "s35"
+      }
+     ],
+     [
+      {
+       "nsstring": "s36"
+      }
+     ],
+     [
+      {
+       "nsstring": "s37"
+      }
+     ],
+     [
+      {
+       "nsstring": "s38"
+      }
+     ],
+     [
+      {
+       "nsstring": "s39"
+      }
+     ],
+     [
+      {
+       "nsstring": "s40"
+      }
+     ],
+     [
+      {
+       "nsstring": "s41"
+      }
+     ],
+     [
+      {
+       "nsstring": "s42"
+      }
+     ],
+     [
+      {
+       "nsstring": "s43"
+      }
+     ],
+     [
+      {
+       "nsstring": "s44"
+      }
+     ],
+     [
+      {
+       "nsstring": "s45"
+      }
+     ],
+     [
+      {
+       "nsstring": "s46"
+      }
+     ],
+     [
+      {
+       "nsstring": "s47"
+      }
+     ],
+     [
+      {
+       "nsstring": "s48"
+      }
+     ],
+     [
+      {
+       "nsstring": "s49"
+      }
+     ],
+     [
+      {
+       "nsstring": "s50"
+      }
+     ],
+     [
+      {
+       "nsstring": "s51"
+      }
+     ],
+     [
+      {
+       "nsstring": "s52"
+      }
+     ],
+     [
+      {
+       "nsstring": "s53"
+      }
+     ],
+     [
+      {
+       "nsstring": "s54"
+      }
+     ],
+     [
+      {
+       "nsstring": "s55"
+      }
+     ],
+     [
+      {
+       "nsstring": "s56"
+      }
+     ],
+     [
+      {
+       "nsstring": "s57"
+      }
+     ],
+     [
+      {
+       "nsstring": "s58"
+      }
+     ],
+     [
+      {
+       "nsstring": "s59"
+      }
+     ],
+     [
+      {
+       "nsstring": "s60"
+      }
+     ],
+     [
+      {
+       "nsstring": "s61"
+      }
+     ],
+     [
+      {
+       "nsstring": "s62"
+      }
+     ],
+     [
+      {
+       "nsstring": "s63"
+      }
+     ],
+     [
+      {
+       "nsstring": "s64"
+      }
+     ],
+     [
+      {
+       "nsstring": "s65"
+      }
+     ],
+     [
+      {
+       "nsstring": "s66"
+      }
+     ],
+     [
+      {
+       "nsstring": "s67"
+      }
+     ],
+     [
+      {
+       "nsstring": "s68"
+      }
+     ],
+     [
+      {
+       "nsstring": "s69"
+      }
+     ],
+     [
+      {
+       "nsstring": "s70"
+      }
+     ],
+     [
+      {
+       "nsstring": "s71"
+      }
+     ],
+     [
+      {
+       "nsstring": "s72"
+      }
+     ],
+     [
+      {
+       "nsstring": "s73"
+      }
+     ],
+     [
+      {
+       "nsstring": "s74"
+      }
+     ],
+     [
+      {
+       "nsstring": "s75"
+      }
+     ],
+     [
+      {
+       "nsstring": "s76"
+      }
+     ],
+     [
+      {
+       "nsstring": "s77"
+      }
+     ],
+     [
+      {
+       "nsstring": "s78"
+      }
+     ],
+     [
+      {
+       "nsstring": "s79"
+      }
+     ],
+     [
+      {
+       "nsstring": "s80"
+      }
+     ],
+     [
+      {
+       "nsstring": "s81"
+      }
+     ],
+     [
+      {
+       "nsstring": "s82"
+      }
+     ],
+     [
+      {
+       "nsstring": "s83"
+      }
+     ],
+     [
+      {
+       "nsstring": "s84"
+      }
+     ],
+     [
+      {
+       "nsstring": "s85"
+      }
+     ],
+     [
+      {
+       "nsstring": "s86"
+      }
+     ],
+     [
+      {
+       "nsstring": "s87"
+      }
+     ],
+     [
+      {
+       "nsstring": "s88"
+      }
+     ],
+     [
+      {
+       "nsstring": "s89"
+      }
+     ],
+     [
+      {
+       "nsstring": "s90"
+      }
+     ],
+     [
+      {
+       "nsstring": "s91"
+      }
+     ],
+     [
+      {
+       "nsstring": "s92"
+      }
+     ],
+     [
+      {
+       "nsstring": "s93"
+      }
+     ],
+     [
+      {
+       "nsstring": "s94"
+      }
+     ],
+     [
+      {
+       "nsstring": "s95"
+      }
+     ],
+     [
+      {
+       "nsstring": "s96"
+      }
+     ],
+     [
+      {
+       "nsstring": "s97"
+      }
+     ],
+     [
+      {
+       "nsstring": "s98"
+      }
+     ],
+     [
+      {
+       "nsstring": "s99"
+      }
+     ],
+     [
+      {
+       "nsstring": "s100"
+      }
+     ],
+     [
+      {
+       "nsstring": "s101"
+      }
+     ],
+     [
+      {
+       "nsstring": "s102"
+      }
+     ],
+     [
+      {
+       "nsstring": "s103"
+      }
+     ],
+     [
+      {
+       "nsstring": "s104"
+      }
+     ],
+     [
+      {
+       "nsstring": "s105"
+      }
+     ],
+     [
+      {
+       "nsstring": "s106"
+      }
+     ],
+     [
+      {
+       "nsstring": "s107"
+      }
+     ],
+     [
+      {
+       "nsstring": "s108"
+      }
+     ],
+     [
+      {
+       "nsstring": "s109"
+      }
+     ],
+     [
+      {
+       "nsstring": "s110"
+      }
+     ],
+     [
+      {
+       "nsstring": "s111"
+      }
+     ],
+     [
+      {
+       "nsstring": "s112"
+      }
+     ],
+     [
+      {
+       "nsstring": "s113"
+      }
+     ],
+     [
+      {
+       "nsstring": "s114"
+      }
+     ],
+     [
+      {
+       "nsstring": "s115"
+      }
+     ],
+     [
+      {
+       "nsstring": "s116"
+      }
+     ],
+     [
+      {
+       "nsstring": "s117"
+      }
+     ],
+     [
+      {
+       "nsstring": "s118"
+      }
+     ],
+     [
+      {
+       "nsstring": "s119"
+      }
+     ],
+     [
+      {
+       "nsstring": "s120"
+      }
+     ],
+     [
+      {
+       "nsstring": "s121"
+      }
+     ],
+     [
+      {
+       "nsstring": "s122"
+      }
+     ],
+     [
+      {
+       "nsstring": "s123"
+      }
+     ],
+     [
+      {
+       "nsstring": "s124"
+      }
+     ],
+     [
+      {
+       "nsstring": "s125"
+      }
+     ],
+     [
+      {
+       "nsstring": "s126"
+      }
+     ],
+     [
+      {
+       "nsstring": "s127"
+      }
+     ],
+     [
+      {
+       "nsstring": "s128"
+      }
+     ],
+     [
+      {
+       "nsstring": "s129"
+      }
+     ],
+     [
+      {
+       "nsstring": "s130"
+      }
+     ],
+     [
+      {
+       "nsstring": "s131"
+      }
+     ],
+     [
+      {
+       "nsstring": "s132"
+      }
+     ],
+     [
+      {
+       "nsstring": "s133"
+      }
+     ],
+     [
+      {
+       "nsstring": "s134"
+      }
+     ],
+     [
+      {
+       "nsstring": "s135"
+      }
+     ],
+     [
+      {
+       "nsstring": "s136"
+      }
+     ],
+     [
+      {
+       "nsstring": "s137"
+      }
+     ],
+     [
+      {
+       "nsstring": "s138"
+      }
+     ],
+     [
+      {
+       "nsstring": "s139"
+      }
+     ],
+     [
+      {
+       "nsstring": "s140"
+      }
+     ],
+     [
+      {
+       "nsstring": "s141"
+      }
+     ],
+     [
+      {
+       "nsstring": "s142"
+      }
+     ],
+     [
+      {
+       "nsstring": "s143"
+      }
+     ],
+     [
+      {
+       "nsstring": "s144"
+      }
+     ],
+     [
+      {
+       "nsstring": "s145"
+      }
+     ],
+     [
+      {
+       "nsstring": "s146"
+      }
+     ],
+     [
+      {
+       "nsstring": "s147"
+      }
+     ],
+     [
+      {
+       "nsstring": "s148"
+      }
+     ],
+     [
+      {
+       "nsstring": "s149"
+      }
+     ],
+     [
+      {
+       "nsstring": "s118"
+      }
+     ]
+    ]
+   },
+   "name": "ref_obj120_81i16",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "strings",
+     "strings": [
+      "s0",
+      "s1",
+      "s2",
+      "s3",
+      "s4",
+      "s5",
+      "s6",
+      "s7",
+      "s8",
+      "s9",
+      "s10",
+      "s11",
+      "s12",
+      "s13",
+      "s14",
+      "s15",
+      "s16",
+      "s17",
+      "s18",
+      "s19",
+      "s20",
+      "s21",
+      "s22",
+      "s23",
+      "s24",
+      "s25",
+      "s26",
+      "s27",
+      "s28",
+      "s29",
+      "s30",
+      "s31",
+      "s32",
+      "s33",
+      "s34",
+      "s35",
+      "s36",
+      "s37",
+      "s38",
+      "s39",
+      "s40",
+      "s41",
+      "s42",
+      "s43",
+      "s44",
+      "s45",
+      "s46",
+      "s47",
+      "s48",
+      "s49",
+      "s50",
+      "s51",
+      "s52",
+      "s53",
+      "s54",
+      "s55",
+      "s56",
+      "s57",
+      "s58",
+      "s59",
+      "s60",
+      "s61",
+      "s62",
+      "s63",
+      "s64",
+      "s65",
+      "s66",
+      "s67",
+      "s68",
+      "s69",
+      "s70",
+      "s71",
+      "s72",
+      "s73",
+      "s74",
+      "s75",
+      "s76",
+      "s77",
+      "s78",
+      "s79",
+      "s80",
+      "s81",
+      "s82",
+      "s83",
+      "s84",
+      "s85",
+      "s86",
+      "s87",
+      "s88",
+      "s89",
+      "s90",
+      "s91",
+      "s92",
+      "s93",
+      "s94",
+      "s95",
+      "s96",
+      "s97",
+      "s98",
+      "s99",
+      "s100",
+      "s101",
+      "s102",
+      "s103",
+      "s104",
+      "s105",
+      "s106",
+      "s107",
+      "s108",
+      "s109",
+      "s110",
+      "s111",
+      "s112",
+      "s113",
+      "s114",
+      "s115",
+      "s116",
+      "s117",
+      "s118",
+      "s119",
+      "s120",
+      "s121",
+      "s122",
+      "s123",
+      "s124",
+      "s125",
+      "s126",
+      "s127",
+      "s128",
+      "s129",
+      "s130",
+      "s131",
+      "s132",
+      "s133",
+      "s134",
+      "s135",
+      "s136",
+      "s137",
+      "s138",
+      "s139",
+      "s140",
+      "s141",
+      "s142",
+      "s143",
+      "s144",
+      "s145",
+      "s146",
+      "s147",
+      "s148",
+      "s149",
+      "s118"
+     ]
+    }
+   },
+   "public": {
+    "error": "TrailingBytes"
+   },
+   "sha256": "77992f08a75169de5a8770e980dedb4234fc6701f2a678d73d7dd5b2b81c0203"
+  },
+  {
+   "file": "ref_obj120_81u16.bin",
+   "generic": {
+    "error": "BadReference"
+   },
+   "name": "ref_obj120_81u16",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "the reference points past the object table"
+   },
+   "public": {
+    "error": "TrailingBytes"
+   },
+   "sha256": "a65efa4fbd03ea31929ab773e3b758a97baf8405b88eb122f6296707160f0241"
+  },
+  {
+   "file": "ref_obj250_81i16.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "nsstring": "s0"
+      }
+     ],
+     [
+      {
+       "nsstring": "s1"
+      }
+     ],
+     [
+      {
+       "nsstring": "s2"
+      }
+     ],
+     [
+      {
+       "nsstring": "s3"
+      }
+     ],
+     [
+      {
+       "nsstring": "s4"
+      }
+     ],
+     [
+      {
+       "nsstring": "s5"
+      }
+     ],
+     [
+      {
+       "nsstring": "s6"
+      }
+     ],
+     [
+      {
+       "nsstring": "s7"
+      }
+     ],
+     [
+      {
+       "nsstring": "s8"
+      }
+     ],
+     [
+      {
+       "nsstring": "s9"
+      }
+     ],
+     [
+      {
+       "nsstring": "s10"
+      }
+     ],
+     [
+      {
+       "nsstring": "s11"
+      }
+     ],
+     [
+      {
+       "nsstring": "s12"
+      }
+     ],
+     [
+      {
+       "nsstring": "s13"
+      }
+     ],
+     [
+      {
+       "nsstring": "s14"
+      }
+     ],
+     [
+      {
+       "nsstring": "s15"
+      }
+     ],
+     [
+      {
+       "nsstring": "s16"
+      }
+     ],
+     [
+      {
+       "nsstring": "s17"
+      }
+     ],
+     [
+      {
+       "nsstring": "s18"
+      }
+     ],
+     [
+      {
+       "nsstring": "s19"
+      }
+     ],
+     [
+      {
+       "nsstring": "s20"
+      }
+     ],
+     [
+      {
+       "nsstring": "s21"
+      }
+     ],
+     [
+      {
+       "nsstring": "s22"
+      }
+     ],
+     [
+      {
+       "nsstring": "s23"
+      }
+     ],
+     [
+      {
+       "nsstring": "s24"
+      }
+     ],
+     [
+      {
+       "nsstring": "s25"
+      }
+     ],
+     [
+      {
+       "nsstring": "s26"
+      }
+     ],
+     [
+      {
+       "nsstring": "s27"
+      }
+     ],
+     [
+      {
+       "nsstring": "s28"
+      }
+     ],
+     [
+      {
+       "nsstring": "s29"
+      }
+     ],
+     [
+      {
+       "nsstring": "s30"
+      }
+     ],
+     [
+      {
+       "nsstring": "s31"
+      }
+     ],
+     [
+      {
+       "nsstring": "s32"
+      }
+     ],
+     [
+      {
+       "nsstring": "s33"
+      }
+     ],
+     [
+      {
+       "nsstring": "s34"
+      }
+     ],
+     [
+      {
+       "nsstring": "s35"
+      }
+     ],
+     [
+      {
+       "nsstring": "s36"
+      }
+     ],
+     [
+      {
+       "nsstring": "s37"
+      }
+     ],
+     [
+      {
+       "nsstring": "s38"
+      }
+     ],
+     [
+      {
+       "nsstring": "s39"
+      }
+     ],
+     [
+      {
+       "nsstring": "s40"
+      }
+     ],
+     [
+      {
+       "nsstring": "s41"
+      }
+     ],
+     [
+      {
+       "nsstring": "s42"
+      }
+     ],
+     [
+      {
+       "nsstring": "s43"
+      }
+     ],
+     [
+      {
+       "nsstring": "s44"
+      }
+     ],
+     [
+      {
+       "nsstring": "s45"
+      }
+     ],
+     [
+      {
+       "nsstring": "s46"
+      }
+     ],
+     [
+      {
+       "nsstring": "s47"
+      }
+     ],
+     [
+      {
+       "nsstring": "s48"
+      }
+     ],
+     [
+      {
+       "nsstring": "s49"
+      }
+     ],
+     [
+      {
+       "nsstring": "s50"
+      }
+     ],
+     [
+      {
+       "nsstring": "s51"
+      }
+     ],
+     [
+      {
+       "nsstring": "s52"
+      }
+     ],
+     [
+      {
+       "nsstring": "s53"
+      }
+     ],
+     [
+      {
+       "nsstring": "s54"
+      }
+     ],
+     [
+      {
+       "nsstring": "s55"
+      }
+     ],
+     [
+      {
+       "nsstring": "s56"
+      }
+     ],
+     [
+      {
+       "nsstring": "s57"
+      }
+     ],
+     [
+      {
+       "nsstring": "s58"
+      }
+     ],
+     [
+      {
+       "nsstring": "s59"
+      }
+     ],
+     [
+      {
+       "nsstring": "s60"
+      }
+     ],
+     [
+      {
+       "nsstring": "s61"
+      }
+     ],
+     [
+      {
+       "nsstring": "s62"
+      }
+     ],
+     [
+      {
+       "nsstring": "s63"
+      }
+     ],
+     [
+      {
+       "nsstring": "s64"
+      }
+     ],
+     [
+      {
+       "nsstring": "s65"
+      }
+     ],
+     [
+      {
+       "nsstring": "s66"
+      }
+     ],
+     [
+      {
+       "nsstring": "s67"
+      }
+     ],
+     [
+      {
+       "nsstring": "s68"
+      }
+     ],
+     [
+      {
+       "nsstring": "s69"
+      }
+     ],
+     [
+      {
+       "nsstring": "s70"
+      }
+     ],
+     [
+      {
+       "nsstring": "s71"
+      }
+     ],
+     [
+      {
+       "nsstring": "s72"
+      }
+     ],
+     [
+      {
+       "nsstring": "s73"
+      }
+     ],
+     [
+      {
+       "nsstring": "s74"
+      }
+     ],
+     [
+      {
+       "nsstring": "s75"
+      }
+     ],
+     [
+      {
+       "nsstring": "s76"
+      }
+     ],
+     [
+      {
+       "nsstring": "s77"
+      }
+     ],
+     [
+      {
+       "nsstring": "s78"
+      }
+     ],
+     [
+      {
+       "nsstring": "s79"
+      }
+     ],
+     [
+      {
+       "nsstring": "s80"
+      }
+     ],
+     [
+      {
+       "nsstring": "s81"
+      }
+     ],
+     [
+      {
+       "nsstring": "s82"
+      }
+     ],
+     [
+      {
+       "nsstring": "s83"
+      }
+     ],
+     [
+      {
+       "nsstring": "s84"
+      }
+     ],
+     [
+      {
+       "nsstring": "s85"
+      }
+     ],
+     [
+      {
+       "nsstring": "s86"
+      }
+     ],
+     [
+      {
+       "nsstring": "s87"
+      }
+     ],
+     [
+      {
+       "nsstring": "s88"
+      }
+     ],
+     [
+      {
+       "nsstring": "s89"
+      }
+     ],
+     [
+      {
+       "nsstring": "s90"
+      }
+     ],
+     [
+      {
+       "nsstring": "s91"
+      }
+     ],
+     [
+      {
+       "nsstring": "s92"
+      }
+     ],
+     [
+      {
+       "nsstring": "s93"
+      }
+     ],
+     [
+      {
+       "nsstring": "s94"
+      }
+     ],
+     [
+      {
+       "nsstring": "s95"
+      }
+     ],
+     [
+      {
+       "nsstring": "s96"
+      }
+     ],
+     [
+      {
+       "nsstring": "s97"
+      }
+     ],
+     [
+      {
+       "nsstring": "s98"
+      }
+     ],
+     [
+      {
+       "nsstring": "s99"
+      }
+     ],
+     [
+      {
+       "nsstring": "s100"
+      }
+     ],
+     [
+      {
+       "nsstring": "s101"
+      }
+     ],
+     [
+      {
+       "nsstring": "s102"
+      }
+     ],
+     [
+      {
+       "nsstring": "s103"
+      }
+     ],
+     [
+      {
+       "nsstring": "s104"
+      }
+     ],
+     [
+      {
+       "nsstring": "s105"
+      }
+     ],
+     [
+      {
+       "nsstring": "s106"
+      }
+     ],
+     [
+      {
+       "nsstring": "s107"
+      }
+     ],
+     [
+      {
+       "nsstring": "s108"
+      }
+     ],
+     [
+      {
+       "nsstring": "s109"
+      }
+     ],
+     [
+      {
+       "nsstring": "s110"
+      }
+     ],
+     [
+      {
+       "nsstring": "s111"
+      }
+     ],
+     [
+      {
+       "nsstring": "s112"
+      }
+     ],
+     [
+      {
+       "nsstring": "s113"
+      }
+     ],
+     [
+      {
+       "nsstring": "s114"
+      }
+     ],
+     [
+      {
+       "nsstring": "s115"
+      }
+     ],
+     [
+      {
+       "nsstring": "s116"
+      }
+     ],
+     [
+      {
+       "nsstring": "s117"
+      }
+     ],
+     [
+      {
+       "nsstring": "s118"
+      }
+     ],
+     [
+      {
+       "nsstring": "s119"
+      }
+     ],
+     [
+      {
+       "nsstring": "s120"
+      }
+     ],
+     [
+      {
+       "nsstring": "s121"
+      }
+     ],
+     [
+      {
+       "nsstring": "s122"
+      }
+     ],
+     [
+      {
+       "nsstring": "s123"
+      }
+     ],
+     [
+      {
+       "nsstring": "s124"
+      }
+     ],
+     [
+      {
+       "nsstring": "s125"
+      }
+     ],
+     [
+      {
+       "nsstring": "s126"
+      }
+     ],
+     [
+      {
+       "nsstring": "s127"
+      }
+     ],
+     [
+      {
+       "nsstring": "s128"
+      }
+     ],
+     [
+      {
+       "nsstring": "s129"
+      }
+     ],
+     [
+      {
+       "nsstring": "s130"
+      }
+     ],
+     [
+      {
+       "nsstring": "s131"
+      }
+     ],
+     [
+      {
+       "nsstring": "s132"
+      }
+     ],
+     [
+      {
+       "nsstring": "s133"
+      }
+     ],
+     [
+      {
+       "nsstring": "s134"
+      }
+     ],
+     [
+      {
+       "nsstring": "s135"
+      }
+     ],
+     [
+      {
+       "nsstring": "s136"
+      }
+     ],
+     [
+      {
+       "nsstring": "s137"
+      }
+     ],
+     [
+      {
+       "nsstring": "s138"
+      }
+     ],
+     [
+      {
+       "nsstring": "s139"
+      }
+     ],
+     [
+      {
+       "nsstring": "s140"
+      }
+     ],
+     [
+      {
+       "nsstring": "s141"
+      }
+     ],
+     [
+      {
+       "nsstring": "s142"
+      }
+     ],
+     [
+      {
+       "nsstring": "s143"
+      }
+     ],
+     [
+      {
+       "nsstring": "s144"
+      }
+     ],
+     [
+      {
+       "nsstring": "s145"
+      }
+     ],
+     [
+      {
+       "nsstring": "s146"
+      }
+     ],
+     [
+      {
+       "nsstring": "s147"
+      }
+     ],
+     [
+      {
+       "nsstring": "s148"
+      }
+     ],
+     [
+      {
+       "nsstring": "s149"
+      }
+     ],
+     [
+      {
+       "nsstring": "s150"
+      }
+     ],
+     [
+      {
+       "nsstring": "s151"
+      }
+     ],
+     [
+      {
+       "nsstring": "s152"
+      }
+     ],
+     [
+      {
+       "nsstring": "s153"
+      }
+     ],
+     [
+      {
+       "nsstring": "s154"
+      }
+     ],
+     [
+      {
+       "nsstring": "s155"
+      }
+     ],
+     [
+      {
+       "nsstring": "s156"
+      }
+     ],
+     [
+      {
+       "nsstring": "s157"
+      }
+     ],
+     [
+      {
+       "nsstring": "s158"
+      }
+     ],
+     [
+      {
+       "nsstring": "s159"
+      }
+     ],
+     [
+      {
+       "nsstring": "s160"
+      }
+     ],
+     [
+      {
+       "nsstring": "s161"
+      }
+     ],
+     [
+      {
+       "nsstring": "s162"
+      }
+     ],
+     [
+      {
+       "nsstring": "s163"
+      }
+     ],
+     [
+      {
+       "nsstring": "s164"
+      }
+     ],
+     [
+      {
+       "nsstring": "s165"
+      }
+     ],
+     [
+      {
+       "nsstring": "s166"
+      }
+     ],
+     [
+      {
+       "nsstring": "s167"
+      }
+     ],
+     [
+      {
+       "nsstring": "s168"
+      }
+     ],
+     [
+      {
+       "nsstring": "s169"
+      }
+     ],
+     [
+      {
+       "nsstring": "s170"
+      }
+     ],
+     [
+      {
+       "nsstring": "s171"
+      }
+     ],
+     [
+      {
+       "nsstring": "s172"
+      }
+     ],
+     [
+      {
+       "nsstring": "s173"
+      }
+     ],
+     [
+      {
+       "nsstring": "s174"
+      }
+     ],
+     [
+      {
+       "nsstring": "s175"
+      }
+     ],
+     [
+      {
+       "nsstring": "s176"
+      }
+     ],
+     [
+      {
+       "nsstring": "s177"
+      }
+     ],
+     [
+      {
+       "nsstring": "s178"
+      }
+     ],
+     [
+      {
+       "nsstring": "s179"
+      }
+     ],
+     [
+      {
+       "nsstring": "s180"
+      }
+     ],
+     [
+      {
+       "nsstring": "s181"
+      }
+     ],
+     [
+      {
+       "nsstring": "s182"
+      }
+     ],
+     [
+      {
+       "nsstring": "s183"
+      }
+     ],
+     [
+      {
+       "nsstring": "s184"
+      }
+     ],
+     [
+      {
+       "nsstring": "s185"
+      }
+     ],
+     [
+      {
+       "nsstring": "s186"
+      }
+     ],
+     [
+      {
+       "nsstring": "s187"
+      }
+     ],
+     [
+      {
+       "nsstring": "s188"
+      }
+     ],
+     [
+      {
+       "nsstring": "s189"
+      }
+     ],
+     [
+      {
+       "nsstring": "s190"
+      }
+     ],
+     [
+      {
+       "nsstring": "s191"
+      }
+     ],
+     [
+      {
+       "nsstring": "s192"
+      }
+     ],
+     [
+      {
+       "nsstring": "s193"
+      }
+     ],
+     [
+      {
+       "nsstring": "s194"
+      }
+     ],
+     [
+      {
+       "nsstring": "s195"
+      }
+     ],
+     [
+      {
+       "nsstring": "s196"
+      }
+     ],
+     [
+      {
+       "nsstring": "s197"
+      }
+     ],
+     [
+      {
+       "nsstring": "s198"
+      }
+     ],
+     [
+      {
+       "nsstring": "s199"
+      }
+     ],
+     [
+      {
+       "nsstring": "s200"
+      }
+     ],
+     [
+      {
+       "nsstring": "s201"
+      }
+     ],
+     [
+      {
+       "nsstring": "s202"
+      }
+     ],
+     [
+      {
+       "nsstring": "s203"
+      }
+     ],
+     [
+      {
+       "nsstring": "s204"
+      }
+     ],
+     [
+      {
+       "nsstring": "s205"
+      }
+     ],
+     [
+      {
+       "nsstring": "s206"
+      }
+     ],
+     [
+      {
+       "nsstring": "s207"
+      }
+     ],
+     [
+      {
+       "nsstring": "s208"
+      }
+     ],
+     [
+      {
+       "nsstring": "s209"
+      }
+     ],
+     [
+      {
+       "nsstring": "s210"
+      }
+     ],
+     [
+      {
+       "nsstring": "s211"
+      }
+     ],
+     [
+      {
+       "nsstring": "s212"
+      }
+     ],
+     [
+      {
+       "nsstring": "s213"
+      }
+     ],
+     [
+      {
+       "nsstring": "s214"
+      }
+     ],
+     [
+      {
+       "nsstring": "s215"
+      }
+     ],
+     [
+      {
+       "nsstring": "s216"
+      }
+     ],
+     [
+      {
+       "nsstring": "s217"
+      }
+     ],
+     [
+      {
+       "nsstring": "s218"
+      }
+     ],
+     [
+      {
+       "nsstring": "s219"
+      }
+     ],
+     [
+      {
+       "nsstring": "s220"
+      }
+     ],
+     [
+      {
+       "nsstring": "s221"
+      }
+     ],
+     [
+      {
+       "nsstring": "s222"
+      }
+     ],
+     [
+      {
+       "nsstring": "s223"
+      }
+     ],
+     [
+      {
+       "nsstring": "s224"
+      }
+     ],
+     [
+      {
+       "nsstring": "s225"
+      }
+     ],
+     [
+      {
+       "nsstring": "s226"
+      }
+     ],
+     [
+      {
+       "nsstring": "s227"
+      }
+     ],
+     [
+      {
+       "nsstring": "s228"
+      }
+     ],
+     [
+      {
+       "nsstring": "s229"
+      }
+     ],
+     [
+      {
+       "nsstring": "s230"
+      }
+     ],
+     [
+      {
+       "nsstring": "s231"
+      }
+     ],
+     [
+      {
+       "nsstring": "s232"
+      }
+     ],
+     [
+      {
+       "nsstring": "s233"
+      }
+     ],
+     [
+      {
+       "nsstring": "s234"
+      }
+     ],
+     [
+      {
+       "nsstring": "s235"
+      }
+     ],
+     [
+      {
+       "nsstring": "s236"
+      }
+     ],
+     [
+      {
+       "nsstring": "s237"
+      }
+     ],
+     [
+      {
+       "nsstring": "s238"
+      }
+     ],
+     [
+      {
+       "nsstring": "s239"
+      }
+     ],
+     [
+      {
+       "nsstring": "s240"
+      }
+     ],
+     [
+      {
+       "nsstring": "s241"
+      }
+     ],
+     [
+      {
+       "nsstring": "s242"
+      }
+     ],
+     [
+      {
+       "nsstring": "s243"
+      }
+     ],
+     [
+      {
+       "nsstring": "s244"
+      }
+     ],
+     [
+      {
+       "nsstring": "s245"
+      }
+     ],
+     [
+      {
+       "nsstring": "s246"
+      }
+     ],
+     [
+      {
+       "nsstring": "s247"
+      }
+     ],
+     [
+      {
+       "nsstring": "s248"
+      }
+     ],
+     [
+      {
+       "nsstring": "s249"
+      }
+     ],
+     [
+      {
+       "nsstring": "s250"
+      }
+     ],
+     [
+      {
+       "nsstring": "s251"
+      }
+     ],
+     [
+      {
+       "nsstring": "s252"
+      }
+     ],
+     [
+      {
+       "nsstring": "s253"
+      }
+     ],
+     [
+      {
+       "nsstring": "s254"
+      }
+     ],
+     [
+      {
+       "nsstring": "s255"
+      }
+     ],
+     [
+      {
+       "nsstring": "s256"
+      }
+     ],
+     [
+      {
+       "nsstring": "s257"
+      }
+     ],
+     [
+      {
+       "nsstring": "s258"
+      }
+     ],
+     [
+      {
+       "nsstring": "s259"
+      }
+     ],
+     [
+      {
+       "nsstring": "s260"
+      }
+     ],
+     [
+      {
+       "nsstring": "s261"
+      }
+     ],
+     [
+      {
+       "nsstring": "s262"
+      }
+     ],
+     [
+      {
+       "nsstring": "s263"
+      }
+     ],
+     [
+      {
+       "nsstring": "s264"
+      }
+     ],
+     [
+      {
+       "nsstring": "s265"
+      }
+     ],
+     [
+      {
+       "nsstring": "s266"
+      }
+     ],
+     [
+      {
+       "nsstring": "s267"
+      }
+     ],
+     [
+      {
+       "nsstring": "s268"
+      }
+     ],
+     [
+      {
+       "nsstring": "s269"
+      }
+     ],
+     [
+      {
+       "nsstring": "s270"
+      }
+     ],
+     [
+      {
+       "nsstring": "s271"
+      }
+     ],
+     [
+      {
+       "nsstring": "s272"
+      }
+     ],
+     [
+      {
+       "nsstring": "s273"
+      }
+     ],
+     [
+      {
+       "nsstring": "s274"
+      }
+     ],
+     [
+      {
+       "nsstring": "s275"
+      }
+     ],
+     [
+      {
+       "nsstring": "s276"
+      }
+     ],
+     [
+      {
+       "nsstring": "s277"
+      }
+     ],
+     [
+      {
+       "nsstring": "s278"
+      }
+     ],
+     [
+      {
+       "nsstring": "s279"
+      }
+     ],
+     [
+      {
+       "nsstring": "s280"
+      }
+     ],
+     [
+      {
+       "nsstring": "s281"
+      }
+     ],
+     [
+      {
+       "nsstring": "s282"
+      }
+     ],
+     [
+      {
+       "nsstring": "s283"
+      }
+     ],
+     [
+      {
+       "nsstring": "s284"
+      }
+     ],
+     [
+      {
+       "nsstring": "s285"
+      }
+     ],
+     [
+      {
+       "nsstring": "s286"
+      }
+     ],
+     [
+      {
+       "nsstring": "s287"
+      }
+     ],
+     [
+      {
+       "nsstring": "s288"
+      }
+     ],
+     [
+      {
+       "nsstring": "s289"
+      }
+     ],
+     [
+      {
+       "nsstring": "s290"
+      }
+     ],
+     [
+      {
+       "nsstring": "s291"
+      }
+     ],
+     [
+      {
+       "nsstring": "s292"
+      }
+     ],
+     [
+      {
+       "nsstring": "s293"
+      }
+     ],
+     [
+      {
+       "nsstring": "s294"
+      }
+     ],
+     [
+      {
+       "nsstring": "s295"
+      }
+     ],
+     [
+      {
+       "nsstring": "s296"
+      }
+     ],
+     [
+      {
+       "nsstring": "s297"
+      }
+     ],
+     [
+      {
+       "nsstring": "s298"
+      }
+     ],
+     [
+      {
+       "nsstring": "s299"
+      }
+     ],
+     [
+      {
+       "nsstring": "s248"
+      }
+     ]
+    ]
+   },
+   "name": "ref_obj250_81i16",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "strings",
+     "strings": [
+      "s0",
+      "s1",
+      "s2",
+      "s3",
+      "s4",
+      "s5",
+      "s6",
+      "s7",
+      "s8",
+      "s9",
+      "s10",
+      "s11",
+      "s12",
+      "s13",
+      "s14",
+      "s15",
+      "s16",
+      "s17",
+      "s18",
+      "s19",
+      "s20",
+      "s21",
+      "s22",
+      "s23",
+      "s24",
+      "s25",
+      "s26",
+      "s27",
+      "s28",
+      "s29",
+      "s30",
+      "s31",
+      "s32",
+      "s33",
+      "s34",
+      "s35",
+      "s36",
+      "s37",
+      "s38",
+      "s39",
+      "s40",
+      "s41",
+      "s42",
+      "s43",
+      "s44",
+      "s45",
+      "s46",
+      "s47",
+      "s48",
+      "s49",
+      "s50",
+      "s51",
+      "s52",
+      "s53",
+      "s54",
+      "s55",
+      "s56",
+      "s57",
+      "s58",
+      "s59",
+      "s60",
+      "s61",
+      "s62",
+      "s63",
+      "s64",
+      "s65",
+      "s66",
+      "s67",
+      "s68",
+      "s69",
+      "s70",
+      "s71",
+      "s72",
+      "s73",
+      "s74",
+      "s75",
+      "s76",
+      "s77",
+      "s78",
+      "s79",
+      "s80",
+      "s81",
+      "s82",
+      "s83",
+      "s84",
+      "s85",
+      "s86",
+      "s87",
+      "s88",
+      "s89",
+      "s90",
+      "s91",
+      "s92",
+      "s93",
+      "s94",
+      "s95",
+      "s96",
+      "s97",
+      "s98",
+      "s99",
+      "s100",
+      "s101",
+      "s102",
+      "s103",
+      "s104",
+      "s105",
+      "s106",
+      "s107",
+      "s108",
+      "s109",
+      "s110",
+      "s111",
+      "s112",
+      "s113",
+      "s114",
+      "s115",
+      "s116",
+      "s117",
+      "s118",
+      "s119",
+      "s120",
+      "s121",
+      "s122",
+      "s123",
+      "s124",
+      "s125",
+      "s126",
+      "s127",
+      "s128",
+      "s129",
+      "s130",
+      "s131",
+      "s132",
+      "s133",
+      "s134",
+      "s135",
+      "s136",
+      "s137",
+      "s138",
+      "s139",
+      "s140",
+      "s141",
+      "s142",
+      "s143",
+      "s144",
+      "s145",
+      "s146",
+      "s147",
+      "s148",
+      "s149",
+      "s150",
+      "s151",
+      "s152",
+      "s153",
+      "s154",
+      "s155",
+      "s156",
+      "s157",
+      "s158",
+      "s159",
+      "s160",
+      "s161",
+      "s162",
+      "s163",
+      "s164",
+      "s165",
+      "s166",
+      "s167",
+      "s168",
+      "s169",
+      "s170",
+      "s171",
+      "s172",
+      "s173",
+      "s174",
+      "s175",
+      "s176",
+      "s177",
+      "s178",
+      "s179",
+      "s180",
+      "s181",
+      "s182",
+      "s183",
+      "s184",
+      "s185",
+      "s186",
+      "s187",
+      "s188",
+      "s189",
+      "s190",
+      "s191",
+      "s192",
+      "s193",
+      "s194",
+      "s195",
+      "s196",
+      "s197",
+      "s198",
+      "s199",
+      "s200",
+      "s201",
+      "s202",
+      "s203",
+      "s204",
+      "s205",
+      "s206",
+      "s207",
+      "s208",
+      "s209",
+      "s210",
+      "s211",
+      "s212",
+      "s213",
+      "s214",
+      "s215",
+      "s216",
+      "s217",
+      "s218",
+      "s219",
+      "s220",
+      "s221",
+      "s222",
+      "s223",
+      "s224",
+      "s225",
+      "s226",
+      "s227",
+      "s228",
+      "s229",
+      "s230",
+      "s231",
+      "s232",
+      "s233",
+      "s234",
+      "s235",
+      "s236",
+      "s237",
+      "s238",
+      "s239",
+      "s240",
+      "s241",
+      "s242",
+      "s243",
+      "s244",
+      "s245",
+      "s246",
+      "s247",
+      "s248",
+      "s249",
+      "s250",
+      "s251",
+      "s252",
+      "s253",
+      "s254",
+      "s255",
+      "s256",
+      "s257",
+      "s258",
+      "s259",
+      "s260",
+      "s261",
+      "s262",
+      "s263",
+      "s264",
+      "s265",
+      "s266",
+      "s267",
+      "s268",
+      "s269",
+      "s270",
+      "s271",
+      "s272",
+      "s273",
+      "s274",
+      "s275",
+      "s276",
+      "s277",
+      "s278",
+      "s279",
+      "s280",
+      "s281",
+      "s282",
+      "s283",
+      "s284",
+      "s285",
+      "s286",
+      "s287",
+      "s288",
+      "s289",
+      "s290",
+      "s291",
+      "s292",
+      "s293",
+      "s294",
+      "s295",
+      "s296",
+      "s297",
+      "s298",
+      "s299",
+      "s248"
+     ]
+    }
+   },
+   "public": {
+    "error": "TrailingBytes"
+   },
+   "sha256": "10d2b544b2da818429061b264eef2bde388295f970a23c11eac11049fbc63637"
+  },
+  {
+   "file": "ref_obj250_81u16.bin",
+   "generic": {
+    "error": "BadReference"
+   },
+   "name": "ref_obj250_81u16",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "the reference points past the object table"
+   },
+   "public": {
+    "error": "TrailingBytes"
+   },
+   "sha256": "05f52ce076c80ba96b315fb9b102b752758c15e05bec7b14281397acb2628f8d"
+  },
+  {
+   "file": "nsdata_5c.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "nsdata": "84858600ff"
+      }
+     ]
+    ]
+   },
+   "name": "nsdata_5c",
+   "note": "NSData: an `i` length, then `[5c]` raw bytes that look like tags",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "hex": "84858600ff",
+     "kind": "data"
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "cab9d5d2240d15680d032e24aaae78297059ac9b563882775c0b1aef4f2debcf"
+  },
+  {
+   "file": "array_5c.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "bytes": "84858600ff"
+      }
+     ]
+    ]
+   },
+   "name": "array_5c",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "hex": "84858600ff",
+     "kind": "bytes",
+     "type": "[5c]"
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "5a79dfe7ad18d0477c575959c89637a74c739729728bf42b96cc78aecc336f1f"
+  },
+  {
+   "file": "struct_nsrange.bin",
+   "generic": {
+    "groups": [
+     [
+      {
+       "int": 5
+      },
+      {
+       "int": 300
+      }
+     ]
+    ]
+   },
+   "name": "struct_nsrange",
+   "note": "struct members are written flat; the name contains a type letter (S)",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "struct",
+     "type": "{_NSRange=QQ}",
+     "values": [
+      5,
+      300
+     ]
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "0be30bd2b4240ee656a5fae09bd64fa76e851e343c9a1c2882c909a588c853ed"
+  },
+  {
+   "file": "h_truncated.bin",
+   "generic": null,
+   "name": "h_truncated",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "truncated"
+   },
+   "public": {
+    "error": "Truncated"
+   },
+   "sha256": "30c532a043b79b50dbd2ac81aa1c87f325a938720557dda5f553eec167b21814"
+  },
+  {
+   "file": "h_trailing.bin",
+   "generic": null,
+   "name": "h_trailing",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "a byte after the root"
+   },
+   "public": {
+    "error": "TrailingBytes"
+   },
+   "sha256": "93d4024c1ba046fd07d3c23f48bec9db6c8a9558c7602bb225bc920d0da90467"
+  },
+  {
+   "file": "h_bad_version.bin",
+   "generic": null,
+   "name": "h_bad_version",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "streamer version 5"
+   },
+   "public": {
+    "error": "UnsupportedHeader"
+   },
+   "sha256": "9adeefd06d276f2e61bb37d39a7497c5fd5762e80da1523859e785da48a4707c"
+  },
+  {
+   "file": "h_bigendian_sig.bin",
+   "generic": null,
+   "name": "h_bigendian_sig",
+   "oracle": {
+    "check": "exempt",
+    "reason": "pytypedstream reads big-endian streams; the decoder refuses them by policy (M3 10.1)"
+   },
+   "public": {
+    "error": "UnsupportedHeader"
+   },
+   "sha256": "7490db7121695c5ecb359243eef3f09cd8b02b59782bfe405e0f6ad1a729dcfd"
+  },
+  {
+   "file": "h_runlen_short.bin",
+   "generic": null,
+   "name": "h_runlen_short",
+   "note": "run fault: validated, the text is kept",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "dicts": [
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 0
+        }
+       ]
+      ]
+     ],
+     "kind": "attributed",
+     "runs": [
+      [
+       1,
+       5
+      ]
+     ],
+     "text": "Hi \ud83d\udc4b!"
+    }
+   },
+   "public": {
+    "ok": {
+     "parts": [
+      {
+       "flags": [],
+       "guid": null,
+       "keys": [
+        "__kIMMessagePartAttributeName"
+       ],
+       "mention": null,
+       "part": 0,
+       "runs": [
+        0,
+        1
+       ],
+       "text_effect": null,
+       "utf16": [
+        0,
+        5
+       ],
+       "utf8": [
+        0,
+        7
+       ]
+      }
+     ],
+     "run_issue": {
+      "kind": "RunLengthMismatch",
+      "run": 1
+     },
+     "runs": [
+      {
+       "attrs": {
+        "flags": [],
+        "guid": null,
+        "keys": [
+         "__kIMMessagePartAttributeName"
+        ],
+        "mention": null,
+        "part": 0,
+        "text_effect": null
+       },
+       "utf16": [
+        0,
+        5
+       ],
+       "utf8": [
+        0,
+        7
+       ]
+      }
+     ],
+     "text": "Hi \ud83d\udc4b!",
+     "unknown_attribute_classes": 0,
+     "unknown_attribute_keys": 0,
+     "unreadable_attribute_values": 0
+    }
+   },
+   "sha256": "25d781d0fc26c4d38c338037fefa1542a3abd544768cd0b1b9e7dcc201fbb7a6"
+  },
+  {
+   "file": "h_runlen_utf8count.bin",
+   "generic": null,
+   "name": "h_runlen_utf8count",
+   "note": "run fault: validated, the text is kept",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "dicts": [
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 0
+        }
+       ]
+      ]
+     ],
+     "kind": "attributed",
+     "runs": [
+      [
+       1,
+       8
+      ]
+     ],
+     "text": "Hi \ud83d\udc4b!"
+    }
+   },
+   "public": {
+    "ok": {
+     "parts": [],
+     "run_issue": {
+      "kind": "RunOverflow",
+      "run": 0
+     },
+     "runs": [],
+     "text": "Hi \ud83d\udc4b!",
+     "unknown_attribute_classes": 0,
+     "unknown_attribute_keys": 0,
+     "unreadable_attribute_values": 0
+    }
+   },
+   "sha256": "936c4076e8164d893c0787f6b8129d4991386dae90a2ea11954abca0556ba304"
+  },
+  {
+   "file": "h_split_surrogate.bin",
+   "generic": null,
+   "name": "h_split_surrogate",
+   "note": "run fault: validated, the text is kept",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "dicts": [
+      [
+       [
+        "__kIMMessagePartAttributeName",
+        {
+         "int": 0
+        }
+       ]
+      ]
+     ],
+     "kind": "attributed",
+     "runs": [
+      [
+       1,
+       4
+      ],
+      [
+       1,
+       2
+      ]
+     ],
+     "text": "Hi \ud83d\udc4b!"
+    }
+   },
+   "public": {
+    "ok": {
+     "parts": [],
+     "run_issue": {
+      "kind": "RunSplitsSurrogate",
+      "run": 0
+     },
+     "runs": [],
+     "text": "Hi \ud83d\udc4b!",
+     "unknown_attribute_classes": 0,
+     "unknown_attribute_keys": 0,
+     "unreadable_attribute_values": 0
+    }
+   },
+   "sha256": "950714bdbc44e213085d75f149bade0c67d4eae1311dc05ba0de4bd5e9ed89e3"
+  },
+  {
+   "file": "h_bad_run_index.bin",
+   "generic": null,
+   "name": "h_bad_run_index",
+   "note": "run fault: validated, the text is kept",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "dicts": [],
+     "kind": "attributed",
+     "runs": [
+      [
+       2,
+       2
+      ]
+     ],
+     "text": "Hi"
+    }
+   },
+   "public": {
+    "ok": {
+     "parts": [],
+     "run_issue": {
+      "kind": "BadRunIndex",
+      "run": 0
+     },
+     "runs": [],
+     "text": "Hi",
+     "unknown_attribute_classes": 0,
+     "unknown_attribute_keys": 0,
+     "unreadable_attribute_values": 0
+    }
+   },
+   "sha256": "e750803777ae44d01f5447c78dacd588f7b8378c61d2ce2507e43f0d7a0cd035"
+  },
+  {
+   "file": "h_invalid_utf8.bin",
+   "generic": null,
+   "name": "h_invalid_utf8",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "the string bytes are not UTF-8"
+   },
+   "public": {
+    "error": "InvalidUtf8"
+   },
+   "sha256": "ed0f9c51392fb0706b1d6b1fceaf2b60ad2d649031a36f6ceeb7acc45ee85f8e"
+  },
+  {
+   "file": "h_dangling_ref.bin",
+   "generic": null,
+   "name": "h_dangling_ref",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "object reference 14 with an empty table"
+   },
+   "public": {
+    "error": "BadReference"
+   },
+   "sha256": "ab3cc0c7f3bc7094ac093167e22d092a47d94eb6177ec4f6a9f18d62de9655da"
+  },
+  {
+   "file": "h_depth64_objects.bin",
+   "generic": null,
+   "name": "h_depth64_objects",
+   "note": "objects nested to depth 64 (the maximum)",
+   "oracle": {
+    "check": "exempt",
+    "reason": "a decoder budget (M3 10.6); pytypedstream has no such limit"
+   },
+   "public": {
+    "ok": {
+     "parts": [
+      {
+       "flags": [],
+       "guid": null,
+       "keys": [
+        "__kIMLinkAttributeName"
+       ],
+       "mention": null,
+       "part": null,
+       "runs": [
+        0,
+        1
+       ],
+       "text_effect": null,
+       "utf16": [
+        0,
+        1
+       ],
+       "utf8": [
+        0,
+        1
+       ]
+      }
+     ],
+     "run_issue": null,
+     "runs": [
+      {
+       "attrs": {
+        "flags": [],
+        "guid": null,
+        "keys": [
+         "__kIMLinkAttributeName"
+        ],
+        "mention": null,
+        "part": null,
+        "text_effect": null
+       },
+       "utf16": [
+        0,
+        1
+       ],
+       "utf8": [
+        0,
+        1
+       ]
+      }
+     ],
+     "text": "x",
+     "unknown_attribute_classes": 1,
+     "unknown_attribute_keys": 0,
+     "unreadable_attribute_values": 0
+    }
+   },
+   "sha256": "ce0216141d7b5059c5ef400e79f186574c1cb72169987967e28af6153eed656d"
+  },
+  {
+   "file": "h_depth65_objects.bin",
+   "generic": null,
+   "name": "h_depth65_objects",
+   "oracle": {
+    "check": "exempt",
+    "reason": "a decoder budget (M3 10.6); pytypedstream has no such limit"
+   },
+   "public": {
+    "error": "TooDeep"
+   },
+   "sha256": "d290a38ccc0cb1456303be95bb9f1c0a8d658ca19017d1f4de078f82a86a0b8c"
+  },
+  {
+   "file": "h_depth64_structs.bin",
+   "generic": null,
+   "name": "h_depth64_structs",
+   "note": "61 nested structs inside an object at depth 3: depth 64",
+   "oracle": {
+    "check": "exempt",
+    "reason": "a decoder budget (M3 10.6); pytypedstream has no such limit"
+   },
+   "public": {
+    "ok": {
+     "parts": [
+      {
+       "flags": [],
+       "guid": null,
+       "keys": [
+        "__kIMLinkAttributeName"
+       ],
+       "mention": null,
+       "part": null,
+       "runs": [
+        0,
+        1
+       ],
+       "text_effect": null,
+       "utf16": [
+        0,
+        1
+       ],
+       "utf8": [
+        0,
+        1
+       ]
+      }
+     ],
+     "run_issue": null,
+     "runs": [
+      {
+       "attrs": {
+        "flags": [],
+        "guid": null,
+        "keys": [
+         "__kIMLinkAttributeName"
+        ],
+        "mention": null,
+        "part": null,
+        "text_effect": null
+       },
+       "utf16": [
+        0,
+        1
+       ],
+       "utf8": [
+        0,
+        1
+       ]
+      }
+     ],
+     "text": "x",
+     "unknown_attribute_classes": 1,
+     "unknown_attribute_keys": 0,
+     "unreadable_attribute_values": 0
+    }
+   },
+   "sha256": "b9faf9c6fb524b20b00589610f4c34b6ad58bb60a57fea1b2d1a0e2bb82ecd24"
+  },
+  {
+   "file": "h_depth65_structs.bin",
+   "generic": null,
+   "name": "h_depth65_structs",
+   "oracle": {
+    "check": "exempt",
+    "reason": "a decoder budget (M3 10.6); pytypedstream has no such limit"
+   },
+   "public": {
+    "error": "TooDeep"
+   },
+   "sha256": "14d688b24cfba43485212a0c771189aa83edfdb70d101c447871dc56617608ed"
+  },
+  {
+   "file": "h_self_reference.bin",
+   "generic": null,
+   "name": "h_self_reference",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "a reference to an object under construction"
+   },
+   "public": {
+    "error": "BadReference"
+   },
+   "sha256": "c1496bc25e3521d8898c36a1c563cb869e757aa96f3bbe62e62fa46bcb7f7ba8"
+  },
+  {
+   "file": "h_plus_len_2pow31.bin",
+   "generic": null,
+   "name": "h_plus_len_2pow31",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "length 2^31"
+   },
+   "public": {
+    "error": "Truncated"
+   },
+   "sha256": "2e5ad85604bdf5b3028c0bc1beb8f7c4946991e9a0687c5c548d003f4d0050db"
+  },
+  {
+   "file": "h_array_huge.bin",
+   "generic": null,
+   "name": "h_array_huge",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "array length past the end"
+   },
+   "public": {
+    "error": "Truncated"
+   },
+   "sha256": "69e510f362dfd18eb6f77870607ecdb820cec0a2a65df671f24e5c6239af54bc"
+  },
+  {
+   "file": "h_array_4i.bin",
+   "generic": null,
+   "name": "h_array_4i",
+   "oracle": {
+    "check": "exempt",
+    "reason": "arrays of non-char elements are refused by policy (M3 10.4)"
+   },
+   "public": {
+    "error": "UnsupportedType"
+   },
+   "sha256": "051f1c84a2c79db879c987a499b58373f798ded71c8fd4778351418f470ef195"
+  },
+  {
+   "file": "h_union.bin",
+   "generic": null,
+   "name": "h_union",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "unions, pointers and bitfields cannot be archived"
+   },
+   "public": {
+    "error": "UnsupportedType"
+   },
+   "sha256": "2e8acc9464f1b4f1d11f9c81c24d12198f17010a75f4f523919402eee4b50d7d"
+  },
+  {
+   "file": "h_pointer.bin",
+   "generic": null,
+   "name": "h_pointer",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "unions, pointers and bitfields cannot be archived"
+   },
+   "public": {
+    "error": "UnsupportedType"
+   },
+   "sha256": "39ba26fed519329a0fa4f878625b0bcf45c34fcd6997ef1b5efdec5b53c0b95a"
+  },
+  {
+   "file": "h_bitfield.bin",
+   "generic": null,
+   "name": "h_bitfield",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "unions, pointers and bitfields cannot be archived"
+   },
+   "public": {
+    "error": "UnsupportedType"
+   },
+   "sha256": "f2623f813ca0cd6b2ba9282706b284bff024110bce2eb8306b807423d248fd52"
+  },
+  {
+   "file": "h_int_tag_80.bin",
+   "generic": null,
+   "name": "h_int_tag_80",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "0x80 as an integer head"
+   },
+   "public": {
+    "error": "UnexpectedTag"
+   },
+   "sha256": "dba09a18e8b2e85690d854ee25e667436146621f69eee4b1fae98842a3041444"
+  },
+  {
+   "file": "h_not_attributed.bin",
+   "generic": null,
+   "name": "h_not_attributed",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "kind": "strings",
+     "strings": [
+      "SYNTH"
+     ]
+    }
+   },
+   "public": {
+    "error": "NotAttributedString"
+   },
+   "sha256": "18d815738ff74363bc7909d1306ff5147a3c43b59583cb7424e15d770f244c29"
+  },
+  {
+   "file": "h_run_index_zero.bin",
+   "generic": null,
+   "name": "h_run_index_zero",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "dicts": [],
+     "kind": "attributed",
+     "runs": [
+      [
+       0,
+       2
+      ]
+     ],
+     "text": "Hi"
+    }
+   },
+   "public": {
+    "ok": {
+     "parts": [],
+     "run_issue": {
+      "kind": "BadRunIndex",
+      "run": 0
+     },
+     "runs": [],
+     "text": "Hi",
+     "unknown_attribute_classes": 0,
+     "unknown_attribute_keys": 0,
+     "unreadable_attribute_values": 0
+    }
+   },
+   "sha256": "89141189d1be39699153fa96a34a090871d97c3e5c24f24b0d167f650ae407de"
+  },
+  {
+   "file": "h_nil_dictionary.bin",
+   "generic": null,
+   "name": "h_nil_dictionary",
+   "oracle": {
+    "check": "compare",
+    "view": {
+     "dicts": [
+      null
+     ],
+     "kind": "attributed",
+     "runs": [
+      [
+       1,
+       2
+      ]
+     ],
+     "text": "Hi"
+    }
+   },
+   "public": {
+    "ok": {
+     "parts": [],
+     "run_issue": {
+      "kind": "BadRunIndex",
+      "run": 0
+     },
+     "runs": [],
+     "text": "Hi",
+     "unknown_attribute_classes": 0,
+     "unknown_attribute_keys": 0,
+     "unreadable_attribute_values": 0
+    }
+   },
+   "sha256": "f82499cd6813143f2e0d6f503ca591fd4565a0c7876047e2b377646bf5214158"
+  },
+  {
+   "file": "h_shared_ref_oob.bin",
+   "generic": null,
+   "name": "h_shared_ref_oob",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "a type reference to an undefined shared string"
+   },
+   "public": {
+    "error": "BadReference"
+   },
+   "sha256": "13a2af895d16beeeb42e57d49f67960fea46e727f80e66fd5b517a055bfdf3aa"
+  },
+  {
+   "file": "h_class_self_super.bin",
+   "generic": null,
+   "name": "h_class_self_super",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "a superclass reference to the class being read"
+   },
+   "public": {
+    "error": "BadReference"
+   },
+   "sha256": "5823cd064b5dac595329270287ad578f0059cc0ddabfae662cd01ce268ca1800"
+  },
+  {
+   "file": "h_empty_after_header.bin",
+   "generic": null,
+   "name": "h_empty_after_header",
+   "oracle": {
+    "check": "exempt",
+    "reason": "an empty stream is valid typedstream; an attributedBody needs a root object"
+   },
+   "public": {
+    "error": "Truncated"
+   },
+   "sha256": "ce7ca39868e1b28ef0c1be374f973c9eefd4ddea5a1930b160ea23d965348db8"
+  },
+  {
+   "file": "h_attr_invalid_utf8.bin",
+   "generic": null,
+   "name": "h_attr_invalid_utf8",
+   "note": "an attribute value that is not UTF-8 is counted, the text is kept",
+   "oracle": {
+    "check": "must_fail",
+    "reason": "an attribute string that is not UTF-8"
+   },
+   "public": {
+    "ok": {
+     "parts": [
+      {
+       "flags": [],
+       "guid": null,
+       "keys": [
+        "__kIMMessagePartAttributeName",
+        "__kIMMentionConfirmedMention"
+       ],
+       "mention": null,
+       "part": 0,
+       "runs": [
+        0,
+        1
+       ],
+       "text_effect": null,
+       "utf16": [
+        0,
+        2
+       ],
+       "utf8": [
+        0,
+        2
+       ]
+      }
+     ],
+     "run_issue": null,
+     "runs": [
+      {
+       "attrs": {
+        "flags": [],
+        "guid": null,
+        "keys": [
+         "__kIMMessagePartAttributeName",
+         "__kIMMentionConfirmedMention"
+        ],
+        "mention": null,
+        "part": 0,
+        "text_effect": null
+       },
+       "utf16": [
+        0,
+        2
+       ],
+       "utf8": [
+        0,
+        2
+       ]
+      }
+     ],
+     "text": "Hi",
+     "unknown_attribute_classes": 0,
+     "unknown_attribute_keys": 0,
+     "unreadable_attribute_values": 1
+    }
+   },
+   "sha256": "8791e7c4343892532eb3a40606d810f1cf6b3769e89fa7f1b96e248f9166709e"
+  }
+ ]
+}

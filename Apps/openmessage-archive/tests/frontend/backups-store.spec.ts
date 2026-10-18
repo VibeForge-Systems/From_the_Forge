@@ -11,6 +11,7 @@ vi.mock('@/services/ipc', async (importOriginal) => {
       forgetBackupFolder: vi.fn(),
       getBackupDetails: vi.fn(),
       openBackup: vi.fn(),
+      checkExtraction: vi.fn(),
       cancelJob: vi.fn(),
     },
   };
@@ -19,7 +20,7 @@ import { IpcError, ipc } from '@/services/ipc';
 import { LEFTOVER_FILES_MESSAGE, useBackups } from '@/stores/backups';
 import { useNotifications } from '@/stores/notifications';
 import type { JobEvent } from '@/types';
-import { backupList, details, report, summary } from './helpers';
+import { backupList, details, extractionReport, report, summary } from './helpers';
 
 const api = vi.mocked(ipc);
 const PASSWORD = 'synthetic-test-password-sentinel';
@@ -28,6 +29,13 @@ const PASSWORD = 'synthetic-test-password-sentinel';
 function lastHandler(): (e: JobEvent) => void {
   const call = api.openBackup.mock.calls.at(-1);
   if (!call) throw new Error('openBackup was not called');
+  return call[2];
+}
+
+/** The handler the store passed to the last checkExtraction call. */
+function lastExtractionHandler(): (e: JobEvent) => void {
+  const call = api.checkExtraction.mock.calls.at(-1);
+  if (!call) throw new Error('checkExtraction was not called');
   return call[2];
 }
 
@@ -201,7 +209,7 @@ describe('backups store: jobs', () => {
     await store.select('enc');
     await store.check('enc');
     expect(api.openBackup).not.toHaveBeenCalled();
-    expect(store.passwordPrompt).toEqual({ backupId: 'enc', error: null });
+    expect(store.passwordPrompt).toEqual({ backupId: 'enc', error: null, resume: 'validate' });
     await store.submitPassword('enc', PASSWORD);
     expect(store.passwordPrompt).toBeNull();
     expect(api.openBackup).toHaveBeenCalledWith('enc', PASSWORD, expect.any(Function));
@@ -211,7 +219,11 @@ describe('backups store: jobs', () => {
       error: { code: 'wrongPassword', message: 'That password did not unlock the backup.' },
       stagingRemoved: true,
     });
-    expect(store.passwordPrompt).toEqual({ backupId: 'enc', error: 'That password did not unlock the backup.' });
+    expect(store.passwordPrompt).toEqual({
+      backupId: 'enc',
+      error: 'That password did not unlock the backup.',
+      resume: 'validate',
+    });
     expect(store.job).toBeNull();
     expect(JSON.stringify(store.$state)).not.toContain(PASSWORD);
   });
@@ -291,7 +303,11 @@ describe('backups store: jobs', () => {
       error: { code: 'malformedBackup', message: 'Manifest.db could not be read.' },
       stagingRemoved: true,
     });
-    expect(store.lastError.b1).toEqual({ code: 'malformedBackup', message: 'Manifest.db could not be read.' });
+    expect(store.lastError.b1).toEqual({
+      code: 'malformedBackup',
+      message: 'Manifest.db could not be read.',
+      kind: 'validate',
+    });
   });
 
   it('polls a job it cannot hear until it ends', async () => {
@@ -301,7 +317,7 @@ describe('backups store: jobs', () => {
       calls += 1;
       const running = calls < 3;
       return details(summary(), {
-        activeJob: running ? { jobId: 'job-6', backupId: 'b1', phase: 'checkingFiles' } : null,
+        activeJob: running ? { jobId: 'job-6', backupId: 'b1', kind: 'validate', phase: 'checkingFiles' } : null,
         lastReport: running ? null : report(),
         lastCleanup: running ? null : { stagingRemoved: false },
       });
@@ -324,7 +340,7 @@ describe('backups store: jobs', () => {
   it('does not stay busy when a failed job is followed by its backup disappearing', async () => {
     api.openBackup.mockResolvedValue({ jobId: 'job-11' });
     api.getBackupDetails.mockResolvedValueOnce(
-      details(summary(), { activeJob: { jobId: 'job-11', backupId: 'b1', phase: 'checkingFiles' } }),
+      details(summary(), { activeJob: { jobId: 'job-11', backupId: 'b1', kind: 'validate', phase: 'checkingFiles' } }),
     );
     const store = useBackups();
     await store.refresh();
@@ -352,7 +368,7 @@ describe('backups store: jobs', () => {
     let running = true;
     api.getBackupDetails.mockImplementation(async () =>
       details(summary(), {
-        activeJob: running ? { jobId: 'job-12', backupId: 'b1', phase: 'checkingFiles' } : null,
+        activeJob: running ? { jobId: 'job-12', backupId: 'b1', kind: 'validate', phase: 'checkingFiles' } : null,
       }),
     );
     const store = useBackups();
@@ -378,5 +394,173 @@ describe('backups store: jobs', () => {
     expect(JSON.stringify(store.lastError)).not.toContain(PASSWORD);
     expect(toasts().join('\n')).not.toContain(PASSWORD);
     expect(store.lastError.enc?.message).toBe('The check could not be started.');
+  });
+});
+
+describe('backups store: extraction check (M3)', () => {
+  it("startJob('extractionCheck'): progress, then a summary, then the details fetch", async () => {
+    api.checkExtraction.mockResolvedValue({ jobId: 'job-20' });
+    const store = useBackups();
+    await store.refresh();
+    await store.select('b1');
+    await store.checkExtraction('b1');
+    expect(api.checkExtraction).toHaveBeenCalledWith('b1', null, expect.any(Function));
+    expect(api.openBackup).not.toHaveBeenCalled();
+    expect(store.job?.kind).toBe('extractionCheck');
+    expect(store.job?.jobId).toBe('job-20');
+    const emit = lastExtractionHandler();
+    emit({ kind: 'progress', jobId: 'job-20', phase: 'readingMessages', done: 10, total: 40 });
+    expect(store.job?.phase).toBe('readingMessages');
+
+    const ext = extractionReport({ jobId: 'job-20' });
+    api.getBackupDetails.mockResolvedValue(details(summary(), { lastReport: report(), lastExtractionReport: ext }));
+    const callsBefore = api.getBackupDetails.mock.calls.length;
+    emit({
+      kind: 'extractionFinished',
+      jobId: 'job-20',
+      outcome: 'readableWithQualifiers',
+      sourceChanged: false,
+      stagingRemoved: true,
+      plaintextRemovedAfterRowPass: true,
+    });
+    expect(store.job).toBeNull();
+    expect(store.extractionSummaries['job-20']?.outcome).toBe('readableWithQualifiers');
+    await flushMicrotasks();
+    expect(api.getBackupDetails.mock.calls.length).toBe(callsBefore + 1);
+    expect(store.extractionReports['job-20']).toEqual(ext);
+    expect(store.selectedExtraction?.jobId).toBe('job-20');
+    expect(toasts()).toEqual([]);
+  });
+
+  it('keys reports by job, so a later check does not overwrite an earlier one', async () => {
+    const store = useBackups();
+    await store.refresh();
+    api.getBackupDetails.mockResolvedValueOnce(
+      details(summary(), { lastExtractionReport: extractionReport({ jobId: 'job-1' }) }),
+    );
+    await store.select('b1');
+    api.getBackupDetails.mockResolvedValueOnce(
+      details(summary(), {
+        lastExtractionReport: extractionReport({ jobId: 'job-2', outcome: 'damaged', qualifiers: [] }),
+      }),
+    );
+    await store.select('b1');
+    expect(Object.keys(store.extractionReports).sort()).toEqual(['job-1', 'job-2']);
+    expect(store.extractionReports['job-1']?.outcome).toBe('readableWithQualifiers');
+    expect(store.selectedExtraction?.jobId).toBe('job-2');
+  });
+
+  it('asks for the password and resumes the extraction check, also after a wrong password', async () => {
+    api.listBackups.mockResolvedValue(backupList([summary({ id: 'enc', state: 'needsPassword', encrypted: true })]));
+    api.checkExtraction.mockResolvedValue({ jobId: 'job-21' });
+    const store = useBackups();
+    await store.refresh();
+    await store.select('enc');
+    await store.checkExtraction('enc');
+    expect(api.checkExtraction).not.toHaveBeenCalled();
+    expect(store.passwordPrompt).toEqual({ backupId: 'enc', error: null, resume: 'extractionCheck' });
+    await store.submitPassword('enc', PASSWORD);
+    expect(api.checkExtraction).toHaveBeenCalledWith('enc', PASSWORD, expect.any(Function));
+    expect(api.openBackup).not.toHaveBeenCalled();
+    lastExtractionHandler()({
+      kind: 'failed',
+      jobId: 'job-21',
+      error: { code: 'wrongPassword', message: 'That password did not unlock the backup.' },
+      stagingRemoved: true,
+    });
+    expect(store.passwordPrompt).toEqual({
+      backupId: 'enc',
+      error: 'That password did not unlock the backup.',
+      resume: 'extractionCheck',
+    });
+    await store.submitPassword('enc', PASSWORD);
+    expect(api.checkExtraction).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(store.$state)).not.toContain(PASSWORD);
+  });
+
+  it('a validation that finishes clears the shown extraction report', async () => {
+    api.getBackupDetails.mockResolvedValueOnce(
+      details(summary(), { lastExtractionReport: extractionReport() }),
+    );
+    api.openBackup.mockResolvedValue({ jobId: 'job-22' });
+    const store = useBackups();
+    await store.refresh();
+    await store.select('b1');
+    expect(store.selectedExtraction).not.toBeNull();
+    await store.check('b1');
+    lastHandler()({ kind: 'finished', jobId: 'job-22', report: report(), stagingRemoved: true });
+    expect(store.selectedDetails?.lastExtractionReport).toBeNull();
+    expect(store.selectedExtraction).toBeNull();
+  });
+
+  it('never shows the previous report as the result when the new one cannot be loaded', async () => {
+    api.getBackupDetails.mockResolvedValueOnce(
+      details(summary(), { lastExtractionReport: extractionReport({ jobId: 'job-old' }) }),
+    );
+    api.checkExtraction.mockResolvedValue({ jobId: 'job-new' });
+    const store = useBackups();
+    await store.refresh();
+    await store.select('b1');
+    expect(store.selectedExtraction?.jobId).toBe('job-old');
+    await store.checkExtraction('b1');
+    api.getBackupDetails.mockRejectedValueOnce(new IpcError('get_backup_details', 'io', 'The details could not be read.'));
+    lastExtractionHandler()({
+      kind: 'extractionFinished',
+      jobId: 'job-new',
+      outcome: 'damaged',
+      sourceChanged: false,
+      stagingRemoved: true,
+      plaintextRemovedAfterRowPass: true,
+    });
+    await flushMicrotasks();
+    expect(store.selectedExtraction).toBeNull();
+    expect(store.latestExtractionJob.b1).toBe('job-new');
+    expect(store.extractionSummaries['job-new']?.outcome).toBe('damaged');
+    expect(store.lastError.b1?.source).toBe('details');
+  });
+
+  it('records which job failed, so Retry can repeat it', async () => {
+    api.checkExtraction.mockResolvedValue({ jobId: 'job-24' });
+    const store = useBackups();
+    await store.refresh();
+    await store.checkExtraction('b1');
+    lastExtractionHandler()({
+      kind: 'failed',
+      jobId: 'job-24',
+      error: { code: 'malformedBackup', message: 'The Messages database copy could not be opened (SQLite error 11).' },
+      stagingRemoved: true,
+    });
+    expect(store.lastError.b1).toEqual({
+      code: 'malformedBackup',
+      message: 'The Messages database copy could not be opened (SQLite error 11).',
+      kind: 'extractionCheck',
+    });
+    // A rejected command is recorded with its kind too.
+    api.checkExtraction.mockRejectedValueOnce(new IpcError('check_extraction', 'io', 'The archive folder is not writable.'));
+    await store.checkExtraction('b1');
+    expect(store.lastError.b1).toEqual({
+      code: 'io',
+      message: 'The archive folder is not writable.',
+      kind: 'extractionCheck',
+    });
+    api.openBackup.mockRejectedValueOnce(new IpcError('open_backup', 'io', 'The archive folder is not writable.'));
+    await store.check('b1');
+    expect(store.lastError.b1?.kind).toBe('validate');
+  });
+
+  it('warns about leftover files after an extraction check that could not clean up', async () => {
+    api.checkExtraction.mockResolvedValue({ jobId: 'job-23' });
+    const store = useBackups();
+    await store.refresh();
+    await store.checkExtraction('b1');
+    lastExtractionHandler()({
+      kind: 'extractionFinished',
+      jobId: 'job-23',
+      outcome: 'skippedNotImportable',
+      sourceChanged: false,
+      stagingRemoved: false,
+      plaintextRemovedAfterRowPass: true,
+    });
+    expect(toasts()).toContain(`warning: ${LEFTOVER_FILES_MESSAGE}`);
   });
 });

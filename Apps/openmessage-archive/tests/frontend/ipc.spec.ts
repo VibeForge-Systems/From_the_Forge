@@ -99,6 +99,7 @@ describe('backup wrappers', () => {
     await ipc.getBackupDetails('b1');
     await ipc.openBackup('b1', null, onEvent);
     await ipc.cancelJob('job-1');
+    await ipc.checkExtraction('b2', null, onEvent);
     expect(fake.calls.map(([c]) => c)).toEqual([
       'list_backups',
       'add_backup_folder',
@@ -106,6 +107,7 @@ describe('backup wrappers', () => {
       'get_backup_details',
       'open_backup',
       'cancel_job',
+      'check_extraction',
     ]);
     expect(fake.calls[0]?.[1]).toBeUndefined();
     expect(fake.calls[1]?.[1]).toBeUndefined();
@@ -115,6 +117,9 @@ describe('backup wrappers', () => {
     const open = fake.calls[4]?.[1] as { request: unknown; onEvent: { onmessage: unknown } };
     expect(open.request).toEqual({ backupId: 'b1', password: null });
     expect(open.onEvent.onmessage).toBe(onEvent);
+    const ext = fake.calls[6]?.[1] as { request: unknown; onEvent: { onmessage: unknown } };
+    expect(ext.request).toEqual({ backupId: 'b2', password: null });
+    expect(ext.onEvent.onmessage).toBe(onEvent);
   });
 
   it('never send a path', async () => {
@@ -124,6 +129,8 @@ describe('backup wrappers', () => {
     await ipc.getBackupDetails('4567ef01');
     await ipc.openBackup('4567ef01', PASSWORD, () => undefined);
     await ipc.cancelJob('job-3');
+    await ipc.checkExtraction('4567ef01', PASSWORD, () => undefined);
+    expect(fake.calls).toHaveLength(7);
     for (const [, args] of fake.calls) {
       for (const s of strings(args)) {
         expect(s).not.toMatch(/^([A-Za-z]:[\\/]|\/)/);
@@ -133,11 +140,31 @@ describe('backup wrappers', () => {
 
   it('put the password only at request.password', async () => {
     await ipc.openBackup('b1', PASSWORD, () => undefined);
-    const args = fake.calls[0]?.[1] as { request: { password: string; backupId: string } };
-    expect(args.request.password).toBe(PASSWORD);
-    const { password: _password, ...rest } = args.request;
-    expect(strings(rest)).not.toContain(PASSWORD);
-    expect(Object.keys(args).sort()).toEqual(['onEvent', 'request']);
+    await ipc.checkExtraction('b1', PASSWORD, () => undefined);
+    expect(fake.calls.map(([c]) => c)).toEqual(['open_backup', 'check_extraction']);
+    for (const [, raw] of fake.calls) {
+      const args = raw as { request: { password: string; backupId: string } };
+      expect(args.request.password).toBe(PASSWORD);
+      const { password: _password, ...rest } = args.request;
+      expect(strings(rest)).not.toContain(PASSWORD);
+      expect(Object.keys(args).sort()).toEqual(['onEvent', 'request']);
+      expect(Object.keys(args.request).sort()).toEqual(['backupId', 'password']);
+    }
+  });
+
+  it('never copy a raw check_extraction rejection, which could echo the password', async () => {
+    fake.respond = () => Promise.reject(`invalid args \`request\`: "${PASSWORD}" is wrong`);
+    const err = (await ipc.checkExtraction('b1', PASSWORD, () => undefined).catch((e: unknown) => e)) as IpcError;
+    expect(err).toBeInstanceOf(IpcError);
+    expect(err.code).toBe('internal');
+    expect(err.command).toBe('check_extraction');
+    expect(JSON.stringify(err)).not.toContain(PASSWORD);
+    expect(strings({ ...err, message: err.message, stack: '' })).not.toContain(PASSWORD);
+    expect(err.message).not.toContain(PASSWORD);
+    // A structured error keeps its code and sentence.
+    fake.respond = () => Promise.reject({ code: 'wrongPassword', message: 'That password did not unlock the backup.' });
+    const wrong = (await ipc.checkExtraction('b1', PASSWORD, () => undefined).catch((e: unknown) => e)) as IpcError;
+    expect(wrong.code).toBe('wrongPassword');
   });
 
   it('never copy a raw open_backup rejection, which could echo the password', async () => {

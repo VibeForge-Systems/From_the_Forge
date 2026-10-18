@@ -89,7 +89,7 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
 }
 
 /**
- * Like `call`, for the one command that carries a secret: a rejection that
+ * Like `call`, for the commands that carry a secret: a rejection that
  * is not a structured IpcError never has its raw text copied anywhere,
  * because a deserialization error could echo the arguments.
  */
@@ -117,11 +117,24 @@ export const ipc = {
     call<ForgetBackupFolderResult>('forget_backup_folder', { request: { locationId } }),
   getBackupDetails: (backupId: string) =>
     call<BackupDetails>('get_backup_details', { request: { backupId } }),
-  /** The only call that carries a secret. Rejections never echo raw text. */
+  /** Carries a secret. Rejections never echo raw text. */
   openBackup: (backupId: string, password: string | null, onEvent: (e: JobEvent) => void) => {
     const channel = new Channel<JobEvent>();
     channel.onmessage = onEvent;
     return callRedacted<JobStarted>('open_backup', {
+      request: { backupId, password },
+      onEvent: channel,
+    });
+  },
+  /**
+   * Validate, then check that the Messages database can be read (counts
+   * only). Carries a secret. The terminal event is a summary; the report is
+   * fetched with getBackupDetails.
+   */
+  checkExtraction: (backupId: string, password: string | null, onEvent: (e: JobEvent) => void) => {
+    const channel = new Channel<JobEvent>();
+    channel.onmessage = onEvent;
+    return callRedacted<JobStarted>('check_extraction', {
       request: { backupId, password },
       onEvent: channel,
     });

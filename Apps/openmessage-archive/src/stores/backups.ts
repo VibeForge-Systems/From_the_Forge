@@ -6,7 +6,10 @@ import type {
   BackupList,
   BackupSummary,
   ErrorCode,
+  ExtractionOutcomeDto,
+  ExtractionReportDto,
   JobEvent,
+  JobKind,
   JobPhase,
 } from '@/types';
 import { useNotifications } from './notifications';
@@ -23,6 +26,7 @@ export interface JobState {
   /** Null until the first event or the command response names it. */
   jobId: string | null;
   backupId: string;
+  kind: JobKind;
   phase: JobPhase | null;
   done: number;
   total: number | null;
@@ -33,6 +37,17 @@ export interface JobState {
 export interface PasswordPrompt {
   backupId: string;
   error: string | null;
+  /** The action to start once the password is entered. */
+  resume: JobKind;
+}
+
+/** What an `extractionFinished` event said, before the report is fetched. */
+export interface ExtractionSummary {
+  backupId: string;
+  outcome: ExtractionOutcomeDto;
+  sourceChanged: boolean;
+  stagingRemoved: boolean;
+  plaintextRemovedAfterRowPass: boolean;
 }
 
 /** An error as the store keeps it: code and sentence only. */
@@ -44,6 +59,8 @@ export interface StoredError {
    * load clears it. Job errors stay until the next check starts.
    */
   source?: 'details';
+  /** The job that failed, so Retry repeats that job. */
+  kind?: JobKind;
 }
 
 /**
@@ -59,6 +76,11 @@ export const useBackups = defineStore('backups', () => {
   const job = ref<JobState | null>(null);
   const passwordPrompt = ref<PasswordPrompt | null>(null);
   const lastError = ref<Record<string, StoredError>>({});
+  /** Extraction summaries and reports, keyed by job id (§17.1). */
+  const extractionSummaries = ref<Record<string, ExtractionSummary>>({});
+  const extractionReports = ref<Record<string, ExtractionReportDto>>({});
+  /** The job id of each backup's latest extraction summary. */
+  const latestExtractionJob = ref<Record<string, string>>({});
   const polling = new Map<string, ReturnType<typeof setTimeout>>();
 
   const selectedSummary = computed<BackupSummary | null>(() => {
@@ -69,6 +91,12 @@ export const useBackups = defineStore('backups', () => {
   const selectedDetails = computed<BackupDetails | null>(() =>
     selectedId.value ? (details.value[selectedId.value] ?? null) : null,
   );
+  /** The selected backup's last extraction report, from the job that made it. */
+  const selectedExtraction = computed<ExtractionReportDto | null>(() => {
+    const last = selectedDetails.value?.lastExtractionReport;
+    if (!last) return null;
+    return extractionReports.value[last.jobId] ?? last;
+  });
   const jobRunning = computed(
     () =>
       (job.value !== null && !job.value.ended) ||
@@ -186,6 +214,8 @@ export const useBackups = defineStore('backups', () => {
     try {
       const d = await ipc.getBackupDetails(id);
       details.value = { ...details.value, [id]: d };
+      const ext = d.lastExtractionReport;
+      if (ext) extractionReports.value = { ...extractionReports.value, [ext.jobId]: ext };
       replaceSummary(d.summary);
       // A details error is over once the details load; a job's error is not.
       if (lastError.value[id]?.source === 'details') clearError(id);
@@ -292,6 +322,8 @@ export const useBackups = defineStore('backups', () => {
             [backupId]: {
               ...d,
               lastReport: event.report,
+              // A validation replaces the whole outcome (§16.1).
+              lastExtractionReport: null,
               lastCleanup: { stagingRemoved: event.stagingRemoved },
               activeJob: null,
             },
@@ -299,13 +331,35 @@ export const useBackups = defineStore('backups', () => {
         }
         break;
       }
+      case 'extractionFinished': {
+        // A summary only (D47): the reports arrive with the details fetch
+        // below, which is an invoke response rather than a channel message.
+        // The previous report is dropped now, so it is never shown as this
+        // job's result if that fetch fails.
+        const d = details.value[backupId];
+        if (d) {
+          details.value = { ...details.value, [backupId]: { ...d, lastExtractionReport: null } };
+        }
+        latestExtractionJob.value = { ...latestExtractionJob.value, [backupId]: event.jobId };
+        extractionSummaries.value = {
+          ...extractionSummaries.value,
+          [event.jobId]: {
+            backupId,
+            outcome: event.outcome,
+            sourceChanged: event.sourceChanged,
+            stagingRemoved: event.stagingRemoved,
+            plaintextRemovedAfterRowPass: event.plaintextRemovedAfterRowPass,
+          },
+        };
+        break;
+      }
       case 'failed':
         if (event.error.code === 'wrongPassword') {
-          passwordPrompt.value = { backupId, error: event.error.message };
+          passwordPrompt.value = { backupId, error: event.error.message, resume: current.kind };
         } else {
           lastError.value = {
             ...lastError.value,
-            [backupId]: { code: event.error.code, message: event.error.message },
+            [backupId]: { code: event.error.code, message: event.error.message, kind: current.kind },
           };
         }
         break;
@@ -325,11 +379,12 @@ export const useBackups = defineStore('backups', () => {
     void loadDetails(backupId);
   }
 
-  async function startJob(backupId: string, password: string | null): Promise<void> {
+  async function startJob(backupId: string, password: string | null, kind: JobKind): Promise<void> {
     clearError(backupId);
     job.value = {
       jobId: null,
       backupId,
+      kind,
       phase: null,
       done: 0,
       total: null,
@@ -337,7 +392,11 @@ export const useBackups = defineStore('backups', () => {
       ended: false,
     };
     try {
-      const started = await ipc.openBackup(backupId, password, (e) => handleEvent(backupId, e));
+      const onEvent = (e: JobEvent) => handleEvent(backupId, e);
+      const started =
+        kind === 'extractionCheck'
+          ? await ipc.checkExtraction(backupId, password, onEvent)
+          : await ipc.openBackup(backupId, password, onEvent);
       const current = job.value;
       // Events and the response are not ordered: the job may already have
       // ended, or an event may already have named it.
@@ -351,38 +410,48 @@ export const useBackups = defineStore('backups', () => {
       const e = asStored(error);
       switch (e.code) {
         case 'passwordRequired':
-          passwordPrompt.value = { backupId, error: null };
+          passwordPrompt.value = { backupId, error: null, resume: kind };
           break;
         case 'passwordTooLong':
         case 'wrongPassword':
-          passwordPrompt.value = { backupId, error: e.message };
+          passwordPrompt.value = { backupId, error: e.message, resume: kind };
           break;
         case 'busy':
           toast('warning', e.message);
           break;
         default:
-          lastError.value = { ...lastError.value, [backupId]: e };
+          lastError.value = { ...lastError.value, [backupId]: { ...e, kind } };
       }
     }
   }
 
-  /** Validate: unencrypted backups start at once; encrypted ones ask first. */
-  async function check(id: string): Promise<void> {
+  /**
+   * Start a job: validation, or the extraction check. Unencrypted backups
+   * start at once; encrypted ones ask for the password first, and the
+   * prompt remembers which job to resume.
+   */
+  async function check(id: string, kind: JobKind = 'validate'): Promise<void> {
     const summary = details.value[id]?.summary ?? list.value?.backups.find((b) => b.id === id);
     if (summary?.state === 'needsPassword') {
-      passwordPrompt.value = { backupId: id, error: null };
+      passwordPrompt.value = { backupId: id, error: null, resume: kind };
       return;
     }
-    await startJob(id, null);
+    await startJob(id, null, kind);
+  }
+
+  /** Run the extraction check (M3). */
+  async function checkExtraction(id: string): Promise<void> {
+    await check(id, 'extractionCheck');
   }
 
   async function submitPassword(id: string, password: string): Promise<void> {
+    const resume = passwordPrompt.value?.backupId === id ? passwordPrompt.value.resume : 'validate';
     if (new TextEncoder().encode(password).length > PASSWORD_MAX_BYTES) {
-      passwordPrompt.value = { backupId: id, error: PASSWORD_TOO_LONG_MESSAGE };
+      passwordPrompt.value = { backupId: id, error: PASSWORD_TOO_LONG_MESSAGE, resume };
       return;
     }
     passwordPrompt.value = null;
-    await startJob(id, password);
+    await startJob(id, password, resume);
   }
 
   function closePrompt(): void {
@@ -406,14 +475,19 @@ export const useBackups = defineStore('backups', () => {
     job,
     passwordPrompt,
     lastError,
+    extractionSummaries,
+    extractionReports,
+    latestExtractionJob,
     selectedSummary,
     selectedDetails,
+    selectedExtraction,
     jobRunning,
     refresh,
     addFolder,
     forget,
     select,
     check,
+    checkExtraction,
     submitPassword,
     closePrompt,
     cancel,

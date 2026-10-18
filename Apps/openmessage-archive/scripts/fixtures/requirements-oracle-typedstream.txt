@@ -1,0 +1,5 @@
+# Oracle 2 for the typedstream vectors (M3 spec section 20.4). Dev-only
+# tooling: run as a black box by verify_typedstream_with_oracle.py, never
+# imported, never shipped. pytypedstream is LGPL-3.0-or-later.
+# Install with: pip install --require-hashes -r requirements-oracle-typedstream.txt
+pytypedstream==0.1.0 --hash=sha256:499920d4cb8bec8fd9d9cdd4c6312765eb418c398c10371ab1c9c0051104d278

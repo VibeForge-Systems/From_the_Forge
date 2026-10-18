@@ -37,13 +37,17 @@ Two automated audits enforce the license policy:
 | sha1 / sha2 | 0.11.0 / 0.11.0 | MIT OR Apache-2.0 | HMAC-SHA1 and HMAC-SHA256 for PBKDF2; SHA-1 for fileIDs; SHA-256 for ids and staging names. Default features off, `zeroize` on |
 | zeroize | 1.9.1 | Apache-2.0 OR MIT | Wiping passwords, keys and plaintext buffers |
 | plist | 1.10.1 | MIT | Property lists, read only through the budgeted event-stream reader. Default features (`serde`) off; `enable_unstable_features_that_may_break_with_minor_version_bumps` on, because that feature is what makes `plist::stream` public. The exact pin makes any change to that API a reviewed upgrade |
-| rusqlite | 0.40.2 | MIT | Read-only access to staged copies of Manifest.db. Features `bundled` (compiles SQLite 3.53.2, public-domain C source, through libsqlite3-sys 0.38.2, MIT) and `limits` (`Connection::set_limit`; an empty feature that adds no crates) |
+| rusqlite | 0.40.2 | MIT | Read-only access to staged copies of Manifest.db and (M3) sms.db. Features `bundled` (compiles SQLite 3.53.2, public-domain C source, through libsqlite3-sys 0.38.2, MIT), `limits` (`Connection::set_limit`) and `hooks` (the authorizer and progress handler that guard staged sms.db connections). `limits` and `hooks` are empty features that add no crates. `cache` (statement cache) stays off, because it adds `hashlink` |
 | pbkdf2 (dev only) | 0.13.0 | MIT OR Apache-2.0 | Differential tests against the in-crate PBKDF2; never linked into the app |
 
-`tracing-subscriber` (above) is also a dev-dependency of `oma-backup`, for
-its log-hygiene test. The shell (`src-tauri`) depends on the workspace crate
-`oma-backup` from M2; that adds no third-party crate beyond the list above.
-No JavaScript dependency was added in M2: `Channel` comes from
+`tracing-subscriber` (above) is also a dev-dependency of `oma-backup` and
+`oma-messages`, for their log-hygiene tests. The shell (`src-tauri`) depends
+on the workspace crates `oma-backup` (from M2) and `oma-messages` (from M3);
+neither adds a third-party crate beyond the list above. `oma-messages`
+depends only on crates already listed (`rusqlite`, `sha2`, `thiserror`,
+`tracing`, `zeroize`) and on the workspace crates `oma-backup` and
+`oma-fs`; its typedstream decoder is our own code, not a dependency. No
+JavaScript dependency was added in M2 or M3: `Channel` comes from
 `@tauri-apps/api` 2.12.4, which was already a dependency.
 
 The RustCrypto crates resolve to one `cipher` (0.5.2), one `digest` (0.11.3)
@@ -105,14 +109,22 @@ correct because Bootstrap's JavaScript is not used.
 ### Dev-only Python tooling
 
 Used only to generate and check the synthetic test fixtures in
-`tests/fixtures/backups/`. Nothing here is shipped, and CI runs no Python:
-the generated files are committed and checked by `SHA256SUMS`.
+`tests/fixtures/backups/`, `tests/fixtures/messages/` and
+`tests/fixtures/typedstream/`. Nothing here is shipped, and CI runs no
+Python: the generated files are committed and checked by `SHA256SUMS`.
+`make_synthetic_messages.py` needs only `requirements.txt`, and
+`make_synthetic_typedstream.py` only the standard library.
 
 | Package | Version | License | Use |
 |---|---|---|---|
 | cryptography | 50.0.2 | Apache-2.0 OR BSD-3-Clause | AES, key wrap and padding in `scripts/fixtures/make_synthetic_backups.py` (pinned in `scripts/fixtures/requirements.txt`) |
 | iphone_backup_decrypt | 0.11.2 | MIT | Independent oracle, run by hand through `scripts/fixtures/verify_with_oracle.py`. Used as a black box; not distributed and not ported. Pinned in `scripts/fixtures/requirements-oracle.txt` |
 | pycryptodome | 4.0.1 | BSD-2-Clause AND Unlicense | The oracle's own dependency (`Requires-Dist: pycryptodome>=3.23.0`); it performs the oracle's AES. Pinned in `scripts/fixtures/requirements-oracle.txt` at the version the recorded oracle run used |
+| pytypedstream | 0.1.0 | **LGPL-3.0-or-later** | Black-box oracle for the typedstream vectors (M3 oracle run 2), run as a subprocess through `scripts/fixtures/verify_typedstream_with_oracle.py` in its own virtual environment. Never imported by our code, never shipped, not run in CI. Pinned with its wheel hash in `scripts/fixtures/requirements-oracle-typedstream.txt` |
+
+Oracle runs 3 and 4 (M3) also use the imessage-exporter 4.3.0 release
+binary (GPL-3.0) as a black box from a scratch directory. It is not a
+dependency of anything here, and no wrapper for it is committed.
 
 ## System and platform components
 
@@ -142,6 +154,8 @@ them locally, is fine. See [supported-formats.md](supported-formats.md).
 | pyiosbackup | GPL-3.0 |
 | libimobiledevice (including `idevicebackup2`) | LGPL-2.1+ |
 | StackOverflow answer 13793043 (backup decryption) | CC BY-SA (the version depends on the revision date; not checked) |
+| pytypedstream (typedstream; black-box oracle only) | LGPL-3.0-or-later |
+| ChatExportKnowledge (sms.db facts, restated with attribution) | CC BY 4.0 |
 | heic (imazen) | AGPL-3.0 |
 
 ## Upgrade log
@@ -161,3 +175,12 @@ them locally, is fine. See [supported-formats.md](supported-formats.md).
 | on merge (M2) | New setting `backupFolders` (settings format stays 1) | The Backups page remembers added folders. **Downgrade caveat:** an M1 build ignores the field and drops it on its next save |
 | on merge (M2) | Tauri channels for job progress, with no `core:*` permission | Relies on Tauri 2.12.4 exempting `plugin:__TAURI_CHANNEL__\|fetch` from the ACL check, a special case marked "remove in v3". **Every Tauri upgrade must re-verify, by hand, that a `finished` event over 8 KiB arrives without a `core:*` grant** |
 | on merge (M2) | The shell depends on the workspace crate `oma-backup` | Backup discovery, validation and the job worker; no new third-party crate |
+| on merge (M3, PR 3a) | rusqlite feature `hooks` enabled | `sqlite3_set_authorizer` and `sqlite3_progress_handler` for the staged sms.db connection (read-only authorizer, op budgets). `hooks = []` in rusqlite 0.40.2's `Cargo.toml`: no new code from outside the rusqlite crate, and no new third-party crate; `Cargo.lock` is unchanged. `cargo deny check` passes with the unchanged `deny.toml` |
+| on merge (M3, PR 3a) | Dev and test builds compile `libsqlite3-sys` (the bundled SQLite) at `opt-level = 3` | Cargo passes the profile's opt level to the `cc` build, so whole-database passes and integrity checks in tests run at release speed. Release builds are unaffected. The matching override for `oma-messages` is added with that crate (PR 3b), because Cargo warns about a profile entry for a package that does not exist yet |
+| on merge (M3, PR 3b) | New workspace crate `oma-messages` (sms.db schema probe and record passes), at `opt-level = 3` in dev and test builds | Its dependencies are crates already in the workspace (`oma-backup`, `rusqlite` with the existing `bundled`, `limits` and `hooks` features, `thiserror`, `tracing`, `zeroize`; `tempfile` for tests). No new third-party crate: the only `Cargo.lock` change is the crate's own entry. `cargo deny check` passes with the unchanged `deny.toml` |
+| on merge (M3, PR 3c) | `oma-messages` gains the dev-dependencies `serde_json` and `sha2`, both already workspace dependencies | Typedstream vector tests read `expected.json`; the fixture-integrity test hashes the vectors. No new third-party crate: `Cargo.lock` changes only in `oma-messages`'s own dependency list. `cargo deny check` passes with the unchanged `deny.toml` |
+| on merge (M3, PR 3c) | Dev-only Python tooling: pytypedstream 0.1.0 (LGPL-3.0-or-later) as a black-box oracle, pinned with its wheel hash in `scripts/fixtures/requirements-oracle-typedstream.txt` | Oracle run 2 for the typedstream vectors. It is run as a subprocess, never imported, never shipped and not run in CI. `make_synthetic_typedstream.py` itself needs only the standard library |
+| on merge (M3, PR 3d) | `sha2` moves from a dev-dependency to a dependency of `oma-messages` | `GuidSets` hashes message, reply-originator and association-target GUIDs with truncated SHA-256 (M3 §7.3, D46). `sha2` is already a workspace dependency (through `oma-backup`); `plist` is still reached only through `oma_backup::bplist`. No new third-party crate, and `Cargo.lock` is unchanged. `cargo deny check` passes with the unchanged `deny.toml` |
+| on merge (M3, PR 3e) | `oma-messages` depends on the workspace crate `oma-fs`, and gains the dev-dependency `tracing-subscriber` (already a workspace dependency) | `oma_fs::resolve_within` gates attachment lookups (I2); the log-hygiene test captures every event with a global subscriber. No new third-party crate: `Cargo.lock` changes only in `oma-messages`'s own dependency list. `cargo deny check` passes with the unchanged `deny.toml` |
+| on merge (M3, PR 3e) | Dev-only Python tooling: `make_synthetic_messages.py` needs only the M2 generator's `requirements.txt` (`cryptography`); oracle run 1 reuses `requirements-oracle.txt` | The messages catalogue and its oracle check. Oracle runs 3 and 4 use the imessage-exporter 4.3.0 binary (GPL-3.0) as a black box in a scratch directory; it is not a dependency, is never committed, and is not run in CI |
+| on merge (M3, PR 3f) | The shell depends on the workspace crate `oma-messages` | The extraction-check job (`check_extraction`). No new third-party crate: the only `Cargo.lock` change is `oma-messages` added to the shell's own dependency list. No new npm package. `cargo deny check` passes with the unchanged `deny.toml` |

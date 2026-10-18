@@ -45,11 +45,11 @@ describe('ArchiveView', () => {
     expect(steps[1]).not.toContain('Planned');
     expect(wrapper.find('.oma-steps a[href="/backups"]').exists()).toBe(true);
     expect(steps[2]).toContain('Import messages.');
-    expect(steps[2]).toContain('Planned · M3');
+    expect(steps[2]).toContain('Planned · M4');
     expect(steps[3]).toContain('Planned · M5');
   });
 
-  it('offers Find backups and never an enabled Import button before milestone 3', () => {
+  it('offers Find backups and never an enabled Import button before milestone 4', () => {
     const settings = useSettings();
     settings.loaded = true;
     settings.snapshot = snapshot({ archiveDirectory: '/data/archives' });
@@ -61,8 +61,9 @@ describe('ArchiveView', () => {
     expect(find?.attributes('href')).toBe('/backups');
     const importButton = wrapper.findAll('button').find((b) => b.text().includes('Import messages'));
     expect(importButton?.attributes('disabled')).toBeDefined();
-    expect(wrapper.text()).toContain('Planned · M3');
-    expect(wrapper.text()).not.toContain('Planned · M2');
+    expect(wrapper.text()).toContain('Planned · M4');
+    expect(wrapper.text()).not.toContain('Planned · M3');
+    expect(wrapper.text()).toContain('Importing messages into the archive arrives in milestone 4.');
     expect(wrapper.text()).toContain('Backup passwords are used once and never saved.');
   });
 

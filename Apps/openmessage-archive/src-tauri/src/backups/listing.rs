@@ -434,6 +434,10 @@ pub fn details(
         archive_sync_provider: archive.sync_provider.clone(),
         archive_configured: archive.configured,
         last_report: last.report,
+        last_extraction_report: last.extraction,
+        ios_version_untested: super::extraction::ios_version_untested(
+            summary.ios_version.as_ref().map(|v| v.value.as_str()),
+        ),
         last_cleanup: last.cleanup,
         active_job: jobs.active_for(insp.id.as_str()),
         summary,

@@ -1,0 +1,27 @@
+[package]
+name = "oma-messages"
+description = "Schema probe and typed, read-only record passes over a staged iPhone Messages database (sms.db) for OpenMessage Archive."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+oma-backup.workspace = true
+oma-fs.workspace = true
+rusqlite.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
+tracing-subscriber.workspace = true # log-hygiene test
+
+[lints]
+workspace = true

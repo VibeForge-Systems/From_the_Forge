@@ -33,16 +33,17 @@ fn check_extraction(name: &str, ob: &OpenBackup) {
     // Opens through the public hardened open M3 will use.
     let c = db.open(&CancelToken::new()).expect("open staged sms");
     let note: String = c
-        .conn()
-        .query_row("SELECT note FROM synthetic_marker", [], |r| r.get(0))
+        .prepare_read("SELECT note FROM synthetic_marker")
+        .expect("prepare")
+        .query_row([], |r| r.get(0))
         .expect("query");
     assert!(note.starts_with("synthetic"));
     assert!(
-        c.conn()
-            .execute("DELETE FROM synthetic_marker", [])
-            .is_err(),
-        "query_only"
+        c.prepare_read("DELETE FROM synthetic_marker").is_err(),
+        "the authorizer refuses writes"
     );
+    assert_eq!(c.authorizer_denials(), 1);
+    assert_eq!(c.total_changes(), 0);
     drop(c);
 
     let entry = ob

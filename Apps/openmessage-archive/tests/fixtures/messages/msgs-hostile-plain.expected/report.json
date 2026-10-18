@@ -1,0 +1,589 @@
+{
+ "attachments": {
+  "by_class": {
+   "absolute_private_var_mobile": 0,
+   "absolute_var_mobile": 0,
+   "mac_messages": 0,
+   "other_home_relative": 0,
+   "sms_attachments": 9,
+   "sms_sticker_cache": 0,
+   "unrecognized": 1
+  },
+  "declared_total_bytes": 0,
+  "filename_null": 0,
+  "filename_too_long": 1,
+  "hidden": 0,
+  "linked": 11,
+  "lookup": {
+   "ambiguous": 0,
+   "found": 0,
+   "invalid_entry": 0,
+   "not_attempted": {
+    "class_not_looked_up": 0,
+    "column_absent": 0,
+    "null": 0,
+    "too_long": 1,
+    "unreadable": 0,
+    "unrecognized": 1,
+    "unusual_name": 8
+   },
+   "not_found_at_assumed_key": 0,
+   "not_listed_at_sourced_key": 1
+  },
+  "not_linked": 0,
+  "present_blob_bytes": 0,
+  "probes": {
+   "class_key_unavailable": 0,
+   "invalid_entry": 0,
+   "key_does_not_unwrap": 0,
+   "missing": 0,
+   "no_key": 0,
+   "no_protection_class": 0,
+   "not_a_file": 0,
+   "not_probed": 0,
+   "not_regular": 0,
+   "other": 0,
+   "present": 0,
+   "unreadable": 0
+  },
+  "rows": 11,
+  "stickers": 0,
+  "transfer_state": {
+   "entries": [],
+   "null": 11,
+   "other": 0,
+   "unreadable": 0
+  },
+  "with_genmoji_description": 0
+ },
+ "chats": {
+  "archived": 1,
+  "by_service": {
+   "empty": 0,
+   "imessage": 2,
+   "imessage_lite": 0,
+   "not_text": 0,
+   "other": 0,
+   "rcs": 0,
+   "sms": 1
+  },
+  "is_filtered": {
+   "entries": [
+    [
+     0,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     2,
+     1
+    ]
+   ],
+   "null": 0,
+   "other": 0,
+   "unreadable": 0
+  },
+  "rows": 3,
+  "style": {
+   "entries": [
+    [
+     3,
+     1
+    ],
+    [
+     43,
+     1
+    ],
+    [
+     45,
+     1
+    ]
+   ],
+   "null": 0,
+   "other": 0,
+   "unreadable": 0
+  },
+  "with_no_other_handle": 0,
+  "with_one_other_handle": 1,
+  "with_properties": 1,
+  "with_several_other_handles": 2
+ },
+ "database": {
+  "header_says_wal": false,
+  "integrity": "ok",
+  "size_matches": true,
+  "staged_bytes": 109568,
+  "wal_bytes": null,
+  "wal_frames_after_first_invalid": null,
+  "wal_listed": false,
+  "wal_outcome": "not_listed",
+  "wal_size_matches": null,
+  "wal_valid_committed_frames": null
+ },
+ "dates": {
+  "chat_last_read": {
+   "ambiguous": 0,
+   "nanoseconds": 1,
+   "negative": 0,
+   "null": 0,
+   "seconds": 1,
+   "unreadable": 0,
+   "zero": 1
+  },
+  "chat_message_date": {
+   "ambiguous": 0,
+   "nanoseconds": 30,
+   "negative": 0,
+   "null": 0,
+   "seconds": 2,
+   "unreadable": 0,
+   "zero": 2
+  },
+  "earliest_message": 1768307200000000000,
+  "edit_entry_date": {
+   "ambiguous": 0,
+   "nanoseconds": 0,
+   "negative": 0,
+   "null": 0,
+   "seconds": 0,
+   "unreadable": 0,
+   "zero": 0
+  },
+  "excluded_after_checked_at": 1,
+  "excluded_before_floor": 0,
+  "excluded_not_classified": 3,
+  "excluded_scheduled": 0,
+  "latest_message": 1768308880000000000,
+  "message_date": {
+   "ambiguous": 1,
+   "nanoseconds": 24,
+   "negative": 1,
+   "null": 0,
+   "seconds": 1,
+   "unreadable": 1,
+   "zero": 0
+  },
+  "recoverable_delete_date": {
+   "ambiguous": 0,
+   "nanoseconds": 1,
+   "negative": 0,
+   "null": 0,
+   "seconds": 0,
+   "unreadable": 0,
+   "zero": 0
+  }
+ },
+ "failures": {
+  "aggregate_over_budget": 0,
+  "assoc_guid_unparsed": 1,
+  "attachment_ambiguous": 0,
+  "attachment_blob_missing": 0,
+  "attachment_blob_unreadable": 0,
+  "attachment_invalid_entry": 0,
+  "attachment_key_problem": 0,
+  "attachment_unusual_name": 8,
+  "date_ambiguous": 1,
+  "date_negative": 1,
+  "orphan_join_row": 9,
+  "summary_not_dictionary": 1,
+  "summary_plist_budget": 1,
+  "summary_plist_invalid": 1,
+  "summary_shape": 1,
+  "summary_too_large": 0,
+  "summary_unknown_keys": 0,
+  "typedstream": {
+   "BadReference": 1,
+   "BadRunIndex": 1,
+   "Budget": 0,
+   "InvalidUtf8": 1,
+   "MaterialisationBudget": 0,
+   "NotAttributedString": 0,
+   "RunLengthMismatch": 1,
+   "RunOverflow": 0,
+   "RunSplitsSurrogate": 0,
+   "TooDeep": 1,
+   "TrailingBytes": 1,
+   "Truncated": 1,
+   "UnexpectedTag": 0,
+   "UnsupportedHeader": 1,
+   "UnsupportedType": 1
+  },
+  "unknown_attribute_class": 1,
+  "unknown_attribute_key": 1,
+  "unreadable_attribute_value": 1,
+  "values": {
+   "blob_in_text_column": 2,
+   "bool_out_of_range": 2,
+   "invalid_utf8_text": 1,
+   "oversized_by_column": {
+    "attachment.filename": 1,
+    "message.associated_message_guid": 1,
+    "message.guid": 1,
+    "message.subject": 1
+   },
+   "plist_invalid": 1,
+   "plist_not_dictionary": 1,
+   "plist_over_budget": 1,
+   "real_in_integer_column": 1,
+   "text_in_blob_column": 1,
+   "type_mismatch": 7,
+   "value_oversized": 4
+  }
+ },
+ "handles": {
+  "by_service": {
+   "empty": 0,
+   "imessage": 1,
+   "imessage_lite": 1,
+   "not_text": 0,
+   "other": 1,
+   "rcs": 1,
+   "sms": 1
+  },
+  "rows": 5
+ },
+ "links": {
+  "chat_handle_rows": 8,
+  "chat_message_rows": 34,
+  "message_attachment_rows": 11,
+  "messages_in_no_chat": 2,
+  "messages_in_no_chat_recently_deleted": 1,
+  "messages_in_several_chats": 2,
+  "orphan_chat_handle_chat": 1,
+  "orphan_chat_handle_handle": 1,
+  "orphan_chat_message_chat": 1,
+  "orphan_chat_message_message": 6,
+  "orphan_message_attachment_attachment": 0,
+  "orphan_message_attachment_message": 0,
+  "orphan_recoverable_chat": 0,
+  "orphan_recoverable_message": 0,
+  "recoverable_rows": 1
+ },
+ "messages": {
+  "associations": {
+   "no_association_type": 0,
+   "poll_vote": 0,
+   "sticker_legacy": 0,
+   "tapback_added": {
+    "dislike": 0,
+    "emoji": 0,
+    "emphasize": 0,
+    "laugh": 0,
+    "like": 0,
+    "love": 1,
+    "question": 0,
+    "sticker": 0
+   },
+   "tapback_removed": {
+    "dislike": 0,
+    "emoji": 0,
+    "emphasize": 0,
+    "laugh": 0,
+    "like": 0,
+    "love": 0,
+    "question": 0,
+    "sticker": 0
+   },
+   "target_not_found": 0,
+   "targets": {
+    "bare": 0,
+    "bubble": 0,
+    "null": 0,
+    "oversized": 1,
+    "part": 0,
+    "unparsed": 1,
+    "unreadable": 0
+   },
+   "type_not_recorded": 1,
+   "unknown_type": 0
+  },
+  "bodies": {
+   "decode_failed": 7,
+   "decoded_degraded": 3,
+   "decoded_ok": 4,
+   "more_than_one_part": 1,
+   "not_decoded": 0,
+   "text_by_attributed": {
+    "absent/absent": 0,
+    "absent/null": 0,
+    "absent/present": 0,
+    "absent/withheld": 0,
+    "empty/absent": 0,
+    "empty/null": 0,
+    "empty/present": 0,
+    "empty/withheld": 0,
+    "non_empty/absent": 0,
+    "non_empty/null": 13,
+    "non_empty/present": 13,
+    "non_empty/withheld": 0,
+    "null/absent": 0,
+    "null/null": 0,
+    "null/present": 1,
+    "null/withheld": 0,
+    "withheld/absent": 0,
+    "withheld/null": 0,
+    "withheld/present": 0,
+    "withheld/withheld": 1
+   },
+   "text_differs_from_decoded": 5,
+   "text_equals_decoded": 1,
+   "with_audio_transcription": 0,
+   "with_link_key": 1,
+   "with_mention": 1
+  },
+  "by_service": {
+   "empty": 0,
+   "imessage": 28,
+   "imessage_lite": 0,
+   "not_text": 0,
+   "other": 0,
+   "rcs": 0,
+   "sms": 0
+  },
+  "cache_has_attachments_set": 0,
+  "date_retracted_set": 0,
+  "direction_null": 0,
+  "direction_unreadable": 1,
+  "ec_single_entry_parts": 0,
+  "edit_labels": {
+   "date_edited_no_body": 0,
+   "date_edited_only": 0,
+   "edit_history": 0,
+   "no_edit_recorded": 23,
+   "not_recorded": 0,
+   "summary_unreadable": 3,
+   "undetermined": 1,
+   "unsent_parts": 1,
+   "unsent_parts_and_edit_history": 0
+  },
+  "filter_action": {
+   "entries": [
+    [
+     0,
+     28
+    ]
+   ],
+   "null": 0,
+   "other": 0,
+   "unreadable": 0
+  },
+  "from_me": 2,
+  "group_actions": 1,
+  "handle_unmatched": 1,
+  "item_kinds": {
+   "audio_kept": 0,
+   "background_changed": 0,
+   "background_removed": 0,
+   "group_photo_changed": 0,
+   "group_photo_removed": 0,
+   "group_renamed": 0,
+   "legacy_shared_location": 0,
+   "message": 26,
+   "own_number_changed": 0,
+   "participant_added": 0,
+   "participant_left": 0,
+   "participant_removed": 0,
+   "share_play": 0,
+   "unknown": 2
+  },
+  "not_from_me": 25,
+  "not_from_me_handle_zero": 0,
+  "other_handle_unmatched": 0,
+  "other_rows": 25,
+  "payload_data_present": 1,
+  "recently_deleted": 0,
+  "replies": 0,
+  "reply_originator_not_found": 0,
+  "reply_to_guid_set": 0,
+  "rows": 28,
+  "scheduled": 0,
+  "summaries": {
+   "null": 24,
+   "oversized": 0,
+   "parsed": 1,
+   "tmp_key_present": 0,
+   "unreadable": 3
+  },
+  "with_association": 2
+ },
+ "recently_deleted": {
+  "chat_recoverable_message_join": 1,
+  "deleted_messages": 1,
+  "recoverable_message_part": 1,
+  "sync_deleted_attachments": 0,
+  "sync_deleted_chats": 0,
+  "sync_deleted_messages": 0,
+  "unsynced_removed_recoverable_messages": 0
+ },
+ "schema": {
+  "client_version": 17001,
+  "client_version_parsed": true,
+  "encoding": "utf8",
+  "features": [
+   "attributed_body",
+   "tapbacks",
+   "emoji_tapbacks",
+   "replies",
+   "edits_and_unsends",
+   "recently_deleted",
+   "scheduled",
+   "filtering",
+   "attachments",
+   "genmoji"
+  ],
+  "indexes": 4,
+  "internal_objects": 1,
+  "stat_tables": 0,
+  "tables": [
+   {
+    "generated": 0,
+    "missing": [],
+    "present": true,
+    "rows": 28,
+    "table": "message",
+    "unknown": 2,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": true,
+    "rows": 5,
+    "table": "handle",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": true,
+    "rows": 3,
+    "table": "chat",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": true,
+    "rows": 34,
+    "table": "chat_message_join",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": true,
+    "rows": 8,
+    "table": "chat_handle_join",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": true,
+    "rows": 11,
+    "table": "message_attachment_join",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": true,
+    "rows": 11,
+    "table": "attachment",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": true,
+    "rows": 1,
+    "table": "chat_recoverable_message_join",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": true,
+    "rows": 1,
+    "table": "recoverable_message_part",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": true,
+    "rows": 1,
+    "table": "deleted_messages",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": true,
+    "rows": 0,
+    "table": "sync_deleted_messages",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": true,
+    "rows": 0,
+    "table": "sync_deleted_chats",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": true,
+    "rows": 0,
+    "table": "sync_deleted_attachments",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": true,
+    "rows": 0,
+    "table": "unsynced_removed_recoverable_messages",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": true,
+    "rows": 2,
+    "table": "_SqliteDatabaseProperties",
+    "unknown": 0,
+    "wrong_case": 0
+   }
+  ],
+  "triggers": 1,
+  "unknown_tables": 1,
+  "views": 2
+ },
+ "status": {
+  "kind": "readable",
+  "qualifiers": [
+   "unknown_tables:1",
+   "unknown_columns:2",
+   "values_withheld"
+  ]
+ }
+}

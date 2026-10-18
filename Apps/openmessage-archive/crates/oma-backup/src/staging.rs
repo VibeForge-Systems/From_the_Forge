@@ -69,7 +69,17 @@ fn new_dir(path: &Path) -> io::Result<()> {
     }
 }
 
-/// Create a new file that must not exist yet: mode 0600 on Unix.
+/// `FILE_ATTRIBUTE_TEMPORARY`: a hint to keep the file in the cache.
+#[cfg(windows)]
+pub const FILE_ATTRIBUTE_TEMPORARY: u32 = 0x100;
+
+/// Create a new file that must not exist yet: mode 0600 on Unix. On Windows
+/// the file is marked temporary; the attribute survives the `.partial`
+/// rename. `CreateFileW` ignores `FILE_ATTRIBUTE_NOT_CONTENT_INDEXED` (the
+/// Windows CI runner showed 0x120, without 0x2000), so staged files are not
+/// excluded from Windows Search; setting it would need `SetFileAttributesW`,
+/// which this crate cannot call without `unsafe`. Antivirus scanning is not
+/// prevented either.
 pub(crate) fn create_new_file(path: &Path) -> io::Result<File> {
     let mut o = OpenOptions::new();
     o.write(true).create_new(true);
@@ -77,6 +87,11 @@ pub(crate) fn create_new_file(path: &Path) -> io::Result<File> {
     {
         use std::os::unix::fs::OpenOptionsExt;
         o.mode(0o600);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        o.attributes(FILE_ATTRIBUTE_TEMPORARY);
     }
     o.open(path)
 }

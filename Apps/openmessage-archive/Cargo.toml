@@ -38,7 +38,7 @@ pbkdf2 = { version = "=0.13.0", default-features = false, features = ["hmac"] } 
 # The event-stream API (`plist::stream`) that the budgeted reader needs is behind
 # this feature. The exact pin makes every upgrade a reviewed change.
 plist = { version = "=1.10.1", default-features = false, features = ["enable_unstable_features_that_may_break_with_minor_version_bumps"] }
-rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled", "limits"] }
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled", "limits", "hooks"] }
 sha1 = { version = "=0.11.0", default-features = false, features = ["zeroize"] }
 sha2 = { version = "=0.11.0", default-features = false, features = ["zeroize"] }
 zeroize = { version = "=1.9.1", features = ["derive", "std"] }
@@ -50,6 +50,7 @@ tauri-plugin-opener = "=2.7.2"
 
 oma-fs = { path = "crates/oma-fs" }
 oma-backup = { path = "crates/oma-backup" }
+oma-messages = { path = "crates/oma-messages" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -77,4 +78,10 @@ opt-level = 3
 [profile.dev.package.aes]
 opt-level = 3
 [profile.dev.package.oma-backup]
+opt-level = 3
+# The bundled SQLite C build: Cargo passes this profile's OPT_LEVEL to `cc`.
+# The M3 checks run whole-database passes and integrity checks in tests.
+[profile.dev.package.libsqlite3-sys]
+opt-level = 3
+[profile.dev.package.oma-messages]
 opt-level = 3

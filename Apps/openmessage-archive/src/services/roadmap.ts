@@ -38,21 +38,23 @@ export const CAPABILITIES: readonly Capability[] = [
     milestone: 2,
     status: 'available',
     summary:
-      'Discover local backups, show their details, unlock encrypted ones with your password, and validate the file index. Messages are not extracted until milestone 3.',
+      'Discover local backups, show their details, unlock encrypted ones with your password, and validate the file index.',
   },
   {
     id: 'extraction',
-    title: 'Extract Messages and attachments',
+    title: 'Check that messages can be read',
     milestone: 3,
-    status: 'planned',
-    summary: 'Locate sms.db, discover its schema version, and extract messages and attachments.',
+    status: 'available',
+    summary:
+      'Locate the Messages database, detect its layout, and check that messages, chats, addresses and attachment references can be read. Shows counts only; nothing is saved until milestone 4.',
   },
   {
     id: 'archive-database',
     title: 'Archive database',
     milestone: 4,
     status: 'planned',
-    summary: 'Versioned SQLite archive with transactional, resumable imports and FTS5 indexes.',
+    summary:
+      'Extract messages and copy attachments into a versioned SQLite archive, with transactional, resumable imports and FTS5 indexes.',
   },
   {
     id: 'viewer',

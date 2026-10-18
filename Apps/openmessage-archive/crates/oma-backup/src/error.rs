@@ -77,6 +77,16 @@ pub enum BackupError {
         /// The primary result code (`extended & 0xff`), if there was one.
         code: Option<i32>,
     },
+    /// A source file changed while it was being copied into staging: its
+    /// length or modification time differed after the copy. The staged copy
+    /// may be inconsistent, so it is removed.
+    #[error("source changed during copy")]
+    SourceChanged,
+    /// A staged database's schema could not be loaded under the limits the
+    /// caller asked for, but loads under [`crate::StagedDbLimits::ceiling`].
+    /// The caller decides whether that makes the database unsupported.
+    #[error("schema exceeds limits")]
+    SchemaExceedsLimits,
     /// The staging directory failed a safety guard.
     #[error("staging refused")]
     StagingRefused(StagingRefusal),
@@ -260,8 +270,14 @@ pub enum MalformedDetail {
 
 /// Map a rusqlite error to [`BackupError`], keeping only the primary code.
 /// An interrupt after cancellation becomes [`BackupError::Cancelled`].
+/// A prepare error that rusqlite reports with an SQL offset keeps its code
+/// too; its message and SQL text are dropped.
 pub(crate) fn sqlite_error(err: &rusqlite::Error, cancelled: bool) -> BackupError {
-    match err.sqlite_error() {
+    let failure = match err {
+        rusqlite::Error::SqlInputError { error, .. } => Some(error),
+        other => other.sqlite_error(),
+    };
+    match failure {
         Some(e) => {
             if e.code == rusqlite::ErrorCode::OperationInterrupted && cancelled {
                 return BackupError::Cancelled;
@@ -307,6 +323,19 @@ mod tests {
         let shown = format!("{mapped:?} {mapped}");
         assert!(!shown.contains("secret"));
         assert!(matches!(mapped, BackupError::Sqlite { code: Some(11) }));
+    }
+
+    #[test]
+    fn prepare_errors_keep_their_code_but_not_their_text() {
+        let err = rusqlite::Error::SqlInputError {
+            error: rusqlite::ffi::Error::new(23),
+            msg: "not authorized: secret".into(),
+            sql: "SELECT secret".into(),
+            offset: 7,
+        };
+        let mapped = sqlite_error(&err, false);
+        assert!(!format!("{mapped:?} {mapped}").contains("secret"));
+        assert!(matches!(mapped, BackupError::Sqlite { code: Some(23) }));
     }
 
     #[test]

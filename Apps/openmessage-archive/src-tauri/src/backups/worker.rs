@@ -1,5 +1,7 @@
-//! The validation job worker (§11.2): sweep, stage, open, validate, close,
-//! then exactly one terminal event.
+//! The job worker (§11.2, M3 §2): sweep, stage, open, validate, then for an
+//! extraction check (if the backup is importable) stage, check and delete
+//! the Messages database copy, recheck the backup, close; then exactly one
+//! terminal event.
 //!
 //! It runs on a dedicated `std::thread` named `oma-job-<n>` and talks to the
 //! UI only through [`JobEventSink`], so it is tested without Tauri.
@@ -11,13 +13,15 @@ use std::time::{Duration, Instant, SystemTime};
 
 use oma_backup::{
     sweep_stale, BackupError, CancelToken, CleanupReport, Inspection, JobCtx, Limits, OpenBackup,
-    OpenError, Password, Phase, Progress, ProgressSink, StagingRoot, ValidationReport,
+    OpenError, Password, Progress, ProgressSink, StagingRoot, ValidationReport,
 };
+use oma_messages::{CheckOptions, MessagesCtx, MessagesError, MessagesProgress, MessagesSink};
 
 use super::dto::{
-    clamp, millis, rfc3339, safe_opt, CleanupDto, JobEvent, JobPhase, ManifestStatsDto,
+    clamp, millis, rfc3339, safe_opt, CleanupDto, JobEvent, JobKind, JobPhase, ManifestStatsDto,
     SmsDbStatusDto, ValidationReportDto,
 };
+use super::extraction::{self, ExtractionEnding};
 use super::{messages, JobEventSink, Jobs, LastOutcome};
 
 /// Forward a progress event at most this often (plus every phase change).
@@ -28,6 +32,7 @@ pub const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 pub struct JobSpec {
     pub job_id: String,
     pub backup_id: String,
+    pub kind: JobKind,
     pub inspection: Inspection,
     pub library: PathBuf,
     pub password: Option<Password>,
@@ -95,43 +100,66 @@ pub fn report_dto(r: &ValidationReport, encrypted: bool) -> ValidationReportDto 
 }
 
 /// Forwards progress to the sink when the phase changes, or when at least
-/// [`PROGRESS_INTERVAL`] has passed and `done` has changed.
+/// [`PROGRESS_INTERVAL`] has passed and `done` has changed. One throttle
+/// serves both progress sources of a job (M3 §16.1): the backup crate's
+/// phases and the messages check's, which map one to one onto [`JobPhase`].
 struct Throttle<'a> {
     job_id: &'a str,
     jobs: &'a Jobs,
     sink: &'a mut dyn JobEventSink,
-    last_phase: Option<Phase>,
+    last_phase: Option<JobPhase>,
     last_done: u64,
     last_sent: Instant,
 }
 
-impl ProgressSink for Throttle<'_> {
-    fn report(&mut self, p: Progress) {
-        let phase_changed = self.last_phase != Some(p.phase);
-        let due = self.last_sent.elapsed() >= PROGRESS_INTERVAL && p.done != self.last_done;
+impl Throttle<'_> {
+    fn forward(&mut self, phase: JobPhase, done: u64, total: Option<u64>) {
+        let phase_changed = self.last_phase != Some(phase);
+        let due = self.last_sent.elapsed() >= PROGRESS_INTERVAL && done != self.last_done;
         if !(phase_changed || due) {
             return;
         }
         if phase_changed {
-            tracing::debug!(job_id = self.job_id, phase = ?p.phase, "job phase");
-            self.jobs.set_phase(self.job_id, JobPhase::from(p.phase));
+            tracing::debug!(job_id = self.job_id, phase = ?phase, "job phase");
+            self.jobs.set_phase(self.job_id, phase);
         }
-        self.last_phase = Some(p.phase);
-        self.last_done = p.done;
+        self.last_phase = Some(phase);
+        self.last_done = done;
         self.last_sent = Instant::now();
-        let (done, _) = clamp(p.done);
+        let (done, _) = clamp(done);
         self.sink.send(JobEvent::Progress {
             job_id: self.job_id.to_owned(),
-            phase: JobPhase::from(p.phase),
+            phase,
             done,
-            total: safe_opt(p.total),
+            total: safe_opt(total),
         });
     }
 }
 
+impl ProgressSink for Throttle<'_> {
+    fn report(&mut self, p: Progress) {
+        self.forward(JobPhase::from(p.phase), p.done, p.total);
+    }
+}
+
+impl MessagesSink for Throttle<'_> {
+    fn report(&mut self, p: MessagesProgress) {
+        self.forward(JobPhase::from(p.phase), p.done, p.total);
+    }
+}
+
+/// An error that ended a job.
+enum Failure {
+    Backup(BackupError),
+    Messages(MessagesError),
+}
+
 enum Ending {
     Finished(Box<ValidationReport>, bool),
-    Failed(BackupError),
+    /// The validation report, whether the backup is encrypted, and what the
+    /// extraction part came to.
+    ExtractionFinished(Box<ValidationReport>, bool, ExtractionEnding),
+    Failed(Failure),
     Cancelled,
 }
 
@@ -141,13 +169,17 @@ pub fn run(spec: JobSpec, jobs: &Jobs, sink: &mut dyn JobEventSink) {
     let JobSpec {
         job_id,
         backup_id,
+        kind,
         inspection,
         library,
         password,
         limits,
         cancel,
     } = spec;
-    tracing::info!(job_id = %job_id, backup_id = %backup_id, "job started");
+    tracing::info!(job_id = %job_id, backup_id = %backup_id, kind = ?kind, "job started");
+    let ios_version_untested = extraction::ios_version_untested(
+        inspection.ios_version().as_ref().map(|s| s.value.as_str()),
+    );
 
     let sweep = sweep_stale(&library);
     if sweep.removed + sweep.failed + sweep.in_use > 0 {
@@ -169,8 +201,15 @@ pub fn run(spec: JobSpec, jobs: &Jobs, sink: &mut dyn JobEventSink) {
             last_done: 0,
             last_sent: Instant::now(),
         };
-        let mut ctx = JobCtx::new(&cancel, &mut throttle);
-        execute(inspection, &library, password, &limits, &mut ctx)
+        execute(
+            kind,
+            inspection,
+            &library,
+            password,
+            &limits,
+            &cancel,
+            &mut throttle,
+        )
     };
 
     let staging_removed = cleanup.removed;
@@ -191,6 +230,7 @@ pub fn run(spec: JobSpec, jobs: &Jobs, sink: &mut dyn JobEventSink) {
                 &job_id,
                 LastOutcome {
                     report: Some(dto.clone()),
+                    extraction: None,
                     cleanup: cleanup_dto,
                 },
             );
@@ -200,12 +240,40 @@ pub fn run(spec: JobSpec, jobs: &Jobs, sink: &mut dyn JobEventSink) {
                 staging_removed,
             }
         }
+        Ending::ExtractionFinished(report, encrypted, ext) => {
+            let dto = report_dto(&report, encrypted);
+            let ext = extraction::report_dto(&ext, &job_id, staging_removed, ios_version_untested);
+            let summary = ext.summary();
+            tracing::info!(
+                job_id = %job_id,
+                importable = dto.importable,
+                outcome = ?summary.outcome,
+                qualifiers = ext.qualifiers.len(),
+                "job finished"
+            );
+            jobs.finish(
+                &job_id,
+                LastOutcome {
+                    report: Some(dto),
+                    extraction: Some(ext),
+                    cleanup: cleanup_dto,
+                },
+            );
+            JobEvent::ExtractionFinished {
+                job_id,
+                outcome: summary.outcome,
+                source_changed: summary.source_changed,
+                staging_removed,
+                plaintext_removed_after_row_pass: summary.plaintext_removed_after_row_pass,
+            }
+        }
         Ending::Cancelled => {
             tracing::info!(job_id = %job_id, "job cancelled");
             jobs.finish(
                 &job_id,
                 LastOutcome {
                     report: None,
+                    extraction: None,
                     cleanup: cleanup_dto,
                 },
             );
@@ -215,12 +283,16 @@ pub fn run(spec: JobSpec, jobs: &Jobs, sink: &mut dyn JobEventSink) {
             }
         }
         Ending::Failed(error) => {
-            let ipc = messages::to_ipc(&error, &limits);
+            let ipc = match &error {
+                Failure::Backup(e) => messages::to_ipc(e, &limits),
+                Failure::Messages(e) => messages::messages_to_ipc(e, &limits),
+            };
             tracing::info!(job_id = %job_id, code = ?ipc.code, "job failed");
             jobs.finish(
                 &job_id,
                 LastOutcome {
                     report: None,
+                    extraction: None,
                     cleanup: cleanup_dto,
                 },
             );
@@ -243,17 +315,19 @@ fn nothing_staged() -> CleanupReport {
 }
 
 fn execute(
+    kind: JobKind,
     inspection: Inspection,
     library: &std::path::Path,
     password: Option<Password>,
     limits: &Limits,
-    ctx: &mut JobCtx<'_>,
+    cancel: &CancelToken,
+    throttle: &mut Throttle<'_>,
 ) -> (Ending, CleanupReport) {
     let fail = |e: BackupError| match e {
         BackupError::Cancelled => Ending::Cancelled,
-        e => Ending::Failed(e),
+        e => Ending::Failed(Failure::Backup(e)),
     };
-    if ctx.cancel.is_cancelled() {
+    if cancel.is_cancelled() {
         return (Ending::Cancelled, nothing_staged());
     }
     let root = match StagingRoot::new(library, &inspection.root) {
@@ -264,17 +338,47 @@ fn execute(
         Ok(s) => s,
         Err(e) => return (fail(e), nothing_staged()),
     };
-    let ob = match OpenBackup::open(inspection, session, password, limits, ctx) {
+    let opened = {
+        let mut ctx = JobCtx::new(cancel, &mut *throttle);
+        OpenBackup::open(inspection, session, password, limits, &mut ctx)
+    };
+    let ob = match opened {
         Ok(ob) => ob,
         Err(OpenError { error, cleanup }) => return (fail(error), cleanup),
     };
     let encrypted = ob.is_encrypted();
-    let result = ob.validate(ctx);
+    let validated = {
+        let mut ctx = JobCtx::new(cancel, &mut *throttle);
+        ob.validate(&mut ctx)
+    };
+    let ending = match (kind, validated) {
+        (_, Err(e)) => fail(e),
+        (JobKind::Validate, Ok(report)) => Ending::Finished(Box::new(report), encrypted),
+        (JobKind::ExtractionCheck, Ok(report)) if !report.importable() => {
+            Ending::ExtractionFinished(
+                Box::new(report),
+                encrypted,
+                ExtractionEnding::SkippedNotImportable,
+            )
+        }
+        (JobKind::ExtractionCheck, Ok(report)) => {
+            // Stage, check and delete the Messages database copy, then
+            // recheck the backup (M3 §2 step 5). The copy is also removed by
+            // close() below if the check could not remove it.
+            let mut mctx = MessagesCtx::new(cancel, &mut *throttle);
+            match oma_messages::check(&ob, &CheckOptions::default(), &mut mctx) {
+                Ok(x) => Ending::ExtractionFinished(
+                    Box::new(report),
+                    encrypted,
+                    ExtractionEnding::Checked(Box::new(x)),
+                ),
+                Err(MessagesError::Cancelled) => Ending::Cancelled,
+                Err(e) => Ending::Failed(Failure::Messages(e)),
+            }
+        }
+    };
     let cleanup = ob.close();
-    match result {
-        Ok(report) => (Ending::Finished(Box::new(report), encrypted), cleanup),
-        Err(e) => (fail(e), cleanup),
-    }
+    (ending, cleanup)
 }
 
 /// Start the worker thread. On success the job owns the reservation; the
@@ -297,6 +401,7 @@ pub fn spawn(
 mod tests {
     use super::*;
     use crate::backups::dto::JobEvent;
+    use crate::backups::extraction::{ExtractionOutcomeDto, QualifierDto};
     use crate::error::ErrorCode;
     use oma_backup::{inspect, Candidate, Zeroizing};
     use std::path::Path;
@@ -332,9 +437,24 @@ mod tests {
     }
 
     fn fixture(name: &str) -> Fx {
+        fixture_from(&fixtures(), name)
+    }
+
+    /// An entry of the synthetic messages catalogue (M3).
+    fn messages_fixture(name: &str) -> Fx {
+        fixture_from(
+            &PathBuf::from(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../tests/fixtures/messages"
+            )),
+            name,
+        )
+    }
+
+    fn fixture_from(root: &Path, name: &str) -> Fx {
         let tmp = tempfile::tempdir().expect("tempdir");
         let dir = tmp.path().join("backups").join(UDID);
-        copy_tree(&fixtures().join(name).join(UDID), &dir);
+        copy_tree(&root.join(name).join(UDID), &dir);
         let library = tmp.path().join("library");
         std::fs::create_dir(&library).expect("mkdir");
         Fx { tmp, dir, library }
@@ -356,12 +476,23 @@ mod tests {
     }
 
     fn spec(fx: &Fx, job_id: &str, cancel: CancelToken, password: Option<&str>) -> JobSpec {
+        spec_kind(fx, JobKind::Validate, job_id, cancel, password)
+    }
+
+    fn spec_kind(
+        fx: &Fx,
+        kind: JobKind,
+        job_id: &str,
+        cancel: CancelToken,
+        password: Option<&str>,
+    ) -> JobSpec {
         let candidate = Candidate::for_dir(&fx.dir).expect("candidate");
         let limits = Limits::default();
         let inspection = inspect(&candidate, &limits, &mut 0).expect("inspect");
         JobSpec {
             job_id: job_id.to_owned(),
             backup_id: inspection.id.as_str().to_owned(),
+            kind,
             inspection,
             library: fx.library.clone(),
             password: password
@@ -379,9 +510,13 @@ mod tests {
     }
 
     fn run_once(fx: &Fx, password: Option<&str>) -> (Vec<JobEvent>, Jobs) {
+        run_kind(fx, JobKind::Validate, password)
+    }
+
+    fn run_kind(fx: &Fx, kind: JobKind, password: Option<&str>) -> (Vec<JobEvent>, Jobs) {
         let jobs = Jobs::default();
-        let s = spec(fx, "", CancelToken::new(), password);
-        let r = jobs.reserve(&s.backup_id).expect("reserve");
+        let s = spec_kind(fx, kind, "", CancelToken::new(), password);
+        let r = jobs.reserve(&s.backup_id, kind).expect("reserve");
         let s = JobSpec {
             job_id: r.job_id.clone(),
             cancel: r.cancel.clone(),
@@ -500,7 +635,9 @@ mod tests {
         let fx = fixture("enc-slow");
         let jobs = Arc::new(Jobs::default());
         let s = spec(&fx, "", CancelToken::new(), Some(PASSWORD));
-        let r = jobs.reserve(&s.backup_id).expect("reserve");
+        let r = jobs
+            .reserve(&s.backup_id, JobKind::Validate)
+            .expect("reserve");
         let s = JobSpec {
             job_id: r.job_id.clone(),
             cancel: r.cancel.clone(),
@@ -540,7 +677,9 @@ mod tests {
         let fx = fixture("plain");
         let jobs = Jobs::default();
         let s = spec(&fx, "", CancelToken::new(), None);
-        let r = jobs.reserve(&s.backup_id).expect("reserve");
+        let r = jobs
+            .reserve(&s.backup_id, JobKind::Validate)
+            .expect("reserve");
         let s = JobSpec {
             job_id: r.job_id.clone(),
             cancel: r.cancel.clone(),
@@ -587,7 +726,9 @@ mod tests {
         let fx = fixture("plain");
         let jobs = Jobs::default();
         let s = spec(&fx, "", CancelToken::new(), None);
-        let r = jobs.reserve(&s.backup_id).expect("reserve");
+        let r = jobs
+            .reserve(&s.backup_id, JobKind::Validate)
+            .expect("reserve");
         r.cancel.cancel();
         let s = JobSpec {
             job_id: r.job_id.clone(),
@@ -648,5 +789,414 @@ mod tests {
         assert!(dto.stats.saturated);
         assert_eq!(dto.sms_db.declared_size, None);
         assert_eq!(dto.duration_ms, crate::backups::dto::MAX_SAFE_INTEGER);
+    }
+
+    // ------------------------------------------------------------ M3
+
+    fn backup_id_of(fx: &Fx) -> String {
+        Candidate::for_dir(&fx.dir)
+            .ok()
+            .and_then(|c| oma_backup::BackupId::for_path(&c.display_canonical))
+            .expect("id")
+            .as_str()
+            .to_owned()
+    }
+
+    #[test]
+    fn an_extraction_check_reports_progress_then_one_summary() {
+        let fx = messages_fixture("msgs-full-plain");
+        let (events, jobs) = run_kind(&fx, JobKind::ExtractionCheck, None);
+        for phase in [
+            JobPhase::CopyingManifest,
+            JobPhase::StagingMessagesDb,
+            JobPhase::CheckingIntegrity,
+            JobPhase::ReadingMessages,
+            JobPhase::CheckingAttachments,
+            JobPhase::Summarising,
+        ] {
+            assert!(
+                events
+                    .iter()
+                    .any(|e| matches!(e, JobEvent::Progress { phase: p, .. } if *p == phase)),
+                "no {phase:?} progress"
+            );
+        }
+        let job_id = match terminal(&events) {
+            JobEvent::ExtractionFinished {
+                job_id,
+                outcome,
+                source_changed,
+                staging_removed,
+                plaintext_removed_after_row_pass,
+            } => {
+                // iosVersionUntested applies to every readable result in M3, so a real or
+                // synthetic backup is never plain "readable".
+                assert_eq!(*outcome, ExtractionOutcomeDto::ReadableWithQualifiers);
+                assert!(!*source_changed);
+                assert!(*staging_removed && *plaintext_removed_after_row_pass);
+                job_id.clone()
+            }
+            other => panic!("unexpected {other:?}"),
+        };
+        let last = jobs.last(&backup_id_of(&fx));
+        assert!(last.report.is_some_and(|r| r.importable));
+        let ext = last.extraction.expect("extraction report");
+        assert_eq!(ext.job_id, job_id, "reports are keyed by job");
+        assert_eq!(
+            ext.qualifiers.first(),
+            Some(&QualifierDto::IosVersionUntested)
+        );
+        assert!(ext
+            .qualifiers
+            .contains(&QualifierDto::UnknownColumns { count: 1 }));
+        let counts = ext.counts.expect("counts");
+        assert!(counts.message_rows > 0 && counts.chat_rows > 0 && counts.handle_rows > 0);
+        assert!(ext.dates.is_some() && ext.attachments.is_some() && ext.problems.is_some());
+        assert!(!jobs.any_active());
+        assert!(staging_is_empty(&fx.library));
+    }
+
+    #[test]
+    fn an_encrypted_extraction_check_unlocks_and_cleans_up() {
+        let fx = messages_fixture("msgs-full-enc");
+        let (events, _) = run_kind(&fx, JobKind::ExtractionCheck, Some(PASSWORD));
+        assert!(matches!(
+            terminal(&events),
+            JobEvent::ExtractionFinished {
+                outcome: ExtractionOutcomeDto::ReadableWithQualifiers,
+                staging_removed: true,
+                plaintext_removed_after_row_pass: true,
+                ..
+            }
+        ));
+        assert!(staging_is_empty(&fx.library));
+    }
+
+    #[test]
+    fn a_backup_that_is_not_importable_is_skipped() {
+        let fx = fixture("missing-sms-blob");
+        let (events, jobs) = run_kind(&fx, JobKind::ExtractionCheck, None);
+        assert!(!events.iter().any(|e| matches!(
+            e,
+            JobEvent::Progress {
+                phase: JobPhase::StagingMessagesDb,
+                ..
+            }
+        )));
+        assert!(matches!(
+            terminal(&events),
+            JobEvent::ExtractionFinished {
+                outcome: ExtractionOutcomeDto::SkippedNotImportable,
+                staging_removed: true,
+                ..
+            }
+        ));
+        let last = jobs.last(&backup_id_of(&fx));
+        assert!(last.report.is_some_and(|r| !r.importable));
+        let ext = last.extraction.expect("extraction");
+        assert_eq!(ext.outcome, ExtractionOutcomeDto::SkippedNotImportable);
+        assert!(ext.schema.is_none() && ext.counts.is_none());
+    }
+
+    #[test]
+    fn unsupported_damaged_and_virtual_table_outcomes() {
+        for (name, outcome) in [
+            ("msgs-unsupported-plain", ExtractionOutcomeDto::Unsupported),
+            ("msgs-vtab-plain", ExtractionOutcomeDto::Unsupported),
+            ("msgs-corrupt-plain", ExtractionOutcomeDto::Damaged),
+        ] {
+            let fx = messages_fixture(name);
+            let (events, jobs) = run_kind(&fx, JobKind::ExtractionCheck, None);
+            match terminal(&events) {
+                JobEvent::ExtractionFinished {
+                    outcome: o,
+                    staging_removed,
+                    ..
+                } => {
+                    assert_eq!(*o, outcome, "{name}");
+                    assert!(*staging_removed);
+                }
+                other => panic!("{name}: unexpected {other:?}"),
+            }
+            let ext = jobs
+                .last(&backup_id_of(&fx))
+                .extraction
+                .expect("extraction");
+            assert!(ext.qualifiers.is_empty(), "{name}");
+            assert!(ext.counts.is_none() && ext.problems.is_none(), "{name}");
+            assert!(ext.database.is_some(), "{name}");
+            match outcome {
+                ExtractionOutcomeDto::Unsupported => {
+                    assert!(!ext.unsupported_reasons.is_empty(), "{name}")
+                }
+                _ => assert!(ext.damage_reason.is_some(), "{name}"),
+            }
+            assert!(staging_is_empty(&fx.library));
+        }
+    }
+
+    /// A truncated sms.db (as an interrupted backup leaves it) passes
+    /// validation's header check but cannot be opened: the job fails with
+    /// the Messages-database sentence, and nothing stays staged.
+    #[test]
+    fn a_truncated_sms_db_fails_with_the_messages_sentence_and_cleans_up() {
+        let fx = messages_fixture("msgs-full-plain");
+        let blob = fx
+            .dir
+            .join(&oma_backup::SMS_DB_FILE_ID[..2])
+            .join(oma_backup::SMS_DB_FILE_ID);
+        let bytes = std::fs::read(&blob).expect("blob");
+        std::fs::write(&blob, &bytes[..4096]).expect("truncate");
+        let (events, _) = run_kind(&fx, JobKind::ExtractionCheck, None);
+        match terminal(&events) {
+            JobEvent::Failed {
+                error,
+                staging_removed,
+                ..
+            } => {
+                assert_eq!(error.code, ErrorCode::MalformedBackup);
+                assert_eq!(
+                    error.message,
+                    "The Messages database copy could not be opened (SQLite error 11)."
+                );
+                assert!(*staging_removed);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        assert!(staging_is_empty(&fx.library));
+    }
+
+    #[test]
+    fn cancel_while_reading_messages_ends_cancelled() {
+        let fx = messages_fixture("msgs-full-plain");
+        let jobs = Arc::new(Jobs::default());
+        let s = spec_kind(&fx, JobKind::ExtractionCheck, "", CancelToken::new(), None);
+        let r = jobs
+            .reserve(&s.backup_id, JobKind::ExtractionCheck)
+            .expect("reserve");
+        let s = JobSpec {
+            job_id: r.job_id.clone(),
+            cancel: r.cancel.clone(),
+            ..s
+        };
+        /// Cancels as soon as the message pass is reported.
+        struct CancelOnMessages(Recording, Arc<Jobs>, String);
+        impl JobEventSink for CancelOnMessages {
+            fn send(&mut self, event: JobEvent) {
+                if matches!(
+                    event,
+                    JobEvent::Progress {
+                        phase: JobPhase::ReadingMessages,
+                        ..
+                    }
+                ) {
+                    self.1.cancel(&self.2);
+                }
+                self.0.send(event);
+            }
+        }
+        let rec = Recording::default();
+        let mut sink = CancelOnMessages(rec.clone(), jobs.clone(), r.job_id.clone());
+        run(s, &jobs, &mut sink);
+        let events = rec.events();
+        match terminal(&events) {
+            JobEvent::Cancelled {
+                staging_removed, ..
+            } => assert!(*staging_removed),
+            other => panic!("unexpected {other:?}"),
+        }
+        assert!(jobs.last(&backup_id_of(&fx)).extraction.is_none());
+        assert!(staging_is_empty(&fx.library));
+    }
+
+    /// D47: the terminal event is a summary, far below the 8 KiB channel
+    /// limit, whatever the report holds.
+    #[test]
+    fn the_largest_extraction_finished_event_is_under_1_kib() {
+        let event = JobEvent::ExtractionFinished {
+            job_id: format!("job-{}", u64::MAX),
+            outcome: ExtractionOutcomeDto::SkippedNotImportable,
+            source_changed: true,
+            staging_removed: false,
+            plaintext_removed_after_row_pass: false,
+        };
+        let json = serde_json::to_string(&event).expect("json");
+        assert!(json.len() < 1024, "{} bytes", json.len());
+        assert_eq!(
+            serde_json::to_value(&event).expect("json")["kind"],
+            "extractionFinished"
+        );
+    }
+
+    /// A real report from the catalogue, for mapping tests.
+    fn checked_report(name: &str) -> oma_messages::ExtractionReport {
+        let fx = messages_fixture(name);
+        let candidate = Candidate::for_dir(&fx.dir).expect("candidate");
+        let limits = Limits::default();
+        let inspection = inspect(&candidate, &limits, &mut 0).expect("inspect");
+        let root = StagingRoot::new(&fx.library, &inspection.root).expect("root");
+        let session = root.begin().expect("session");
+        let token = CancelToken::new();
+        let mut sink = |_: Progress| {};
+        let mut ctx = JobCtx::new(&token, &mut sink);
+        let Ok(ob) = OpenBackup::open(inspection, session, None, &limits, &mut ctx) else {
+            panic!("the fixture opens");
+        };
+        let mut msink = |_: MessagesProgress| {};
+        let mut mctx = MessagesCtx::new(&token, &mut msink);
+        let report = oma_messages::check(&ob, &CheckOptions::default(), &mut mctx).expect("check");
+        let _ = ob.close();
+        report
+    }
+
+    fn assert_numbers_safe(v: &serde_json::Value, path: &str) {
+        match v {
+            serde_json::Value::Number(n) => {
+                let max = crate::backups::dto::MAX_SAFE_INTEGER;
+                if let Some(u) = n.as_u64() {
+                    assert!(u <= max, "{path}: {u}");
+                } else if let Some(i) = n.as_i64() {
+                    assert!(i.unsigned_abs() <= max, "{path}: {i}");
+                } else {
+                    panic!("{path}: not an integer");
+                }
+            }
+            serde_json::Value::Array(a) => {
+                for (i, x) in a.iter().enumerate() {
+                    assert_numbers_safe(x, &format!("{path}[{i}]"));
+                }
+            }
+            serde_json::Value::Object(o) => {
+                for (k, x) in o {
+                    assert_numbers_safe(x, &format!("{path}.{k}"));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// §16.4: every u64 is clamped (and sets `saturated`), and every raw
+    /// Without an `attachment` table nothing was looked up, so the
+    /// attachment section is `null` ("not recorded"), never a set of zeros.
+    #[test]
+    fn no_attachment_table_sends_no_attachment_counters() {
+        let r = checked_report("msgs-minimal-plain");
+        assert!(r.attachments.as_ref().is_some_and(|a| a.rows.is_none()));
+        let dto = extraction::report_dto(
+            &ExtractionEnding::Checked(Box::new(r)),
+            "job-1",
+            true,
+            false,
+        );
+        assert!(dto.attachments.is_none());
+        assert_eq!(dto.counts.expect("counts").attachment_rows, None);
+        let full = checked_report("msgs-full-plain");
+        let dto = extraction::report_dto(
+            &ExtractionEnding::Checked(Box::new(full)),
+            "job-2",
+            true,
+            false,
+        );
+        assert!(dto.attachments.is_some());
+    }
+
+    /// i64 outside ±(2^53 − 1) is withheld, never sent as a number.
+    #[test]
+    fn the_extraction_dto_clamps_u64_max_and_unsafe_i64() {
+        let mut r = checked_report("msgs-full-plain");
+        let max = u64::MAX;
+        r.database.staged_bytes = max;
+        r.database.page_size = Some(max);
+        r.database.wal.bytes = Some(max);
+        for t in &mut r.schema.tables {
+            t.rows = Some(max);
+        }
+        r.schema.client_version = Some(i64::MAX);
+        r.schema.client_version_parsed = true;
+        if let Some(m) = r.messages.as_mut() {
+            m.rows = max;
+            m.with_association = Some(max);
+            m.group_actions = Some(max);
+            m.recently_deleted = Some(max);
+            m.other_rows = Some(max);
+        }
+        if let Some(c) = r.chats.as_mut() {
+            c.rows = max;
+        }
+        if let Some(h) = r.handles.as_mut() {
+            h.rows = max;
+        }
+        if let Some(l) = r.links.as_mut() {
+            l.messages_in_no_chat = Some(max);
+        }
+        if let Some(d) = r.dates.as_mut() {
+            d.earliest_message = Some(i64::MIN);
+            d.latest_message = Some(i64::MAX);
+            d.excluded_scheduled = Some(max);
+            d.excluded_before_floor = max;
+            d.excluded_after_checked_at = max;
+            d.excluded_not_classified = max;
+        }
+        if let Some(a) = r.attachments.as_mut() {
+            a.rows = Some(max);
+            a.present_blob_bytes = max;
+            a.lookup.found = max;
+            a.lookup.not_listed_at_sourced_key = max;
+            a.lookup.not_found_at_assumed_key = max;
+            a.lookup.ambiguous = max;
+            a.lookup.invalid_entry = max;
+            for e in &mut a.lookup.not_attempted {
+                e.1 = max;
+            }
+            a.probes.present = max;
+            a.probes.missing = max;
+            a.probes.not_regular = max;
+            a.probes.unreadable = max;
+            a.probes.no_key = max;
+            a.probes.no_protection_class = max;
+            a.probes.key_does_not_unwrap = max;
+            a.probes.class_key_unavailable = max;
+            a.probes.not_a_file = max;
+            a.probes.invalid_entry = max;
+            a.probes.other = max;
+            a.probes.not_probed = max;
+        }
+        if let Some(f) = r.failures.as_mut() {
+            for e in &mut f.typedstream {
+                e.1 = max;
+            }
+            f.summary_too_large = max;
+            f.values.value_oversized = max;
+            f.attachment_key_problem = max;
+            f.orphan_join_row = max;
+        }
+        r.elapsed = Duration::MAX;
+        let dto =
+            extraction::report_dto(&ExtractionEnding::Checked(Box::new(r)), "job-1", true, true);
+        let json = serde_json::to_value(&dto).expect("json");
+        assert_numbers_safe(&json, "report");
+        assert!(dto.saturated);
+        let counts = dto.counts.expect("counts");
+        assert_eq!(counts.message_rows, crate::backups::dto::MAX_SAFE_INTEGER);
+        assert_eq!(
+            counts.association_rows,
+            Some(crate::backups::dto::MAX_SAFE_INTEGER),
+            "a huge optional counter stays recorded"
+        );
+        let schema = dto.schema.expect("schema");
+        assert_eq!(schema.client_version, None);
+        assert!(schema.client_version_out_of_safe_range);
+        assert!(json.to_string().find("bigint").is_none());
+    }
+
+    #[test]
+    fn safe_i64_bounds() {
+        let max = i64::try_from(crate::backups::dto::MAX_SAFE_INTEGER).expect("fits");
+        assert_eq!(extraction::safe_i64(max), Some(max));
+        assert_eq!(extraction::safe_i64(-max), Some(-max));
+        assert_eq!(extraction::safe_i64(max + 1), None);
+        assert_eq!(extraction::safe_i64(-max - 1), None);
+        assert_eq!(extraction::safe_i64(i64::MIN), None);
+        assert_eq!(extraction::safe_i64(0), Some(0));
     }
 }

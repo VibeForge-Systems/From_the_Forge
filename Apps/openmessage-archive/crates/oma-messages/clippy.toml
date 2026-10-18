@@ -1,0 +1,29 @@
+# Clippy configuration for oma-messages (M3 spec §4.3).
+#
+# The staged sms.db is only ever read. The crate never sees a
+# `rusqlite::Connection` (oma-backup's `StagedConnection` does not hand one
+# out), and these entries guard against regressions anyway. The second group
+# are APIs that panic on attacker-chosen lengths or offsets, or allocate an
+# attacker-chosen capacity up front.
+#
+# Integration tests build their databases with a plain `Connection`; each
+# test file allows `disallowed_types` and `disallowed_methods` explicitly.
+
+disallowed-types = [
+    { path = "rusqlite::Connection", reason = "sms.db is read through oma_backup::StagedConnection only" },
+]
+
+disallowed-methods = [
+    { path = "rusqlite::Statement::execute", reason = "sms.db is read-only" },
+    { path = "rusqlite::Statement::insert", reason = "sms.db is read-only" },
+    { path = "rusqlite::Statement::raw_execute", reason = "sms.db is read-only" },
+    { path = "str::split_at", reason = "panics on a bad offset; use split_at_checked" },
+    { path = "str::split_at_mut", reason = "panics on a bad offset; use split_at_mut_checked" },
+    { path = "alloc::string::String::split_off", reason = "panics on a bad offset" },
+    { path = "slice::split_at", reason = "panics on a bad offset; use split_at_checked" },
+    { path = "slice::copy_from_slice", reason = "panics on a length mismatch" },
+    { path = "slice::chunks", reason = "panics on a zero size; use an explicit loop" },
+    { path = "slice::chunks_exact", reason = "panics on a zero size; use an explicit loop" },
+    { path = "slice::windows", reason = "panics on a zero size; use an explicit loop" },
+    { path = "alloc::vec::Vec::with_capacity", reason = "never pre-allocate from a length the input chose" },
+]
