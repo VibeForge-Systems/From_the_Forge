@@ -161,6 +161,30 @@ an ignored test, not run anywhere yet. No network, FUSE, 9P, VirtualBox or
 FAT volume has been tried; their detection rests on the `statfs` magic table
 and its unit test.
 
+### Milestone 4 attachment copy (slice 4b)
+
+Observed by `crates/oma-backup/tests/copy.rs` in the same Linux container
+on 2026-10-18; not CI, not a desktop, synthetic fixtures only:
+
+- `copy_file_to` wrote exactly the bytes in `<fixture>.expected/` for the
+  attachment and for sms.db, and its SHA-256 equalled theirs, for the
+  `plain`, `plain-xml`, `enc`, `enc-xml`, `enc-key-uid-data`,
+  `enc-key-inline` and `enc-unicode-pw` fixtures. Nothing was written to
+  staging and the read-only fixture copies were untouched.
+- The `hostile-size-max` attachment (declared `Size` 2^64 − 1) copied its
+  87 bytes with `size_matches = false`.
+- `attachment_bytes` refused a blob one byte over the cap before reading it,
+  and allowed one exactly at the cap (87 bytes plain, 96 bytes encrypted).
+- Appending to a blob during its copy gave `SourceChanged`; cancellation,
+  a full or size-limited writer (`Io { side: Sink }`), a missing blob, bad
+  padding and (Unix only) a blob replaced by a symbolic link gave the
+  expected errors.
+
+**Not yet observed:** any of this on Windows, and any attachment larger
+than the 87-byte fixture file or sms.db; the multi-chunk (over 1 MiB) and
+mid-file cancellation paths are covered by unit tests on in-memory data
+only.
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI

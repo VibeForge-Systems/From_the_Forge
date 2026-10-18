@@ -77,9 +77,11 @@ pub enum BackupError {
         /// The primary result code (`extended & 0xff`), if there was one.
         code: Option<i32>,
     },
-    /// A source file changed while it was being copied into staging: its
-    /// length or modification time differed after the copy. The staged copy
-    /// may be inconsistent, so it is removed.
+    /// A source file changed while it was being copied: its length or
+    /// modification time differed after the copy. A staged copy may be
+    /// inconsistent, so it is removed; after
+    /// [`crate::OpenBackup::copy_file_to`] the caller discards what its
+    /// writer received.
     #[error("source changed during copy")]
     SourceChanged,
     /// A staged database's schema could not be loaded under the limits the
@@ -96,24 +98,24 @@ pub enum BackupError {
 }
 
 impl BackupError {
-    /// An I/O error on the backup side.
-    pub(crate) fn source_io(op: IoOp, err: &io::Error) -> Self {
+    /// An I/O error on `side`, keeping only its kind and OS code.
+    pub(crate) fn io(op: IoOp, side: IoSide, err: &io::Error) -> Self {
         BackupError::Io {
             op,
-            side: IoSide::Source,
+            side,
             kind: err.kind(),
             os_code: err.raw_os_error(),
         }
     }
 
+    /// An I/O error on the backup side.
+    pub(crate) fn source_io(op: IoOp, err: &io::Error) -> Self {
+        BackupError::io(op, IoSide::Source, err)
+    }
+
     /// An I/O error on the staging side.
     pub(crate) fn staging_io(op: IoOp, err: &io::Error) -> Self {
-        BackupError::Io {
-            op,
-            side: IoSide::Staging,
-            kind: err.kind(),
-            os_code: err.raw_os_error(),
-        }
+        BackupError::io(op, IoSide::Staging, err)
     }
 
     /// A malformed-content error.
@@ -161,6 +163,12 @@ pub enum IoSide {
     Source,
     /// The staging directory inside the archive library.
     Staging,
+    /// The caller's writer in [`crate::OpenBackup::copy_file_to`] (M4: a
+    /// partial file in the archive's attachment store). `kind` and
+    /// `os_code` are kept so the caller can tell a full volume
+    /// (`StorageFull`) or a per-file size limit (`FileTooLarge`, `EFBIG`,
+    /// `ERROR_FILE_TOO_LARGE`) from other failures.
+    Sink,
 }
 
 /// Why a listed file cannot be provided.

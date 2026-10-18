@@ -47,13 +47,14 @@ pub use error::{
     BackupError, FileUnavailable, IoOp, IoSide, MalformedDetail, StagingRefusal, UnsupportedReason,
 };
 pub use extract::{
-    AttachmentKey, ContentDigest, ExtractedFile, FileEntry, StagedDatabase, WalOutcome, WalPolicy,
+    AttachmentKey, ContentDigest, CopiedFile, ExtractedFile, FileEntry, StagedDatabase, WalOutcome,
+    WalPolicy,
 };
 pub use id::{BackupId, LocationId};
 pub use inspect::{inspect, Classification, Inspection, Layout};
 pub use keybag::KeybagNote;
 pub use keys::Password;
-pub use limits::{LimitKind, Limits, SMS_DB_BYTES_DEFAULT};
+pub use limits::{LimitKind, Limits, ATTACHMENT_BYTES_DEFAULT, SMS_DB_BYTES_DEFAULT};
 pub use manifest_db::{EntryKind, ManifestEntry, OpenMode};
 pub use mbfile::MbFile;
 pub use open::{OpenBackup, OpenError};

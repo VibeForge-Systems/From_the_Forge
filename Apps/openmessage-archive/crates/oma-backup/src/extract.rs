@@ -7,21 +7,21 @@
 #![deny(clippy::arithmetic_side_effects)]
 
 use std::fs;
-use std::io::{self, BufWriter, Read, Write};
+use std::io::{self, BufWriter, Write};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
 use crate::cancel::{CancelToken, JobCtx, Phase, Progress, ProgressSink};
-use crate::cbc_stream::{decrypt_cbc_pkcs7_stream, CbcInput};
+use crate::cbc_stream::{copy_plain, decrypt_cbc_pkcs7_stream, CbcInput, Output};
 use crate::db_limits::StagedDbLimits;
-use crate::error::{BackupError, FileUnavailable, IoOp, MalformedDetail};
+use crate::error::{BackupError, FileUnavailable, IoOp, IoSide, MalformedDetail};
 use crate::guard::{open_source_file, BlobDirGuard, OpenFailure};
 use crate::keys::unwrap_file_key;
 use crate::limits::LimitKind;
 use crate::manifest_db::{open_staged, EntryKind, InterruptWatcher, ManifestEntry, INTERRUPT_POLL};
-use crate::open::{copy_to_staging, partial_path, OpenBackup, Stamp};
+use crate::open::{partial_path, OpenBackup, Stamp};
 use crate::plists::BackupFile;
 use crate::staged_conn::{ReadPolicy, StagedConnection};
 use crate::staging::{create_new_file, RemoveOnDrop};
@@ -86,6 +86,35 @@ impl ExtractedFile<'_> {
     /// example once M3 has imported it).
     pub fn remove(self) -> Result<(), BackupError> {
         fs::remove_file(&self.path).map_err(|e| BackupError::staging_io(IoOp::Remove, &e))
+    }
+}
+
+/// What [`OpenBackup::copy_file_to`] wrote to the caller's writer.
+///
+/// Its `Debug` prints the digest as `<sha256>`: an attachment's hash names
+/// its file in the archive and is kept out of logs (M4 §13.2).
+#[derive(Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CopiedFile {
+    /// SHA-256 of the plaintext written, computed while it streamed.
+    pub sha256: [u8; 32],
+    /// Plaintext bytes written (from the padding, for encrypted files).
+    pub len: u64,
+    /// `Size` from the record (Manifest MBFile).
+    pub declared_size: Option<u64>,
+    /// `len == Size`; `None` when no `Size` is recorded. Differences are
+    /// routine and recorded, never corrected.
+    pub size_matches: Option<bool>,
+}
+
+impl std::fmt::Debug for CopiedFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CopiedFile")
+            .field("sha256", &format_args!("<sha256>"))
+            .field("len", &self.len)
+            .field("declared_size", &self.declared_size)
+            .field("size_matches", &self.size_matches)
+            .finish()
     }
 }
 
@@ -175,22 +204,6 @@ impl ProgressSink for OffsetSink<'_> {
             done: self.base.saturating_add(p.done),
             total: self.total,
         });
-    }
-}
-
-/// Feeds every byte read into a hasher.
-struct HashingReader<'h, R> {
-    inner: R,
-    hasher: Option<&'h mut Sha256>,
-}
-
-impl<R: Read> Read for HashingReader<'_, R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let n = self.inner.read(buf)?;
-        if let Some(h) = self.hasher.as_deref_mut() {
-            h.update(buf.get(..n).unwrap_or(&[]));
-        }
-        Ok(n)
     }
 }
 
@@ -543,8 +556,90 @@ impl OpenBackup {
         })
     }
 
-    /// Copy or decrypt one file to `dest`. `progress` is the offset and the
-    /// total reported; `hasher`, when given, receives the plaintext.
+    /// Stream one listed file's plaintext (decrypting when the backup is
+    /// encrypted) into `sink`, hashing it with SHA-256 as it goes. This is
+    /// the M4 attachment copy (M4 §3.2, §9.1).
+    ///
+    /// - **Never writes to the file system itself.** The caller owns the
+    ///   writer: its buffering, flushing, `sync_all`, placement and cleanup.
+    ///   On any error the caller discards whatever `sink` received.
+    /// - **Size cap first.** A blob longer than
+    ///   [`crate::Limits::attachment_bytes`] is
+    ///   [`BackupError::LimitExceeded`] with [`LimitKind::AttachmentBytes`]
+    ///   before a byte is read or written.
+    /// - **Per-file stamps.** The blob's length and modification time are
+    ///   taken before the copy and compared after it; a difference is
+    ///   [`BackupError::SourceChanged`]. These stamps are not added to the
+    ///   ones [`OpenBackup::unchanged_since_open`] compares, so that check
+    ///   stays O(1) however many files are copied.
+    /// - **Errors.** Problems reading the backup are
+    ///   [`crate::IoSide::Source`] (or `Malformed` for truncation and bad
+    ///   padding); a failed write or flush of `sink` is
+    ///   [`crate::IoSide::Sink`] with its `kind` and OS code, so the caller
+    ///   can tell a full or size-limited volume apart.
+    /// - **Progress** is reported as [`Phase::Copying`] in bytes of the
+    ///   stored blob; cancellation is checked before every 1 MiB read.
+    pub fn copy_file_to<E: FileEntry + ?Sized>(
+        &self,
+        entry: &E,
+        sink: &mut dyn Write,
+        ctx: &mut JobCtx<'_>,
+    ) -> Result<CopiedFile, BackupError> {
+        let entry = sealed::Sealed::manifest_entry(entry);
+        let source = self.source(entry)?;
+        self.check_attachment_len(source.len)?;
+        let before = Stamp::of(&source.blob);
+        let (src, len) = open_blob(&source.blob)?;
+        // The handle's length is what will be read; it is checked again in
+        // case the blob grew since it was listed.
+        self.check_attachment_len(len)?;
+        ctx.check()?;
+        let declared_size = entry.record.as_ref().and_then(|r| r.size);
+
+        let mut hasher = Sha256::new();
+        ctx.report(Phase::Copying, 0, Some(len));
+        let written = {
+            let mut out = HashingWriter {
+                inner: &mut *sink,
+                hasher: Some(&mut hasher),
+            };
+            self.stream_entry(
+                entry,
+                src,
+                len,
+                Output {
+                    dst: &mut out,
+                    side: IoSide::Sink,
+                },
+                ctx,
+                (Phase::Copying, 0, Some(len)),
+            )?
+        };
+        if Stamp::of(&source.blob) != before {
+            return Err(BackupError::SourceChanged);
+        }
+        Ok(CopiedFile {
+            sha256: hasher.finalize().into(),
+            len: written,
+            declared_size,
+            size_matches: declared_size.map(|s| s == written),
+        })
+    }
+
+    fn check_attachment_len(&self, len: u64) -> Result<(), BackupError> {
+        if len > self.limits.attachment_bytes {
+            return Err(BackupError::limit(
+                LimitKind::AttachmentBytes,
+                len,
+                self.limits.attachment_bytes,
+            ));
+        }
+        Ok(())
+    }
+
+    /// Copy or decrypt one file to `dest`, through `dest.partial`.
+    /// `progress` is the offset and the total reported; `hasher`, when
+    /// given, receives the plaintext.
     fn extract_to<'a>(
         &'a self,
         entry: &ManifestEntry,
@@ -554,95 +649,33 @@ impl OpenBackup {
         hasher: Option<&mut Sha256>,
     ) -> Result<ExtractedFile<'a>, BackupError> {
         let source = self.source(entry)?;
-        let (src, len) = match open_source_file(&source.blob) {
-            Ok(f) => f,
-            Err(OpenFailure::Missing) => {
-                return Err(BackupError::FileUnavailable(FileUnavailable::BlobMissing))
-            }
-            Err(OpenFailure::NotRegular) => {
-                return Err(BackupError::FileUnavailable(
-                    FileUnavailable::BlobNotRegular,
-                ))
-            }
-            Err(OpenFailure::Io(e)) => return Err(BackupError::source_io(IoOp::Open, &e)),
-        };
+        let (src, len) = open_blob(&source.blob)?;
         let declared_size = entry.record.as_ref().and_then(|r| r.size);
 
-        let written = match &self.keys {
-            None => copy_to_staging(
-                &mut HashingReader { inner: src, hasher },
-                len,
-                dest,
-                BackupFile::Blob,
-                ctx,
-                Phase::Extracting,
-                progress,
-            )?,
-            Some(keys) => {
-                let mut src = src;
-                let record = entry
-                    .record
-                    .as_ref()
-                    .ok_or(BackupError::FileUnavailable(FileUnavailable::NoKey))?;
-                match record.wrapped_key() {
-                    None => {
-                        if declared_size.unwrap_or(0) > 0 || len > 0 {
-                            return Err(BackupError::FileUnavailable(FileUnavailable::NoKey));
-                        }
-                        write_empty(dest)?
-                    }
-                    Some(wrapped) => {
-                        let class = record.protection_class.ok_or(BackupError::FileUnavailable(
-                            FileUnavailable::NoProtectionClass,
-                        ))?;
-                        if len == 0 {
-                            if declared_size.unwrap_or(0) > 0 {
-                                return Err(BackupError::malformed(
-                                    BackupFile::Blob,
-                                    MalformedDetail::Empty,
-                                ));
-                            }
-                            write_empty(dest)?
-                        } else {
-                            let key =
-                                unwrap_file_key(&keys.class_keys, &keys.keybag, class, wrapped)?;
-                            let partial = partial_path(dest);
-                            let out = create_new_file(&partial)
-                                .map_err(|e| BackupError::staging_io(IoOp::Create, &e))?;
-                            // Before the writer: the writer closes first.
-                            let remove_partial = RemoveOnDrop::new(&partial);
-                            let mut out = HashingWriter {
-                                inner: BufWriter::new(out),
-                                hasher,
-                            };
-                            let mut sink = OffsetSink {
-                                inner: &mut *ctx.progress,
-                                base: progress.0,
-                                total: progress.1,
-                            };
-                            let mut offset_ctx = JobCtx::new(ctx.cancel, &mut sink);
-                            let n = decrypt_cbc_pkcs7_stream(
-                                &key,
-                                &[0u8; 16],
-                                CbcInput {
-                                    src: &mut src,
-                                    src_len: len,
-                                    file: BackupFile::Blob,
-                                },
-                                &mut out,
-                                &mut offset_ctx,
-                                Phase::Extracting,
-                            )?;
-                            drop(out);
-                            fs::rename(&partial, dest)
-                                .map_err(|e| BackupError::staging_io(IoOp::Rename, &e))?;
-                            remove_partial.disarm();
-                            n
-                        }
-                    }
-                }
-            }
+        let partial = partial_path(dest);
+        let file =
+            create_new_file(&partial).map_err(|e| BackupError::staging_io(IoOp::Create, &e))?;
+        // Before the writer: the writer closes first. Key and entry problems
+        // fail before any byte is written, and the empty partial goes too.
+        let remove_partial = RemoveOnDrop::new(&partial);
+        let mut out = HashingWriter {
+            inner: BufWriter::new(file),
+            hasher,
         };
+        let written = self.stream_entry(
+            entry,
+            src,
+            len,
+            Output {
+                dst: &mut out,
+                side: IoSide::Staging,
+            },
+            ctx,
+            (Phase::Extracting, progress.0, progress.1),
+        )?;
+        drop(out);
+        fs::rename(&partial, dest).map_err(|e| BackupError::staging_io(IoOp::Rename, &e))?;
+        remove_partial.disarm();
         Ok(ExtractedFile {
             path: dest.to_path_buf(),
             len: written,
@@ -650,6 +683,86 @@ impl OpenBackup {
             size_matches: declared_size.map(|s| s == written),
             _session: PhantomData,
         })
+    }
+
+    /// The read and decrypt loop shared by [`OpenBackup::extract_file`],
+    /// [`OpenBackup::extract_database_with`] and
+    /// [`OpenBackup::copy_file_to`]: stream the plaintext of `entry`, whose
+    /// blob is open as `src` with length `len`, into `out`, and flush it.
+    /// `progress` is the phase, a fixed offset and the total reported.
+    /// Returns the plaintext length.
+    fn stream_entry<W: Write + ?Sized>(
+        &self,
+        entry: &ManifestEntry,
+        mut src: fs::File,
+        len: u64,
+        mut out: Output<'_, W>,
+        ctx: &mut JobCtx<'_>,
+        progress: (Phase, u64, Option<u64>),
+    ) -> Result<u64, BackupError> {
+        let Some(keys) = &self.keys else {
+            return copy_plain(&mut src, len, out, BackupFile::Blob, ctx, progress);
+        };
+        let declared_size = entry.record.as_ref().and_then(|r| r.size);
+        let record = entry
+            .record
+            .as_ref()
+            .ok_or(BackupError::FileUnavailable(FileUnavailable::NoKey))?;
+        let Some(wrapped) = record.wrapped_key() else {
+            if declared_size.unwrap_or(0) > 0 || len > 0 {
+                return Err(BackupError::FileUnavailable(FileUnavailable::NoKey));
+            }
+            out.flush()?;
+            return Ok(0);
+        };
+        let class = record.protection_class.ok_or(BackupError::FileUnavailable(
+            FileUnavailable::NoProtectionClass,
+        ))?;
+        if len == 0 {
+            if declared_size.unwrap_or(0) > 0 {
+                return Err(BackupError::malformed(
+                    BackupFile::Blob,
+                    MalformedDetail::Empty,
+                ));
+            }
+            out.flush()?;
+            return Ok(0);
+        }
+        let key = unwrap_file_key(&keys.class_keys, &keys.keybag, class, wrapped)?;
+        let (phase, base, total) = progress;
+        let mut sink = OffsetSink {
+            inner: &mut *ctx.progress,
+            base,
+            total,
+        };
+        let mut offset_ctx = JobCtx::new(ctx.cancel, &mut sink);
+        decrypt_cbc_pkcs7_stream(
+            &key,
+            &[0u8; 16],
+            CbcInput {
+                src: &mut src,
+                src_len: len,
+                file: BackupFile::Blob,
+            },
+            out,
+            &mut offset_ctx,
+            phase,
+        )
+    }
+}
+
+/// Open a blob for reading without following links, mapping the guard's
+/// refusals to [`FileUnavailable`].
+fn open_blob(path: &Path) -> Result<(fs::File, u64), BackupError> {
+    match open_source_file(path) {
+        Ok(f) => Ok(f),
+        Err(OpenFailure::Missing) => {
+            Err(BackupError::FileUnavailable(FileUnavailable::BlobMissing))
+        }
+        Err(OpenFailure::NotRegular) => Err(BackupError::FileUnavailable(
+            FileUnavailable::BlobNotRegular,
+        )),
+        Err(OpenFailure::Io(e)) => Err(BackupError::source_io(IoOp::Open, &e)),
     }
 }
 
@@ -660,9 +773,4 @@ fn wal_outcome_kind(o: &WalOutcome) -> &'static str {
         WalOutcome::Staged { .. } => "staged",
         WalOutcome::Skipped(_) => "skipped",
     }
-}
-
-fn write_empty(dest: &Path) -> Result<u64, BackupError> {
-    create_new_file(dest).map_err(|e| BackupError::staging_io(IoOp::Create, &e))?;
-    Ok(0)
 }

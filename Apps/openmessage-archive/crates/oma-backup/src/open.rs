@@ -2,14 +2,14 @@
 //! open it hardened, and hold the keys and staging until `close()` (D5).
 
 use std::fs;
-use std::io::{BufWriter, Read, Write};
+use std::io::{BufWriter, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::SystemTime;
 
 use crate::cancel::{JobCtx, Phase};
-use crate::cbc_stream::{decrypt_cbc_pkcs7_stream, CbcInput, CHUNK};
-use crate::error::{BackupError, IoOp, MalformedDetail};
+use crate::cbc_stream::{copy_plain, decrypt_cbc_pkcs7_stream, CbcInput, Output};
+use crate::error::{BackupError, IoOp, IoSide, MalformedDetail};
 use crate::guard::{open_source_file, OpenFailure};
 use crate::inspect::{Classification, Inspection, SQLITE_HEADER};
 use crate::keybag::{Keybag, KeybagNote};
@@ -123,25 +123,17 @@ pub(crate) fn copy_to_staging(
     // Declared before the writer, so the writer is closed first on an error.
     let remove_partial = RemoveOnDrop::new(&partial);
     let mut out = BufWriter::new(out);
-    let mut buf = zeroize::Zeroizing::new(vec![0u8; CHUNK]);
-    let mut src = src.take(len);
-    let mut done: u64 = 0;
-    while done < len {
-        ctx.check()?;
-        let n = match src.read(&mut buf) {
-            Ok(0) => return Err(BackupError::malformed(file, MalformedDetail::Truncated)),
-            Ok(n) => n,
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) => return Err(BackupError::source_io(IoOp::Read, &e)),
-        };
-        let chunk = buf.get(..n).ok_or(BackupError::Internal("copy buffer"))?;
-        out.write_all(chunk)
-            .map_err(|e| BackupError::staging_io(IoOp::Write, &e))?;
-        done = done.saturating_add(u64::try_from(n).unwrap_or(u64::MAX));
-        ctx.report(phase, progress_base.0.saturating_add(done), progress_base.1);
-    }
-    out.flush()
-        .map_err(|e| BackupError::staging_io(IoOp::Write, &e))?;
+    let done = copy_plain(
+        src,
+        len,
+        Output {
+            dst: &mut out,
+            side: IoSide::Staging,
+        },
+        file,
+        ctx,
+        (phase, progress_base.0, progress_base.1),
+    )?;
     drop(out);
     fs::rename(&partial, dst).map_err(|e| BackupError::staging_io(IoOp::Rename, &e))?;
     remove_partial.disarm();
@@ -323,7 +315,10 @@ impl OpenBackup {
                     src_len: len,
                     file: BackupFile::ManifestDb,
                 },
-                &mut out,
+                Output {
+                    dst: &mut out,
+                    side: IoSide::Staging,
+                },
                 ctx,
                 Phase::DecryptingManifest,
             )?;

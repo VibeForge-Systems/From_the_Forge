@@ -14,7 +14,7 @@ use aes::Aes256;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::cancel::{JobCtx, Phase};
-use crate::error::{BackupError, IoOp, MalformedDetail};
+use crate::error::{BackupError, IoOp, IoSide, MalformedDetail};
 use crate::plists::BackupFile;
 
 type Decryptor = cbc::Decryptor<Aes256>;
@@ -32,13 +32,67 @@ pub(crate) struct CbcInput<'r, R: Read> {
     pub file: BackupFile,
 }
 
-/// Decrypt `input` into `dst`. `src_len` must be a non-zero multiple of 16;
+/// Where plaintext goes, and which side of the job its write errors belong
+/// to: staging, or a caller's writer ([`IoSide::Sink`]).
+pub(crate) struct Output<'w, W: Write + ?Sized> {
+    pub dst: &'w mut W,
+    pub side: IoSide,
+}
+
+impl<W: Write + ?Sized> Output<'_, W> {
+    pub(crate) fn write_all(&mut self, bytes: &[u8]) -> Result<(), BackupError> {
+        self.dst
+            .write_all(bytes)
+            .map_err(|e| BackupError::io(IoOp::Write, self.side, &e))
+    }
+
+    pub(crate) fn flush(&mut self) -> Result<(), BackupError> {
+        self.dst
+            .flush()
+            .map_err(|e| BackupError::io(IoOp::Write, self.side, &e))
+    }
+}
+
+/// Copy exactly `len` plaintext bytes from `src` to `out` in [`CHUNK`]
+/// reads, checking cancellation before each read. `progress` is the phase,
+/// a fixed offset added to every report, and the total reported. A source
+/// shorter than `len` is [`MalformedDetail::Truncated`]. Returns `len`.
+pub(crate) fn copy_plain<R: Read, W: Write + ?Sized>(
+    src: &mut R,
+    len: u64,
+    mut out: Output<'_, W>,
+    file: BackupFile,
+    ctx: &mut JobCtx<'_>,
+    progress: (Phase, u64, Option<u64>),
+) -> Result<u64, BackupError> {
+    let (phase, base, total) = progress;
+    let mut buf = Zeroizing::new(vec![0u8; CHUNK]);
+    let mut src = src.take(len);
+    let mut done: u64 = 0;
+    while done < len {
+        ctx.check()?;
+        let n = match src.read(&mut buf) {
+            Ok(0) => return Err(BackupError::malformed(file, MalformedDetail::Truncated)),
+            Ok(n) => n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(BackupError::source_io(IoOp::Read, &e)),
+        };
+        let chunk = buf.get(..n).ok_or(BackupError::Internal("copy buffer"))?;
+        out.write_all(chunk)?;
+        done = done.saturating_add(u64::try_from(n).unwrap_or(u64::MAX));
+        ctx.report(phase, base.saturating_add(done), total);
+    }
+    out.flush()?;
+    Ok(done)
+}
+
+/// Decrypt `input` into `out`. `src_len` must be a non-zero multiple of 16;
 /// the caller handles a zero length. Returns the plaintext length.
-pub(crate) fn decrypt_cbc_pkcs7_stream<R: Read, W: Write>(
+pub(crate) fn decrypt_cbc_pkcs7_stream<R: Read, W: Write + ?Sized>(
     key: &[u8; 32],
     iv: &[u8; 16],
     input: CbcInput<'_, R>,
-    dst: &mut W,
+    mut out: Output<'_, W>,
     ctx: &mut JobCtx<'_>,
     phase: Phase,
 ) -> Result<u64, BackupError> {
@@ -78,7 +132,7 @@ pub(crate) fn decrypt_cbc_pkcs7_stream<R: Read, W: Write>(
         }
         if remaining > 0 {
             dec.decrypt_blocks(blocks);
-            write_all(dst, chunk)?;
+            out.write_all(chunk)?;
             written = written.saturating_add(want as u64);
         } else {
             let (body, last) = match blocks.split_last_mut() {
@@ -90,8 +144,8 @@ pub(crate) fn decrypt_cbc_pkcs7_stream<R: Read, W: Write>(
             let tail = Pkcs7::unpad(last)
                 .map_err(|_| BackupError::malformed(file, MalformedDetail::Padding))?;
             let body_bytes = Array::slice_as_flattened(body);
-            write_all(dst, body_bytes)?;
-            write_all(dst, tail)?;
+            out.write_all(body_bytes)?;
+            out.write_all(tail)?;
             written = written
                 .saturating_add(body_bytes.len() as u64)
                 .saturating_add(tail.len() as u64);
@@ -99,8 +153,7 @@ pub(crate) fn decrypt_cbc_pkcs7_stream<R: Read, W: Write>(
         }
         ctx.report(phase, total.saturating_sub(remaining), Some(total));
     }
-    dst.flush()
-        .map_err(|e| BackupError::staging_io(IoOp::Write, &e))?;
+    out.flush()?;
     Ok(written)
 }
 
@@ -113,11 +166,6 @@ fn read_full<R: Read>(src: &mut R, buf: &mut [u8], file: BackupFile) -> Result<(
         }
         Err(e) => Err(BackupError::source_io(IoOp::Read, &e)),
     }
-}
-
-fn write_all<W: Write>(dst: &mut W, bytes: &[u8]) -> Result<(), BackupError> {
-    dst.write_all(bytes)
-        .map_err(|e| BackupError::staging_io(IoOp::Write, &e))
 }
 
 /// The result of [`probe_first_and_last_block`].
@@ -191,7 +239,6 @@ mod tests {
     #![allow(clippy::arithmetic_side_effects)]
     use super::*;
     use crate::cancel::{CancelToken, Progress};
-    use crate::error::IoSide;
     use aes::cipher::BlockModeEncrypt;
     use std::io::Cursor;
 
@@ -225,7 +272,10 @@ mod tests {
                 src_len: ct.len() as u64,
                 file: BackupFile::Blob,
             },
-            &mut out,
+            Output {
+                dst: &mut out,
+                side: IoSide::Staging,
+            },
             &mut ctx,
             Phase::Extracting,
         )?;
@@ -388,7 +438,10 @@ mod tests {
                 src_len: ct.len() as u64,
                 file: BackupFile::Blob,
             },
-            &mut FullDisk,
+            Output {
+                dst: &mut FullDisk,
+                side: IoSide::Staging,
+            },
             &mut ctx,
             Phase::Extracting,
         )
@@ -418,7 +471,10 @@ mod tests {
                 src_len: ct.len() as u64 + 16,
                 file: BackupFile::ManifestDb,
             },
-            &mut Vec::new(),
+            Output {
+                dst: &mut Vec::new(),
+                side: IoSide::Staging,
+            },
             &mut ctx,
             Phase::DecryptingManifest,
         )
@@ -430,5 +486,170 @@ mod tests {
                 detail: MalformedDetail::Truncated
             }
         ));
+    }
+
+    /// Cancels the job on its first write, so the loop must stop before
+    /// the next 1 MiB read.
+    struct CancelOnWrite<'t> {
+        token: &'t CancelToken,
+        out: Vec<u8>,
+    }
+    impl Write for CancelOnWrite<'_> {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.token.cancel();
+            self.out.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn copy_plain_copies_reports_and_detects_truncation() {
+        let data: Vec<u8> = (0..CHUNK * 2 + 5).map(|i| (i % 253) as u8).collect();
+        let token = CancelToken::new();
+        let mut seen = Vec::new();
+        let mut sink = |p: Progress| seen.push(p);
+        let mut ctx = JobCtx::new(&token, &mut sink);
+        let mut out = Vec::new();
+        let n = copy_plain(
+            &mut Cursor::new(&data),
+            data.len() as u64,
+            Output {
+                dst: &mut out,
+                side: IoSide::Sink,
+            },
+            BackupFile::Blob,
+            &mut ctx,
+            (Phase::Copying, 10, Some(99)),
+        )
+        .expect("copy");
+        assert_eq!(n, data.len() as u64);
+        assert_eq!(out, data);
+        assert_eq!(seen.len(), 3);
+        assert!(seen
+            .iter()
+            .all(|p| p.phase == Phase::Copying && p.total == Some(99)));
+        assert_eq!(seen.last().map(|p| p.done), Some(10 + data.len() as u64));
+
+        let mut quiet = |_: Progress| {};
+        let mut ctx = JobCtx::new(&token, &mut quiet);
+        let err = copy_plain(
+            &mut Cursor::new(&data),
+            data.len() as u64 + 1,
+            Output {
+                dst: &mut Vec::new(),
+                side: IoSide::Sink,
+            },
+            BackupFile::Blob,
+            &mut ctx,
+            (Phase::Copying, 0, None),
+        )
+        .expect_err("short");
+        assert!(matches!(
+            err,
+            BackupError::Malformed {
+                file: BackupFile::Blob,
+                detail: MalformedDetail::Truncated
+            }
+        ));
+    }
+
+    #[test]
+    fn copy_plain_and_decrypt_stop_between_chunks_when_cancelled() {
+        let data = vec![0x5Au8; CHUNK * 2 + 1];
+        let token = CancelToken::new();
+        let mut w = CancelOnWrite {
+            token: &token,
+            out: Vec::new(),
+        };
+        let mut quiet = |_: Progress| {};
+        let mut ctx = JobCtx::new(&token, &mut quiet);
+        let err = copy_plain(
+            &mut Cursor::new(&data),
+            data.len() as u64,
+            Output {
+                dst: &mut w,
+                side: IoSide::Sink,
+            },
+            BackupFile::Blob,
+            &mut ctx,
+            (Phase::Copying, 0, None),
+        )
+        .expect_err("cancelled");
+        assert!(matches!(err, BackupError::Cancelled));
+        assert_eq!(w.out.len(), CHUNK);
+
+        let key = [4u8; 32];
+        let ct = encrypt(&key, &[0; 16], &data);
+        let token = CancelToken::new();
+        let mut w = CancelOnWrite {
+            token: &token,
+            out: Vec::new(),
+        };
+        let mut quiet = |_: Progress| {};
+        let mut ctx = JobCtx::new(&token, &mut quiet);
+        let err = decrypt_cbc_pkcs7_stream(
+            &key,
+            &[0; 16],
+            CbcInput {
+                src: &mut Cursor::new(&ct),
+                src_len: ct.len() as u64,
+                file: BackupFile::Blob,
+            },
+            Output {
+                dst: &mut w,
+                side: IoSide::Sink,
+            },
+            &mut ctx,
+            Phase::Copying,
+        )
+        .expect_err("cancelled");
+        assert!(matches!(err, BackupError::Cancelled));
+        assert_eq!(w.out.len(), CHUNK);
+    }
+
+    #[test]
+    fn write_errors_carry_the_output_side() {
+        let key = [1u8; 32];
+        let ct = encrypt(&key, &[0; 16], &[1u8; 100]);
+        for side in [IoSide::Staging, IoSide::Sink] {
+            let token = CancelToken::new();
+            let mut quiet = |_: Progress| {};
+            let mut ctx = JobCtx::new(&token, &mut quiet);
+            let err = decrypt_cbc_pkcs7_stream(
+                &key,
+                &[0; 16],
+                CbcInput {
+                    src: &mut Cursor::new(&ct),
+                    src_len: ct.len() as u64,
+                    file: BackupFile::Blob,
+                },
+                Output {
+                    dst: &mut FullDisk,
+                    side,
+                },
+                &mut ctx,
+                Phase::Copying,
+            )
+            .expect_err("full");
+            assert!(matches!(err, BackupError::Io { side: s, op: IoOp::Write, .. } if s == side));
+            let mut quiet = |_: Progress| {};
+            let mut ctx = JobCtx::new(&token, &mut quiet);
+            let err = copy_plain(
+                &mut Cursor::new(&[1u8; 3]),
+                3,
+                Output {
+                    dst: &mut FullDisk,
+                    side,
+                },
+                BackupFile::Blob,
+                &mut ctx,
+                (Phase::Copying, 0, None),
+            )
+            .expect_err("full");
+            assert!(matches!(err, BackupError::Io { side: s, op: IoOp::Write, .. } if s == side));
+        }
     }
 }

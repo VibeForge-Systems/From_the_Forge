@@ -75,7 +75,7 @@ flowchart LR
 | `src/` | Vue 3 UI: views, Pinia stores, the typed IPC client, the shortcut registry, and the capability roadmap | M1, M2 (Backups page), M3 (extraction report) |
 | `src-tauri/` | Tauri shell. Holds IPC commands, application state, settings persistence, archive-location validation, the backup registry, job table and DTOs, and (M3) the report mapping and the panic hook. Contains no domain logic. | M1, M2, M3 |
 | `crates/oma-fs` | Filesystem safety: filename sanitization, contained path resolution, and guards for backups, MobileSync, iMazing's default store and cloud sync. From M4: volume facts (`volume`: free space, network/virtualised/FAT detection), the Unix private-permission check (`perm::check_private`), and durable placement (`place`: `fsync_dir`, `create_dir_durable`, `place_noreplace`, `open_nofollow`) | M1, M4 (slice 4a) |
-| `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them | ✔ M2, M3 |
+| `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them. From M4: `copy_file_to` streams one listed file's plaintext into a caller's writer, hashing it, under `Limits::attachment_bytes` and per-file stamps | ✔ M2, M3, M4 (slice 4b) |
 | `crates/oma-messages` | Scans and probes the sms.db schema by capability, streams typed records (handles, chats, the joins, messages, attachments, Recently Deleted links) as `Col<T>` values, decodes `attributedBody` with a clean-room typedstream decoder, and produces the aggregate `ExtractionReport`. Persists nothing. | ✔ M3 |
 | `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity | planned, M4 |
 | `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX | planned, M6 |
@@ -423,6 +423,44 @@ set, so a truncated or empty blob is not reported as the file. Every other
 class is counted only. Without an `attachment` table nothing is looked up,
 and the shell sends no attachment section, so its counters read "not
 recorded", never 0.
+
+### The attachment copy for the archive (M4 slice 4b)
+
+`OpenBackup::copy_file_to(entry, sink, ctx)` is how the archive import
+(M4) will read attachment files. It shares one read-and-decrypt loop with
+`extract_file` and `extract_database_with`; only the destination differs.
+
+- **It never writes to the file system.** The plaintext goes to a
+  `&mut dyn Write` the caller owns, so `oma-backup` keeps its rule of
+  writing only inside staging, the archive's files never carry
+  `FILE_ATTRIBUTE_TEMPORARY`, and buffering, `sync_all`, placement and
+  cleanup stay with the caller. On any error the caller discards what the
+  writer received.
+- **SHA-256 of the plaintext is computed while it streams** and returned
+  in `CopiedFile` with the plaintext length, the Manifest `Size` and
+  whether they match (`None` when no `Size` is recorded). A mismatch is
+  recorded, never corrected. `CopiedFile`'s `Debug` prints the digest as
+  `<sha256>`, because the digest names the archived file.
+- **`Limits::attachment_bytes` (8 GiB, fixed like D40)** is checked
+  against the stored blob's length before a byte is read, and again
+  against the open handle's length. For an encrypted backup that is the
+  ciphertext, up to 16 bytes longer than the plaintext. A larger blob is
+  `LimitExceeded { what: AttachmentBytes }`.
+- **Per-file stamps.** The blob's length and modification time are taken
+  before the copy and compared after it; a difference is `SourceChanged`.
+  They are not added to the stamps `unchanged_since_open()` compares, so
+  that check stays O(1) however many attachments are copied. A change that
+  keeps both the length and the modification time is not detected; the
+  full verifier re-hashes stored files.
+- **Errors keep their side.** A failed write or flush of the caller's
+  writer is `Io { side: Sink, .. }` with its `kind` and OS code, so the
+  import can tell a full volume (`StorageFull`) or a per-file size limit
+  (`FileTooLarge`, `EFBIG`, `ERROR_FILE_TOO_LARGE`) from a source problem.
+- **Progress** is `Phase::Copying` in bytes of the stored blob (the shell
+  maps it to `copyingAttachments`). Cancellation is checked before every
+  1 MiB read, so a cancel inside a large file stops within one chunk.
+- **Not done here:** `AttachmentKey` stays opaque and cannot be persisted,
+  so the import must copy inside its attachment pass (M4 §9.1).
 
 ### Status and qualifiers (D43)
 
