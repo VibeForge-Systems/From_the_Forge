@@ -158,6 +158,83 @@ about real Messages data, which remains untested.
 The `fixtures_integrity` test in `crates/oma-messages` pins this checksum,
 so a change to any vector fails until the run is repeated and recorded.
 
+## Messages catalogue (M3, synthetic)
+
+`tests/profiles.rs` runs `oma_messages::check()` over every backup in
+`tests/fixtures/messages` (20 entries, plain and encrypted) and compares the
+report with the generator's model in `<name>.expected/report.json`. This
+proves that the Rust code and the generator's second statement of the rules
+agree; it is not external evidence. On 2026-10-18 it passed locally in an
+Ubuntu 24.04.5 LTS container (Linux). **CI on `ubuntu-22.04` and
+`windows-2022` has not run it yet**, and nothing is claimed for Windows.
+
+## Oracle run 1 (encrypted messages fixtures, M3)
+
+`scripts/fixtures/verify_messages_with_oracle.py` runs `iphone_backup_decrypt`
+0.11.2 (MIT) as a black box against every encrypted entry of the messages
+catalogue: Manifest.db, sms.db, sms.db-wal and every decryptable attachment
+blob must decrypt to the entry's `.expected` plaintext. Exempt, by name (the
+oracle's outcome is printed, not asserted): in `msgs-attachments-enc`, the
+attachments whose blob is missing, whose key is missing, whose protection
+class is unavailable and whose key does not unwrap.
+
+| Date | Versions | SHA-256 of `SHA256SUMS` checked | Result |
+|---|---|---|---|
+| 2026-10-18 | iphone_backup_decrypt 0.11.2 with pycryptodome 4.0.1, Python 3.13.16, Linux | `8ac4418ebce62f7407056e0041bde0195d10832e3a200d463f18911d4c171fd0` | ALL ORACLE CHECKS PASSED: 19 checks over `msgs-attachments-enc`, `msgs-full-enc` and `msgs-wal-enc`. Exempt attachments, observed: missing blob `FileNotFoundError`, no key `TypeError`, unavailable class `ValueError`, key that does not unwrap `ValueError` (run twice that day, with the same result) |
+
+## Oracle run 3 (imessage-exporter, messages catalogue, M3)
+
+imessage-exporter 4.3.0 (GPL-3.0), a release build kept in a scratch
+directory, run as a black box (`-a macOS -p <copy>/sms.db`, with `-d`,
+`-f txt` and `-f html`) on a scratch copy of each entry's plaintext
+`.expected/sms.db` (with its `-wal` when the check stages one). No GPL tool
+or wrapper is committed; the steps are in
+[`tests/fixtures/messages/README.md`](../tests/fixtures/messages/README.md).
+
+| Date | Versions | SHA-256 of `SHA256SUMS` checked | Result |
+|---|---|---|---|
+| 2026-10-18 | imessage-exporter 4.3.0, Linux | `8ac4418ebce62f7407056e0041bde0195d10832e3a200d463f18911d4c171fd0` | 19 checks passed, 0 failed. The message count equals the model for all 14 readable entries the oracle opens. The text of every attributedBody-only row in `msgs-full-plain` and `msgs-full-enc` (two rows each) is in its export, and the mention after the non-BMP characters is placed on the same text as our decode. 13 further counts agree (messages in no chat, messages in more than one chat, attachments). **Observed, not compared:** the oracle refuses `msgs-minimal-plain` (it needs `chat.chat_identifier`) and `msgs-resume-plain` (a rowid of `i64::MIN`); in `msgs-hostile-plain` one multipart row's text is not in its export; it exits with an error on the four entries we report damaged or unsupported |
+
+## Oracle run 4 (third-party macOS samples, M3)
+
+Our `check()` (the ignored test `tests/external_sample.rs`) versus
+imessage-exporter 4.3.0 (`-d`), both black box, on two third-party sample
+databases, each wrapped in a scratch-only unencrypted backup. **Aggregate
+counts only; both samples are macOS chat.db, so this says nothing about any
+iOS version.** The samples are not committed.
+
+| Date | Sample (SHA-256) | Our status | Counts, ours / oracle |
+|---|---|---|---|
+| 2026-10-18 | imessage-exporter `test_data/db/test.db` (S3, GPL-3.0; `2e26ffcc9d629c98cffecc3b04ad48ef2dcdbf901205e30eb6044a452de4a878`) | Readable, with qualifiers: 3 unknown tables, 71 unknown columns | messages 3 / 3; messages in no chat 3 / 3; chats 0 / 0; attachments 4 / 4; handles 0 / 1 |
+| 2026-10-18 | plaso `test_data/sqlite/imessage_chat.db` (S12, file terms UNVERIFIED; `2931db3b556e33728867726f5bfd56464c4c2955cbe2e795660bda2ad631127d`, with an empty `-wal`) | Readable, with qualifiers: 32 unknown columns | messages 10 / 10; messages in more than one chat 1 / 1; chats 7 / 7; attachments 1 / 1; handles 7 / 8 |
+
+- The oracle reports one more handle than `count(*)` on `handle` in every
+  comparison (also 6 against 5 on `msgs-full-plain`). Why is not known: the
+  oracle is a black box.
+- The first run reported the S12 sample's **empty** `-wal` as
+  `WalFramesInvalid`. A zero-length `-wal` is a normal state, so the
+  qualifier now needs bytes after an invalid header
+  (`tests/wal.rs::an_empty_wal_is_not_invalid`); the second run is the row
+  above.
+
+## Synthetic performance (M3)
+
+`perf_synthetic_large` (`tests/perf.rs`, ignored by default) on a synthetic
+sms.db with 1,000,000 messages, 2,000 chats and 50,000 attachments (none
+listed in the backup). Run once, 2026-10-18, in the **dev** profile, whose
+overrides build `oma-messages`, `oma-backup` and the bundled SQLite at
+`opt-level = 3`, in an Ubuntu 24.04.5 LTS container with 4 CPUs. **Synthetic
+data; real-backup timing, memory and sizes remain UNVERIFIED.**
+
+| Indexes | Database | `check()` | Messages pass | Attachments | Aggregates | `quick_check` | Peak RSS (`VmHWM`) |
+|---|---|---|---|---|---|---|---|
+| None | 130 MB | 6.6 s | 3.0 s | 1.4 s | 1.5 s | 0.5 s | 186 MiB |
+| Our own, on the join keys | 165 MB | 6.6 s | 3.0 s | 1.2 s | 1.5 s | 0.5 s | 186 MiB |
+
+No aggregate went over its op budget. Peak RSS is the whole test process,
+including building the database. Release-mode and Windows runs are not yet
+recorded.
+
 ## Manual checklist for milestone 2 (not yet run)
 
 Record each run here only once it has actually been done.

@@ -1,0 +1,198 @@
+{
+ "attachments": null,
+ "chats": null,
+ "database": {
+  "header_says_wal": false,
+  "integrity": "ok",
+  "size_matches": true,
+  "staged_bytes": 9216,
+  "wal_bytes": null,
+  "wal_frames_after_first_invalid": null,
+  "wal_listed": false,
+  "wal_outcome": "not_listed",
+  "wal_size_matches": null,
+  "wal_valid_committed_frames": null
+ },
+ "dates": null,
+ "failures": null,
+ "handles": null,
+ "links": null,
+ "messages": null,
+ "recently_deleted": null,
+ "schema": {
+  "client_version": null,
+  "client_version_parsed": false,
+  "encoding": "utf8",
+  "features": [],
+  "indexes": 1,
+  "internal_objects": 1,
+  "stat_tables": 0,
+  "tables": [
+   {
+    "generated": 0,
+    "missing": [],
+    "present": false,
+    "rows": null,
+    "table": "message",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [
+     "service",
+     "country",
+     "uncanonicalized_id",
+     "person_centric_id"
+    ],
+    "present": true,
+    "rows": 1,
+    "table": "handle",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [
+     "style",
+     "chat_identifier",
+     "service_name",
+     "display_name",
+     "room_name",
+     "group_id",
+     "properties",
+     "is_archived",
+     "is_filtered",
+     "is_blackholed",
+     "is_pending_review",
+     "is_recovered",
+     "last_read_message_timestamp"
+    ],
+    "present": true,
+    "rows": 1,
+    "table": "chat",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [
+     "message_date"
+    ],
+    "present": true,
+    "rows": 3,
+    "table": "chat_message_join",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": true,
+    "rows": 1,
+    "table": "chat_handle_join",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": false,
+    "rows": null,
+    "table": "message_attachment_join",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": false,
+    "rows": null,
+    "table": "attachment",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": false,
+    "rows": null,
+    "table": "chat_recoverable_message_join",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": false,
+    "rows": null,
+    "table": "recoverable_message_part",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": false,
+    "rows": null,
+    "table": "deleted_messages",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": false,
+    "rows": null,
+    "table": "sync_deleted_messages",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": false,
+    "rows": null,
+    "table": "sync_deleted_chats",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": false,
+    "rows": null,
+    "table": "sync_deleted_attachments",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": false,
+    "rows": null,
+    "table": "unsynced_removed_recoverable_messages",
+    "unknown": 0,
+    "wrong_case": 0
+   },
+   {
+    "generated": 0,
+    "missing": [],
+    "present": false,
+    "rows": null,
+    "table": "_SqliteDatabaseProperties",
+    "unknown": 0,
+    "wrong_case": 0
+   }
+  ],
+  "triggers": 0,
+  "unknown_tables": 1,
+  "views": 1
+ },
+ "status": {
+  "kind": "unsupported",
+  "reasons": [
+   "not_ordinary_table:message"
+  ]
+ }
+}

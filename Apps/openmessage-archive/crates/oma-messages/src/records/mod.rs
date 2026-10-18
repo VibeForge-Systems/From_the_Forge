@@ -5,12 +5,14 @@
 //! `Debug` impl is hand-written to print the rowid and each field's shape
 //! (absent, NULL, value, unreadable or oversized), never a value.
 
+mod attachment;
 mod chat;
 mod handle;
 mod joins;
 mod message;
 mod recoverable;
 
+pub use attachment::AttachmentRecord;
 pub use chat::ChatRecord;
 pub use handle::HandleRecord;
 pub use joins::{ChatHandleLink, ChatMessageLink, MessageAttachmentLink};

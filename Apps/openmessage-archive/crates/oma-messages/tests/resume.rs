@@ -1,4 +1,4 @@
-//! Break and resume for every `for_each_*` pass so far (M3 §4.4,
+//! Break and resume for every `for_each_*` pass (M3 §4.4,
 //! §19.3 `resume.rs`).
 //!
 //! The fixture has rowid gaps, deleted rows, and rows keyed `i64::MIN` and
@@ -37,13 +37,14 @@ fn expected_keys() -> Vec<i64> {
 }
 
 /// (table, key column, insert statement taking the key as ?1)
-const TABLES: [(&str, &str, &str); 7] = [
+const TABLES: [(&str, &str, &str); 8] = [
     ("message", "ROWID", "INSERT INTO message (ROWID, guid, date, is_from_me, text) VALUES (?1, 'SYNTH-MSG-' || ?1, 700000000000000000, 0, 'SYNTH-BODY-' || ?1)"),
     ("handle", "ROWID", "INSERT INTO handle (ROWID, id, service) VALUES (?1, 'synthetic-handle-' || ?1 || '@example.invalid', 'iMessage')"),
     ("chat", "ROWID", "INSERT INTO chat (ROWID, guid) VALUES (?1, 'SYNTH-CHAT-GUID-' || ?1)"),
     ("chat_handle_join", "rowid", "INSERT INTO chat_handle_join (rowid, chat_id, handle_id) VALUES (?1, 1, ?1)"),
     ("chat_message_join", "rowid", "INSERT INTO chat_message_join (rowid, chat_id, message_id, message_date) VALUES (?1, 1, ?1, 700000000000000000)"),
     ("message_attachment_join", "rowid", "INSERT INTO message_attachment_join (rowid, message_id, attachment_id) VALUES (?1, ?1, 1)"),
+    ("attachment", "ROWID", "INSERT INTO attachment (ROWID, guid, filename) VALUES (?1, 'SYNTH-ATT-GUID-' || ?1, '~/Library/SMS/Attachments/aa/' || ?1 || '/SYNTH-FILE.heic')"),
     ("chat_recoverable_message_join", "rowid", "INSERT INTO chat_recoverable_message_join (rowid, chat_id, message_id, delete_date, ck_sync_state) VALUES (?1, 1, ?1, 0, 0)"),
 ];
 
@@ -196,6 +197,15 @@ fn every_pass_breaks_and_resumes_exactly() {
             rows(KnownTable::MessageAttachmentJoin),
             &mut |from, f| {
                 db.for_each_message_attachment(from, ctx, |r| f(r.rowid))
+                    .expect("pass")
+            },
+        );
+        check_resume(
+            "attachment",
+            8,
+            rows(KnownTable::Attachment),
+            &mut |from, f| {
+                db.for_each_attachment(from, None, ctx, |r| f(r.rowid))
                     .expect("pass")
             },
         );

@@ -40,14 +40,15 @@ use oma_backup::{
 use rusqlite::types::ValueRef;
 use rusqlite::{Row, Statement};
 
+use crate::attachments::AttachmentLocator;
 use crate::col::Col;
 use crate::col::IssueKind;
 use crate::error::{BackupStage, MessagesError, Stage};
 use crate::guidset::GuidSets;
 use crate::progress::{BackupSinkAdapter, MessagesCtx, MessagesPhase};
 use crate::records::{
-    ChatHandleLink, ChatMessageLink, ChatRecord, HandleRecord, MessageAttachmentLink,
-    MessageReadOptions, MessageRecord, RecoverableLink,
+    AttachmentRecord, ChatHandleLink, ChatMessageLink, ChatRecord, HandleRecord,
+    MessageAttachmentLink, MessageReadOptions, MessageRecord, RecoverableLink,
 };
 use crate::redact::{RawBlob, Redacted, SqlText};
 use crate::schema::{
@@ -597,6 +598,37 @@ impl<'s> SmsDb<'s> {
         self.pass(from, ctx, f)
     }
 
+    /// Every `attachment` row. With a locator, each row's `filename` is
+    /// classified, looked up in Manifest.db and its file probed (§12); the
+    /// cancellation token is checked before each lookup. An empty pass when
+    /// the optional table is absent.
+    pub fn for_each_attachment<B>(
+        &self,
+        from: Cursor,
+        locate: Option<&mut AttachmentLocator<'_>>,
+        ctx: &mut MessagesCtx<'_>,
+        f: impl FnMut(AttachmentRecord) -> ControlFlow<B>,
+    ) -> Result<PassOutcome<B>, MessagesError> {
+        let mut locate = locate;
+        let cancel = ctx.cancel;
+        self.pass_with(
+            PassSpec {
+                table: KnownTable::Attachment,
+                phase: MessagesPhase::CheckingAttachments,
+                stage: Stage::Attachments,
+            },
+            from,
+            ctx,
+            |key, r| {
+                if locate.is_some() && cancel.is_cancelled() {
+                    return Err(MessagesError::Cancelled);
+                }
+                AttachmentRecord::from_row(key, r, locate.as_deref_mut())
+            },
+            f,
+        )
+    }
+
     /// Every `chat_recoverable_message_join` row (Recently Deleted links).
     /// An empty pass when the optional table is absent.
     pub fn for_each_recoverable<B>(
@@ -606,6 +638,23 @@ impl<'s> SmsDb<'s> {
         f: impl FnMut(RecoverableLink) -> ControlFlow<B>,
     ) -> Result<PassOutcome<B>, MessagesError> {
         self.pass(from, ctx, f)
+    }
+
+    /// The aggregates (§7.3): integer SQL under op budgets, then the GUID
+    /// counts from `guids` (filled by [`SmsDb::for_each_message`]). The sets
+    /// are sorted in place, so they are taken mutably.
+    pub fn aggregates(
+        &self,
+        guids: &mut GuidSets,
+        ctx: &mut MessagesCtx<'_>,
+    ) -> Result<crate::aggregates::Aggregates, MessagesError> {
+        crate::aggregates::run(
+            self.conn,
+            &self.caps,
+            crate::aggregates::AggBudget::default(),
+            guids,
+            ctx,
+        )
     }
 
     fn prepare(&self, sql: &str, stage: Stage) -> Result<Statement<'s>, MessagesError> {

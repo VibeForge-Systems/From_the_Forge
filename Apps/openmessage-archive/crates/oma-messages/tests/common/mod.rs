@@ -6,6 +6,7 @@
 #![allow(dead_code, clippy::disallowed_types, clippy::disallowed_methods)]
 
 pub mod bplist;
+pub mod expected;
 pub mod mutate;
 pub mod ts_writer;
 
@@ -32,6 +33,32 @@ pub fn fixtures_dir() -> PathBuf {
         env!("CARGO_MANIFEST_DIR"),
         "/../../tests/fixtures/backups"
     ))
+}
+
+/// `tests/fixtures/messages` at the app level (the M3 catalogue).
+pub fn messages_dir() -> PathBuf {
+    PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/fixtures/messages"
+    ))
+}
+
+/// The names of the messages catalogue's backups, sorted.
+pub fn catalogue() -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(messages_dir())
+        .expect("messages dir")
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| !n.ends_with(".expected"))
+        .collect();
+    names.sort();
+    names
+}
+
+/// The password of an encrypted catalogue entry, `None` for a plain one.
+pub fn catalogue_password(name: &str) -> Option<&'static str> {
+    name.ends_with("-enc").then_some(PASSWORD)
 }
 
 pub fn copy_tree(src: &Path, dst: &Path) {
@@ -84,6 +111,20 @@ impl Fixture {
         }
     }
 
+    /// A copy of a messages-catalogue backup.
+    pub fn messages(name: &str) -> Self {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let parent = tmp.path().join("backups").join(name);
+        copy_tree(&messages_dir().join(name), &parent);
+        let library = tmp.path().join("library");
+        fs::create_dir(&library).expect("mkdir");
+        Fixture {
+            dir: parent.join(UDID),
+            library,
+            tmp,
+        }
+    }
+
     /// A copy of `plain` whose sms.db blob is `main`.
     pub fn with_sms(main: &[u8]) -> Self {
         let fx = Fixture::m2("plain");
@@ -114,6 +155,75 @@ impl Fixture {
         walk(&self.library.join(".oma-staging"), &mut out);
         out
     }
+}
+
+/// Sentinel strings planted in the synthetic fixtures (M3 §19.3). None may
+/// appear in a log line, an error's `Display` or `Debug`, or any public
+/// type's `Debug`.
+pub const SENTINELS: &[&str] = &[
+    "SYNTH-BODY",
+    "SYNTH-EDIT",
+    "SYNTH-DELETED",
+    "synthetic-handle",
+    "+1555",
+    "1555SYNTH",
+    "SYNTH-CHAT",
+    "chatSYNTH",
+    "SYNTH-GROUP",
+    "SYNTH-PERSON",
+    "SYNTH-FILE",
+    "SYNTH-GENMOJI",
+    "SYNTH-MENTION",
+    "SYNTH-SUBJECT",
+    "SYNTH-MSG-GUID",
+    "SYNTH-ATT-GUID",
+    "SYNTH-MISSING",
+    "SYNTH_SENTINEL",
+    "SYNTH-TRANSLATION",
+    "SYNTH-LANG",
+    "SYNTH-PAYLOAD",
+    "SYNTH-PROPERTY",
+    "SYNTH-KEY",
+    "SYNTH-VALUE",
+    "SYNTH-CORRUPT",
+    "SYNTH-LONG",
+    "SYNTH-SERVICE",
+    "SYNTH-TEXT",
+    "SYNTH-NOT-A",
+    "SYNTHLinkClass",
+    "SYNTHUnknownValue",
+    "__kSYNTHUnknownKey",
+    "at_0_00000000",
+    "\u{1F525}",
+    "example.invalid",
+    "com.example.synthetic",
+];
+
+/// The sentinels found in `s`.
+pub fn sentinels_in(s: &str) -> Vec<&'static str> {
+    SENTINELS
+        .iter()
+        .copied()
+        .filter(|x| s.contains(x))
+        .collect()
+}
+
+/// Run `check()` on a fixture, close the backup, and return the result and
+/// the cleanup report.
+pub fn run_check(
+    fx: &Fixture,
+    password: Option<&str>,
+    opts: &oma_messages::CheckOptions,
+) -> (
+    Result<oma_messages::ExtractionReport, MessagesError>,
+    oma_backup::CleanupReport,
+) {
+    let ob = fx.open(password);
+    let token = CancelToken::new();
+    let mut sink = |_: MessagesProgress| {};
+    let mut ctx = MessagesCtx::new(&token, &mut sink);
+    let result = oma_messages::check(&ob, opts, &mut ctx);
+    (result, ob.close())
 }
 
 /// Build a database file with `build` and return its bytes.

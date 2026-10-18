@@ -31,8 +31,15 @@
 //! `message_summary_info` and a derived [`EditLabel`]. [`GuidSets`] counts
 //! reply originators and association targets that match no message.
 //!
-//! The attachment and aggregate passes and the report land in later slices
-//! of Milestone 3.
+//! [`SmsDb::for_each_attachment`] classifies each `attachment.filename`,
+//! looks the two sourced classes up in Manifest.db, and probes the file it
+//! finds without extracting it ([`AttachmentLocator`]). The aggregates
+//! (orphans, chat membership, unmatched handles) run as integer SQL under op
+//! budgets.
+//!
+//! [`check`] runs the whole extraction check on an opened backup and returns
+//! an [`ExtractionReport`]: aggregates only, with no string from the
+//! database.
 #![cfg_attr(
     not(test),
     deny(
@@ -43,8 +50,11 @@
     )
 )]
 
+mod aggregates;
 mod assoc;
+mod attachments;
 mod caps;
+mod check;
 mod codes;
 mod col;
 mod db;
@@ -53,17 +63,24 @@ mod guidset;
 mod progress;
 mod records;
 mod redact;
+mod report;
 mod schema;
 mod summary;
 mod time;
 mod typedstream;
 mod value;
 
+pub use aggregates::{aggregate_queries, AggregateId, Aggregates, AGG_OPS_BASE, AGG_OPS_PER_ROW};
 pub use assoc::{AssocTarget, Association};
+pub use attachments::{
+    classify as classify_attachment_path, AttachmentLocation, AttachmentLocator, LookupOutcome,
+    NotAttemptedReason, PathClass, ATTACHMENT_LOOKUP_DOMAIN,
+};
 pub use caps::{
     CAP_ATTRIBUTED_BODY, CAP_GUID, CAP_IDENTIFIER, CAP_OTHER_TEXT, CAP_PROPERTIES, CAP_SUMMARY,
     CAP_TEXT, INTEGER_BYTES, ROW_BYTES_BUDGET,
 };
+pub use check::{check, CheckOptions};
 pub use codes::{AssociatedKind, ItemKind, Reaction, ServiceClass};
 pub use col::{Col, ColShape, IssueKind};
 pub use db::{
@@ -74,10 +91,19 @@ pub use error::{BackupStage, MessagesError, Stage};
 pub use guidset::{GuidCounts, GuidSets, GUID_SET_CAP};
 pub use progress::{MessagesCtx, MessagesPhase, MessagesProgress, MessagesSink};
 pub use records::{
-    AttributedOutcome, Body, ChatHandleLink, ChatMessageLink, ChatRecord, EditLabel, HandleRecord,
-    MessageAttachmentLink, MessageReadOptions, MessageRecord, RecoverableLink, ReplyInfo,
+    AttachmentRecord, AttributedOutcome, Body, ChatHandleLink, ChatMessageLink, ChatRecord,
+    EditLabel, HandleRecord, MessageAttachmentLink, MessageReadOptions, MessageRecord,
+    RecoverableLink, ReplyInfo,
 };
 pub use redact::{ByteLen, RawBlob, Redacted, SqlText};
+pub use report::{
+    AssociationCounts, AttachmentCounts, AttributedState, BodyCounts, ChatCounts, DateCounts,
+    DbFacts, EditLabelCounts, ExtractionReport, ExtractionStatus, FailureCounts, HandleCounts,
+    IntegrityOutcome, ItemKindCounts, LinkCounts, LookupCounts, MessageCounts, ProbeCounts,
+    Qualifier, RawHistogram, ReactionCounts, RecentlyDeletedCounts, SchemaReport, ServiceCounts,
+    SummaryCounts, TableReport, TargetCounts, TextState, UnitHistogram, WalReport, HISTOGRAM_CAP,
+    RANGE_FLOOR_UNIX_NS,
+};
 pub use schema::{
     Capabilities, ColumnKind, DamageReason, Features, IncompleteReason, KnownColumn,
     KnownColumnSet, KnownTable, Probe, TableCaps, Unsupported, UnsupportedReason,

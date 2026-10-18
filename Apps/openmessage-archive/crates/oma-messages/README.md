@@ -28,6 +28,37 @@ plist writer in `tests/common/bplist.rs`), `tests/parser_mutation.rs`
 (seeded mutations of summaries, association targets and every `message`
 column through SQLite) and `tests/resume.rs`.
 
+## Attachments, aggregates and the check
+
+`SmsDb::for_each_attachment` reads each `attachment` row and, given an
+`AttachmentLocator` (`attachments.rs`), classifies its `filename` by prefix,
+looks up only the two classes under `Library/SMS/` (in `MediaDomain`, after
+an unusual-name gate built on `oma_fs::resolve_within`), and probes the file
+it finds without extracting it. `aggregates.rs` holds the integer aggregates
+(orphans on each side of each join, messages in no chat or in several,
+unmatched handles, chats by linked handles): static SQL in plan-safe forms,
+each under an op budget. `check()` (`check.rs`) runs the whole extraction
+check on an opened backup and returns an `ExtractionReport` (`report.rs`):
+counts, closed kinds, capped histograms of raw codes and the date range,
+with no string from the database. Counters that depend on an optional table
+or column are `Option<u64>`, so "not recorded" is never shown as 0.
+
+These modules were written from the M3 spec and `docs/supported-formats.md`;
+no GPL implementation was opened. The synthetic catalogue they are tested
+on, `tests/fixtures/messages`, is produced by
+`scripts/fixtures/make_synthetic_messages.py`, whose own model of the report
+(`report.json`) is compared with `check()` in `tests/profiles.rs`. That
+proves self-consistency only; the oracle runs recorded in
+`docs/compatibility.md` are the external checks.
+
+Tests: `tests/profiles.rs` (every catalogue entry against its model, and
+the budget and M2-fixture paths), `tests/attachments.rs`, `tests/wal.rs`,
+`tests/readonly.rs`, `tests/query_plans.rs`, `tests/cancel.rs`,
+`tests/log_hygiene.rs`, `tests/redaction.rs` and `tests/resume.rs`.
+`tests/perf.rs` (`perf_synthetic_large`) and `tests/external_sample.rs`
+(a backup outside the repository, named by `OMA_EXTERNAL_BACKUP`) are
+ignored by default and run by hand.
+
 ## Typedstream decoder (clean room)
 
 `src/typedstream/` decodes the typedstream (`NSArchiver`) blobs in
