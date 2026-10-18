@@ -1,0 +1,33 @@
+[package]
+name = "oma-backup"
+description = "iPhone backup discovery, manifest parsing, keybag unlocking, Manifest.db validation and single-file extraction for OpenMessage Archive."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+oma-fs.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+dunce.workspace = true
+aes.workspace = true
+aes-kw.workspace = true
+cbc.workspace = true
+hmac.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+zeroize.workspace = true
+plist.workspace = true
+rusqlite.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tracing-subscriber.workspace = true # log-hygiene test
+pbkdf2.workspace = true             # differential tests against the in-crate PBKDF2 only
+
+[lints]
+workspace = true

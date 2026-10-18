@@ -5,9 +5,12 @@
 //! extraction, storage, and export live in their own crates so they can be
 //! tested without a window.
 
+pub mod backups;
 pub mod commands;
 pub mod error;
 pub mod settings;
+
+use std::time::Duration;
 
 use tauri::Manager;
 use tracing_subscriber::EnvFilter;
@@ -38,6 +41,10 @@ pub fn run() {
         .setup(|app| {
             let config_dir = app.path().app_config_dir()?;
             let store = SettingsStore::load(config_dir.join(SETTINGS_FILE));
+            // Leftovers from a crash or a failed cleanup, in the background.
+            commands::archive_location::sweep_in_background(
+                store.settings().archive_directory.clone(),
+            );
             app.manage(AppState::new(store));
             Ok(())
         })
@@ -49,7 +56,27 @@ pub fn run() {
             commands::archive_location::clear_archive_directory,
             commands::archive_location::open_archive_directory,
             commands::system::get_app_info,
+            commands::backups::list_backups,
+            commands::backups::add_backup_folder,
+            commands::backups::forget_backup_folder,
+            commands::backups::get_backup_details,
+            commands::jobs::open_backup,
+            commands::jobs::cancel_job,
         ])
-        .run(tauri::generate_context!())
-        .expect("the Tauri runtime failed to start");
+        .build(tauri::generate_context!())
+        .expect("the Tauri runtime failed to start")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Cancel running checks and let them remove their staged
+                // copies. A kill or crash skips this; the startup sweep
+                // covers that case.
+                if let Some(state) = app.try_state::<AppState>() {
+                    let clean = state.jobs.cancel_all_and_wait(EXIT_WAIT);
+                    tracing::info!(clean, "exit");
+                }
+            }
+        });
 }
+
+/// How long the exit handler waits for running jobs to clean up.
+const EXIT_WAIT: Duration = Duration::from_secs(5);

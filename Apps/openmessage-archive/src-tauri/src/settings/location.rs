@@ -150,6 +150,13 @@ pub fn inspect_location(path: &Path) -> ArchiveLocationStatus {
         ));
         return finish(display, checks);
     }
+    if oma_fs::is_within_imazing_backups(&canonical) {
+        checks.push(error(
+            "outside-backup",
+            "This folder is inside the iMazing backup store (iMazing's Backups folder) that iMazing manages. Choose a folder outside it.",
+        ));
+        return finish(display, checks);
+    }
     checks.push(ok(
         "outside-backup",
         "The folder is not inside an iPhone backup.",
@@ -161,6 +168,35 @@ pub fn inspect_location(path: &Path) -> ArchiveLocationStatus {
             checks.push(error(
                 "writable",
                 format!("The folder is not writable ({}).", e.kind()),
+            ));
+            return finish(display, checks);
+        }
+    }
+
+    // Staging decrypted copies needs a drive that keeps a 0700 folder
+    // private. FAT, exFAT and NTFS on Linux (and many network shares) report
+    // modes from mount options instead, and staging refuses such a folder, so
+    // say so here rather than on every check.
+    #[cfg(unix)]
+    match keeps_private_permissions(&canonical) {
+        Ok(true) => checks.push(ok(
+            "private",
+            "The folder's drive keeps files private to your user account.",
+        )),
+        Ok(false) => {
+            checks.push(error(
+                "private",
+                "This folder's drive does not keep Linux file permissions (for example a FAT, exFAT or NTFS drive, or a network share), so other users of this computer could read the copies made while checking a backup. Choose a folder on another drive, or mount this one with a private umask (dmask=077, fmask=077).",
+            ));
+            return finish(display, checks);
+        }
+        Err(e) => {
+            checks.push(error(
+                "private",
+                format!(
+                    "The folder's permissions could not be checked ({}).",
+                    e.kind()
+                ),
             ));
             return finish(display, checks);
         }
@@ -200,6 +236,31 @@ fn probe_writable(dir: &Path) -> std::io::Result<()> {
     result.and(removed)
 }
 
+/// Create a folder with mode 0700 and report whether the drive kept it
+/// private. The umask can only remove bits, so group or other bits on the new
+/// folder mean the filesystem ignores the requested mode.
+#[cfg(unix)]
+fn keeps_private_permissions(dir: &Path) -> std::io::Result<bool> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let probe = dir.join(format!(".oma-mode-probe-{}-{nanos}", std::process::id()));
+    fs::DirBuilder::new().mode(0o700).create(&probe)?;
+    let mode = fs::symlink_metadata(&probe).map(|m| m.mode());
+    let removed = fs::remove_dir(&probe);
+    let mode = mode?;
+    removed?;
+    Ok(is_private_mode(mode))
+}
+
+/// No permission bits for group or others.
+#[cfg(unix)]
+fn is_private_mode(mode: u32) -> bool {
+    mode & 0o077 == 0
+}
+
 fn ok(id: &str, message: impl Into<String>) -> LocationCheck {
     check(id, CheckLevel::Ok, message)
 }
@@ -234,6 +295,8 @@ mod tests {
         let status = inspect_location(tmp.path());
         assert_eq!(status.state, LocationState::Ready, "{status:#?}");
         assert!(status.is_usable());
+        #[cfg(unix)]
+        assert_eq!(level_of(&status, "private"), Some(CheckLevel::Ok));
         for id in ["exists", "outside-backup", "writable", "local-only"] {
             assert_eq!(level_of(&status, id), Some(CheckLevel::Ok), "{id}");
         }
@@ -242,6 +305,17 @@ mod tests {
             0,
             "the write probe must clean up after itself"
         );
+    }
+
+    /// A drive that reports modes from mount options (vfat with the usual
+    /// umask 022 reports 0755) is not private; only 0700-style modes are.
+    #[cfg(unix)]
+    #[test]
+    fn modes_with_group_or_other_bits_are_not_private() {
+        assert!(is_private_mode(0o040700));
+        assert!(!is_private_mode(0o040755));
+        assert!(!is_private_mode(0o040777));
+        assert!(!is_private_mode(0o040770));
     }
 
     #[test]
@@ -306,6 +380,32 @@ mod tests {
         fs::create_dir_all(&store).expect("mkdir");
         let status = inspect_location(&store);
         assert_eq!(level_of(&status, "outside-backup"), Some(CheckLevel::Error));
+    }
+
+    #[test]
+    fn the_imazing_store_is_rejected_without_a_write_probe() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // Case differs from iMazing's own spelling on purpose.
+        let store = tmp.path().join("IMAZING").join("backups");
+        let inner = store.join("library");
+        fs::create_dir_all(&inner).expect("mkdir");
+        for candidate in [&store, &inner] {
+            let status = inspect_location(candidate);
+            assert_eq!(status.state, LocationState::Error);
+            let check = status
+                .checks
+                .iter()
+                .find(|c| c.id == "outside-backup")
+                .expect("outside-backup check");
+            assert_eq!(check.level, CheckLevel::Error);
+            assert!(check.message.contains("iMazing"), "{}", check.message);
+            assert!(!check.message.contains("MobileSync"), "{}", check.message);
+            assert_eq!(level_of(&status, "writable"), None);
+        }
+        assert_eq!(fs::read_dir(&inner).expect("read_dir").count(), 0);
+        // The iMazing folder itself, outside Backups, is fine.
+        let status = inspect_location(&tmp.path().join("IMAZING"));
+        assert_eq!(level_of(&status, "outside-backup"), Some(CheckLevel::Ok));
     }
 
     #[test]

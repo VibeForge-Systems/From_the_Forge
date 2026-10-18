@@ -10,9 +10,12 @@ describe('roadmap', () => {
     }
   });
 
-  it('claims only milestone 1 as available in this build', () => {
+  it('claims only milestones 1 and 2 as available in this build', () => {
     const available = CAPABILITIES.filter((c) => c.status === 'available').map((c) => c.id);
-    expect(available).toEqual(['shell']);
+    expect(available).toEqual(['shell', 'backup-import']);
+    for (const c of CAPABILITIES) {
+      if (c.milestone >= 3) expect(c.status).toBe('planned');
+    }
   });
 
   it('throws on an unknown capability rather than rendering nothing', () => {

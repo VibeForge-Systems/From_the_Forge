@@ -3,3 +3,7 @@
 # TypeScript sides of the IPC contract cannot drift apart.
 [env]
 TS_RS_EXPORT_DIR = { value = "src/types/generated", relative = true }
+# u64 and i64 IPC fields become TypeScript `number`, not `bigint`. The shell
+# clamps every value above 2^53 - 1 before it enters a DTO (milestone 2 spec,
+# §11.6). Documented in ts-rs 12.0.1 (`src/lib.rs`, "Configuration").
+TS_RS_LARGE_INT = "number"

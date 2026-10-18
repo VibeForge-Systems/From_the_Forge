@@ -30,6 +30,26 @@ Two automated audits enforce the license policy:
 | ts-rs | 12.0.1 | MIT | Generates TypeScript IPC types from Rust |
 | dunce | 1.0.5 | CC0-1.0 OR MIT-0 OR Apache-2.0 | Canonical paths without Windows `\\?\` prefixes |
 | tempfile (dev only) | 3.27.0 | MIT OR Apache-2.0 | Test directories |
+| aes | 0.9.3 | MIT OR Apache-2.0 | AES-256 for backup decryption (`oma-backup`); `zeroize` feature |
+| aes-kw | 0.3.1 | MIT OR Apache-2.0 | RFC 3394 key unwrap for class, manifest and file keys; default features off (drops `const-oid`), `zeroize` on |
+| cbc | 0.2.1 | MIT OR Apache-2.0 | AES-CBC decryption with strict PKCS#7 (`block-padding`, `zeroize`) |
+| hmac | 0.13.0 | MIT OR Apache-2.0 | HMAC for the in-crate, cancellable PBKDF2 |
+| sha1 / sha2 | 0.11.0 / 0.11.0 | MIT OR Apache-2.0 | HMAC-SHA1 and HMAC-SHA256 for PBKDF2; SHA-1 for fileIDs; SHA-256 for ids and staging names. Default features off, `zeroize` on |
+| zeroize | 1.9.1 | Apache-2.0 OR MIT | Wiping passwords, keys and plaintext buffers |
+| plist | 1.10.1 | MIT | Property lists, read only through the budgeted event-stream reader. Default features (`serde`) off; `enable_unstable_features_that_may_break_with_minor_version_bumps` on, because that feature is what makes `plist::stream` public. The exact pin makes any change to that API a reviewed upgrade |
+| rusqlite | 0.40.2 | MIT | Read-only access to staged copies of Manifest.db. Features `bundled` (compiles SQLite 3.53.2, public-domain C source, through libsqlite3-sys 0.38.2, MIT) and `limits` (`Connection::set_limit`; an empty feature that adds no crates) |
+| pbkdf2 (dev only) | 0.13.0 | MIT OR Apache-2.0 | Differential tests against the in-crate PBKDF2; never linked into the app |
+
+`tracing-subscriber` (above) is also a dev-dependency of `oma-backup`, for
+its log-hygiene test. The shell (`src-tauri`) depends on the workspace crate
+`oma-backup` from M2; that adds no third-party crate beyond the list above.
+No JavaScript dependency was added in M2: `Channel` comes from
+`@tauri-apps/api` 2.12.4, which was already a dependency.
+
+The RustCrypto crates resolve to one `cipher` (0.5.2), one `digest` (0.11.3)
+and one `hybrid-array` (0.4.15) major for the backup code. An older
+`digest` 0.10 and `sha2` 0.10 remain in the tree through Tauri; nothing in
+`oma-backup` uses them.
 
 Transitive crates are listed by `cargo tree` and audited by `cargo deny`.
 
@@ -82,6 +102,18 @@ needs is a direct dependency, so nothing is lost. A side effect is that
 Bootstrap's optional `@popperjs/core` peer is not installed, which is
 correct because Bootstrap's JavaScript is not used.
 
+### Dev-only Python tooling
+
+Used only to generate and check the synthetic test fixtures in
+`tests/fixtures/backups/`. Nothing here is shipped, and CI runs no Python:
+the generated files are committed and checked by `SHA256SUMS`.
+
+| Package | Version | License | Use |
+|---|---|---|---|
+| cryptography | 50.0.2 | Apache-2.0 OR BSD-3-Clause | AES, key wrap and padding in `scripts/fixtures/make_synthetic_backups.py` (pinned in `scripts/fixtures/requirements.txt`) |
+| iphone_backup_decrypt | 0.11.2 | MIT | Independent oracle, run by hand through `scripts/fixtures/verify_with_oracle.py`. Used as a black box; not distributed and not ported. Pinned in `scripts/fixtures/requirements-oracle.txt` |
+| pycryptodome | 4.0.1 | BSD-2-Clause AND Unlicense | The oracle's own dependency (`Requires-Dist: pycryptodome>=3.23.0`); it performs the oracle's AES. Pinned in `scripts/fixtures/requirements-oracle.txt` at the version the recorded oracle run used |
+
 ## System and platform components
 
 These are not bundled. They come from the operating system or the user.
@@ -107,7 +139,9 @@ them locally, is fine. See [supported-formats.md](supported-formats.md).
 | crabstep (typedstream) | GPL-3.0 |
 | crabapple (backup decryption) | GPL-3.0 |
 | pymobiledevice3 | GPL-3.0 |
-| StackOverflow answer 13793043 (backup decryption) | CC BY-SA 4.0 |
+| pyiosbackup | GPL-3.0 |
+| libimobiledevice (including `idevicebackup2`) | LGPL-2.1+ |
+| StackOverflow answer 13793043 (backup decryption) | CC BY-SA (the version depends on the revision date; not checked) |
 | heic (imazen) | AGPL-3.0 |
 
 ## Upgrade log
@@ -117,3 +151,13 @@ them locally, is fine. See [supported-formats.md](supported-formats.md).
 | 2026-10-17 | Initial set (Milestone 1) | — |
 | 2026-10-17 | MPL-2.0 exception for five Tauri transitive crates | Found by the first `cargo deny` run; see above |
 | 2026-10-17 | Project moved to `Apps/openmessage-archive/` | Repository layout; no dependency change |
+| on merge (M2) | Added aes 0.9.3, aes-kw 0.3.1, cbc 0.2.1, hmac 0.13.0, sha1 0.11.0, sha2 0.11.0, zeroize 1.9.1, plist 1.10.1, rusqlite 0.40.2; pbkdf2 0.13.0 as a dev-dependency | Milestone 2: backup parsing and decryption in `crates/oma-backup`. `cargo deny check` passes with the unchanged `deny.toml` |
+| on merge (M2) | rusqlite with `bundled` and `limits` | Hardened read-only open of staged Manifest.db copies (`set_limit`); bundled SQLite 3.53.2 |
+| on merge (M2) | plist with `enable_unstable_features_that_may_break_with_minor_version_bumps`, default features off | `plist::stream::Reader` is public only under this feature; the budgeted reader never builds a `plist::Value` from backup data |
+| on merge (M2) | sha2 0.11.1 deferred | 0.11.1 was under two weeks old and raises the MSRV to 1.88; upgrade later and log it |
+| on merge (M2) | `TS_RS_LARGE_INT = "number"` in `.cargo/config.toml` | IPC `u64` fields become TypeScript `number`; no generated file changed when it was added |
+| on merge (M2) | Dev-only Python tooling: cryptography 50.0.2; iphone_backup_decrypt 0.11.2 as an oracle | Synthetic fixture generation and the manual cross-check |
+| on merge (M2) | Dev-only: pycryptodome 4.0.1 pinned for the oracle, with iphone_backup_decrypt, in `scripts/fixtures/requirements-oracle.txt` | It was installed unpinned with the oracle; the recorded oracle run used 4.0.1, and repeating the run must use the same crypto implementation |
+| on merge (M2) | New setting `backupFolders` (settings format stays 1) | The Backups page remembers added folders. **Downgrade caveat:** an M1 build ignores the field and drops it on its next save |
+| on merge (M2) | Tauri channels for job progress, with no `core:*` permission | Relies on Tauri 2.12.4 exempting `plugin:__TAURI_CHANNEL__\|fetch` from the ACL check, a special case marked "remove in v3". **Every Tauri upgrade must re-verify, by hand, that a `finished` event over 8 KiB arrives without a `core:*` grant** |
+| on merge (M2) | The shell depends on the workspace crate `oma-backup` | Backup discovery, validation and the job worker; no new third-party crate |

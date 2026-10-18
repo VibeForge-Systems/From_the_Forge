@@ -28,12 +28,28 @@ tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["fmt", "env-filter", "ansi"] }
 ts-rs = "=12.0.1"
 
+# Milestone 2: backup parsing and decryption (crates/oma-backup).
+# Every feature set below is the minimum the crate uses; see docs/dependencies.md.
+aes = { version = "=0.9.3", features = ["zeroize"] }
+aes-kw = { version = "=0.3.1", default-features = false, features = ["zeroize"] }
+cbc = { version = "=0.2.1", features = ["block-padding", "zeroize"] }
+hmac = { version = "=0.13.0", features = ["zeroize"] }
+pbkdf2 = { version = "=0.13.0", default-features = false, features = ["hmac"] } # dev-dependency only: differential tests
+# The event-stream API (`plist::stream`) that the budgeted reader needs is behind
+# this feature. The exact pin makes every upgrade a reviewed change.
+plist = { version = "=1.10.1", default-features = false, features = ["enable_unstable_features_that_may_break_with_minor_version_bumps"] }
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled", "limits"] }
+sha1 = { version = "=0.11.0", default-features = false, features = ["zeroize"] }
+sha2 = { version = "=0.11.0", default-features = false, features = ["zeroize"] }
+zeroize = { version = "=1.9.1", features = ["derive", "std"] }
+
 tauri = "=2.12.4"
 tauri-build = "=2.7.3"
 tauri-plugin-dialog = "=2.8.3"
 tauri-plugin-opener = "=2.7.2"
 
 oma-fs = { path = "crates/oma-fs" }
+oma-backup = { path = "crates/oma-backup" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -49,3 +65,16 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+
+# Debug-build crypto would make the key-derivation tests slow and
+# timing-sensitive, so these crates are optimized even in dev and test builds.
+[profile.dev.package.sha1]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.hmac]
+opt-level = 3
+[profile.dev.package.aes]
+opt-level = 3
+[profile.dev.package.oma-backup]
+opt-level = 3

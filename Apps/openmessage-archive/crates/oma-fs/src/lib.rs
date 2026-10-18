@@ -16,6 +16,6 @@ mod location;
 pub use contain::{resolve_within, PathError};
 pub use filename::{sanitize_filename, MAX_FILENAME_BYTES};
 pub use location::{
-    cloud_sync_provider, enclosing_backup_dir, is_filesystem_root, is_within_mobilesync,
-    looks_like_backup_dir,
+    cloud_sync_provider, enclosing_backup_dir, is_filesystem_root, is_within_imazing_backups,
+    is_within_mobilesync, looks_like_backup_dir,
 };

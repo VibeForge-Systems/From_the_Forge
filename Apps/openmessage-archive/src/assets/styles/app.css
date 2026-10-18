@@ -322,3 +322,44 @@ body {
 .oma-toasts {
   z-index: 1090;
 }
+
+/* ---- Backups ------------------------------------------------------------ */
+
+.oma-backup-item {
+  display: block;
+  width: 100%;
+  padding: var(--oma-space-2) var(--oma-space-3);
+  border: 0;
+  border-inline-start: 3px solid transparent;
+  background: transparent;
+  color: inherit;
+  text-align: start;
+}
+
+.oma-backup-item:hover {
+  background: var(--bs-tertiary-bg);
+}
+
+.oma-backup-item:focus-visible {
+  outline: 2px solid var(--bs-primary);
+  outline-offset: -2px;
+}
+
+.oma-backup-item.active {
+  border-inline-start-color: var(--bs-primary);
+  background: var(--bs-secondary-bg);
+}
+
+.oma-backup-page {
+  max-width: 48rem;
+}
+
+.oma-facts dt {
+  font-weight: 500;
+}
+
+.oma-nav-spinner {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-width: 0.15em;
+}

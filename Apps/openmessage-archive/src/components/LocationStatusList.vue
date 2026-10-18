@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { CheckLevel, LocationCheck } from '@/types';
 
-defineProps<{ checks: LocationCheck[] }>();
+defineProps<{ checks: Pick<LocationCheck, 'id' | 'level' | 'message'>[] }>();
 
 const ICON: Record<CheckLevel, string> = {
   ok: 'bi-check-circle-fill text-success',

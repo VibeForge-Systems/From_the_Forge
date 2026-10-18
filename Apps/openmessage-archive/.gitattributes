@@ -1,0 +1,4 @@
+# Fixtures are compared byte for byte (tests/fixtures/backups/SHA256SUMS).
+# Without this, core.autocrlf on Windows would rewrite the XML plists and
+# other NUL-free files on checkout.
+tests/fixtures/** binary

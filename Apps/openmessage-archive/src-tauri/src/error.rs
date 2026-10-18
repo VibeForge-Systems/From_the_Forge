@@ -24,6 +24,29 @@ pub enum ErrorCode {
     Platform,
     /// An invariant inside the application was violated. Always a bug.
     Internal,
+    /// An unknown or stale backup, location or job id, or a backup folder
+    /// that has vanished.
+    BackupNotFound,
+    /// The folder is not an iPhone backup. Reserved for the library mapping;
+    /// folder-picker refusals travel as `AddBackupFolderResult.outcome`.
+    NotABackup,
+    /// The backup was recognised but uses a layout or encryption scheme this
+    /// version does not read.
+    UnsupportedBackup,
+    /// The backup did not finish (SnapshotState is not `finished`, or
+    /// Status.plist is missing).
+    IncompleteBackup,
+    /// The backup's content is damaged or hostile.
+    MalformedBackup,
+    /// The backup is encrypted and no password was given.
+    PasswordRequired,
+    /// The password is longer than 1,024 bytes as UTF-8. It is refused, never
+    /// truncated.
+    PasswordTooLong,
+    /// The password did not unlock the backup's first class key.
+    WrongPassword,
+    /// A backup check or a listing is already running.
+    Busy,
 }
 
 #[derive(Debug, Clone, Serialize, TS, thiserror::Error)]

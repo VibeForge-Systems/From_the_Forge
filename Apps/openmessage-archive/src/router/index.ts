@@ -6,6 +6,12 @@ import ArchiveView from '@/views/ArchiveView.vue';
 export const routes: RouteRecordRaw[] = [
   { path: '/', name: 'archive', component: ArchiveView, meta: { title: 'Archive' } },
   {
+    path: '/backups',
+    name: 'backups',
+    component: () => import('@/views/BackupsView.vue'),
+    meta: { title: 'Backups' },
+  },
+  {
     path: '/settings',
     name: 'settings',
     component: () => import('@/views/SettingsView.vue'),
