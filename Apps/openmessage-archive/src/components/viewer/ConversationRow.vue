@@ -4,19 +4,12 @@
 // retraction withheld, sentences for events) when the `listPreviews`
 // setting is on, and badges. Content goes through SafeText only.
 import { computed } from 'vue';
-import type { ConversationRowDto, ItemKindDto, PreviewBodyDto } from '@/types';
+import type { ConversationRowDto } from '@/types';
 import ConversationLabel from './ConversationLabel.vue';
 import SafeText from './SafeText.vue';
 import { formatInstant } from '@/services/time';
-import {
-  ASSOC_KIND_TEXT,
-  DISPLAY_NONE_TEXT,
-  ITEM_KIND_TEXT,
-  LIST_TEXT,
-  PREVIEW_BODY_TEXT,
-  SERVICE_TEXT,
-  fill,
-} from '@/services/viewerText';
+import { previewSentence } from '@/services/messageView';
+import { LIST_TEXT, SERVICE_TEXT, fill } from '@/services/viewerText';
 import { useSettings } from '@/stores/settings';
 
 const props = defineProps<{ row: ConversationRowDto }>();
@@ -42,18 +35,6 @@ const undated = computed(() => {
 
 const preview = computed(() => (settings.viewer.listPreviews ? props.row.preview : null));
 
-function sentence(body: PreviewBodyDto, item: ItemKindDto | null): string {
-  switch (body.kind) {
-    case 'noText':
-      return body.reason ? DISPLAY_NONE_TEXT[body.reason] : PREVIEW_BODY_TEXT.noText;
-    case 'reaction':
-      return body.association ? ASSOC_KIND_TEXT[body.association] : PREVIEW_BODY_TEXT.reaction;
-    case 'event':
-      return item ? ITEM_KIND_TEXT[item] : PREVIEW_BODY_TEXT.event;
-    default:
-      return PREVIEW_BODY_TEXT[body.kind];
-  }
-}
 </script>
 
 <template>
@@ -72,7 +53,7 @@ function sentence(body: PreviewBodyDto, item: ItemKindDto | null): string {
     <div v-if="preview" class="oma-conv-preview oma-contained">
       <span v-if="preview.direction === 'you'" class="oma-preview-who">{{ LIST_TEXT.previewYou }} </span>
       <SafeText v-if="preview.body.kind === 'text'" :pieces="preview.body.pieces" quiet />
-      <span v-else class="oma-missing">{{ sentence(preview.body, preview.item) }}</span>
+      <span v-else class="oma-missing">{{ previewSentence(preview.body, preview.item) }}</span>
     </div>
   </div>
 </template>

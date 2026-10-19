@@ -44,8 +44,10 @@ passed on `ubuntu-22.04` and `windows-2022` ([run 39205163013](https://github.co
 including the Windows-only tests); the UI is PR B, whose slice 5g (frontend foundations:
 `SafeText`, the viewer words, time, media URLs, the store, the source rule
 and the Viewer settings section) and slice 5h1 (the in-house `VirtualFeed`
-of slice 5h0, the conversation list and the thread in their plain form, the
-viewer routes) are in place; nothing links to the viewer until slice 5h3.
+of slice 5h0, the conversation list and the thread, the viewer routes) and
+slice 5h2 (message bubbles, system rows, reaction chips, reply quotes,
+per-part edits and unsends, and the reveals of codes and earlier text) are
+in place; nothing links to the viewer until slice 5h3.
 The owner answered the M5 questions (`docs/architecture.md`, "Milestone 5
 decisions").
 
@@ -458,6 +460,20 @@ Never hand-edit generated files.
   after a failed page (Retry). Leaving the `viewer`/`viewer-chat` routes
   closes the session (`closeViewerOnLeave`, D114); chat ids from the URL
   go through `services/ids.ts`, and message ids never enter a URL.
+- **Bubbles and system rows (M5 slice 5h2).** `ThreadItem` picks a
+  `MessageBubble` or a centred `SystemRow` by `services/messageView.ts`'s
+  `itemShape`; that module holds the pure rules (edit and unsend sentences
+  per part, chips, sender runs, service changes) and is where new reading
+  rules go, with a test in `message-view.spec.ts`. "Edited" and "Unsent"
+  mark only the parts the record lists, a whole-bubble "Unsent" needs
+  `unsentWhole`, codes 6 and 7 never say unsent, and codes 1 and 8 show
+  nothing on the bubble. Events show the addresses recorded with them but
+  never the row's sender (no roles). Reveals never change a page: "Show
+  code" and "Show earlier text" call `useViewer().revealMessage`, which
+  re-reads that one message with `get_message_detail` and keeps an overlay
+  (`shown(m)`, at most 100); "Hide" drops it. Put explicit `{{ ' ' }}`
+  separators between inline elements whose text forms an accessible name
+  (Vue's whitespace condensing removes them otherwise).
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush

@@ -1080,6 +1080,17 @@ paths and its `aria-*` attributes, the feed's articles and `aria-busy`,
 paging at the edges, the undated section, the retry row, the day
 separators, and the route guard that closes the session.
 
+**Slice 5h2 (message bubbles and system rows)** was tested in jsdom only
+(Vitest 4.1.12, synthetic DTOs): every event kind and visible association
+kind renders its sentence; codes and earlier text are requested only on
+click and hidden again; reply jumps (here and to another conversation)
+open around the originator and focus it; chips read as text with their
+derived states; per-part edit and unsend sentences; no read, delivery or
+sent word. **Not tested:** any of it on WebKitGTK or WebView2, with a
+screen reader, in forced colours or at 400 % zoom (slice 5j), and the
+layout of long or mixed-direction bubbles on a real engine. Spike 5s(2)
+(playback) is still **UNVERIFIED**; this slice does not play media.
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI

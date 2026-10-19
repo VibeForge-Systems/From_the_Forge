@@ -99,11 +99,19 @@ const ALLOWED_BINDINGS: Record<string, readonly string[]> = {
     "class=\"{ 'oma-active': index === active, 'oma-selected': item === selected }\"",
     'id="optionId(index)"',
   ],
-  // `base` is `oma-m-<SafeId>`: an app-made prefix and a checked integer.
+  // Classes from closed flags and states (5h2).
+  'components/viewer/MessageBody.vue': [
+    "class=\"collapsed ? 'oma-collapsed' : ''\"",
+    'class="segmentClass(seg)"',
+  ],
+  'components/viewer/ReactionChips.vue': ['class="stateClass(chip)"'],
+  // `base` is `oma-m-<SafeId>`: an app-made prefix and a checked integer;
+  // the classes come from the item's shape and direction codes.
   'components/viewer/ThreadItem.vue': [
     'aria-describedby="`${base}-b`"',
     'aria-labelledby="`${base}-h`"',
-    'class="directionClass"',
+    'class="itemClass"',
+    'class="senderClass"',
     'id="base"',
     'id="`${base}-b`"',
     'id="`${base}-h`"',

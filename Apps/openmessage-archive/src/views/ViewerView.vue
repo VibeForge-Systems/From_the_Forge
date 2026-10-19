@@ -90,7 +90,7 @@ function closeViewer(): void {
         <p class="mb-2">{{ viewer.error ?? THREAD_TEXT.sessionClosed }}</p>
         <RouterLink :to="{ name: 'archive' }" class="btn btn-sm btn-outline-secondary">Back to Archive</RouterLink>
       </div>
-      <ThreadView v-else-if="chat !== null" :key="`${viewer.viewer}:${chat}`" :chat-id="chat" />
+      <ThreadView v-else-if="chat !== null" :key="`${viewer.viewer}:${chat}`" :chat-id="chat" @open-chat="openChat" />
       <EmptyState v-else icon="chat-left-text" :title="THREAD_TEXT.chooseConversation">
         <p>{{ THREAD_TEXT.chooseHint }}</p>
       </EmptyState>

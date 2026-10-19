@@ -273,23 +273,209 @@
   color: var(--bs-secondary-color);
 }
 
-/* Sent and received differ by alignment and label, never by colour alone. */
+/*
+ * Items (5h2). Sent and received differ by alignment and label, never by
+ * colour alone (WCAG 1.4.1); a message whose direction is not recorded
+ * takes the full width in a neutral style. The article carries focus; the
+ * bubble inside it carries the border, which stays visible in forced
+ * colours.
+ */
 .oma-thread-item {
   max-width: min(42rem, 85%);
   margin: var(--oma-space-1) var(--oma-space-3);
-  padding: var(--oma-space-2);
-  border: 1px solid var(--bs-border-color);
   border-radius: var(--bs-border-radius-lg);
-  background: var(--bs-body-bg);
 }
 
 .oma-thread-item.oma-dir-you {
   margin-inline-start: auto;
 }
 
+.oma-thread-item.oma-dir-notRecorded,
+.oma-thread-item.oma-system-item {
+  max-width: none;
+}
+
 .oma-thread-item:focus-visible {
   outline: 2px solid var(--bs-focus-ring-color);
   outline-offset: 1px;
+}
+
+.oma-bubble {
+  padding: var(--oma-space-2);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-lg);
+  background: var(--bs-body-bg);
+}
+
+.oma-dir-you .oma-bubble {
+  background: var(--bs-tertiary-bg);
+}
+
+.oma-dir-notRecorded .oma-bubble {
+  border-style: dashed;
+}
+
+.oma-system {
+  padding: var(--oma-space-1) var(--oma-space-2);
+  text-align: center;
+  font-size: var(--oma-text-sm);
+  color: var(--bs-secondary-color);
+}
+
+.oma-system-item .oma-item-head {
+  justify-content: center;
+}
+
+.oma-system-body {
+  text-align: start;
+}
+
+.oma-service-sep {
+  margin: var(--oma-space-2) var(--oma-space-3) 0;
+  text-align: center;
+  font-size: var(--oma-text-xs);
+  color: var(--bs-secondary-color);
+  border-block-start: 1px dashed var(--bs-border-color);
+}
+
+/* A long body starts collapsed behind "Show more" (§8.1). */
+.oma-body-text.oma-collapsed {
+  max-height: 20em;
+  overflow: clip;
+}
+
+.oma-no-overflow-clip .oma-body-text.oma-collapsed {
+  overflow: hidden;
+}
+
+.oma-body-note,
+.oma-reply-head {
+  font-size: var(--oma-text-xs);
+  color: var(--bs-secondary-color);
+}
+
+.oma-body-badges,
+.oma-bubble-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oma-space-1);
+}
+
+.oma-bubble-badges .oma-badge-inline,
+.oma-body-badges .oma-badge-inline {
+  margin-inline-start: 0;
+  white-space: normal;
+}
+
+.oma-placeholder {
+  display: inline-block;
+  padding-inline: 0.3em;
+  font-size: var(--oma-text-xs);
+  font-style: italic;
+  color: var(--bs-secondary-color);
+  border: 1px dashed var(--bs-border-color);
+  border-radius: var(--bs-border-radius-sm);
+}
+
+/* Segment styles: closed flags from Rust, applied only when formatting could be trusted. */
+.oma-seg-bold { font-weight: 700; }
+.oma-seg-italic { font-style: italic; }
+.oma-seg-underline { text-decoration: underline; }
+.oma-seg-strike { text-decoration: line-through; }
+.oma-seg-underline.oma-seg-strike { text-decoration: underline line-through; }
+/* Mentions are styled spans and URL runs stay text: nothing is a link. */
+.oma-seg-mention { font-weight: 600; color: var(--bs-emphasis-color); }
+.oma-seg-url { text-decoration: underline dotted; }
+.oma-seg-code {
+  font-family: var(--bs-font-monospace);
+  border: 1px dashed var(--bs-border-color);
+  border-radius: var(--bs-border-radius-sm);
+  padding-inline: 0.2em;
+}
+
+/* Buttons inside a bubble: at least 24×24 CSS px (WCAG 2.5.8). */
+.oma-inline-btn {
+  min-height: 24px;
+  min-width: 24px;
+  padding: 0 var(--oma-space-1);
+  font-size: var(--oma-text-xs);
+  vertical-align: baseline;
+}
+
+.oma-body-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oma-space-1);
+}
+
+.oma-reply {
+  margin-block-end: var(--oma-space-1);
+  padding-inline-start: var(--oma-space-2);
+  border-inline-start: 3px solid var(--bs-border-color);
+}
+
+.oma-reply-quote {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--oma-text-sm);
+}
+
+.oma-earlier {
+  margin-block-start: var(--oma-space-1);
+  font-size: var(--oma-text-sm);
+  color: var(--bs-secondary-color);
+}
+
+.oma-earlier-shown {
+  padding: var(--oma-space-1) var(--oma-space-2);
+  border: 1px dashed var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+}
+
+.oma-earlier-text {
+  color: var(--bs-body-color);
+}
+
+/* Reaction chips read as text: kind, sender, derived state. */
+.oma-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oma-space-1);
+  margin: var(--oma-space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.oma-chip {
+  display: inline-block;
+  min-height: 24px;
+  line-height: 22px;
+  padding: 0 var(--oma-space-2);
+  font-size: var(--oma-text-xs);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-pill);
+}
+
+.oma-chip-undeterminable,
+.oma-chip-added,
+.oma-chip-removed {
+  border-style: dashed;
+}
+
+.oma-chip-state {
+  color: var(--bs-secondary-color);
+}
+
+@media (forced-colors: active) {
+  .oma-bubble,
+  .oma-chip,
+  .oma-placeholder,
+  .oma-earlier-shown {
+    border-color: CanvasText;
+  }
 }
 
 .oma-item-head {

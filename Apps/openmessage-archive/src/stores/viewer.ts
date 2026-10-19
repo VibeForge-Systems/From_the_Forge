@@ -8,6 +8,13 @@
 // looking at are evicted, and the window's edge keeps that page's anchor
 // so the same rows are fetched again by anchor when scrolled back. Only
 // the open chat and the last two visited keep windows.
+//
+// Reveals (D115, slice 5h2): "Show code" and "Show earlier text" re-read
+// one message with `get_message_detail` and the reveal flag, and keep the
+// result as an overlay over the page's item (`shown`), never in the page
+// itself; "Hide" drops the overlay. Page requests carry a reveal only when
+// the `revealEarlierText` setting is on. The full text of a truncated body
+// is read with `get_message_text`, chunk by chunk, on request only.
 import { defineStore } from 'pinia';
 import { computed, markRaw, ref, shallowRef } from 'vue';
 import { IpcError, ipc } from '@/services/ipc';
@@ -28,7 +35,9 @@ import type {
   SearchHitDto,
   SearchMessagesRequest,
   SearchStartedDto,
+  TextPieceDto,
   ThreadPageDto,
+  WithheldReasonDto,
   ViewerSessionDto,
 } from '@/types';
 import { useSettings } from './settings';
@@ -47,6 +56,35 @@ export const MAX_ROWS = 2000;
 export const MAX_INSPECTIONS = 500;
 /** Search hits per `get_search_results`. */
 export const HITS_PER_REQUEST = 50;
+/** Messages kept re-read with a reveal (D115). */
+export const MAX_REVEALED = 100;
+/** Bodies whose full text is kept loaded. */
+export const MAX_FULL_TEXTS = 20;
+
+/** A message re-read with a reveal, shown over the page's copy. */
+export interface RevealedMessage {
+  reveal: RevealInput;
+  message: MessageDto;
+}
+
+/** The full text of a truncated body, read chunk by chunk. */
+export interface FullText {
+  pieces: TextPieceDto[];
+  /** UTF-16 units read so far, and the body's length. */
+  end: number;
+  full: number;
+  /** The text is withheld from here on (D115), or there is none. */
+  withheld: WithheldReasonDto | null;
+  none: boolean;
+  loading: boolean;
+  error: string | null;
+}
+
+/** A message to focus in a chat that is about to open (a reply's originator). */
+export interface PendingFocus {
+  chatId: SafeId;
+  message: SafeId;
+}
 
 /** One loaded page of a chat, with the anchors to load beyond it. */
 export interface LoadedPage {
@@ -166,6 +204,9 @@ export const useViewer = defineStore('viewer', () => {
 
   const search = ref<SearchState>(emptySearch());
   const inspections = shallowRef(new Map<SafeId, AttachmentInspectionDto>());
+  const revealed = shallowRef(new Map<SafeId, RevealedMessage>());
+  const fullTexts = shallowRef(new Map<SafeId, FullText>());
+  const pendingFocus = ref<PendingFocus | null>(null);
 
   let epochs = 0;
   let searchSeq = 0;
@@ -191,6 +232,9 @@ export const useViewer = defineStore('viewer', () => {
     openChatId.value = null;
     search.value = emptySearch();
     inspections.value = new Map();
+    revealed.value = new Map();
+    fullTexts.value = new Map();
+    pendingFocus.value = null;
   }
 
   /** A `viewerClosed` rejection means the session is gone: forget it all. */
@@ -456,6 +500,121 @@ export const useViewer = defineStore('viewer', () => {
     }
   }
 
+  /** The message as shown: the revealed copy when there is one. */
+  function shown(m: MessageDto): MessageDto {
+    return revealed.value.get(m.id)?.message ?? m;
+  }
+
+  /**
+   * Re-read one message with a reveal added (D115): "Show code" or "Show
+   * earlier text". Nothing is revealed until the user asks. Returns the
+   * error sentence, or null.
+   */
+  async function revealMessage(id: SafeId, add: RevealInput): Promise<string | null> {
+    const v = viewer.value;
+    if (v === null) return null;
+    const before = revealed.value.get(id)?.reveal ?? {};
+    const reveal: RevealInput = {
+      ...(before.earlierText || add.earlierText ? { earlierText: true } : {}),
+      ...(before.oneTimeCode || add.oneTimeCode ? { oneTimeCode: true } : {}),
+    };
+    try {
+      const detail = await ipc.getMessageDetail({ viewer: v, messageId: id, reveal });
+      if (viewer.value !== v) return null;
+      const next = new Map(revealed.value);
+      next.delete(id);
+      next.set(id, { reveal, message: markRaw(detail.message) });
+      while (next.size > MAX_REVEALED) next.delete(next.keys().next().value!);
+      revealed.value = next;
+      return null;
+    } catch (e) {
+      return failed(e);
+    }
+  }
+
+  /** "Hide": drop the revealed copy, or only one of its reveals. */
+  async function unreveal(id: SafeId, drop: RevealInput): Promise<string | null> {
+    const kept = revealed.value.get(id);
+    if (!kept) return null;
+    const rest: RevealInput = {
+      ...(kept.reveal.earlierText && !drop.earlierText ? { earlierText: true } : {}),
+      ...(kept.reveal.oneTimeCode && !drop.oneTimeCode ? { oneTimeCode: true } : {}),
+    };
+    const next = new Map(revealed.value);
+    next.delete(id);
+    revealed.value = next;
+    // Drop the full text read under the old reveal as well.
+    const body = kept.message.body;
+    if (body.kind === 'text' && fullTexts.value.has(body.body)) {
+      const texts = new Map(fullTexts.value);
+      texts.delete(body.body);
+      fullTexts.value = texts;
+    }
+    if (rest.earlierText || rest.oneTimeCode) return revealMessage(id, rest);
+    return null;
+  }
+
+  function setFullText(bodyId: SafeId, value: FullText): void {
+    const next = new Map(fullTexts.value);
+    next.delete(bodyId);
+    next.set(bodyId, value);
+    while (next.size > MAX_FULL_TEXTS) next.delete(next.keys().next().value!);
+    fullTexts.value = next;
+  }
+
+  /**
+   * Read the next chunk of a truncated body's text (from the start, then
+   * from where the last chunk ended). Codes stay masked unless the
+   * message's code was revealed.
+   */
+  async function loadFullText(bodyId: SafeId, messageId: SafeId): Promise<void> {
+    const v = viewer.value;
+    if (v === null) return;
+    const have = fullTexts.value.get(bodyId);
+    if (have && (have.loading || have.withheld !== null || have.none || have.end >= have.full)) return;
+    const from = have?.end ?? 0;
+    const base: FullText = have ?? { pieces: [], end: 0, full: 0, withheld: null, none: false, loading: false, error: null };
+    setFullText(bodyId, { ...base, loading: true, error: null });
+    const codes = revealed.value.get(messageId)?.reveal.oneTimeCode === true;
+    try {
+      const chunk = await ipc.getMessageText({
+        viewer: v,
+        bodyId,
+        fromUtf16: from,
+        ...(codes ? { reveal: { oneTimeCode: true } } : {}),
+      });
+      if (viewer.value !== v) return;
+      const now = fullTexts.value.get(bodyId) ?? base;
+      const next: FullText = { ...now, loading: false, error: null, full: chunk.fullUtf16 };
+      if (chunk.text.kind === 'text') {
+        next.pieces = markRaw([...now.pieces, ...chunk.text.pieces]);
+        next.end = Math.max(chunk.endUtf16, now.end);
+        // A chunk that ends where it started has nothing more to give.
+        if (chunk.endUtf16 <= from) next.none = true;
+      } else if (chunk.text.kind === 'withheld') {
+        next.withheld = chunk.text.reason;
+      } else {
+        next.none = true;
+      }
+      setFullText(bodyId, next);
+    } catch (e) {
+      const now = fullTexts.value.get(bodyId) ?? base;
+      setFullText(bodyId, { ...now, loading: false, error: failed(e) });
+    }
+  }
+
+  /** Remember a message to focus when `chatId` opens; taken once. */
+  function focusOnOpen(chatId: SafeId, message: SafeId): void {
+    pendingFocus.value = { chatId, message };
+  }
+
+  function takePendingFocus(chatId: SafeId): SafeId | null {
+    const p = pendingFocus.value;
+    if (!p || p.chatId !== chatId) return null;
+    pendingFocus.value = null;
+    return p.message;
+  }
+
   return {
     session,
     archiveId,
@@ -472,6 +631,9 @@ export const useViewer = defineStore('viewer', () => {
     openWindow,
     search,
     inspections,
+    revealed,
+    fullTexts,
+    pendingFocus,
     open,
     close,
     listConversations,
@@ -482,5 +644,11 @@ export const useViewer = defineStore('viewer', () => {
     loadHits,
     cancelSearch,
     inspect,
+    shown,
+    revealMessage,
+    unreveal,
+    loadFullText,
+    focusOnOpen,
+    takePendingFocus,
   };
 });

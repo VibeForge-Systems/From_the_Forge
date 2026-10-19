@@ -2566,10 +2566,81 @@ to the page until slice 5h3.
   `aria-setsize="-1"`, no `aria-posinset`, `aria-busy` while loading. Older
   and newer pages load within 800 px of an end, never before the open has
   been aligned and never after a failed page until Retry. Each item is
-  rendered plainly (`ThreadItem`: sender, time, text segments, sentences
-  for events, reactions and missing text, a count of attachments) until
-  slice 5h2's bubbles; local-day separators come from `dayKey` in the
-  chosen zone.
+  a `ThreadItem` (slice 5h2, below); local-day separators come from
+  `dayKey` in the chosen zone.
+
+### Message bubbles and system rows (M5 slice 5h2)
+
+Each thread item is an `article` (`ThreadItem`) whose content is a
+`MessageBubble` or a centred `SystemRow`, chosen by `itemShape` in
+`services/messageView.ts`: an association row that stays a timeline item
+(a legacy sticker, a poll vote, or a reaction whose target is in another
+conversation, unreadable, not unique or itself a reaction) and every
+`item_kind` other than 1 are system rows; an `item_kind` this build does
+not know reads "Item of a kind this version does not recognise". The rules
+are spec §3.6's, applied to the DTOs' closed codes:
+
+- **Direction and sender.** Bubbles are aligned by direction ("You" right,
+  received left, "Direction not recorded" full width with a dashed
+  border), never by colour alone. A sender label shows above each run of
+  bubbles (a new sender, a system row or a new local day starts a run)
+  when the conversation has more than one recorded address; otherwise the
+  sender stays in the article's accessible name. A sender reason (no
+  sender, column absent, unreadable, not found) always shows. A direction
+  value whose message was seen by more than one backup set says which set
+  it follows.
+- **Body.** Rust's segments render through `SafeText`, with styles,
+  mentions, transcription and URL marks from the segments' closed flags;
+  nothing is a link. One-time codes arrive masked. A body without text
+  lists its recorded reasons (display reason, attributed-body outcome or
+  decode error, the plain column's state). Lossy decoding, differing
+  sources and unreadable formatting are noted once per body. A body over
+  1,500 UTF-16 units starts collapsed behind "Show more"; one cut at the
+  page cap offers "Show the full text", read with `get_message_text`
+  chunk by chunk, still masked.
+- **Edits and unsends, per part** (`editView`). "Edited" names the parts
+  with recorded edit entries; "N of M parts unsent by the sender" when
+  the part count is known, and "Unsent by the sender" for the whole bubble
+  only when `unsentWhole`. A label without listed parts says "An edit (or
+  unsend) is recorded; which parts is not recorded". Codes 6 and 7 read
+  "An edit date is recorded; no edit history in this version" and are
+  never called unsent; codes 0, 2 and 9 read "Edit state could not be
+  determined"; codes 1 and 8 put nothing on the bubble (the details panel
+  of slice 5h3 lists them). "N stored versions" shows whenever more than
+  one body row is stored.
+- **Reveals (D115, owner Q3b).** Withheld earlier text shows its reason
+  and "Show earlier text"; a masked code shows "Show code". Either
+  re-reads that one message with `get_message_detail` and the reveal flag
+  (`stores/viewer.ts`, `revealMessage`) and keeps the result as an overlay
+  over the page's copy, which stays masked; "Hide" drops the overlay. The
+  `revealEarlierText` setting (off by default) instead sends the flag with
+  every page request. Revealed earlier text names the import that first
+  kept it.
+- **Reactions** (`reactionsView`). Chips read as text: "Loved by A,
+  recorded (derived)", "cannot be determined", or one chip per row for a
+  sender that is not recorded. A removal hides its chip, and hidden chips
+  are counted ("1 removed later (derived)"). Unpaired emoji removals, chips
+  over the cap and rows over the cap each have a sentence. In this slice a
+  chip is not a control: the rows behind it are listed by the details
+  panel (slice 5h3).
+- **Replies.** A quote chip (two lines, built and masked in Rust) with a
+  button that opens a page around the originator and focuses it; for an
+  originator in another conversation, the view opens that conversation
+  and the store hands it the originator (`focusOnOpen`), so the message id
+  never enters the URL. An unresolved reference is a sentence, not a
+  control. "N replies across conversations" is shown as a count (the reply
+  thread opens in the right panel in slice 5h3).
+- **System rows.** Events read from closed sentences and list the
+  addresses recorded with them; **no actor or target role is asserted**,
+  so the row's own sender is not shown. A renamed conversation shows the
+  recorded name as isolated text, in identifier mode. An unrecognised item
+  names its raw `item_type` and `group_action_type`, followed by any text.
+  Text recorded with a reaction row (an SMS fallback) is shown as recorded
+  and never parsed.
+- **Labels and dividers.** Message labels and Recently Deleted lines (with
+  the date of the import that read each backup) are text badges and
+  sentences; a divider marks each place where the service changes between
+  loaded items. Attachments are counted until slice 5h3 draws them.
 
 ### Status and qualifiers (D43)
 

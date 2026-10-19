@@ -1,48 +1,62 @@
 <script setup lang="ts">
-// One item of the thread feed (M5 §8.4, §10), in its plain form: an
-// `article` labelled by its sender and time and described by its text,
-// with a local-day separator above the first item of each day. Slice 5h2
-// replaces the body with MessageBubble and SystemRow (formatting, reaction
-// chips, replies, edits, unsends and withheld text); attachments are
-// counted here and shown in 5h3.
+// One item of the thread feed (M5 §8.4, §10): an `article` labelled by its
+// sender and time and described by its content, with a local-day
+// separator and a service divider above it when they change. Since slice
+// 5h2 its content is a MessageBubble (aligned by direction) or a centred
+// SystemRow (events, unrecognised items, association rows that stay
+// items); attachments are counted until slice 5h3 draws them.
+//
+// - A sender label shows above each run of messages when the conversation
+//   has more than one recorded address (`showSender`); otherwise it stays
+//   in the article's accessible name only. System rows name no sender in
+//   their heading, so an event never asserts who acted.
+// - Reveals (D115) re-read this one message through the store; the page's
+//   own copy stays masked, and "Hide" drops the revealed copy.
 //
 // `aria-setsize="-1"`: the number of visible items is not known (the
 // chat's count includes folded reactions and goes stale during imports),
 // and `aria-posinset` is omitted because keyset pages give no exact
 // ordinal (a stated deviation from the APG feed pattern).
-import { computed } from 'vue';
-import type { HandleDto, MessageDto, SafeId } from '@/types';
+import { computed, ref } from 'vue';
+import type { HandleDto, MessageDto, RevealInput, SafeId, ServiceClassDto } from '@/types';
 import SafeText from './SafeText.vue';
+import MessageBubble from './MessageBubble.vue';
+import SystemRow from './SystemRow.vue';
+import { itemShape } from '@/services/messageView';
 import { timeText } from '@/services/time';
-import {
-  ASSOC_KIND_TEXT,
-  BEFORE_2007_TEXT,
-  DIRECTION_TEXT,
-  DISPLAY_NONE_TEXT,
-  ITEM_KIND_TEXT,
-  MASK_TEXT,
-  PREVIEW_BODY_TEXT,
-  SEGMENT_TEXT,
-  SENDER_TEXT,
-  THREAD_TEXT,
-  fill,
-} from '@/services/viewerText';
+import { BEFORE_2007_TEXT, BUBBLE_TEXT, DIRECTION_TEXT, SENDER_TEXT, SERVICE_TEXT, THREAD_TEXT, fill } from '@/services/viewerText';
 import { useSettings } from '@/stores/settings';
+import { useViewer } from '@/stores/viewer';
 
-const props = defineProps<{
-  message: MessageDto;
-  handles: ReadonlyMap<SafeId, HandleDto>;
-  /** The day separator's text, when this item starts a new local day. */
-  dayLabel: string | null;
-}>();
+const props = withDefaults(
+  defineProps<{
+    message: MessageDto;
+    handles: ReadonlyMap<SafeId, HandleDto>;
+    /** The day separator's text, when this item starts a new local day. */
+    dayLabel: string | null;
+    /** Show the sender above this bubble (the first of a run in a conversation with several addresses). */
+    showSender?: boolean;
+    /** The service this item changes to; `undefined` when it does not change. */
+    serviceChange?: ServiceClassDto | null | undefined;
+  }>(),
+  { showSender: false },
+);
+const emit = defineEmits<{ jump: [originator: SafeId, chat: SafeId | null] }>();
 
 const settings = useSettings();
+const viewer = useViewer();
 
+const shown = computed(() => viewer.shown(props.message));
+const revealed = computed(() => viewer.revealed.get(props.message.id)?.reveal ?? null);
+const error = ref<string | null>(null);
+
+const shape = computed(() => itemShape(shown.value));
+const system = computed(() => shape.value !== 'bubble');
 const base = computed(() => `oma-m-${props.message.id}`);
-const time = computed(() => timeText(props.message.date, settings.viewer));
+const time = computed(() => timeText(shown.value.date, settings.viewer));
 
 const sender = computed<{ handle: HandleDto } | { text: string }>(() => {
-  const s = props.message.sender;
+  const s = shown.value.sender;
   if (s.kind === 'resolved') {
     const handle = props.handles.get(s.handle);
     return handle ? { handle } : { text: THREAD_TEXT.senderNotLoaded };
@@ -50,67 +64,74 @@ const sender = computed<{ handle: HandleDto } | { text: string }>(() => {
   return { text: SENDER_TEXT[s.kind] };
 });
 
-/** A conversation event or another non-message item. */
-const eventText = computed(() => {
-  const item = props.message.item;
-  return item !== null && item !== 'message' ? ITEM_KIND_TEXT[item] : null;
+/** A sender that is not a resolved address is a qualifier: always shown. */
+const senderVisible = computed(() => props.showSender || 'text' in sender.value);
+
+const itemClass = computed(() =>
+  system.value ? 'oma-thread-item oma-system-item' : `oma-thread-item oma-dir-${shown.value.direction}`,
+);
+const senderClass = computed(() => (senderVisible.value ? 'oma-item-sender' : 'oma-item-sender visually-hidden'));
+
+const serviceText = computed(() => {
+  if (props.serviceChange === undefined) return null;
+  return props.serviceChange === null
+    ? BUBBLE_TEXT.serviceNotRecognised
+    : fill(BUBBLE_TEXT.serviceChanged, { service: SERVICE_TEXT[props.serviceChange] });
 });
 
-const associationText = computed(() => {
-  const a = props.message.association;
-  if (!a) return null;
-  return a.kind ? ASSOC_KIND_TEXT[a.kind] : PREVIEW_BODY_TEXT.reaction;
-});
+async function reveal(what: RevealInput): Promise<void> {
+  error.value = await viewer.revealMessage(props.message.id, what);
+}
 
-const attachmentText = computed(() => {
-  const n = props.message.attachments.length + props.message.moreAttachments;
-  if (n === 0) return null;
-  return n === 1 ? THREAD_TEXT.oneAttachment : fill(THREAD_TEXT.attachments, { n });
-});
-
-const directionClass = computed(() => `oma-dir-${props.message.direction}`);
+async function hide(what: RevealInput): Promise<void> {
+  error.value = await viewer.unreveal(props.message.id, what);
+}
 </script>
 
 <template>
   <div v-if="dayLabel" class="oma-day-sep" aria-hidden="true">{{ dayLabel }}</div>
+  <div v-if="serviceText" class="oma-service-sep" aria-hidden="true">{{ serviceText }}</div>
   <article
     :id="base"
-    class="oma-thread-item"
-    :class="directionClass"
+    :class="itemClass"
     tabindex="0"
     aria-setsize="-1"
     :aria-labelledby="`${base}-h`"
     :aria-describedby="`${base}-b`"
   >
     <header :id="`${base}-h`" class="oma-item-head">
-      <span class="oma-item-sender">
+      <span v-if="!system" :class="senderClass">
         <SafeText v-if="'handle' in sender" :value="sender.handle.address" mode="identifier" ltr quiet />
         <template v-else>{{ sender.text }}</template>
       </span>
-      <span v-if="message.direction === 'notRecorded'" class="oma-badge-inline">{{ DIRECTION_TEXT.notRecorded }}</span>
-      <span class="oma-item-time">{{ time.text }}</span>
+      <span v-if="!system && shown.direction === 'received' && 'handle' in sender" class="visually-hidden">{{
+        BUBBLE_TEXT.received
+      }}</span>
+      <span v-if="shown.direction === 'notRecorded'" class="oma-badge-inline">{{ DIRECTION_TEXT.notRecorded }}</span>
+      {{ ' ' }}<span class="oma-item-time">{{ time.text }}</span>
       <span v-if="time.kind === 'instant' && time.before2007" class="oma-badge-inline">{{ BEFORE_2007_TEXT }}</span>
     </header>
-    <div :id="`${base}-b`" class="oma-item-body oma-contained">
-      <p v-if="eventText" class="oma-item-event">{{ eventText }}</p>
-      <p v-if="associationText" class="oma-item-event">{{ associationText }}</p>
-      <p v-if="message.body.kind === 'text'" class="oma-item-text">
-        <template v-for="(seg, i) in message.body.segments" :key="i"
-          ><SafeText
-            v-if="seg.piece.kind === 'text'"
-            :value="seg.piece.value"
-            :show-hidden="settings.viewer.showHiddenCharacters"
-          /><span v-else-if="seg.piece.kind === 'withheld'" class="oma-masked">{{ MASK_TEXT[seg.piece.mask] }}</span
-          ><span v-else-if="seg.piece.kind === 'inlineEmoji'" class="oma-missing">{{ SEGMENT_TEXT.inlineEmoji }}</span
-          ><span v-else-if="seg.piece.kind === 'attachment'" class="oma-missing">{{ THREAD_TEXT.attachmentInText }}</span
-          ><span v-else class="oma-missing">{{ SEGMENT_TEXT.unmatchedPlaceholder }}</span></template
-        >
-      </p>
-      <p v-else-if="message.body.kind === 'noText'" class="oma-missing">
-        {{ message.body.detail.reason ? DISPLAY_NONE_TEXT[message.body.detail.reason] : PREVIEW_BODY_TEXT.noText }}
-      </p>
-      <p v-else-if="!eventText && !associationText" class="oma-missing">{{ PREVIEW_BODY_TEXT.noBody }}</p>
-      <p v-if="attachmentText" class="oma-item-attachments">{{ attachmentText }}</p>
+    <div :id="`${base}-b`" class="oma-item-body">
+      <span v-if="serviceText" class="visually-hidden">{{ serviceText }}</span>
+      <SystemRow
+        v-if="system"
+        :message="shown"
+        :handles="handles"
+        :revealed="revealed"
+        @reveal="reveal"
+        @hide="hide"
+      />
+      <MessageBubble
+        v-else
+        :message="shown"
+        :handles="handles"
+        :revealed="revealed"
+        :error="error"
+        @reveal="reveal"
+        @hide="hide"
+        @jump="(o, c) => emit('jump', o, c)"
+      />
+      <p v-if="system && error" class="oma-body-note" role="alert">{{ BUBBLE_TEXT.revealFailed }} {{ error }}</p>
     </div>
   </article>
 </template>

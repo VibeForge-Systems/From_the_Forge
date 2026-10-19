@@ -33,8 +33,15 @@ import {
   type ChatWindow,
 } from '@/stores/viewer';
 import { useSettings } from '@/stores/settings';
-import type { GetThreadPageRequest, SearchMessagesRequest } from '@/types';
-import { ARCHIVE_ID, sid, snapshot, threadPage, viewerSession } from './helpers';
+import type {
+  GetMessageDetailRequest,
+  GetMessageTextRequest,
+  GetThreadPageRequest,
+  MessageDetailDto,
+  SearchMessagesRequest,
+  TextChunkDto,
+} from '@/types';
+import { ARCHIVE_ID, message, sid, snapshot, textPiece, threadPage, viewerSession } from './helpers';
 
 const range = (from: number, count: number) => Array.from({ length: count }, (_, i) => from + i);
 
@@ -267,5 +274,122 @@ describe('viewer store', () => {
     expect(fake.calls.filter(([n]) => n === 'inspectAttachment')).toHaveLength(2);
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
+  });
+});
+
+/** A detail reply whose message carries the request's reveal as its earlier text. */
+function serveDetail(): void {
+  fake.handlers.getMessageDetail = (arg) => {
+    const r = arg as GetMessageDetailRequest;
+    const m = message(r.messageId, {
+      edit: {
+        label: 'unsentParts',
+        editedParts: [],
+        unsentParts: [],
+        partCount: null,
+        unsentWhole: false,
+        storedVersions: 2,
+        earlier: r.reveal?.earlierText
+          ? { kind: 'revealed', reason: 'unsent', pieces: [textPiece('before')], session: sid(1) }
+          : { kind: 'withheld', reason: 'unsent' },
+      },
+    });
+    return Promise.resolve({ message: m } as unknown as MessageDetailDto);
+  };
+}
+
+describe('viewer store: reveals and full text (5h2)', () => {
+  it('reveals one message on request only, as an overlay, and hides it again', async () => {
+    const store = await openSession();
+    serveChat(100);
+    serveDetail();
+    await store.openChat(sid(4));
+    const item = store.openWindow!.pages[0]!.items.at(-1)!;
+    expect(fake.calls.some(([n]) => n === 'getMessageDetail')).toBe(false);
+    expect(store.shown(item)).toBe(item);
+
+    expect(await store.revealMessage(item.id, { earlierText: true })).toBeNull();
+    const [, req] = fake.calls.find(([n]) => n === 'getMessageDetail')!;
+    expect(req).toEqual({ viewer: 7, messageId: item.id, reveal: { earlierText: true } });
+    expect(store.shown(item).edit.earlier.kind).toBe('revealed');
+    // The page's own copy is unchanged.
+    expect(item.edit.earlier.kind).toBe('none');
+
+    // A second reveal keeps the first.
+    await store.revealMessage(item.id, { oneTimeCode: true });
+    const last = fake.calls.filter(([n]) => n === 'getMessageDetail').at(-1)![1];
+    expect(last).toMatchObject({ reveal: { earlierText: true, oneTimeCode: true } });
+
+    // Hiding the earlier text re-reads with the code reveal only.
+    await store.unreveal(item.id, { earlierText: true });
+    const again = fake.calls.filter(([n]) => n === 'getMessageDetail').at(-1)![1];
+    expect(again).toMatchObject({ reveal: { oneTimeCode: true } });
+    expect((again as GetMessageDetailRequest).reveal?.earlierText).toBeUndefined();
+    expect(store.shown(item).edit.earlier.kind).toBe('withheld');
+
+    await store.unreveal(item.id, { oneTimeCode: true });
+    expect(store.shown(item)).toBe(item);
+    expect(store.revealed.size).toBe(0);
+  });
+
+  it('returns the error sentence when a reveal fails, and keeps nothing', async () => {
+    const store = await openSession();
+    fake.handlers.getMessageDetail = () =>
+      Promise.reject(new IpcError('get_message_detail', 'messageNotFound', 'gone'));
+    const error = await store.revealMessage(sid(3), { earlierText: true });
+    expect(error).toBe('That message is no longer in the archive.');
+    expect(store.revealed.size).toBe(0);
+  });
+
+  it('reads a truncated body chunk by chunk, masked unless the code was revealed', async () => {
+    const store = await openSession();
+    const full = 70_000;
+    fake.handlers.getMessageText = (arg) => {
+      const r = arg as GetMessageTextRequest;
+      const end = Math.min(full, r.fromUtf16 + 32_768);
+      const chunk: TextChunkDto = {
+        body: r.bodyId,
+        fromUtf16: r.fromUtf16,
+        endUtf16: end,
+        fullUtf16: full,
+        text: { kind: 'text', pieces: [textPiece(`chunk from ${r.fromUtf16}`)] },
+      };
+      return Promise.resolve(chunk);
+    };
+    await store.loadFullText(sid(9), sid(3));
+    await store.loadFullText(sid(9), sid(3));
+    await store.loadFullText(sid(9), sid(3));
+    await store.loadFullText(sid(9), sid(3));
+    const reqs = fake.calls.filter(([n]) => n === 'getMessageText').map(([, a]) => a as GetMessageTextRequest);
+    expect(reqs.map((r) => r.fromUtf16)).toEqual([0, 32_768, 65_536]);
+    expect(reqs.every((r) => r.reveal === undefined)).toBe(true);
+    const text = store.fullTexts.get(sid(9))!;
+    expect(text.end).toBe(full);
+    expect(text.pieces).toHaveLength(3);
+  });
+
+  it('stops at withheld text and forgets reveals and texts on close', async () => {
+    const store = await openSession();
+    serveDetail();
+    fake.handlers.getMessageText = () =>
+      Promise.resolve({ body: sid(9), fromUtf16: 0, endUtf16: 0, fullUtf16: 10, text: { kind: 'withheld', reason: 'unsent' } });
+    await store.loadFullText(sid(9), sid(3));
+    await store.loadFullText(sid(9), sid(3));
+    expect(fake.calls.filter(([n]) => n === 'getMessageText')).toHaveLength(1);
+    expect(store.fullTexts.get(sid(9))!.withheld).toBe('unsent');
+    await store.revealMessage(sid(3), { earlierText: true });
+    store.focusOnOpen(sid(5), sid(3));
+    await store.close();
+    expect(store.revealed.size).toBe(0);
+    expect(store.fullTexts.size).toBe(0);
+    expect(store.pendingFocus).toBeNull();
+  });
+
+  it('hands a pending focus to the chat it names, once', async () => {
+    const store = await openSession();
+    store.focusOnOpen(sid(5), sid(30));
+    expect(store.takePendingFocus(sid(6))).toBeNull();
+    expect(store.takePendingFocus(sid(5))).toBe(30);
+    expect(store.takePendingFocus(sid(5))).toBeNull();
   });
 });

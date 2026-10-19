@@ -277,10 +277,11 @@ export const EDIT_ENTRY_TEXT: Record<KindOf<EditEntryTextDto>, string> = {
   notMatched: 'Edit text could not be matched',
 };
 
+/** The sentence before the "Show earlier text" button (D115). */
 export const WITHHELD_TEXT: Record<WithheldReasonDto, string> = {
-  unsent: 'Earlier text was kept from an import before it was unsent. Show earlier text',
-  earlierVersion: 'Earlier text was kept from an import. Show earlier text',
-  noCurrentText: 'Earlier text was kept from an import. Show earlier text',
+  unsent: 'Earlier text was kept from an import before it was unsent.',
+  earlierVersion: 'Earlier text was kept from an import.',
+  noCurrentText: 'Earlier text was kept from an import.',
 };
 
 export const REVEALED_TEXT: Record<WithheldReasonDto, string> = {
@@ -341,7 +342,7 @@ export const ASSOC_VISIBILITY_TEXT: Record<KindOf<AssocVisibilityDto>, string> =
   targetNotUnique: 'Reaction target is not uniquely identified',
   targetInAnotherChat: 'Reaction to a message in another conversation',
   folded: 'Shown on the message it reacts to',
-  targetFolds: 'Shown on the message it reacts to',
+  targetFolds: 'Reaction to another reaction, which is not shown as an item of its own',
 };
 
 export const REACTION_KIND_TEXT: Record<ReactionKindDto, string> = {
@@ -752,6 +753,70 @@ export const THREAD_TEXT = {
   provisional: 'The newest import is not complete; derived values are provisional',
   unsearchable: '{n} messages have no searchable text',
   sessionClosed: 'The viewer is closed.',
+} as const;
+
+// ------------------------------------------------------------- bubbles (5h2)
+
+/**
+ * Message bubbles and system rows (§3.6, §8.4). `{n}`, `{total}`,
+ * `{parts}`, `{value}` and `{lineage}` are counts, raw recorded integers
+ * or ids; `{date}` is a formatted date.
+ */
+export const BUBBLE_TEXT = {
+  edited: 'Edited',
+  editedParts: 'Edited (recorded part {parts})',
+  editedUnknownParts: 'An edit is recorded; which parts is not recorded',
+  unsentWhole: 'Unsent by the sender',
+  partsUnsent: '{n} of {total} parts unsent by the sender',
+  unsentParts: 'Unsent by the sender: recorded part {parts}',
+  unsentUnknownParts: 'An unsend is recorded; which parts is not recorded',
+  storedVersions: '{n} stored versions',
+  showEarlier: 'Show earlier text',
+  hideEarlier: 'Hide earlier text',
+  revealedFrom: 'First kept by the import of {date}',
+  showCode: 'Show code',
+  hideCode: 'Hide code',
+  revealFailed: 'The text could not be shown.',
+  showFullText: 'Show the full text',
+  showMoreText: 'Show more of the text',
+  showMore: 'Show more',
+  showLess: 'Show less',
+  fullTextWithheld: 'The rest of this text is withheld.',
+  fullTextNone: 'No more text is recorded for this message.',
+  loadingText: 'Loading the text…',
+  textColumn: 'Plain-text column: {state}',
+  urlHidden: 'This link contains hidden characters',
+  directionRecordedBy: 'As recorded by backup set {lineage}; another phone’s backup may disagree',
+  received: 'Received',
+  recentlyDeleted: 'Listed in Recently Deleted in the backup imported on {date}',
+  recentlyDeletedUnknown: 'Listed in Recently Deleted in a backup this archive imported',
+  notListedLater: 'Not listed in the backup imported on {date}',
+  notListedLaterUnknown: 'Not listed in a later backup of the same set',
+  extrasMissing: 'Reactions and replies could not be read for this message',
+  replies: '{n} replies across conversations',
+  repliesCapped: '{n}+ replies across conversations',
+  oneReply: '1 reply across conversations',
+  replyJump: 'Show the message this replies to',
+  replyOtherChat: 'Open that conversation at the message',
+  reactionsHeading: 'Reactions',
+  reactionBy: 'by',
+  reactionsOver: 'More than {n} reactions recorded; too many to show here',
+  reactionsMore: '{n} more reactions not shown',
+  reactionsRemoved: '{n} removed later (derived)',
+  oneReactionRemoved: '1 removed later (derived)',
+  emojiRemovalUnpaired: 'Removal of an emoji reaction (emoji not recorded)',
+  emojiRemovalUnpairedMany: 'Removal of an emoji reaction (emoji not recorded), {n} rows',
+  reactionKindNotRecorded: 'Reaction kind not recorded',
+  unknownItem: 'Unrecognised item (item_type {item}, group_action_type {action})',
+  rawNotRecorded: 'not recorded',
+  itemKindNotRecognised: 'Item of a kind this version does not recognise',
+  eventAddresses: 'Addresses recorded with this event:',
+  eventNoAddresses: 'No address is recorded with this event',
+  addressNotLoaded: 'address not loaded with this page',
+  recordedText: 'Text recorded with this item:',
+  newTitle: 'Name recorded:',
+  serviceChanged: 'Service: {service}',
+  serviceNotRecognised: 'Service not recognised by this version',
 } as const;
 
 // ------------------------------------------------------------- settings

@@ -13,11 +13,18 @@
 //   reason, a partial or size-cut page, unreadable extras, skipped rows.
 // - Keyboard: Page Down/Up and Down/Up move focus between articles; the
 //   focused article is kept mounted.
+// - Items (5h2): sender labels above runs when the conversation has more
+//   than one recorded address, service dividers, and a reply's jump to its
+//   originator: here, by opening a page around it and focusing it; in
+//   another conversation, by asking the view to open that conversation
+//   (`openChat`) with the originator remembered in the store, never in
+//   the URL.
 import { computed, nextTick, ref, watch } from 'vue';
 import type { AnchorInput, MessageDto, SafeId } from '@/types';
 import type { FeedHandle } from '@/services/feedModel';
 import VirtualFeed from './VirtualFeed.vue';
 import ThreadItem from './ThreadItem.vue';
+import { runStarts, serviceChanges } from '@/services/messageView';
 import ConversationLabel from './ConversationLabel.vue';
 import { parseSafeId } from '@/services/ids';
 import { dayKey, formatInstant, timeText } from '@/services/time';
@@ -33,6 +40,7 @@ import { useSettings } from '@/stores/settings';
 import { useViewer } from '@/stores/viewer';
 
 const props = defineProps<{ chatId: SafeId }>();
+const emit = defineEmits<{ openChat: [chatId: SafeId] }>();
 const viewer = useViewer();
 const settings = useSettings();
 
@@ -43,8 +51,11 @@ type Align = 'start' | 'end';
 
 const feed = ref<FeedHandle<SafeId> | null>(null);
 const focusedId = ref<SafeId | null>(null);
-/** The alignment an open still owes (an object, so a newer open is told apart). */
-let pendingAlign: { align: Align } | null = null;
+/**
+ * The alignment an open still owes (an object, so a newer open is told
+ * apart); `focus` moves keyboard focus to the focused message once shown.
+ */
+let pendingAlign: { align: Align; focus: boolean } | null = null;
 let lastOpen: { anchor: AnchorInput; align: Align } = { anchor: { kind: 'newest' }, align: 'end' };
 let lastEdge: 'older' | 'newer' | null = null;
 
@@ -115,12 +126,17 @@ const dayLabels = computed(() => {
   return out;
 });
 
+/** Sender labels show above runs only with more than one recorded address. */
+const several = computed(() => (row.value?.addresses ?? 0) > 1);
+const starts = computed(() => runStarts(items.value, dayLabels.value));
+const changes = computed(() => serviceChanges(items.value));
+
 const empty = computed(
   () => !!win.value && win.value.loading === null && !win.value.error && win.value.pages.length > 0 && items.value.length === 0,
 );
 
-function open(anchor: AnchorInput, align: Align): void {
-  pendingAlign = { align };
+function open(anchor: AnchorInput, align: Align, focus = false): void {
+  pendingAlign = { align, focus };
   lastOpen = { anchor, align };
   lastEdge = null;
   // A window kept from an earlier visit may change nothing the watcher
@@ -133,7 +149,9 @@ watch(
   (id) => {
     focusedId.value = null;
     if (!viewer.rows.has(id)) void viewer.loadRows([id]);
-    open({ kind: 'newest' }, 'end');
+    const target = viewer.takePendingFocus(id);
+    if (target !== null) open({ kind: 'message', message: target }, 'end', true);
+    else open({ kind: 'newest' }, 'end');
   },
   { immediate: true },
 );
@@ -153,9 +171,15 @@ async function alignOpened(): Promise<void> {
   await nextTick();
   const f = feed.value;
   const focus = w.notices?.focus;
-  if (f && focus && items.value.some((m) => m.id === focus.id)) f.scrollToKey(focus.id, 'center');
+  const shown = !!focus && items.value.some((m) => m.id === focus.id);
+  if (f && focus && shown) f.scrollToKey(focus.id, 'center');
   else if (f && pending.align === 'start') f.scrollToStart();
   else if (f) f.scrollToEnd();
+  if (pending.focus && focus && shown) {
+    focusedId.value = focus.id;
+    await nextTick();
+    document.getElementById(`${ARTICLE_ID_PREFIX}${focus.id}`)?.focus({ preventScroll: true });
+  }
   if (pendingAlign === pending) pendingAlign = null;
   aligning = false;
 }
@@ -197,6 +221,16 @@ function articleId(target: EventTarget | null): SafeId | null {
 function onFocusin(event: FocusEvent): void {
   const id = articleId(event.target);
   if (id !== null) focusedId.value = id;
+}
+
+/** A reply's quote: open around its originator, here or in its conversation. */
+function onJump(originator: SafeId, chat: SafeId | null): void {
+  if (chat === null || chat === props.chatId) {
+    open({ kind: 'message', message: originator }, 'end', true);
+    return;
+  }
+  viewer.focusOnOpen(chat, originator);
+  emit('openChat', chat);
 }
 
 const NEXT_KEYS: Record<string, number> = { PageDown: 1, ArrowDown: 1, PageUp: -1, ArrowUp: -1 };
@@ -287,7 +321,14 @@ function onFeedKeydown(event: KeyboardEvent): void {
       @focusin="onFocusin"
     >
       <template #default="{ item }">
-        <ThreadItem :message="item" :handles="win?.handles ?? new Map()" :day-label="dayLabels.get(item.id) ?? null" />
+        <ThreadItem
+          :message="item"
+          :handles="win?.handles ?? new Map()"
+          :day-label="dayLabels.get(item.id) ?? null"
+          :show-sender="several && starts.has(item.id)"
+          :service-change="changes.get(item.id)"
+          @jump="onJump"
+        />
       </template>
     </VirtualFeed>
     <p v-if="loading === 'newer'" class="oma-thread-loading" role="status">{{ THREAD_TEXT.loadingNewer }}</p>

@@ -294,4 +294,81 @@ describe('ThreadView', () => {
     await flushPromises();
     expect(document.activeElement?.id).toBe('oma-m-200');
   });
+
+  it('jumps to a reply\'s originator in this conversation and focuses it', async () => {
+    const serve = fake.handlers.getThreadPage!;
+    fake.handlers.getThreadPage = (arg) => {
+      const r = arg as GetThreadPageRequest;
+      if (r.anchor.kind === 'message' && r.direction === 'around') {
+        const at = r.anchor.message;
+        return Promise.resolve(page(range(at - 5, 11), 200, { focus: { id: sid(at), reason: 'anchor' } }));
+      }
+      return (serve(arg) as Promise<ThreadPageDto>).then((p) => ({
+        ...p,
+        items: p.items.map((m) =>
+          m.id === 200 ? { ...m, reply: { kind: 'resolved' as const, originator: sid(20), quote: { kind: 'noBody' as const } } } : m,
+        ),
+      }));
+    };
+    const w = await mountThread();
+    fake.calls.length = 0;
+    const button = w.get('#oma-m-200').findAll('button').find((b) => b.text() === 'Show the message this replies to')!;
+    await button.trigger('click');
+    await flushPromises();
+    await flushPromises();
+    expect(pageRequests()[0]).toMatchObject({ anchor: { kind: 'message', message: 20 }, direction: 'around' });
+    expect(w.text()).toContain('Showing the message you chose');
+    expect(document.activeElement?.id).toBe('oma-m-20');
+  });
+
+  it('opens another conversation at a reply\'s originator without putting the id in a URL', async () => {
+    const serve = fake.handlers.getThreadPage!;
+    fake.handlers.getThreadPage = (arg) =>
+      (serve(arg) as Promise<ThreadPageDto>).then((p) => ({
+        ...p,
+        items: p.items.map((m) =>
+          m.id === 200
+            ? {
+                ...m,
+                reply: {
+                  kind: 'inAnotherConversation' as const,
+                  originator: sid(8),
+                  chat: sid(9),
+                  quote: { kind: 'noBody' as const },
+                },
+              }
+            : m,
+        ),
+      }));
+    const w = await mountThread();
+    const button = w.get('#oma-m-200').findAll('button').find((b) => b.text() === 'Open that conversation at the message')!;
+    await button.trigger('click');
+    expect(w.emitted('openChat')).toEqual([[9]]);
+    expect(useViewer().pendingFocus).toEqual({ chatId: 9, message: 8 });
+    fake.calls.length = 0;
+    const other = mount(ThreadView, { attachTo: document.body, props: { chatId: sid(9) } });
+    await flushPromises();
+    expect(pageRequests()[0]).toMatchObject({ chatId: 9, anchor: { kind: 'message', message: 8 }, direction: 'around' });
+    expect(useViewer().pendingFocus).toBeNull();
+    other.unmount();
+  });
+
+  it('labels runs of messages only when the conversation has several addresses', async () => {
+    const w = await mountThread();
+    const visible = () => w.findAll('.oma-item-sender').filter((s) => !s.classes().includes('visually-hidden'));
+    // One sender throughout: a label at the start of each local day only.
+    const days = w.findAll('.oma-day-sep').length;
+    expect(days).toBeGreaterThan(0);
+    expect(visible()).toHaveLength(days);
+    w.unmount();
+
+    fake.handlers.getConversations = (arg) => {
+      const [, wanted] = arg as [number, number[]];
+      return Promise.resolve({ rows: wanted.map((id) => conversationRow(id, { addresses: 1 })), skippedRows: 0 });
+    };
+    setActivePinia(createPinia());
+    useSettings().snapshot = snapshot();
+    const single = await mountThread();
+    expect(single.findAll('.oma-item-sender').every((s) => s.classes().includes('visually-hidden'))).toBe(true);
+  });
 });
