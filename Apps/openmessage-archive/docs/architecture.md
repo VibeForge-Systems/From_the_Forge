@@ -2950,6 +2950,61 @@ checklist. Nothing in the crate or the shell changed.
   QuickTime and WAV only, and the one file played through the scheme got
   one `206` response and then failed for lack of an audio device.
 
+### Export caps and raw codes (M6 slice 6a)
+
+Slice 6a prepares the assembly layer for exports (M6 spec §3.1, §3.3,
+§3.9). Nothing an export writes exists yet, and the viewer is unchanged.
+
+- **Every cap is a `Caps` field.** The four caps that were hard-coded
+  (`IDENTIFIER_UTF16` for type, name, UTI, group title, address, account
+  and most history values; `BODY_PAGE_UTF16` for versions and decoded edit
+  text; `PREVIEW_UTF16` for the subject, its history and the Genmoji
+  description; `EMOJI_BYTES` for `assoc_emoji`) are now
+  `identifier_utf16`, `version_utf16`, `subject_utf16` and `emoji_bytes`,
+  threaded through `attachments()`, `event()`, `handle()`,
+  `emoji_content` and the details (`detail_row`, `versions`,
+  `edit_entries`, `history`, `attachment_facts`). `Caps::PAGE` keeps M5's
+  values. `Caps::EXPORT` sets every field to its type's maximum. The
+  conversation list's caps (chat names, previews) and the reply quote
+  (`QUOTE_UTF16`) are not part of the assembly an export uses and stay as
+  they were; the export's conversation reads are slice 6b's.
+- **`Caps::PAGE` is pinned.** `tests/export_caps.rs` dumps every viewer
+  read the caps reach (conversation rows, thread pages of both ranges,
+  reply threads, details and reaction histories, with no reveal and with
+  both) over every viewer catalogue entry and scenario, as `Debug` plus the
+  exposed texts, and compares each dump's SHA-256 with the digest the M5
+  code produced at `9883217` before this slice.
+- **A missed cap is never silent.** `AssembledMessage::cap_miss` returns
+  the first `truncated`, `capped` or `more` marker (body, segments, earlier
+  text, attachment values, "N more" attachments, event title, emoji,
+  reaction rows, chips, reply count), or `ExtrasNotLoaded`. It is ordinary
+  code, so it runs in release builds. The reply quote is not checked: it is
+  the viewer's excerpt, and an export references the originator instead.
+- **Raw codes and states** (`view/raw.rs`) are read from the same rows as
+  the view types and returned beside them as `RawCodes`: the item kind,
+  service, edit label and units as `Coded<T> = Result<T, i64>`; `_st`
+  states coded the same way; `is_from_me` as `RawDirection` (`FromMe`,
+  `Received`, `NotRecorded { state }`, `UnknownValue { raw }`);
+  `app_content` and `effect` as `StateBool` (an absent or unreadable
+  column is never `false`); `schedule_type`, `item_type`,
+  `group_action_type`, `total_bytes` and `is_sticker` as `RawInt`; the
+  date as `RawTime`; the association's and the current body's codes; the
+  stored size per attachment. `base()` is now a wrapper over `base_coded()`,
+  which returns them; the viewer drops them.
+- **`ExportItem`** (`view/uncapped.rs`) is one message under `Caps::EXPORT`
+  with its extras loaded and its `RawCodes`. Until slice 6b adds the export
+  snapshot, its only callers are the `fault-injection` hooks
+  (`export_item`, `export_detail`, `export_handle`, with `LowerCaps` to
+  lower a cap in a test). They run in one read transaction under
+  `ReadConn::cancellable` (no op budget), and `export_item` refuses a missed
+  cap with `Internal("value truncated under export caps")` or
+  `Internal("export extras not loaded")`.
+
+Not done in 6a: content `_st` codes this build does not know still read
+`Unreadable` inside `OptContent`, and `RawValue` in the details does the
+same. The detail lists keep their M5 limits (`DETAIL_VERSIONS`,
+`DETAIL_EDIT_ENTRIES`, `REACTION_HISTORY_LIMIT`); slice 6b streams them.
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`

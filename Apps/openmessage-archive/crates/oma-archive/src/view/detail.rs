@@ -42,10 +42,7 @@ use super::assemble::{
 };
 use super::conversations::{masked_preview, ONE_TIME_CODE_BIT, SQL_FLAGGED_PARTS};
 use super::text::{mask_utf16, utf16_len, ContentText, MaskKind, OptContent, TextPiece};
-use super::{
-    AssocVisibility, AttachmentId, BodyId, CappedCount, ChatId, MessageId, BODY_PAGE_UTF16,
-    IDENTIFIER_UTF16, PREVIEW_UTF16,
-};
+use super::{AssocVisibility, AttachmentId, BodyId, CappedCount, ChatId, MessageId};
 use crate::conn::{Phase, ViewBudget};
 use crate::error::ArchiveError;
 use crate::import::ts_code;
@@ -129,10 +126,11 @@ impl HistoryColumn {
         })
     }
 
-    fn cap(self) -> u32 {
+    /// The subject's cap for the subject, the identifier cap otherwise.
+    fn cap(self, caps: &Caps) -> u32 {
         match self {
-            HistoryColumn::Subject => PREVIEW_UTF16,
-            _ => IDENTIFIER_UTF16,
+            HistoryColumn::Subject => caps.subject_utf16,
+            _ => caps.identifier_utf16,
         }
     }
 }
@@ -153,8 +151,9 @@ pub struct HistoryValue {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum VersionText {
-    /// The version's text, capped at [`BODY_PAGE_UTF16`], one-time codes
-    /// withheld unless revealed.
+    /// The version's text, capped at
+    /// [`BODY_PAGE_UTF16`](super::BODY_PAGE_UTF16) in the viewer,
+    /// one-time codes withheld unless revealed.
     Text(Vec<TextPiece>),
     /// Earlier text withheld (D115) until "Show earlier text".
     Withheld(WithheldReason),
@@ -652,14 +651,20 @@ fn edit_text_pieces(
     runs_complete: bool,
     text: &str,
     reveal_code: bool,
+    cap: u32,
 ) -> Vec<TextPiece> {
     if !runs_complete && !reveal_code {
         return vec![TextPiece::Masked(MaskKind::OneTimeCode)];
     }
-    masked(codes, runs_complete, text, BODY_PAGE_UTF16, reveal_code)
+    masked(codes, runs_complete, text, cap, reveal_code)
 }
 
-fn history(c: &Connection, entity: Entity, id: i64) -> rusqlite::Result<Vec<HistoryValue>> {
+fn history(
+    c: &Connection,
+    entity: Entity,
+    id: i64,
+    caps: &Caps,
+) -> rusqlite::Result<Vec<HistoryValue>> {
     let mut st = c.prepare(SQL_VALUE_HISTORY)?;
     let mut rows = st.query(rusqlite::params![entity.code(), id])?;
     let mut out: Vec<(HistoryColumn, Vec<u8>, HistoryValue)> = Vec::new();
@@ -670,7 +675,7 @@ fn history(c: &Connection, entity: Entity, id: i64) -> rusqlite::Result<Vec<Hist
         let value = match r.get_ref(1)? {
             ValueRef::Null => OptContent::Missing(ValueState::Null),
             ValueRef::Text(b) | ValueRef::Blob(b) => {
-                OptContent::Text(ContentText::from_bytes(b, column.cap()))
+                OptContent::Text(ContentText::from_bytes(b, column.cap(caps)))
             }
             ValueRef::Integer(_) | ValueRef::Real(_) => OptContent::Missing(ValueState::Unreadable),
         };
@@ -755,21 +760,25 @@ type AttachmentRow = (
 );
 
 /// The facts and card of attachment `id`; `None` when it does not exist.
+/// The declared type, UTI and name are capped at
+/// [`Caps::identifier_utf16`], the Genmoji description at
+/// [`Caps::subject_utf16`].
 pub(crate) fn attachment_facts(
     c: &Connection,
     id: i64,
+    caps: &Caps,
 ) -> rusqlite::Result<Option<AttachmentFacts>> {
     let row: Option<AttachmentRow> = c
         .prepare(SQL_ATTACHMENT_ROW)?
         .query_row([id], |r| {
             Ok((
-                OptContent::from_cell(r.get_ref(0)?, r.get(1)?, IDENTIFIER_UTF16),
-                OptContent::from_cell(r.get_ref(2)?, r.get(3)?, IDENTIFIER_UTF16),
-                OptContent::from_cell(r.get_ref(4)?, r.get(5)?, IDENTIFIER_UTF16),
+                OptContent::from_cell(r.get_ref(0)?, r.get(1)?, caps.identifier_utf16),
+                OptContent::from_cell(r.get_ref(2)?, r.get(3)?, caps.identifier_utf16),
+                OptContent::from_cell(r.get_ref(4)?, r.get(5)?, caps.identifier_utf16),
                 RawValue::of(r.get(6)?, r.get(7)?),
                 RawValue::of(r.get(8)?, r.get(9)?),
                 RawValue::of(r.get(10)?, r.get(11)?),
-                OptContent::from_cell(r.get_ref(12)?, r.get(13)?, PREVIEW_UTF16),
+                OptContent::from_cell(r.get_ref(12)?, r.get(13)?, caps.subject_utf16),
                 r.get(14)?,
                 r.get(15)?,
                 r.get(16)?,
@@ -853,7 +862,7 @@ pub(crate) fn attachment_facts(
         }),
         _ => None,
     };
-    let mut hist = history(c, Entity::Attachment, id)?;
+    let mut hist = history(c, Entity::Attachment, id, caps)?;
     hist.retain(|h| {
         matches!(
             h.column,
@@ -949,6 +958,7 @@ fn edit_entries(
     body: i64,
     withhold: Option<WithheldReason>,
     reveal: Reveal,
+    caps: &Caps,
 ) -> rusqlite::Result<(Vec<EditEntryView>, u64, EditTextsOutcome)> {
     let (rows, more) = entry_rows(c, body)?;
     if !rows.iter().any(|r| r.body_present) {
@@ -1022,6 +1032,7 @@ fn edit_entries(
                             *runs_complete,
                             text.expose(),
                             reveal.one_time_code,
+                            caps.version_utf16,
                         )),
                     },
                     Some(EditBody::Failed(k)) => EditEntryText::Failed(ts_code(*k)),
@@ -1047,6 +1058,7 @@ fn versions(
     m: &AssembledMessage,
     current: Option<i64>,
     reveal: Reveal,
+    caps: &Caps,
 ) -> rusqlite::Result<(Vec<BodyVersion>, u64)> {
     let mut rows: Vec<VersionRow> = {
         let mut st = c.prepare(SQL_DETAIL_VERSIONS)?;
@@ -1088,7 +1100,7 @@ fn versions(
                     VersionText::Withheld(reason)
                 }
                 _ if reveal.one_time_code => VersionText::Text(vec![TextPiece::Text(
-                    ContentText::from_str(t, BODY_PAGE_UTF16),
+                    ContentText::from_str(t, caps.version_utf16),
                 )]),
                 _ => VersionText::Text(masked_preview(
                     c,
@@ -1096,7 +1108,7 @@ fn versions(
                     t,
                     source,
                     run_issue,
-                    BODY_PAGE_UTF16,
+                    caps.version_utf16,
                 )?),
             },
             _ => VersionText::NoText(NoText {
@@ -1111,7 +1123,7 @@ fn versions(
         let text_unchanged = previous
             .as_ref()
             .is_some_and(|p| p.is_some() && *p == shown);
-        let (edits, more_edits, edit_texts) = edit_entries(c, id, withhold, reveal)?;
+        let (edits, more_edits, edit_texts) = edit_entries(c, id, withhold, reveal, caps)?;
         out.push(BodyVersion {
             body: BodyId::new(id),
             current: is_current,
@@ -1129,7 +1141,7 @@ fn versions(
     Ok((out, more))
 }
 
-fn chats(c: &Connection, id: i64) -> rusqlite::Result<Vec<ChatFlags>> {
+fn chats(c: &Connection, id: i64, caps: &Caps) -> rusqlite::Result<Vec<ChatFlags>> {
     type Row = (i64, RawValue, RawValue, RawValue);
     let rows: Vec<Row> = {
         let mut st = c.prepare(SQL_MESSAGE_CHATS)?;
@@ -1150,7 +1162,7 @@ fn chats(c: &Connection, id: i64) -> rusqlite::Result<Vec<ChatFlags>> {
             style,
             is_filtered,
             is_archived,
-            history: history(c, Entity::Chat, chat)?,
+            history: history(c, Entity::Chat, chat, caps)?,
         });
     }
     Ok(out)
@@ -1165,7 +1177,7 @@ struct DetailRow {
     target_guid: Option<Vec<u8>>,
 }
 
-fn detail_row(c: &Connection, id: i64) -> rusqlite::Result<Option<DetailRow>> {
+fn detail_row(c: &Connection, id: i64, caps: &Caps) -> rusqlite::Result<Option<DetailRow>> {
     c.prepare(SQL_DETAIL_ROW)?
         .query_row([id], |r| {
             let t = |i: usize| -> rusqlite::Result<RecordedTime> {
@@ -1182,8 +1194,8 @@ fn detail_row(c: &Connection, id: i64) -> rusqlite::Result<Option<DetailRow>> {
                     edited: t(4)?,
                     retracted: t(8)?,
                 },
-                account: OptContent::from_cell(r.get_ref(12)?, r.get(13)?, IDENTIFIER_UTF16),
-                subject: OptContent::from_cell(r.get_ref(14)?, r.get(15)?, PREVIEW_UTF16),
+                account: OptContent::from_cell(r.get_ref(12)?, r.get(13)?, caps.identifier_utf16),
+                subject: OptContent::from_cell(r.get_ref(14)?, r.get(15)?, caps.subject_utf16),
                 reply_guid: bytes_of(r.get_ref(16)?).filter(|g| !g.is_empty()),
                 target_guid: bytes_of(r.get_ref(17)?),
             })
@@ -1230,13 +1242,24 @@ impl ArchiveReader {
         id: MessageId,
         reveal: Reveal,
     ) -> Result<MessageDetail, ArchiveError> {
+        self.detail_with(id, reveal, Caps::PAGE)
+    }
+
+    /// [`ArchiveReader::message_detail`] under `caps`: the viewer passes
+    /// [`Caps::PAGE`]; the fault-injection hooks pass `Caps::EXPORT` (M6
+    /// slice 6a).
+    pub(crate) fn detail_with(
+        &self,
+        id: MessageId,
+        reveal: Reveal,
+        caps: Caps,
+    ) -> Result<MessageDetail, ArchiveError> {
         self.require_current()?;
         let conn = self.conn();
         let deadline = Instant::now() + ViewBudget::Detail.window();
         conn.snapshot(|| {
             let (detail, guids) = conn.viewing(ViewBudget::Detail, None, deadline, |p| {
                 let ctx = p.sql(Ctx::load)?;
-                let caps = Caps::PAGE;
                 let (mut m, x) = p
                     .sql(|c| assemble::base(c, &ctx, None, id.get(), &caps, reveal))?
                     .ok_or(ArchiveError::AnchorNotFound)?;
@@ -1244,13 +1267,14 @@ impl ArchiveReader {
                 p.sql(|c| assemble::extras(c, None, &mut m, &x, &caps))?;
                 p.checkpoint()?;
                 let row = p
-                    .sql(|c| detail_row(c, id.get()))?
+                    .sql(|c| detail_row(c, id.get(), &caps))?
                     .ok_or(ArchiveError::AnchorNotFound)?;
                 let current = current_body(&m);
-                let (versions, more_versions) = p.sql(|c| versions(c, &m, current, reveal))?;
+                let (versions, more_versions) =
+                    p.sql(|c| versions(c, &m, current, reveal, &caps))?;
                 p.checkpoint()?;
-                let history = p.sql(|c| history(c, Entity::Message, id.get()))?;
-                let chats = p.sql(|c| chats(c, id.get()))?;
+                let history = p.sql(|c| history(c, Entity::Message, id.get(), &caps))?;
+                let chats = p.sql(|c| chats(c, id.get(), &caps))?;
                 p.checkpoint()?;
                 let ids: Vec<i64> = p.sql(|c| {
                     let mut st = c.prepare(SQL_ATTACHMENT_IDS)?;
@@ -1263,7 +1287,7 @@ impl ArchiveReader {
                 let mut attachments = Vec::with_capacity(ids.len());
                 for a in ids {
                     p.checkpoint()?;
-                    if let Some(f) = p.sql(|c| attachment_facts(c, a))? {
+                    if let Some(f) = p.sql(|c| attachment_facts(c, a, &caps))? {
                         attachments.push(f);
                     }
                 }
@@ -1317,7 +1341,7 @@ impl ArchiveReader {
         let deadline = Instant::now() + ViewBudget::Lookup.window();
         conn.snapshot(|| {
             conn.viewing(ViewBudget::Lookup, None, deadline, |p| {
-                p.sql(|c| attachment_facts(c, id.get()))?
+                p.sql(|c| attachment_facts(c, id.get(), &Caps::PAGE))?
                     .ok_or(ArchiveError::AnchorNotFound)
             })
         })
@@ -1374,8 +1398,13 @@ impl ArchiveReader {
                                 id: MessageId::new(r.get(0)?),
                                 kind: code.and_then(AssocKindCode::from_code),
                                 adds: matches!(code, Some(10..=17)),
-                                emoji: (emoji.is_some() || emoji_st.is_some())
-                                    .then(|| emoji_content(emoji.as_deref(), emoji_st)),
+                                emoji: (emoji.is_some() || emoji_st.is_some()).then(|| {
+                                    emoji_content(
+                                        emoji.as_deref(),
+                                        emoji_st,
+                                        Caps::PAGE.emoji_bytes,
+                                    )
+                                }),
                                 sender: chip_sender(r.get(4)?, r.get(5)?, r.get(6)?),
                                 time: recorded_time(r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?),
                                 target_part: r.get(11)?,
@@ -1586,30 +1615,51 @@ fn text_chunk(
 mod tests {
     use super::*;
     use crate::schema::codes::ArchiveColumn;
+    use crate::view::BODY_PAGE_UTF16;
+
+    #[test]
+    fn edit_text_follows_the_version_cap() {
+        let long = "e".repeat(9000);
+        let page = edit_text_pieces(&[], true, &long, false, Caps::PAGE.version_utf16);
+        let [TextPiece::Text(page)] = page.as_slice() else {
+            panic!("one piece");
+        };
+        assert!(page.truncated);
+        assert_eq!(page.text.expose().len(), 8192);
+        let export = edit_text_pieces(&[], true, &long, false, Caps::EXPORT.version_utf16);
+        let [TextPiece::Text(export)] = export.as_slice() else {
+            panic!("one piece");
+        };
+        assert!(!export.truncated);
+        assert_eq!(export.text.expose().len(), 9000);
+    }
 
     #[test]
     fn an_edit_text_with_incomplete_runs_is_withheld_whole() {
         let whole = vec![TextPiece::Masked(MaskKind::OneTimeCode)];
         // No code decoded, but the runs stopped early: a code could be
         // missing, so nothing is shown unless codes are revealed.
-        assert_eq!(edit_text_pieces(&[], false, "code 123456", false), whole);
         assert_eq!(
-            edit_text_pieces(&[(5, 11)], false, "code 123456", false),
+            edit_text_pieces(&[], false, "code 123456", false, BODY_PAGE_UTF16),
             whole
         );
         assert_eq!(
-            edit_text_pieces(&[], false, "code 123456", true),
+            edit_text_pieces(&[(5, 11)], false, "code 123456", false, BODY_PAGE_UTF16),
+            whole
+        );
+        assert_eq!(
+            edit_text_pieces(&[], false, "code 123456", true, BODY_PAGE_UTF16),
             vec![TextPiece::Text(ContentText::from_str(
                 "code 123456",
                 BODY_PAGE_UTF16
             ))]
         );
         // Complete runs: only the code is masked; no code, no mask.
-        let p = edit_text_pieces(&[(5, 11)], true, "code 123456", false);
+        let p = edit_text_pieces(&[(5, 11)], true, "code 123456", false, BODY_PAGE_UTF16);
         assert_eq!(p.last(), Some(&TextPiece::Masked(MaskKind::OneTimeCode)));
         assert_eq!(p.len(), 2);
         assert_eq!(
-            edit_text_pieces(&[], true, "hello", false),
+            edit_text_pieces(&[], true, "hello", false, BODY_PAGE_UTF16),
             vec![TextPiece::Text(ContentText::from_str(
                 "hello",
                 BODY_PAGE_UTF16

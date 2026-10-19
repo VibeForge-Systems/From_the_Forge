@@ -143,6 +143,10 @@ pub use view::{
     QUOTE_UTF16, REPLY_THREAD_LIMIT,
 };
 pub use view::{
+    AssociationCodes, AttachmentCodes, BodyCodes, CapMiss, Coded, ExportItem, RawCodes,
+    RawDirection, RawInt, RawTime, StateBool,
+};
+pub use view::{
     AttachmentFacts, BlobFacts, BodyVersion, CardState, ChatFlags, ChunkText, DayCounts,
     DetailTimes, EditEntryText, EditEntryView, EditTextsOutcome, EditTime, HistoryColumn,
     HistoryValue, IdentifierProbe, MessageDetail, Observation, OlderBackup, RawNumber, RawValue,

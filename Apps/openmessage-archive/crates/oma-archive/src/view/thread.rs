@@ -777,7 +777,7 @@ fn assemble_page(
             if incomplete {
                 continue;
             }
-            match p.sql(|c| assemble::handle(c, h.get())) {
+            match p.sql(|c| assemble::handle(c, h.get(), &caps)) {
                 Ok(Some(ph)) => {
                     add += assemble::handle_bound(&ph);
                     fresh.push(ph);

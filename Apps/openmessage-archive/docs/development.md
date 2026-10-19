@@ -568,6 +568,24 @@ PR A's run were `crash.rs` (78.2 s), `resume.rs` (52.0 s), `import_core.rs`
 the shell's unit tests took 43.7 s. Run-to-run noise on the Windows runner
 is large: `oma-messages`' `resume.rs` alone took 94.0 s in PR A's run.
 
+**Milestone 6 (spec §0.1: at most 3 more minutes of Rust test time per
+Linux job, 6 on Windows), measured from slice 6a.** The baseline is `main`
+at `9883217` (milestones 1–5), run in a Linux container (4 CPUs, debug
+build, `CARGO_INCREMENTAL=0`, after compiling), then again with slice 6a:
+
+| What | Baseline (`9883217`) | Slice 6a |
+|---|---|---|
+| `cargo test --workspace`, wall clock | 2 min 8 s | 2 min 6 s |
+| Sum of all test binaries' run times | 124.2 s | 123.1 s |
+| Rust tests passed | 1,241 (12 ignored) | 1,251 (12 ignored) |
+| `oma-archive`'s `export_caps.rs` | — | 2.4 s (4 tests) |
+
+The difference between the two runs is inside the run-to-run noise: a
+first, cold run of the baseline in the same container took 3 min 58 s
+(148.4 s summed). Slice 6a's own cost is `export_caps.rs` plus six quick
+unit tests. Windows has not been measured for M6. Slices 6h and 6l record
+the figures again, with CI's.
+
 **Optional oracles** (manual; nothing enters the repository or CI; each
 run is recorded in `docs/compatibility.md` with the checksum it tested):
 

@@ -8,8 +8,9 @@
 //! - **Caps** ([`Caps`]) are a parameter. The thread pages, the reply
 //!   thread and later the details and search hits pass the UI caps
 //!   ([`Caps::PAGE`]): 8,192 UTF-16 units per body, 2,000 segments, 200
-//!   reaction rows, 50 chips, 100 attachments. M6 will stream the same
-//!   assembly without them, under a cancel token only.
+//!   reaction rows, 50 chips, 100 attachments. M6 assembles the same
+//!   way under [`Caps::EXPORT`], which lifts every cap, under a cancel
+//!   token only (`super::uncapped`).
 //! - **Masking (D115)** happens here, before anything leaves the crate: a
 //!   one-time code is a [`SegmentKind::Withheld`] segment unless the
 //!   request carries [`Reveal::one_time_code`], and text captured before an
@@ -29,6 +30,10 @@ use rusqlite::{Connection, OptionalExtension};
 
 use super::conversations::{
     masked_preview, preview_of, PreviewBody, FLOOR_2007_NS, ONE_TIME_CODE_BIT,
+};
+use super::raw::{
+    coded, opt_coded, state, AssociationCodes, AttachmentCodes, BodyCodes, RawCodes, RawDirection,
+    RawInt, RawTime, StateBool,
 };
 use super::text::{facts, url_runs, utf16_len, ContentText, MaskKind, OptContent, TextPiece};
 use super::{
@@ -65,7 +70,9 @@ pub struct Reveal {
     pub one_time_code: bool,
 }
 
-/// The caps one consumer applies to an assembled message (§3.11).
+/// The caps one consumer applies to an assembled message (§3.11; M6
+/// spec §3.3). Every cap the assembly layer and the details apply is a
+/// field here, so [`Caps::EXPORT`] can lift them all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Caps {
     /// UTF-16 units of shown body text.
@@ -80,10 +87,24 @@ pub(crate) struct Caps {
     pub attachments: usize,
     /// The reply count's cap ("1,000+ replies").
     pub reply_count: u64,
+    /// UTF-16 units of an identifier-like value: `transfer_name`,
+    /// `mime_type`, `uti`, a group title, a handle address, the account,
+    /// and history values other than the subject (was
+    /// [`IDENTIFIER_UTF16`]).
+    pub identifier_utf16: u32,
+    /// UTF-16 units of a body version's text and of decoded edit text in
+    /// the details (was [`BODY_PAGE_UTF16`](super::BODY_PAGE_UTF16)).
+    pub version_utf16: u32,
+    /// UTF-16 units of the subject, its history values and the Genmoji
+    /// description (was [`PREVIEW_UTF16`](super::PREVIEW_UTF16)).
+    pub subject_utf16: u32,
+    /// Bytes of `assoc_emoji` (was [`EMOJI_BYTES`]).
+    pub emoji_bytes: usize,
 }
 
 impl Caps {
-    /// The UI caps of thread pages and the reply thread.
+    /// The UI caps of thread pages, the reply thread and the details: M5's
+    /// values, unchanged (a regression test pins every viewer read).
     pub(crate) const PAGE: Caps = Caps {
         body_utf16: super::BODY_PAGE_UTF16,
         segments: 2000,
@@ -91,6 +112,28 @@ impl Caps {
         chips: 50,
         attachments: 100,
         reply_count: 1000,
+        identifier_utf16: IDENTIFIER_UTF16,
+        version_utf16: super::BODY_PAGE_UTF16,
+        subject_utf16: super::PREVIEW_UTF16,
+        emoji_bytes: EMOJI_BYTES,
+    };
+
+    /// No cap at all (M6 spec §3.3): an export carries every value whole.
+    /// A value that still carries a `truncated`, `capped` or `more` marker
+    /// under these caps is a bug, reported by
+    /// [`AssembledMessage::cap_miss`] in every build.
+    #[cfg_attr(not(feature = "fault-injection"), allow(dead_code))]
+    pub(crate) const EXPORT: Caps = Caps {
+        body_utf16: u32::MAX,
+        segments: usize::MAX,
+        reactions: u64::MAX,
+        chips: usize::MAX,
+        attachments: usize::MAX,
+        reply_count: u64::MAX,
+        identifier_utf16: u32::MAX,
+        version_utf16: u32::MAX,
+        subject_utf16: u32::MAX,
+        emoji_bytes: usize::MAX,
     };
 }
 
@@ -578,9 +621,10 @@ const SQL_ITEM: &str = "SELECT key_kind, guid, is_from_me, is_from_me_st, handle
        handle_rowid_st, handle_ref, other_handle_ref, service_class, date_raw, date_st, \
        date_unit, date_utc_ns, item_type, group_action_type, item_kind, group_title, \
        group_title_st, assoc_present, assoc_kind, assoc_target_shape, assoc_target_guid, \
-       assoc_target_part, assoc_emoji, assoc_emoji_st, length(balloon_bundle_id) > 0, \
-       length(expressive_send_style_id) > 0, schedule_type, current_body_id, sort_key, \
-       last_session_id \
+       assoc_target_part, assoc_emoji, assoc_emoji_st, length(balloon_bundle_id), \
+       length(expressive_send_style_id), schedule_type, current_body_id, sort_key, \
+       last_session_id, schedule_type_st, item_type_st, group_action_type_st, \
+       balloon_bundle_id_st, expressive_send_style_id_st \
      FROM message WHERE id = ?1";
 const SQL_BODY: &str = "SELECT display_text, display_source, display_none_reason, \
        attributed_outcome, attributed_error, run_issue, sources_differ, text_raw_st, \
@@ -606,7 +650,7 @@ const SQL_RD_MARKERS: &str =
     "SELECT session_id, chat_ref FROM message_recently_deleted WHERE message_id = ?1";
 const SQL_ATTACHMENTS: &str = "SELECT ma.attachment_id, a.key_kind, a.guid, a.mime_type, \
        a.mime_type_st, a.transfer_name, a.transfer_name_st, a.is_sticker, a.total_bytes, \
-       a.current_blob_id, bl.byte_len \
+       a.current_blob_id, bl.byte_len, a.total_bytes_st, a.is_sticker_st \
      FROM message_attachment ma JOIN attachment a ON a.id = ma.attachment_id \
      LEFT JOIN blob bl ON bl.id = a.current_blob_id \
      WHERE ma.message_id = ?1 ORDER BY ma.ord_rank, ma.ord_rowid LIMIT ?2";
@@ -737,13 +781,13 @@ fn opt_content(v: Option<&[u8]>, st: Option<i64>, cap: u32) -> OptContent {
     )
 }
 
-/// `assoc_emoji` as content: at most [`EMOJI_BYTES`] bytes, cut at a char
-/// boundary and marked truncated beyond.
-pub(crate) fn emoji_content(v: Option<&[u8]>, st: Option<i64>) -> OptContent {
+/// `assoc_emoji` as content: at most `cap` bytes ([`Caps::emoji_bytes`]),
+/// cut at a char boundary and marked truncated beyond.
+pub(crate) fn emoji_content(v: Option<&[u8]>, st: Option<i64>, cap: usize) -> OptContent {
     match (v, st) {
-        (Some(b), None) if b.len() > EMOJI_BYTES => {
+        (Some(b), None) if b.len() > cap => {
             let decoded = String::from_utf8_lossy(b);
-            let mut end = EMOJI_BYTES.min(decoded.len());
+            let mut end = cap.min(decoded.len());
             while end > 0 && !decoded.is_char_boundary(end) {
                 end -= 1;
             }
@@ -1071,15 +1115,22 @@ struct ItemRow {
     body: Option<i64>,
     sort_key: Vec<u8>,
     last_session: i64,
+    // Raw states (M6 §3.9).
+    app_len: Option<i64>,
+    effect_len: Option<i64>,
+    schedule_type_st: Option<i64>,
+    item_type_st: Option<i64>,
+    group_action_type_st: Option<i64>,
+    app_st: Option<i64>,
+    effect_st: Option<i64>,
 }
 
 fn item_row(c: &Connection, id: i64) -> rusqlite::Result<Option<ItemRow>> {
     c.prepare(SQL_ITEM)?
         .query_row([id], |r| {
             let key_kind: i64 = r.get(0)?;
-            let flag = |i: usize| -> rusqlite::Result<bool> {
-                Ok(r.get::<_, Option<i64>>(i)?.is_some_and(|v| v != 0))
-            };
+            let app_len: Option<i64> = r.get(25)?;
+            let effect_len: Option<i64> = r.get(26)?;
             Ok(ItemRow {
                 keyed: key_kind == 1,
                 guid: bytes_of(r.get_ref(1)?),
@@ -1106,12 +1157,19 @@ fn item_row(c: &Connection, id: i64) -> rusqlite::Result<Option<ItemRow>> {
                 assoc_part: r.get(22)?,
                 assoc_emoji: bytes_of(r.get_ref(23)?),
                 assoc_emoji_st: r.get(24)?,
-                app_content: flag(25)?,
-                effect: flag(26)?,
+                app_content: app_len.is_some_and(|n| n > 0),
+                effect: effect_len.is_some_and(|n| n > 0),
                 schedule_type: r.get(27)?,
                 body: r.get(28)?,
                 sort_key: bytes_of(r.get_ref(29)?).unwrap_or_default(),
                 last_session: r.get(30)?,
+                app_len,
+                effect_len,
+                schedule_type_st: r.get(31)?,
+                item_type_st: r.get(32)?,
+                group_action_type_st: r.get(33)?,
+                app_st: r.get(34)?,
+                effect_st: r.get(35)?,
             })
         })
         .optional()
@@ -1159,6 +1217,7 @@ fn association(
     chat: Option<i64>,
     id: i64,
     row: &ItemRow,
+    caps: &Caps,
 ) -> rusqlite::Result<Option<AssociationFacts>> {
     if row.assoc_present == 0 {
         return Ok(None);
@@ -1199,8 +1258,13 @@ fn association(
         kind,
         shape,
         target_part: row.assoc_part,
-        emoji: (row.assoc_emoji.is_some() || row.assoc_emoji_st.is_some())
-            .then(|| emoji_content(row.assoc_emoji.as_deref(), row.assoc_emoji_st)),
+        emoji: (row.assoc_emoji.is_some() || row.assoc_emoji_st.is_some()).then(|| {
+            emoji_content(
+                row.assoc_emoji.as_deref(),
+                row.assoc_emoji_st,
+                caps.emoji_bytes,
+            )
+        }),
     }))
 }
 
@@ -1216,7 +1280,7 @@ fn target_folds(c: &Connection, chat: Option<i64>, t: i64) -> rusqlite::Result<b
     }
 }
 
-fn event(row: &ItemRow, item: Option<ItemKindCode>) -> Option<GroupEvent> {
+fn event(row: &ItemRow, item: Option<ItemKindCode>, caps: &Caps) -> Option<GroupEvent> {
     if item == Some(ItemKindCode::Message) {
         return None;
     }
@@ -1230,7 +1294,7 @@ fn event(row: &ItemRow, item: Option<ItemKindCode>) -> Option<GroupEvent> {
             opt_content(
                 row.group_title.as_deref(),
                 row.group_title_st,
-                IDENTIFIER_UTF16,
+                caps.identifier_utf16,
             )
         }),
         item_type: row.item_type,
@@ -1241,20 +1305,27 @@ fn event(row: &ItemRow, item: Option<ItemKindCode>) -> Option<GroupEvent> {
 /// The GUIDs of a message's keyed attachments, with their ids.
 type KeyedGuids = Vec<(Vec<u8>, i64)>;
 
-/// A body view, its edit label, the session that last saw it, and the
-/// attachments placed inline.
-type BodyParts = (BodyView, Option<i64>, Option<i64>, BTreeSet<i64>);
+/// A body view, its edit label, the session that last saw it, the
+/// attachments placed inline, and the body row's raw codes.
+type BodyParts = (
+    BodyView,
+    Option<i64>,
+    Option<i64>,
+    BTreeSet<i64>,
+    Option<BodyCodes>,
+);
 
-fn attachments(
-    c: &Connection,
-    id: i64,
-    caps: &Caps,
-) -> rusqlite::Result<(Vec<AttachmentRef>, u64, KeyedGuids)> {
+/// A message's attachments as a page lists them, how many more the cap
+/// left out, the GUIDs of the keyed ones, and their raw values.
+type Attachments = (Vec<AttachmentRef>, u64, KeyedGuids, Vec<AttachmentCodes>);
+
+fn attachments(c: &Connection, id: i64, caps: &Caps) -> rusqlite::Result<Attachments> {
     let limit = i64::try_from(caps.attachments).unwrap_or(i64::MAX);
     let mut st = c.prepare(SQL_ATTACHMENTS)?;
     let mut rows = st.query(rusqlite::params![id, limit])?;
     let mut out = Vec::new();
     let mut guids = Vec::new();
+    let mut codes = Vec::new();
     while let Some(r) = rows.next()? {
         let aid: i64 = r.get(0)?;
         let key_kind: i64 = r.get(1)?;
@@ -1264,10 +1335,15 @@ fn attachments(
             }
         }
         let sticker: Option<i64> = r.get(7)?;
+        codes.push(AttachmentCodes {
+            declared_bytes: RawInt::of(r.get(8)?, r.get(11)?),
+            sticker: RawInt::of(sticker, r.get(12)?),
+            stored_bytes: r.get(10)?,
+        });
         out.push(AttachmentRef {
             id: AttachmentId::new(aid),
-            declared_type: OptContent::from_cell(r.get_ref(3)?, r.get(4)?, IDENTIFIER_UTF16),
-            name: OptContent::from_cell(r.get_ref(5)?, r.get(6)?, IDENTIFIER_UTF16),
+            declared_type: OptContent::from_cell(r.get_ref(3)?, r.get(4)?, caps.identifier_utf16),
+            name: OptContent::from_cell(r.get_ref(5)?, r.get(6)?, caps.identifier_utf16),
             sticker: sticker.map(|v| v == 1),
             declared_bytes: r.get(8)?,
             blob: r.get::<_, Option<i64>>(9)?.map(BlobId::new),
@@ -1285,7 +1361,7 @@ fn attachments(
     } else {
         0
     };
-    Ok((out, more, guids))
+    Ok((out, more, guids, codes))
 }
 
 /// The current body, segmented.
@@ -1297,7 +1373,7 @@ fn body(
     reveal: Reveal,
 ) -> rusqlite::Result<BodyParts> {
     let Some(b) = body_id else {
-        return Ok((BodyView::NoBody, None, None, BTreeSet::new()));
+        return Ok((BodyView::NoBody, None, None, BTreeSet::new(), None));
     };
     type BodyRow = (
         Option<String>,
@@ -1334,7 +1410,16 @@ fn body(
         .optional()?;
     let Some((text, source, none, outcome, error, run_issue, differ, text_st, label, last)) = row
     else {
-        return Ok((BodyView::NoBody, None, None, BTreeSet::new()));
+        return Ok((BodyView::NoBody, None, None, BTreeSet::new(), None));
+    };
+    let codes = BodyCodes {
+        display_source: opt_coded(source, DisplaySource::from_code),
+        display_none_reason: opt_coded(none, DisplayNoneReason::from_code),
+        attributed_outcome: coded(outcome, AttributedOutcome::from_code),
+        attributed_error: opt_coded(error, TsErrorCode::from_code),
+        run_issue: opt_coded(run_issue, TsErrorCode::from_code),
+        text_raw_state: state(text_st),
+        edit_label: coded(label, EditLabelCode::from_code),
     };
     let Some(text) = text.filter(|_| source.is_some()) else {
         return Ok((
@@ -1348,6 +1433,7 @@ fn body(
             Some(label),
             Some(last),
             BTreeSet::new(),
+            Some(codes),
         ));
     };
     let parts: Vec<PartRange> = {
@@ -1406,6 +1492,7 @@ fn body(
         Some(label),
         Some(last),
         placed,
+        Some(codes),
     ))
 }
 
@@ -1631,12 +1718,25 @@ pub(crate) fn base(
     caps: &Caps,
     reveal: Reveal,
 ) -> rusqlite::Result<Option<(AssembledMessage, Extras)>> {
+    Ok(base_coded(c, ctx, chat, id, caps, reveal)?.map(|(m, x, _)| (m, x)))
+}
+
+/// [`base`], with the raw codes and states the view types collapse
+/// (M6 spec §3.9), read from the same rows.
+pub(crate) fn base_coded(
+    c: &Connection,
+    ctx: &Ctx,
+    chat: Option<i64>,
+    id: i64,
+    caps: &Caps,
+    reveal: Reveal,
+) -> rusqlite::Result<Option<(AssembledMessage, Extras, RawCodes)>> {
     let Some(row) = item_row(c, id)? else {
         return Ok(None);
     };
     let item = ItemKindCode::from_code(row.item_kind);
-    let (mut atts, more, guids) = attachments(c, id, caps)?;
-    let (body, label, body_session, placed) = body(c, row.body, &guids, caps, reveal)?;
+    let (mut atts, more, guids, att_codes) = attachments(c, id, caps)?;
+    let (body, label, body_session, placed, body_codes) = body(c, row.body, &guids, caps, reveal)?;
     for a in &mut atts {
         a.placed_inline = placed.contains(&a.id.get());
     }
@@ -1654,8 +1754,8 @@ pub(crate) fn base(
         edit,
         labels,
         recently_deleted,
-        association: association(c, chat, id, &row)?,
-        event: event(&row, item),
+        association: association(c, chat, id, &row, caps)?,
+        event: event(&row, item, caps),
         attachments: atts,
         more_attachments: more,
         extras: false,
@@ -1663,10 +1763,28 @@ pub(crate) fn base(
         reply: None,
         reply_count: None,
     };
+    let codes = RawCodes {
+        item: coded(row.item_kind, ItemKindCode::from_code),
+        direction: RawDirection::of(row.is_from_me, row.is_from_me_st),
+        service: opt_coded(row.service, ServiceClassCode::from_code),
+        date: RawTime::of(row.date_raw, row.date_st, row.date_unit, row.date_utc_ns),
+        item_type: RawInt::of(row.item_type, row.item_type_st),
+        group_action_type: RawInt::of(row.group_action_type, row.group_action_type_st),
+        schedule_type: RawInt::of(row.schedule_type, row.schedule_type_st),
+        app_content: StateBool::of(row.app_len, row.app_st),
+        effect: StateBool::of(row.effect_len, row.effect_st),
+        association: (row.assoc_present != 0).then(|| AssociationCodes {
+            present: row.assoc_present,
+            kind: opt_coded(row.assoc_kind, AssocKindCode::from_code),
+            shape: opt_coded(row.assoc_shape, AssocTargetShape::from_code),
+        }),
+        body: body_codes,
+        attachments: att_codes,
+    };
     let extras = Extras {
         guid: row.guid.filter(|_| row.keyed),
     };
-    Ok(Some((msg, extras)))
+    Ok(Some((msg, extras, codes)))
 }
 
 /// What [`extras`] needs from the base row.
@@ -1759,7 +1877,7 @@ fn reactions(
             single.push(ReactionChip {
                 kind: r.kind,
                 emoji: (r.kind == ReactionKind::Emoji)
-                    .then(|| emoji_content(r.emoji.as_deref(), r.emoji_st)),
+                    .then(|| emoji_content(r.emoji.as_deref(), r.emoji_st, caps.emoji_bytes)),
                 sender: ChipSender::NotRecorded,
                 rows: vec![MessageId::new(r.id)],
                 state: if r.adds {
@@ -1790,7 +1908,7 @@ fn reactions(
             let emoji = rows
                 .first()
                 .filter(|_| kind == ReactionKind::Emoji)
-                .map(|r| emoji_content(r.emoji.as_deref(), r.emoji_st));
+                .map(|r| emoji_content(r.emoji.as_deref(), r.emoji_st, caps.emoji_bytes));
             let mut ids: Vec<MessageId> = rows.iter().map(|r| MessageId::new(r.id)).collect();
             ids.sort();
             ReactionChip {
@@ -1911,13 +2029,18 @@ pub(crate) fn extras(
     Ok(())
 }
 
-/// One handle as a page lists it.
-pub(crate) fn handle(c: &Connection, id: i64) -> rusqlite::Result<Option<super::Participant>> {
+/// One handle as a page lists it, its address capped at
+/// [`Caps::identifier_utf16`].
+pub(crate) fn handle(
+    c: &Connection,
+    id: i64,
+    caps: &Caps,
+) -> rusqlite::Result<Option<super::Participant>> {
     c.prepare(SQL_HANDLE)?
         .query_row([id], |r| {
             let service: Option<i64> = r.get(2)?;
             Ok((
-                OptContent::from_cell(r.get_ref(0)?, r.get(1)?, IDENTIFIER_UTF16),
+                OptContent::from_cell(r.get_ref(0)?, r.get(1)?, caps.identifier_utf16),
                 service,
             ))
         })
@@ -2214,13 +2337,13 @@ mod tests {
     #[test]
     fn long_emoji_are_cut_at_a_char_boundary() {
         let long = "\u{1F600}".repeat(20); // 80 bytes
-        let OptContent::Text(t) = emoji_content(Some(long.as_bytes()), None) else {
+        let OptContent::Text(t) = emoji_content(Some(long.as_bytes()), None, EMOJI_BYTES) else {
             panic!("text");
         };
         assert!(t.truncated);
         assert_eq!(t.text.expose().len(), 64);
         assert_eq!(
-            emoji_content(None, Some(1)),
+            emoji_content(None, Some(1), EMOJI_BYTES),
             OptContent::Missing(ValueState::Null)
         );
     }

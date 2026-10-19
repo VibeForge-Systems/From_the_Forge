@@ -532,6 +532,15 @@ Never hand-edit generated files.
   what was copied. `services/guards.ts` stops print, save, reload, the
   engine's context menu and drag-out while the viewer is mounted; keep
   media and bubbles `draggable="false"`.
+- **Every cap is a `Caps` field (M6 slice 6a).** The assembly layer and
+  the details take their caps from `view::assemble::Caps`; never add a
+  hard-coded cap there. `Caps::PAGE` is pinned byte for byte by the digests
+  in `crates/oma-archive/tests/export_caps.rs` (re-pin only for a
+  deliberate viewer change), and `Caps::EXPORT` lifts every cap.
+  `AssembledMessage::cap_miss` must run in release builds (never a
+  `debug_assert`). Raw codes and states for exports come from
+  `base_coded()` as `RawCodes` (`view/raw.rs`); the view types keep
+  collapsing them for the viewer.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush

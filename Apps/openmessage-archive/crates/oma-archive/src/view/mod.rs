@@ -20,14 +20,18 @@
 //! decoded at read time, the reaction history, `message_text`, value
 //! history and the attachment facts and cards ([`detail`]), and date seek
 //! and day counts ([`calendar`]). Slice 5c adds search in `crate::search`;
-//! media follows in slice 5d.
+//! media follows in slice 5d. M6 slice 6a adds the uncapped assembly an
+//! export uses ([`uncapped`]: `Caps::EXPORT` and its check) and the raw
+//! codes and states it keeps ([`raw`]).
 
 pub mod assemble;
 pub mod calendar;
 pub mod conversations;
 pub mod detail;
+pub mod raw;
 pub mod text;
 pub mod thread;
+pub mod uncapped;
 
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OptionalExtension};
@@ -53,6 +57,10 @@ pub use detail::{
     DETAIL_EDIT_ENTRIES, DETAIL_VERSIONS, REACTION_HISTORY_LIMIT, REACTION_HISTORY_PAGE,
     TEXT_CHUNK_UTF16,
 };
+pub use raw::{
+    AssociationCodes, AttachmentCodes, BodyCodes, Coded, RawCodes, RawDirection, RawInt, RawTime,
+    StateBool,
+};
 pub use text::{
     ContentText, MaskKind, OptContent, TextPiece, UrlRun, BODY_PAGE_UTF16, IDENTIFIER_UTF16,
     PREVIEW_UTF16,
@@ -61,6 +69,7 @@ pub use thread::{
     Anchor, Direction, Focus, FocusReason, PageRange, SortKeyHint, ThreadPage, PAGE_HANDLES,
     PAGE_ITEMS, REPLY_THREAD_LIMIT,
 };
+pub use uncapped::{CapMiss, ExportItem};
 
 use crate::schema::codes::{AssocKindCode, Entity};
 
@@ -131,7 +140,8 @@ impl CappedCount {
 }
 
 /// `message.is_from_me` as the viewer shows it (§3.6). Read, delivery and
-/// sent state are never shown (D94).
+/// sent state are never shown (D94). An export keeps the raw value
+/// instead ([`RawDirection`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum DirectionCode {
