@@ -31,7 +31,13 @@
 //!
 //! [`Archive::verify`] is the report-only integrity verifier (slice 4k,
 //! spec §11), quick or full, and [`ArchiveReader::open_blob`] the one way
-//! attachment bytes are read back.
+//! attachment bytes are read back in full.
+//!
+//! [`media`] (M5 slice 5d) holds the viewer's media rules: the content
+//! sniffer, the structural check of audio and video containers, the
+//! viewer's blob readers (`inspect_blob`, `verify_blob`, `check_container`,
+//! `open_range`, `read_blob_verified`) and [`media::render::render`], the
+//! pure function the decode helper process runs to make image renditions.
 //!
 //! Every connection is opened by one module, with the hardening of spec
 //! §5.5 (`DEFENSIVE`, `TRUSTED_SCHEMA` off, no `ATTACH`, an op budget on
@@ -61,6 +67,7 @@ mod import;
 mod layout;
 mod library;
 mod lock;
+pub mod media;
 mod progress;
 mod provenance;
 mod reader;
@@ -76,7 +83,7 @@ mod view;
 pub use fault::hooks;
 
 pub use archive::{Archive, CheckpointOutcome, CloseReport, Recovery, RecoveryReport};
-pub use blobs::BlobReader;
+pub use blobs::{BlobReader, RangeReader};
 pub use conn::SearchInterrupt;
 pub use error::{
     ArchiveError, BlobProblem, DamageKind, IoOp, LocationRefusal, PermProblem, QueryProblem,
@@ -93,6 +100,10 @@ pub use import::{
 };
 pub use library::{ArchiveEntry, Library, SweepReport, LIST_LIMIT, SWEEP_MIN_AGE};
 pub use lock::{LOCK_RETRIES, LOCK_RETRY_WAIT};
+pub use media::{
+    BlobIdentity, ContainerRefusal, ContainerVerdict, MediaClass, RenderError, RenderLimits,
+    Rendered, RenderedFormat, Rendition, Sniffed, SniffedKind, CONTAINER_CHECK_TIME, SNIFF_WINDOW,
+};
 pub use progress::{
     ArchiveCtx, ArchiveEvent, ArchiveSink, CancelToken, Clock, FixedClock, ImportPhase, NoProgress,
     SystemClock, VerifyPhase,

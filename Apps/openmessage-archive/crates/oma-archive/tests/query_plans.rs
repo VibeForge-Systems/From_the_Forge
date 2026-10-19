@@ -489,6 +489,10 @@ const PINNED: &[(&str, &[&str])] = &[
         ],
     ),
     (
+        "viewer blob row",
+        &["SEARCH blob USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
         "viewer attachment row",
         &[
             "SEARCH a USING INTEGER PRIMARY KEY (rowid=?)",

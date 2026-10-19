@@ -24,14 +24,22 @@
 //!   name parsed, the directories checked, the file opened without
 //!   following a link, its length compared with `byte_len`, and its
 //!   content re-hashed while it streams.
+//! - [`RangeReader`] and [`open_range`] (M5 §5.4): the viewer's random
+//!   access to a file `verify_blob` has hashed, with the same checks as
+//!   [`open_checked`] plus a comparison of the file's identity
+//!   ([`FileIdentity`]) with the one recorded at verification; and
+//!   [`read_sniff_window`], the first 4 KiB for the sniffer, the one read
+//!   that needs no verification. These and [`open_checked`] are the only
+//!   readers of store files.
 //! - [`walk_store`]: the verifier's bounded walk of `attachments/`.
 //!
 //! The pass that drives the phases (A to D) is `import/attachments.rs`.
 
 use std::collections::BTreeSet;
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use oma_fs::{check_private, Expect, PermProblem};
 use rusqlite::TransactionBehavior;
@@ -510,6 +518,11 @@ impl BlobReader {
         self.len == 0
     }
 
+    /// The identity of the open file (M5 §5.4).
+    pub(crate) fn identity(&self) -> io::Result<FileIdentity> {
+        Ok(FileIdentity::of(&self.file.get_ref().metadata()?))
+    }
+
     fn mismatch() -> io::Error {
         io::Error::new(
             io::ErrorKind::InvalidData,
@@ -550,6 +563,34 @@ impl Read for BlobReader {
     }
 }
 
+/// The checks every reader of a store file makes (spec §9.5): `attachments/`
+/// and `<hh>/` must be private real directories, the file is opened with
+/// `open_nofollow` and must be a regular file of `byte_len` bytes. Returns
+/// the open file and its metadata.
+fn open_store_file(
+    dir: &ArchiveDir,
+    name: &StorageName,
+    byte_len: i64,
+) -> Result<(fs::File, fs::Metadata), crate::error::BlobProblem> {
+    use crate::error::BlobProblem;
+    match store_dir(dir, name) {
+        Ok(Some(_)) => {}
+        Ok(None) => return Err(BlobProblem::Missing),
+        Err(_) => return Err(BlobProblem::NotRegular),
+    }
+    let file = match oma_fs::open_nofollow(&name.path_in(dir)) {
+        Ok(f) => f,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Err(BlobProblem::Missing),
+        Err(e) if oma_fs::open_refusal(&e).is_some() => return Err(BlobProblem::NotRegular),
+        Err(e) => return Err(BlobProblem::Io(e.kind())),
+    };
+    let meta = file.metadata().map_err(|e| BlobProblem::Io(e.kind()))?;
+    if u64::try_from(byte_len).ok() != Some(meta.len()) {
+        return Err(BlobProblem::LengthMismatch);
+    }
+    Ok((file, meta))
+}
+
 /// Open the store file `name` for a row of `byte_len` bytes (spec §9.5):
 /// `attachments/` and `<hh>/` must be private real directories, the file is
 /// opened with `open_nofollow` and must be a regular file of `byte_len`
@@ -562,24 +603,8 @@ pub(crate) fn open_checked(
 ) -> Result<BlobReader, crate::error::BlobProblem> {
     use crate::error::BlobProblem;
     let expected = name.sha256().ok_or(BlobProblem::BadName)?;
-    match store_dir(dir, name) {
-        Ok(Some(_)) => {}
-        Ok(None) => return Err(BlobProblem::Missing),
-        Err(_) => return Err(BlobProblem::NotRegular),
-    }
-    let file = match oma_fs::open_nofollow(&name.path_in(dir)) {
-        Ok(f) => f,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Err(BlobProblem::Missing),
-        Err(e) if oma_fs::open_refusal(&e).is_some() => return Err(BlobProblem::NotRegular),
-        Err(e) => return Err(BlobProblem::Io(e.kind())),
-    };
-    let len = file
-        .metadata()
-        .map_err(|e| BlobProblem::Io(e.kind()))?
-        .len();
-    if u64::try_from(byte_len).ok() != Some(len) {
-        return Err(BlobProblem::LengthMismatch);
-    }
+    let (file, meta) = open_store_file(dir, name, byte_len)?;
+    let len = meta.len();
     Ok(BlobReader {
         file: file.take(len),
         len,
@@ -587,6 +612,153 @@ pub(crate) fn open_checked(
         hasher: Sha256::new(),
         expected,
         end: None,
+    })
+}
+
+/// The identity of a store file (M5 §5.4): on Unix `(dev, ino, len,
+/// mtime)`, on Windows `(len, mtime)` only (the file index needs an
+/// unstable API or `unsafe`; M5 §20 item 1). `Debug` prints nothing of it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FileIdentity {
+    len: u64,
+    mtime: Option<SystemTime>,
+    #[cfg(unix)]
+    dev: u64,
+    #[cfg(unix)]
+    ino: u64,
+}
+
+impl std::fmt::Debug for FileIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("FileIdentity(..)")
+    }
+}
+
+impl FileIdentity {
+    pub(crate) fn of(m: &fs::Metadata) -> FileIdentity {
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        FileIdentity {
+            len: m.len(),
+            mtime: m.modified().ok(),
+            #[cfg(unix)]
+            dev: m.dev(),
+            #[cfg(unix)]
+            ino: m.ino(),
+        }
+    }
+
+    /// The length it was recorded with.
+    pub(crate) fn len(&self) -> u64 {
+        self.len
+    }
+}
+
+/// The first [`crate::media::SNIFF_WINDOW`] bytes of the store file `name`
+/// (M5 §5.2), after [`open_checked`]'s checks. Not hashed: these bytes go
+/// only to the sniffer, and are the one read of an unverified file the
+/// viewer makes.
+pub(crate) fn read_sniff_window(
+    dir: &ArchiveDir,
+    name: &StorageName,
+    byte_len: i64,
+) -> Result<Vec<u8>, crate::error::BlobProblem> {
+    use crate::error::BlobProblem;
+    let (file, meta) = open_store_file(dir, name, byte_len)?;
+    let window = u64::try_from(crate::media::SNIFF_WINDOW).unwrap_or(4096);
+    let want = meta.len().min(window);
+    let mut out = Vec::with_capacity(usize::try_from(want).unwrap_or(0));
+    file.take(want)
+        .read_to_end(&mut out)
+        .map_err(|e| BlobProblem::Io(e.kind()))?;
+    Ok(out)
+}
+
+/// Random access to a store file that `verify_blob` hashed (M5 §5.4).
+/// Opened per request by [`open_range`] and dropped after it. `Debug`
+/// prints the length only.
+pub struct RangeReader {
+    file: fs::File,
+    len: u64,
+}
+
+impl std::fmt::Debug for RangeReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RangeReader")
+            .field("len", &self.len)
+            .finish_non_exhaustive()
+    }
+}
+
+impl RangeReader {
+    /// The file's length, which equals the row's `byte_len`.
+    pub fn len(&self) -> u64 {
+        self.len
+    }
+
+    /// `true` for an empty file.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Read from `offset` into `buf`: `min(buf.len(), len - offset)` bytes,
+    /// all of them. An `offset` at or past the end is refused
+    /// ([`io::ErrorKind::InvalidInput`]); a file that ends early (it
+    /// shrank) is [`io::ErrorKind::UnexpectedEof`].
+    pub fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> io::Result<usize> {
+        if offset >= self.len {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "read past the end of the attachment file",
+            ));
+        }
+        let left = self.len - offset;
+        let want = usize::try_from(left).map_or(buf.len(), |l| l.min(buf.len()));
+        let dst = buf
+            .get_mut(..want)
+            .ok_or_else(|| io::Error::other("short buffer"))?;
+        self.file.seek(SeekFrom::Start(offset))?;
+        self.file.read_exact(dst)?;
+        Ok(want)
+    }
+}
+
+impl crate::media::ReadAt for RangeReader {
+    fn size(&self) -> u64 {
+        self.len
+    }
+
+    fn read_exact_at(&mut self, offset: u64, buf: &mut [u8]) -> io::Result<()> {
+        if buf.is_empty() {
+            return Ok(());
+        }
+        let n = self.read_at(offset, buf)?;
+        if n == buf.len() {
+            Ok(())
+        } else {
+            Err(io::Error::from(io::ErrorKind::UnexpectedEof))
+        }
+    }
+}
+
+/// Open the store file `name` for random access (M5 §5.4): the checks of
+/// [`open_checked`], then the file's identity must equal `ident`, the
+/// identity recorded when `verify_blob` hashed it; any change is
+/// [`crate::error::BlobProblem::Changed`].
+pub(crate) fn open_range(
+    dir: &ArchiveDir,
+    name: &StorageName,
+    byte_len: i64,
+    ident: &FileIdentity,
+) -> Result<RangeReader, crate::error::BlobProblem> {
+    use crate::error::BlobProblem;
+    let (file, meta) = open_store_file(dir, name, byte_len)?;
+    if FileIdentity::of(&meta) != *ident {
+        return Err(BlobProblem::Changed);
+    }
+    Ok(RangeReader {
+        file,
+        len: meta.len(),
     })
 }
 

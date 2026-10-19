@@ -287,6 +287,7 @@ pub mod hooks {
     pub fn viewer_statements() -> Vec<(&'static str, String)> {
         let mut v = crate::view::plan_statements();
         v.extend(crate::search::plan_statements());
+        v.extend(crate::media::plan_statements());
         v
     }
 

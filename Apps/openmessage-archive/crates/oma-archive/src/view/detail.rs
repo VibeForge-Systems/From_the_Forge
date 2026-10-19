@@ -21,7 +21,9 @@
 //!   lookup code first, then its copy code. A present blob always shows
 //!   the file; when the newest observation found no file, the card says
 //!   the file is from an older backup. What a present file is (an image, a
-//!   playable file, another kind) is decided by the sniff of slice 5d.
+//!   playable file, a file card or unrecognised content) is decided from its
+//!   bytes by `ArchiveReader::inspect_blob` (`crate::media`, slice 5d),
+//!   which the shell calls for the attachments it shows.
 //! - The unkeyed identifier probe ("unkeyed messages share this
 //!   identifier") scans `message` under its own `Detail` phase; a trip
 //!   reads [`IdentifierProbe::NotChecked`], never an error.
@@ -285,8 +287,10 @@ pub enum IdentifierProbe {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum CardState {
-    /// A blob is present: the file. The sniff (slice 5d) decides between a
-    /// rendition, the Play card, a file card and "Unrecognised content".
+    /// A blob is present: the file. Its sniff
+    /// ([`crate::ArchiveReader::inspect_blob`], [`crate::MediaClass`])
+    /// decides between a rendition, the Play card, a file card and
+    /// "Unrecognised content".
     File {
         /// The highest-ranked observation found no file: "Showing the file
         /// from the backup of D (`held_by`); not found in the backup of D2

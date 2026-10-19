@@ -16,6 +16,11 @@ publish = false
 # Never enabled by a shipped build; only this crate's own tests turn it on,
 # through the self dev-dependency below.
 fault-injection = []
+# Owner decision Q2 (M5): HEIC/HEIF previews through the pure-Rust `heic-rs`
+# decoder, inside `media::render` only. OFF by default; official and CI
+# release builds never enable it (HEVC patent pools; docs/privacy.md). CI
+# runs clippy with it on Linux so it does not rot.
+heic = ["dep:heic-rs"]
 
 [dependencies]
 oma-backup.workspace = true
@@ -29,10 +34,11 @@ thiserror.workspace = true
 dunce.workspace = true
 tracing.workspace = true
 zeroize.workspace = true      # source values held during a batch
+image.workspace = true        # media::render: decode and re-encode (decode helper only)
+heic-rs = { workspace = true, optional = true } # the `heic` feature only
 
 [dev-dependencies]
 oma-archive = { path = ".", features = ["fault-injection"] }
-image.workspace = true              # viewer fixtures: make_viewer_media and viewer_fixtures.rs
 tempfile.workspace = true
 tracing-subscriber.workspace = true # log-hygiene test
 

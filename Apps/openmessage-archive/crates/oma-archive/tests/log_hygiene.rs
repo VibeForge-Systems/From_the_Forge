@@ -242,6 +242,7 @@ fn logs_errors_and_debug_output_hold_no_label_id_or_path() {
         .conversation_index(oma_archive::ConversationSort::Recent, None)
         .expect("index");
     let mut items = 0;
+    let mut blobs = std::collections::BTreeSet::new();
     for chat in &index.ids {
         let page = reader
             .thread_page(
@@ -273,7 +274,9 @@ fn logs_errors_and_debug_output_hold_no_label_id_or_path() {
         for m in page.items.iter().take(5) {
             let d = reader.message_detail(m.id, all).expect("detail");
             for a in &d.attachments {
-                shown.push(format!("{:?}", reader.attachment(a.id).expect("facts")));
+                let facts = reader.attachment(a.id).expect("facts");
+                blobs.extend(facts.blob.map(|b| b.id));
+                shown.push(format!("{facts:?}"));
             }
             for v in &d.versions {
                 shown.push(format!(
@@ -297,6 +300,36 @@ fn logs_errors_and_debug_output_hold_no_label_id_or_path() {
         ));
     }
     assert!(items > 0, "the catalogue has thread items");
+    // Media (slice 5d): sniffs, identities, verdicts, ranges, verified
+    // bytes, renditions and their errors print no bytes, names or paths.
+    assert!(!blobs.is_empty(), "the catalogue has stored files");
+    let cancel = CancelToken::new();
+    for b in &blobs {
+        let sniffed = reader.inspect_blob(*b).expect("sniff");
+        let ident = reader.verify_blob(*b, &cancel).expect("verify");
+        let verdict = reader.check_container(*b, &ident, sniffed.kind, &cancel);
+        let range = reader.open_range(*b, &ident).expect("range");
+        let bytes = reader
+            .read_blob_verified(*b, oma_archive::media::MAX_INPUT_BYTES)
+            .expect("bytes");
+        let rendered = oma_archive::media::render(
+            bytes.expose(),
+            oma_archive::Rendition::Thumb,
+            &oma_archive::RenderLimits::default(),
+        );
+        shown.push(format!(
+            "{sniffed:?} {ident:?} {verdict:?} {range:?} {bytes:?} {rendered:?}"
+        ));
+    }
+    for p in [
+        oma_archive::BlobProblem::DigestMismatch,
+        oma_archive::BlobProblem::Changed,
+        oma_archive::BlobProblem::NotVerified,
+        oma_archive::BlobProblem::OverLimit,
+    ] {
+        let e = ArchiveError::Blob(p);
+        shown.push(format!("{e} {e:?}"));
+    }
     let e = ArchiveError::AnchorNotFound;
     shown.push(format!("{e} {e:?}"));
     // Search (slice 5c): requests, result sets, hits (earlier text

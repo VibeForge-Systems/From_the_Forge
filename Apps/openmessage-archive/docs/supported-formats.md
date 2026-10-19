@@ -860,6 +860,25 @@ Added by milestone 4 (the archive import; spec Appendix B). All are
 34. The meaning of `destination_caller_id` (the owner's own address or
     not); the contents of `payload_data` for polls and app messages.
 
+Added by milestone 5 (the viewer's media, slice 5d; M5 spec Appendix B).
+All are **UNVERIFIED**; the checks were built and tested on synthetic files
+only.
+
+35. Whether GStreamer (WebKitGTK) and Media Foundation (WebView2) choose
+    their demuxer from the bytes, the `Content-Type` or both. GStreamer's
+    autoplugging typefinds on its own, so a file the app sniffed as MP4 may
+    still be parsed by another element; the sniff decides only what the
+    app offers (`crates/oma-archive/src/media/sniff.rs`), and is not
+    claimed as a mitigation.
+36. The QuickTime reference-movie atoms (`rmra`, `rmda`, `rdrf`, `rmdr`),
+    the `dref` entry types (`url `, `urn `, `alis`, `rsrc`) and the meaning
+    of their flag 0x000001 ("data in this file"), as the structural check
+    reads them (`media/container.rs`). Taken from the M5 spec's summary of
+    Apple's QuickTime File Format Specification, which was not re-read for
+    slice 5d; and whether either engine would follow a reference movie or
+    an external data reference at all (a manual test with the check
+    bypassed in a debug build, M5 §5.3).
+
 Two questions from the M3 research were settled by tests rather than
 hardware: a schema with double-quoted string literals still loads with
 `DQS_DDL` off (`crates/oma-backup/tests/staged_db.rs`), and table-valued

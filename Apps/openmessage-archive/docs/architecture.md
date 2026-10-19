@@ -2006,6 +2006,145 @@ is no search history (owner-confirmed, Q1c).
   **UNVERIFIED** and the designed behaviour stays behind feature
   detection.
 
+### Viewer media in the crate (M5 slice 5d)
+
+`crates/oma-archive/src/media/` and `blobs.rs`: what an attachment's
+bytes are, whether a container may be streamed, and how an image becomes a
+rendition. No schema change; nothing is written.
+
+- **Sniffing (`media/sniff.rs`, §5.2).** The stored `mime_type`, `uti` and
+  `transfer_name` decide nothing. A clean-room table of the WHATWG MIME
+  Sniffing facts (image §6.1, audio and video §6.2) plus ISO-BMFF `ftyp`
+  brands (major first, then compatible in order: `qt  `, `M4A `, `M4V `,
+  the HEIF brands, any `mp4*`), then CAF, PDF, XML (so SVG is never an
+  image), HTML tags, vCard and UTF-8 text without binary control bytes;
+  anything else, empty files included, is `Unknown` ("Unrecognised
+  content"). At most 4 KiB are read. `SniffedKind::class()` is what the
+  viewer offers: `Image` (PNG, JPEG, GIF, WebP), `Playable` (MP4, M4V,
+  MOV, M4A and WAV with a structural check; MP3, Ogg and WebM magic only),
+  `File` (a card that names the type) or `Unrecognised`. The table is
+  also stated in the catalogue's Python model and `tests/viewer_media.rs`
+  compares them on every catalogue attachment. **Deviations:** an MP3
+  without an `ID3` tag is not recognised (the WHATWG frame walk is not
+  implemented); a text window cut inside a UTF-8 sequence of a longer file
+  is still text (the model, which only has short files, would say
+  unknown). The sniff does not choose the engine's demuxer (GStreamer
+  typefinds on its own; **UNVERIFIED**, `supported-formats.md` question
+  35).
+- **Structural check (`media/container.rs`, §5.3).** Over the verified
+  file through `open_range`, reading box and chunk headers only (a 3 GiB
+  file is checked from a fake source in a few dozen reads), bounded to
+  10,000 boxes or chunks, depth 16 and 2 s, and stopped by the cancel
+  token. ISO-BMFF/QuickTime: every box inside its parent and the file,
+  64-bit sizes checked for overflow, `size 0` at the top level only;
+  reference-movie atoms (`rmra`, `rmda`, `rdrf`, `rmdr`) and `dref`
+  entries (`url `, `urn `, `alis`, `rsrc`) without the self-contained flag
+  are refused anywhere, and a file without a top-level `moov` is refused.
+  WAV: chunks inside the RIFF size and the file, `fmt ` before `data`.
+  Verdicts are `Ok`, `NotChecked` (MP3, Ogg, WebM) or `Refused` with a
+  closed reason named as in the model. The atom names and the flag's
+  meaning come from the M5 spec's summary of Apple's QuickTime File Format
+  Specification, which was not re-read: **UNVERIFIED**
+  (`supported-formats.md` question 36). It is not a safety guarantee.
+- **Blob readers (`blobs.rs`, `media/mod.rs`, §5.4).** `blobs.rs` stays
+  the only module that opens store files (`tests/source_rules.rs`):
+  `open_checked` (whole files, hashed) and `open_range` share one
+  `open_store_file` check (the parsed name, the private directories,
+  `open_nofollow`, a regular file of `byte_len` bytes).
+  `ArchiveReader::inspect_blob` sniffs the first 4 KiB, the one read of an
+  unverified file. `verify_blob` hashes the whole file in 1 MiB reads,
+  checking the cancel token between them, and returns a `BlobIdentity`
+  (on Unix `(dev, ino, len, mtime)`, on Windows `(len, mtime)`, D113 and
+  §20 item 1), refusing a file whose identity changed while it was read.
+  `check_container` and `open_range` need that identity: another blob's is
+  `NotVerified`, a changed file is `Changed` (a changed length is caught
+  first, as `LengthMismatch`). `RangeReader::read_at` refuses an offset at
+  or past the end. `read_blob_verified(id, max)` reads to the end through
+  the hashing reader and returns the bytes only when they match
+  (`DigestMismatch` otherwise; `OverLimit` above `max`, before reading);
+  images are decoded only from that buffer. The blob row is read in its
+  own `Lookup` phase and snapshot, so no read transaction is held while a
+  file is hashed. **Integrity, not safety:** a file crafted by its sender
+  passes. The remaining time-of-check gap (a same-size rewrite keeping
+  the mtime on Windows; an in-place rewrite keeping inode, size and mtime
+  on Unix) is documented, not closed.
+- **Cards.** `attachment()` still returns `CardState::File` for a present
+  file; `inspect_blob`'s `MediaClass` says which kind of card it is. The
+  shell (slice 5e) combines them; a digest mismatch while reading now and
+  a structural refusal are card states built from these errors and
+  verdicts.
+- **Renditions (`media/render.rs`, §5.5, D98, D113).** `render(bytes,
+  rendition, limits)` is a pure function, unit-tested in the crate and run
+  by the shell **only inside the decode helper process** (slice 5f). In
+  order, before decoding: input ≤ 64 MiB; only the sniffed PNG, JPEG, GIF
+  and WebP (HEIF with the `heic` feature); each side ≤ 16384; `width ×
+  height × bytes per pixel` of the decoder's colour type ≤ 128 MiB; then
+  `image::Limits` with the same sides and a 160 MiB allocation limit. It
+  **downscales, then orients** (the EXIF orientation from
+  `ImageDecoder::orientation`, applied to the 640 or 2048 px image), and
+  encodes a JPEG at quality 85, or a PNG when the colour type has alpha,
+  with no metadata. A GIF gives its first frame, and `animated` is set
+  from a block walk that counts image descriptors without decoding (WebP
+  from the `VP8X` animation flag). Errors are six closed codes, which the
+  helper protocol returns as its status (`RenderError::code`). `image`
+  moves from a dev-dependency to a dependency of `oma-archive`; only
+  `media/render.rs` may name it.
+- **HEIC (D101; owner-confirmed 2026-10-18, Q2, differing from the
+  spec's lean).** An optional `heic` Cargo feature of `oma-archive`, **off
+  by default and never enabled in official or CI release builds**, decodes
+  HEIF with `heic-rs =0.1.4` (pure Rust, `forbid(unsafe_code)`, MIT OR
+  Apache-2.0, no dependencies with its default `parallel` feature off),
+  inside `render` only, under the same limits. Its decoder applies
+  `clap`, `irot` and `imir` at full size, so the decoded image and its
+  transformed copy are each held to half of the 128 MiB cap. Without the
+  feature (the default) HEIF is a file card. HEVC is pooled-patent
+  technology and the crate's own NOTICE grants no patent licence; the risk
+  is the self-builder's (`privacy.md`, `dependencies.md`). CI runs clippy
+  and `cargo deny` with the feature on Linux so it does not rot;
+  `tests/source_rules.rs` checks that it is not a default and that the
+  app's manifest never names it. The decode path itself is **untested**:
+  no synthetic HEIC image can be made without an encoder, so only the
+  header-only fixture (refused as `Malformed`) runs through it.
+- **Measured (synthetic, one host, no CI assertion).** A 4032 × 3024
+  noise JPEG (21.7 MiB, a worst case), `perf_render_a_large_photo`
+  (`#[ignore]`), on the 4-core VM of slice 5c: under the release profile's
+  `opt-level = "s"` (without LTO), 0.84 s for `thumb` and 1.33 s for
+  `display`; at `opt-level = 3`, 0.46 s and 0.69 s. The spec's scratch
+  figure (342 ms) was at `opt-level = 3`. Whether the decoders should be
+  built at `opt-level = 3` in release, and the helper's pipe overhead, are
+  for slice 5f.
+- **Tests.** Unit tests: every magic number and `ftyp` brand, truncated
+  headers, empty and one-byte files, polyglots (GIF then HTML is a GIF,
+  only ever re-encoded; HTML is a card; SVG with a script is XML), the
+  4 KiB window; valid MP4, MOV, M4A, M4V and WAV, every reference atom and
+  external `dref` type, sizes past the end, 64-bit overflow, `size 0`
+  nested, depth and box-count limits, RIFF chunk errors, a 3 GiB fake
+  source, cancel, the deadline and short reads; EXIF orientations 1–8
+  after downscaling (dimensions and where the stored top-left lands), no
+  EXIF in the output, alpha to PNG and opaque to JPEG, the limits refused
+  before decoding, other kinds refused, GIF frame counting, the error
+  codes. `tests/viewer_media.rs`: for every catalogue entry and scenario
+  with stored files, every attachment's sniffed kind and card match the
+  model, every playable file's `verify_blob` and `check_container` give
+  the model's verdict and reason, every image is rendered from
+  `read_blob_verified` (valid ones without metadata, the bomb, 16-bit and
+  oversized-IHDR PNGs refused before decoding), and reading writes
+  nothing; and on a copy, `open_range` refusing another blob's identity, a
+  changed mtime, length and (Unix) inode, a link and a directory,
+  `read_at` past the end, a digest mismatch (no bytes returned; the sniff
+  window still reads), cancel, the size limit and unknown ids.
+  `tests/media_corpus.rs`: `render` on every media fixture at the app's
+  limits, and on 200 seeded mutations of each of the six valid images
+  (PNG CRCs repaired on half of them) under an 8 MiB decoded cap, each
+  within a per-input wall-time cap: no panic, only the closed error codes,
+  and every rendition re-decodes at its stated size. One statement is
+  pinned in `tests/query_plans.rs`; `log_hygiene.rs` covers the new reads.
+- **Not verified here.** Nothing has run on Windows (the `(len, mtime)`
+  identity and the store checks under `win32-longpath` are CI's).
+  Spike 5s (playback and the virtualiser) cannot run in this environment;
+  its results stay **UNVERIFIED** and the designed behaviour stays behind
+  feature detection (`canPlayType`, slice 5h3).
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`

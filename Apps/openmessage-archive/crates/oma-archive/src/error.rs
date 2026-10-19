@@ -113,7 +113,8 @@ pub enum IoOp {
     Sync,
 }
 
-/// Why an attachment file could not be opened through `open_blob`.
+/// Why an attachment file could not be opened or read through `open_blob`
+/// or the viewer's blob readers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum BlobProblem {
@@ -132,6 +133,20 @@ pub enum BlobProblem {
     LengthMismatch,
     /// Opening or inspecting the file failed.
     Io(io::ErrorKind),
+    /// The content does not hash to the row's digest (`verify_blob`,
+    /// `read_blob_verified`; M5 §5.4): "the file does not match its recorded
+    /// checksum".
+    DigestMismatch,
+    /// The file is not the one `verify_blob` checked: its identity (on Unix
+    /// device, inode, length and mtime; on Windows length and mtime)
+    /// changed, before `open_range` or while it was being hashed.
+    Changed,
+    /// `open_range` or `check_container` was given the identity of another
+    /// blob: only a blob verified in this session may be streamed.
+    NotVerified,
+    /// The file is larger than the caller's limit (`read_blob_verified`):
+    /// "Too large to preview".
+    OverLimit,
 }
 
 /// Why a search query was refused (M5 spec §4.1). The query text is never

@@ -362,6 +362,18 @@ Never hand-edit generated files.
   reach the statement through `SearchInterrupt` as well as the token:
   the op budget cannot see work inside one FTS5 call. A new search
   statement goes into `search::plan_statements` and `tests/query_plans.rs`.
+- **Media in the crate (M5 slice 5d).** The stored type decides nothing:
+  `media/sniff.rs` decides from the first 4 KiB, the only unverified read
+  (`inspect_blob`). Streaming needs the `BlobIdentity` that `verify_blob`
+  returns (`check_container`, `open_range`; a changed file is `Changed`).
+  Images are decoded only by `media::render::render`, a pure function on
+  the buffer `read_blob_verified` read to the end, and only inside the
+  decode helper process (slice 5f): never call it in the main process.
+  `media/` opens no file and only `media/render.rs` names `image` or
+  `heic_rs` (`tests/source_rules.rs`). The `heic` feature (owner Q2) is
+  off by default and must never be enabled by `src-tauri` or a release
+  build; CI only lints and audits it. The structural check and the hash
+  are not safety guarantees; never word them as such.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush
@@ -380,8 +392,10 @@ Never hand-edit generated files.
   the FTS rank-1 check runs on the writer under `conn::armed`. A failed
   schema check stops it before any table read and writes nothing. Its
   counts are numbers, booleans, closed states and `v1.sql` table names
-  only. Attachment bytes are read back only through `blobs::open_checked`
-  (`open_blob`, the verifier): add no other reader of store files.
+  only. Attachment bytes are read back only through `blobs.rs`:
+  `open_checked` (`open_blob`, the verifier, `verify_blob`,
+  `read_blob_verified`) and `open_range` (plus the sniff window), both
+  there: add no other reader of store files (`tests/source_rules.rs`).
 - **Crash points are `fault::point(FaultPoint::…)` calls.** They compile
   to nothing without the feature. `tests/crash.rs` re-runs its own binary
   with `OMA_TEST_FAULT=<point>:<n>` and kills the child there; add a point

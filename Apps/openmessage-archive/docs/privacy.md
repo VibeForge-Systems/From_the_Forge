@@ -17,7 +17,10 @@ by milestone and are commitments the design is built around.
 | Temporary copy of the Messages database during an import (decrypted for an encrypted backup) | `<archive folder>/.oma-staging/`, from staging until after the import's last pass, including the confirmation step (up to two minutes) and the attachment copy; see "The archive (M4)" | M4 |
 | Archives: messages and their raw source bytes, addresses (handles), chat names, attachment metadata and files, the search index, import records and verify results | Only inside the archive library folder the user chooses, one `a<32 hex>/` folder per archive, **stored unencrypted** (see "The archive (M4)") | M4 |
 | Backup passwords | **Never stored, anywhere.** A password is asked for on each check, used once, and zeroized in Rust; see "Backup passwords" below. No OS credential store is used. Storing passwords there was dropped from M2 and no milestone is planned for it. | M2 |
-| Search history | Off by default. It can be cleared, and it is stored inside the archive. | M5 |
+
+There is no search history: the row that promised one stored inside the
+archive was removed (owner-confirmed 2026-10-18, Q1c), because the viewer
+is read-only and writes nothing to the archive.
 
 The settings file never contains message content, contact data or
 credentials. You can delete it at any time; the application starts again
@@ -465,9 +468,36 @@ Backups and their contents are treated as hostile:
   fingerprint) before any table is read; stored file names are parsed as 64 hex digits
   before a path is built from them; store files and folders are never
   followed through links; and nothing is written until those checks pass.
-- Attachments are never executed. Previews will be generated only for
-  formats with memory-safe decoders. Anything else is shown as a file to
-  open with the user's own application.
+- **Attachments are never opened, executed or saved by M5** (owner-confirmed
+  2026-10-18, Q1a). Saving a copy of an attachment is M6.
+- **Previews and playback (owner-confirmed 2026-10-18, Q1b).** Images are
+  decoded by memory-safe Rust decoders in a separate helper process and
+  re-encoded before the window sees them. Audio and video are played by
+  your system's media codecs (GStreamer on Linux, Media Foundation on
+  Windows) from the original file. They play only after a structural
+  check, and by default only after you confirm for that file. A file
+  crafted by a sender could exploit a flaw in those codecs; the app cannot
+  prevent that. Playback can be turned off. Before an image is decoded or
+  a file is played, the app re-reads the whole file and checks it against
+  the checksum recorded at import: **that check protects against
+  corruption only**, not against a file that was harmful when it was
+  imported. The type a message records for an attachment is never trusted;
+  the app looks at the bytes, and treats anything it does not recognise as
+  a file card. *Status: the crate side (the content check, the structural
+  check, the checksum readers and the image re-encoding function) exists
+  from M5 slice 5d; the helper process, playback and the viewer window
+  come in later M5 slices.*
+- **HEIC images (owner-confirmed 2026-10-18, Q2).** Official builds, and
+  every build CI produces, **do not decode HEIC or HEIF**: such an
+  attachment is shown as a file card. Decoding HEIC means implementing
+  HEVC, which is covered by patent pools that license "HEVC software" for
+  royalties, and no open-source decoder licence grants those patent
+  rights. People who build the app themselves can turn on the optional
+  `heic` Cargo feature of `crates/oma-archive`, which uses the pure-Rust
+  `heic-rs` decoder (MIT OR Apache-2.0, no C, no `unsafe`) inside the same
+  helper process and under the same limits as other images. **Doing so is
+  at the self-builder's own legal risk**; the project gives no assurance
+  about patents (see `dependencies.md`).
 - Message text is rendered as text, never as HTML. The UI does not use
   `v-html` with untrusted content, and HTML exports will escape everything.
 

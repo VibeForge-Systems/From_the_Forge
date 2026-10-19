@@ -41,7 +41,8 @@ Two automated audits enforce the license policy:
 | pbkdf2 (dev only) | 0.13.0 | MIT OR Apache-2.0 | Differential tests against the in-crate PBKDF2; never linked into the app |
 | fs4 | 1.1.0 | MIT OR Apache-2.0 | Free space for the archive's space checks (`oma_fs::available_space`): `statvfs` on Unix, `GetDiskFreeSpaceExW` (caller-scoped, so quotas count) on Windows. Default features off: `sync` (file locking) is not used. It depends on `rustix` (Unix) and `windows-sys` 0.61.2 (Windows), both already in the tree |
 | rustix (Linux only) | 1.1.5 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | `oma-fs` on Linux: `statfs` for the volume kind, `renameat2(RENAME_NOREPLACE)`, `O_NOFOLLOW` opens and `geteuid`, all without `unsafe`. Features `fs` and `process` (plus the default `std`). Already in the tree through Tauri's Linux stack, with both features on |
-| image (dev only in M5 slice 5a) | 0.25.10 | MIT OR Apache-2.0 | The viewer fixtures: `make_viewer_media` encodes the tiny PNG, JPEG, GIF and WebP files with its encoders, and `tests/viewer_fixtures.rs` reads them back with its decoders. Default features off; only `jpeg`, `png`, `gif` and `webp` on (no AVIF, which pulls in MPL-2.0 `mp4parse` and C `dav1d`; no TIFF, EXR or rayon). From slice 5d it decodes images in the decode helper process only (M5 spec §5.5). MSRV 1.88, under the workspace's 1.90 |
+| image | 0.25.10 | MIT OR Apache-2.0 | Decodes and re-encodes image renditions in `oma-archive`'s `media::render`, the pure function the decode helper process runs (M5 spec §5.5; a dependency from slice 5d, a dev-dependency in 5a), and encodes the viewer fixtures (`make_viewer_media`, `tests/viewer_fixtures.rs`). Only `media/render.rs` may name it (`tests/source_rules.rs`). Default features off; only `jpeg`, `png`, `gif` and `webp` on (no AVIF, which pulls in MPL-2.0 `mp4parse` and C `dav1d`; no TIFF, EXR or rayon). MSRV 1.88, under the workspace's 1.90 |
+| heic-rs (optional, never shipped) | 0.1.4 | MIT OR Apache-2.0 | Owner decision Q2 (M5): HEIF decoding behind `oma-archive`'s non-default `heic` feature, inside `media::render` only. **Official and CI release builds never enable it**; CI only runs clippy and `cargo deny` with it on Linux. Pure Rust, `#![forbid(unsafe_code)]`, no C; default features off and `std` on, so its optional `rayon` (the `parallel` feature) is not pulled in and it has **no dependencies**. Its NOTICE says it was written from the ISO/IEC and ITU-T texts without GPL, LGPL or AGPL code, and that it **grants no patent licence to HEVC**. HEVC is pooled-patent technology (Access Advance's HEVC Advance overview lists "All HEVC Software" with per-copy royalties; a reported waiver for application-layer software is UNVERIFIED), so a self-builder who enables the feature takes that legal risk (`privacy.md`). Young: first published 2026-09-12, 0.1.4 on 2026-10-11, edition 2024 and MSRV 1.85 (under the toolchain's 1.97). Its decode path is untested here (no synthetic HEIC image can be made without an encoder). The AGPL `heic` crate and LGPL libheif (and the MIT `libheif-rs` wrapper over it) are not used |
 
 `tracing-subscriber` (above) is also a dev-dependency of `oma-backup` and
 `oma-messages`, for their log-hygiene tests (and of `oma-archive`, for
@@ -49,9 +50,9 @@ its own). The shell (`src-tauri`) depends on the workspace crates
 `oma-backup` (from M2), `oma-messages` (from M3) and `oma-archive` (from
 M4, slice 4l); none adds a third-party crate beyond the list above.
 `oma-archive` depends only on crates already listed (`rusqlite`, `serde`,
-`serde_json`, `sha2`, `thiserror`, `dunce`, `tracing`, `zeroize`; `tempfile`
-and `tracing-subscriber` for its tests, and from M5 `image` for its viewer
-fixture example and tests) and on the workspace crates
+`serde_json`, `sha2`, `thiserror`, `dunce`, `tracing`, `zeroize`, and from
+M5 `image` and the optional `heic-rs`; `tempfile` and `tracing-subscriber`
+for its tests) and on the workspace crates
 `oma-backup`, `oma-fs` and `oma-messages`. `oma-messages`
 depends only on crates already listed (`rusqlite`, `sha2`, `thiserror`,
 `tracing`, `zeroize`) and on the workspace crates `oma-backup` and
@@ -179,6 +180,7 @@ them locally, is fine. See [supported-formats.md](supported-formats.md).
 | pytypedstream (typedstream; black-box oracle only) | LGPL-3.0-or-later |
 | ChatExportKnowledge (sms.db facts, restated with attribution) | CC BY 4.0 |
 | heic (imazen) | AGPL-3.0 |
+| libheif, libde265 (and the MIT `libheif-rs` wrapper, which links them) | LGPL (C libraries; version not re-checked) |
 
 ## Upgrade log
 
@@ -219,3 +221,4 @@ dependency change; `deny.toml` unchanged. Slice 4n changed no dependency.
 | on merge (M4, slice 4l) | The shell depends on the workspace crate `oma-archive` | The archive commands and the import and verify jobs. No new third-party crate: the only `Cargo.lock` change is `oma-archive` added to the shell's own dependency list. No new npm package. `cargo deny check` passes with the unchanged `deny.toml` |
 | on merge (M5, slice 5a) | Added image 0.25.10 (`=0.25.10`, default features off, features `jpeg`, `png`, `gif`, `webp`) as a workspace dependency and a dev-dependency of `oma-archive` | The viewer fixture generator (`examples/make_viewer_media`) and `tests/viewer_fixtures.rs`. Eleven new crates in `Cargo.lock` (`image`, `zune-jpeg`, `zune-core`, `gif`, `image-webp`, `weezl`, `moxcms`, `pxfm`, `color_quant`, `byteorder-lite`, `quick-error`; licenses above); `png` 0.18.1 and its deflate crates were already locked. It enters the shipped binary only when slice 5d makes it a dependency of the decode helper. `cargo deny check` passes with the unchanged `deny.toml` |
 | on merge (M5, slice 5a) | Dev-only Python tooling: `make_synthetic_viewer.py` needs only the existing `requirements.txt` (`cryptography`) | The viewer catalogue. It imports the M2, M3 and M4 generators as modules; no new Python package |
+| on merge (M5, slice 5d) | `image` 0.25.10 becomes a regular dependency of `oma-archive` (it was a dev-dependency); added `heic-rs` 0.1.4 (`=0.1.4`, default features off, `std` on) as a workspace dependency and an **optional** dependency of `oma-archive` behind the non-default `heic` feature | `media::render` decodes images (in the decode helper only). `heic-rs` is owner decision Q2: an opt-in HEIC decoder for self-builders, never in official or CI release builds (HEVC patents; `privacy.md`). One new crate in `Cargo.lock` (`heic-rs`, MIT OR Apache-2.0, no dependencies with this feature set). `cargo deny check` and `cargo deny --features oma-archive/heic check` pass with the unchanged `deny.toml` (whose `all-features = false` would otherwise not see an optional crate; CI runs both) |
