@@ -80,7 +80,7 @@ flowchart LR
 | `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them. From M4: `copy_file_to` streams one listed file's plaintext into a caller's writer, hashing it, under `Limits::attachment_bytes` and per-file stamps | ✔ M2, M3, M4 (slice 4b) |
 | `crates/oma-messages` | Scans and probes the sms.db schema by capability, streams typed records (handles, chats, the joins, messages, attachments, Recently Deleted links) as `Col<T>` values, decodes `attributedBody` with a clean-room typedstream decoder, and produces the aggregate `ExtractionReport`. Persists nothing. From M4: stable `KnownColumn` codes, raw values of unreadable cells (`raw_issues`), `payload_data` on request, the raw association columns, key-only passes and the storage class of text cells | ✔ M3, M4 (slice 4c) |
 | `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep; slices 4e–4j the import; slice 4k the report-only verifier and `open_blob`. Used by the shell since slice 4l. From M5: the viewer reads (`view/`, `sortkey.rs`, phased budgets), search (`search/`) and media sniffing, checks and rendering (`media/`, `blobs::open_range`) | ✔ M4 (slices 4d–4k), M5 (slices 5a–5d) |
-| `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX. Tauri-free and SQLite-free: it reads only through `oma-archive`'s export APIs. Slice 6d ships the record core: the validated plan, the code registry, the column ledger, the canonical record and its mapping, export-local ordinals, the Rust word tables, time zones and local-day bounds, and the hidden-character markers. No writer, file or shell command yet | M6 slice 6d (record core); writers 6e–6g |
+| `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX. Tauri-free and SQLite-free: it reads only through `oma-archive`'s export APIs. Slice 6d ships the record core: the validated plan, the code registry, the column ledger, the canonical record and its mapping, export-local ordinals, the Rust word tables, time zones and local-day bounds, and the hidden-character markers. Slice 6e1 adds the files core: names, staging and publish, leftovers, the manifest and the writer trait. No writer or shell command yet | M6 slices 6d (record core), 6e1 (files core); writers 6e2–6g |
 | `crates/oma-device` | Detects devices and creates backups behind a platform trait | planned, M7 |
 
 Each library crate can be built and tested without Tauri. The shell only
@@ -3418,6 +3418,118 @@ reaches a record without a reveal and each appears with it; segment
 offsets are taken after masking; and every text the viewer's details show
 for a message is in its record, except the subject history §3.8 withholds.
 
+### Export staging, naming and the manifest (M6 slice 6e1)
+
+Slice 6e1 adds the files core of `oma-export` (spec §4.3, §6.2, §7,
+§8.3–§8.6). No writer exists yet; the core is driven by test writers.
+
+- **Names** (`naming.rs`, I2): the only module that builds a path inside
+  or beside a bundle (`tests/source_rules.rs` bans `.join(` elsewhere).
+  Fixed names (`README.txt`, `manifest.json`, `SHA256SUMS`, the marker
+  `.oma-export-partial`); a closed grammar for format files
+  (`txt/c0001.txt`, `json/no-conversation.jsonl`, `csv/messages.csv`);
+  attachment names `attachments/<shard>/<6-digit ordinal>-<name>` with
+  1,000 files per shard, where `<name>` is the `transfer_name` without
+  hidden characters, through the new `oma_fs::sanitize_filename_max`
+  within a length budget (the canonical parent, the longer of the bundle
+  name with ` (99)` and the staging name, the shard, the prefix,
+  `.blocked` and `:Zone.Identifier`, all within 259 bytes, and at most 120
+  bytes), and the ordinal alone (`000045.heic`) below 16 bytes; a nameless
+  attachment is `attachment.<ext>` from the **sniffed** kind. The passive
+  allowlist of owner Q3b (`naming::PASSIVE`, pinned by a test) keeps an
+  extension only when it is listed for the sniffed kind; everything else,
+  a missing extension included, gets `.blocked` (unless the confirmed
+  "Keep original file extensions" is on). `aac` and `amr` are on the
+  spec's list but `sniff.rs` names no such kind, so they are always
+  blocked. Staging entries are `.oma-export-<32 hex>.partial`,
+  `.partial-file` or `.probe`. An export's own name (`TargetName`) is
+  refused, never changed, when `sanitize_filename` would change it or it
+  starts with `.oma-export-`; a single file's name gains the format's
+  extension unless it already ends in it (`notes.html` → `notes.html.txt`).
+- **Staging** (`stage.rs`, D126, D140, D143, D144): the destination must
+  be canonical (`dunce`) and a real directory. **On Linux** the parent is
+  opened `O_DIRECTORY | O_NOFOLLOW` and its `(dev, ino)` recorded; the
+  staging folder is made with `mkdirat` (0700) and opened the same way;
+  every later file (`openat` with `O_CREAT | O_EXCL | O_NOFOLLOW`, 0600),
+  subfolder, rename and removal is relative to those handles. Before the
+  publish rename the parent must still canonicalise to the same path and
+  `(dev, ino)`, and the staging name must still be that folder; otherwise
+  `DestinationChanged`. **Elsewhere** (Windows) staging works on paths
+  below the canonical parent with `create_new` everywhere and the same
+  checks by name and type: a junction swapped in between a check and a
+  create is the disclosed residual (spec §11.1), and re-checks cannot use
+  a file id without `unsafe`. Every file is hashed (SHA-256) and counted
+  as it is written, never read back; `sync_all` runs once per batch.
+- **The marker** is created right after the staging folder, held with
+  `File::try_lock` for the whole job, and removed only **after** the
+  publish rename and the parent's flush, so a crash before the rename
+  always leaves a marked folder. On a file system without locks the job
+  continues and the sweep's age rule is the only protection.
+- **Publish**: a bundle is renamed with `renameat2(RENAME_NOREPLACE)`
+  (a checked rename where the file system lacks the flag), trying the
+  name, then ` (2)` to ` (99)`, then `TargetExists`. A single file
+  (`.partial-file`, locked while open) is placed without replacing
+  anything, or, with the app's confirmation, over a **regular file**
+  only (never a folder or a link). Renames and removals retry on Windows'
+  access-denied and sharing-violation errors with 100 ms doubling to 2 s,
+  9.1 s in all; if the publish rename still fails with the marker held,
+  the marker's handle is closed and the rename tried once more.
+- **Cancel or failure** (`Staging::remove`, also run on drop) removes
+  only what the export created: its files and subfolders through the
+  handles, the marker, then the staging folder by name only if it is
+  still the export's own. Anything else keeps the folder, and the result
+  is `stagingRemoved: false`.
+- **Leftovers** (`find_leftovers`, `remove_leftovers`): entries matching
+  the pattern exactly, real folders with the marker (or empty ones: a
+  crash between `mkdirat` and the marker) and regular files, at least 5
+  minutes old and not locked. Removal takes the list pinned at choose
+  time, re-checks each by name, type, marker, lock and (Linux)
+  `(dev, ino)`, and on Linux empties a folder through handles that never
+  follow a link. `probe_writable` creates and removes a `.probe`.
+- **Provenance** (`manifest.rs`, D135): `README.txt` (fixed paragraphs
+  from `words::readme`), then `manifest.json` (its `files` lists every
+  file so far but itself and the sums), then `SHA256SUMS` (coreutils
+  format, every file, `manifest.json` included), then the folders are
+  flushed. The counts must satisfy the four identities of §7.1, or nothing
+  is written. `ManifestBody` has no field that can hold a query, a
+  device fact, an archive id or label, a GUID or a path; `exclusions`
+  are the ledger's plus two export-level notes. `jsonfmt.rs` escapes
+  U+2028, U+2029, DEL and C1 controls in the JSON text.
+- **The writer trait and fan-out** (`writer/mod.rs`, spec §4.3): every
+  format is an `ExportWriter` (`begin`, `begin_conversation`, `item`,
+  `end_conversation`, `finish`); `FanOut` hands every call to every
+  writer of the plan, enforces that order (`Limit(RowOrder)`), checks the
+  cancel token before each item, and refuses a report that disagrees with
+  its own counts (`RowCountMismatch`) or a file left open
+  (`FileStillOpen`). `begin_conversation` takes a `ConversationFile`
+  (a record, or the "No conversation" file), not only a record.
+- **Crash points** (`fault.rs`, the non-default `fault-injection`
+  feature): staging created, first file staged, before `README.txt`,
+  after `SHA256SUMS`, after the publish rename before the parent's flush,
+  before the marker's removal, and a single file staged.
+
+**Tests** (`crates/oma-export/tests/{stage,crash,fanout}.rs`): a bundle
+publishes whole with provenance last, 0700/0600 modes and sums that verify
+in Rust; taken names give ` (n)` and never a replace; 99 taken names fail
+and leave nothing; a single file never replaces without confirmation and
+never a folder or a link; cancel and drop remove exactly what was created;
+**the swap tests** (Linux: the staging folder renamed and a link planted
+under its name mid-export, and the parent itself moved and replaced by a
+link) write nothing outside the staging folder and fail the publish; the
+sweep finds only dead leftovers, skips this process's live exports by
+their locks, removes exactly the pinned list, and skips an entry replaced
+after the scan; a kill at every crash point (a child process killed with
+`Child::kill`) leaves nothing under a final name before the publish,
+nothing outside the destination, and only leftovers the sweep removes,
+and a re-run publishes under ` (2)`; the fan-out drives two writers with
+the view catalogue's records and checks order, cancel and reports.
+Disabling the publish's destination check, the marker's lock or the
+sweep's `(dev, ino)` re-check by hand made four of these fail.
+Windows was not run: the Windows half of `stage.rs` was only compiled
+(and linted) for `x86_64-pc-windows-msvc` through a scratch harness that
+stubs the crate's other modules; the whole crate could not be compiled
+for that target here (the bundled SQLite needs MSVC).
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`
@@ -3637,6 +3749,12 @@ owner: its lean is applied and awaits confirmation.
 | D138 | Readability safety, the classifier and markers (slice 6d; the writers apply it from 6e) | D121's rule inverted, checked against the shared vectors; the reserved `⟨` marker form; header fields always marked; combining runs limited in TXT and PDF | Raw everywhere | Prevents marker forgery, header forgery and bidi spoofing |
 | D141 | Identifiers (**owner Q5: lean applied, awaiting confirmation**; slice 6d) | Export-local ordinals by default; archive ids as decimal strings and source identifiers only under an opt-in for JSON, CSV and XLSX, off | Archive ids by default | No archive-size disclosure by default; joining exports is possible on request |
 | D142 | Record fidelity and the ledger (slice 6d) | Dedicated record structs; segments kept; unknown codes and states kept; tagged absence; every v1 column given a disposition, exported columns checked at their paths; `exclusions` generated; never less than the viewer, with the documented exceptions; `extras == false` refused | Flattened bodies; hand-picked fields | Rule 3 holds by construction, and drift fails a test |
+| D126 | Packaging and placement (slices 6d, 6e1) | A bundle for multi-file, CSV, attachments or multi-conversation exports, a single file otherwise; staging inside the destination; a no-replace rename publishes (` (2)` … ` (99)`); a single file replaces only a regular file, only after the app's confirmation | Always a folder; trusting native overwrite prompts | Atomic per output, never a silent overwrite, nothing outside the destination |
+| D134 | Attachment names (**owner-confirmed, Q3b**; slice 6e1 names, 6e2 the copy) | Ordinal-prefixed, budgeted, sharded names; the passive allowlist with sniff agreement, else `.blocked`; the confirmed opt-out | An extension blocklist | Safe names by construction; no completeness claimed, so Mark of the Web follows (Q3c, 6e2) |
+| D135 | Provenance (slice 6e1) | README, then manifest, then `SHA256SUMS`; counts with the four identities; never the query, the excluded-hit count, device facts, the archive id or label, or paths | An opt-in for the query | Never reveal more than the export contains |
+| D140 | Permissions (slice 6e1) | 0700 folders and 0600 files on Linux (`mkdirat`, `openat` modes); the destination's ACL on Windows | umask | Private by default |
+| D143 | Destination integrity (slice 6e1) | Canonical destination; on Linux every write relative to `O_DIRECTORY\|O_NOFOLLOW` handles and a `(dev, ino)` check before publish; the Windows residual disclosed | String paths | Closes the staging-swap path into a backup (I1) |
+| D144 | Leftovers (slice 6e1) | The marker kept until after publish and held with `try_lock`; fixed, content-free names; probes swept; locked and recent entries skipped; removal of the pinned list only; bounded retries on Windows | Removing the marker before the rename; a fresh glob | Every crash leftover is findable, and a live export is never deleted |
 | D147 | Consent and drift (slice 6b2; the comparison is slice 6h's) | Exact, cancellable counts; the archive generation in the draft; a recount under the lock before writing; reveal counts that never understate | Budgeted "at least" counts | "N messages" is never an understatement |
 
 ## Logging

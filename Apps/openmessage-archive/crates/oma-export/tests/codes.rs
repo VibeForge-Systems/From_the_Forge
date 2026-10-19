@@ -9,6 +9,8 @@
 //!
 //! and reviewing the diff: lines may only be added.
 
+#![allow(clippy::disallowed_methods)] // regenerating the pin
+
 use std::path::PathBuf;
 
 fn pin_path() -> PathBuf {

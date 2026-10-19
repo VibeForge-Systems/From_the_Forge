@@ -1,10 +1,12 @@
 //! Errors (M6 spec §4.4). None carries a path, a name, an id or content:
 //! every variant is a kind, and its `Display` names the kind only.
 //!
-//! Slice 6d defines the errors the record core can return. The file,
-//! placement and helper errors of §4.4 (`Write`, `NoSpace`, `TargetExists`,
-//! `NameRefused`, `DestinationChanged`, `HelperFailed`,
-//! `HelperOutputRejected`) arrive with the slices that can raise them.
+//! Slice 6d defined the errors the record core can return; slice 6e adds
+//! the file and placement errors (`Write`, `NoSpace`, `TargetExists`,
+//! `NameRefused`, `DestinationChanged`). The helper errors of §4.4
+//! (`HelperFailed`, `HelperOutputRejected`) arrive with slice 6i.
+
+use std::io;
 
 use oma_archive::ArchiveError;
 
@@ -39,6 +41,65 @@ pub enum ExportError {
     /// a wrong or cut value.
     #[error("an export invariant failed: {0:?}")]
     Limit(LimitKind),
+    /// A file or folder could not be written, read back or removed. The
+    /// kind only: never a path.
+    #[error("an export file could not be written ({kind:?})")]
+    Write { kind: io::ErrorKind },
+    /// The destination's volume is full (or over a quota).
+    #[error("the destination is full")]
+    NoSpace,
+    /// Every name the export may publish under is taken (` (2)` to ` (99)`
+    /// for a bundle; the chosen name for a single file without a confirmed
+    /// replace), or a replace was asked for a target that is not a
+    /// regular file.
+    #[error("the export's name is already taken")]
+    TargetExists,
+    /// A name the export was asked to publish under is not one it may
+    /// write (`exportNameRefused`): one `sanitize_filename` would change,
+    /// or one starting with `.oma-export-`.
+    #[error("the export's name was refused")]
+    NameRefused,
+    /// The destination changed under the export (spec §8.3, D143): the
+    /// parent vanished, moved or became a link, or the staging folder is
+    /// no longer the one the export created.
+    #[error("the destination changed while the export was written")]
+    DestinationChanged,
+}
+
+impl ExportError {
+    /// A file-system error as an export error: `NoSpace` for a full volume
+    /// or quota, `Write { kind }` otherwise. Never carries the path.
+    pub fn io(e: &io::Error) -> ExportError {
+        if is_no_space(e) {
+            ExportError::NoSpace
+        } else {
+            ExportError::Write { kind: e.kind() }
+        }
+    }
+}
+
+/// `true` for a full volume or an exceeded quota.
+fn is_no_space(e: &io::Error) -> bool {
+    if matches!(
+        e.kind(),
+        io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded
+    ) {
+        return true;
+    }
+    // ENOSPC and EDQUOT on Linux; ERROR_HANDLE_DISK_FULL and
+    // ERROR_DISK_FULL on Windows (std maps most of these already).
+    #[cfg(target_os = "linux")]
+    {
+        matches!(e.raw_os_error(), Some(28 | 122))
+    }
+    #[cfg(windows)]
+    {
+        matches!(e.raw_os_error(), Some(39 | 112))
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        false
+    }
 }
 
 impl From<ArchiveError> for ExportError {
@@ -70,6 +131,18 @@ pub enum LimitKind {
     /// A column the record needs was not read (an identifier the opt-in
     /// asked for came back empty).
     ColumnNotRead,
+    /// The writers were driven out of order (an item outside a
+    /// conversation file, a conversation inside another, a second
+    /// `begin`), or a single-file export asked for a second output.
+    RowOrder,
+    /// A staged file was still open when the export was finished or
+    /// published.
+    FileStillOpen,
+    /// Two files of one export would have the same name ignoring ASCII
+    /// case (a defensive check: ordinal prefixes make names unique).
+    NameCollision,
+    /// A value could not be serialised (a map key that is not a string).
+    NotSerializable,
 }
 
 /// Why a zone table was refused (spec §4.6).

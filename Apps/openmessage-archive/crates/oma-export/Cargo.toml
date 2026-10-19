@@ -13,13 +13,27 @@ publish = false
 # D123): every archive read goes through `oma-archive`'s public export
 # APIs. `tests/source_rules.rs` enforces both.
 [dependencies]
+dunce.workspace = true # the destination is checked in its canonical form (§8.2, D143)
+getrandom.workspace = true # 128-bit export and staging ids (§7.1, §8.3)
 oma-archive.workspace = true
+oma-fs.workspace = true # sanitize_filename_max, create_new_private, placement (§6.2, §8)
 serde.workspace = true
 serde_json.workspace = true # the record's serde form is the JSON format (§4.2)
+sha2.workspace = true # SHA256SUMS and the manifest's `files` (§7.2)
 thiserror.workspace = true
 
+# Linux only: every staged write is relative to O_DIRECTORY | O_NOFOLLOW
+# handles (openat, mkdirat, renameat2, unlinkat; spec §8.3, D143).
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix.workspace = true
+
+[features]
+# Crash points (`fault::point`), compiled to nothing without the feature.
+# Only this crate's own tests enable it (the self dev-dependency below).
+fault-injection = []
+
 [dev-dependencies]
-dunce.workspace = true
+oma-export = { path = ".", features = ["fault-injection"] }
 oma-backup.workspace = true # tests import the synthetic catalogues
 tempfile.workspace = true
 # Tests only: applying the export catalogue's `patches` (codes an import

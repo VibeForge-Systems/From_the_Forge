@@ -613,6 +613,42 @@ tested there; no export file is written yet):
   without naming it; the other conversations a message is in are counted,
   not named, when they are not exported.
 
+What the export's files core decides (`crates/oma-export`, slice 6e1,
+tested on Linux with test writers; no export can be started from the app
+yet, and nothing here was run on Windows):
+
+- **Nothing is written outside the folder the export goes to.** A bundle
+  is written into a folder named `.oma-export-<32 hex digits>.partial`
+  inside the chosen folder, and a single file into a file named
+  `.oma-export-<32 hex digits>.partial-file` beside it. Those names carry
+  no content. No temporary folder of the system is used.
+- **Private by default on Linux:** the export's folders are created 0700
+  and its files 0600, readable only by the account that made them (on
+  file systems that keep Unix permissions). On Windows the files take the
+  chosen folder's permissions.
+- **An unfinished export is plaintext on disk.** Cancelling or a failure
+  removes what the export wrote; if that removal fails, the folder stays
+  under its `.oma-export-….partial` name. After a crash, the unfinished
+  folder or file stays where it was. The app finds it again only when the
+  next export goes to the same folder (it keeps no list of past
+  destinations); entries younger than five minutes, or held by a running
+  export, are never removed. On Windows a name starting with a dot is not
+  hidden.
+- **A published export never replaces anything** without the app's own
+  confirmation, and then only a regular file of the same name; a bundle
+  takes the next free name (` (2)` … ` (99)`).
+- **`manifest.json`, `README.txt` and `SHA256SUMS` never contain** the
+  words of a search, the number of search hits left out, device facts,
+  the archive's name or id, or any path outside the export: the manifest's
+  structure has no place for them. The manifest does list the export's
+  own file paths, and an attachment's file name there is built from the
+  name the phone recorded (hidden characters removed, cut to fit).
+- **Attachment file names** keep their extension only when it is on a
+  short list of passive types and matches what the file's bytes are;
+  every other copied file gets `.blocked` appended (owner decision Q3b),
+  unless "Keep original file extensions" is chosen and confirmed. The
+  copy itself is slice 6e2.
+
 ## Device identifiers (M2)
 
 The app never stores or keeps these fields from a backup: `Unique

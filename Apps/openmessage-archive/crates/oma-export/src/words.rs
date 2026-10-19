@@ -748,6 +748,63 @@ pub fn tables() -> Vec<WordsTable> {
     ]
 }
 
+/// The fixed text of a bundle's `README.txt` (spec §7.2). Paragraphs, in
+/// order; [`readme`] picks the ones an export's options need. No sentence
+/// names a path, a conversation, a search or a device, and none says
+/// "you".
+pub mod readme {
+    use crate::ids::IdentifierMode;
+    use crate::plan::Format;
+
+    pub const TITLE: &str = "OpenMessage Archive export";
+
+    pub const WHAT: &str = "This folder is an export from an OpenMessage Archive archive: copies of messages, and of attachment files when they were included, from iPhone backups. The files are plain text and ordinary files. Anyone who can open this folder can read them; they are not encrypted.";
+
+    pub const VERIFY: &str = "To check that no file changed since the export: SHA256SUMS lists a SHA-256 checksum for every file, manifest.json included. On Linux, run 'sha256sum -c SHA256SUMS' in this folder. On Windows, compare each file's 'Get-FileHash <file>' output with its line. manifest.json lists every file except SHA256SUMS with its size and checksum.";
+
+    pub const MANIFEST: &str = "manifest.json records what was exported: the scope kind, the formats, the options, the time zone table the times were written in, the counts and the kinds of data that are never exported. It never records a search's words, device facts, the archive's name or id, or any path.";
+
+    pub const MARKERS: &str = "Values marked 'derived' were worked out by the archive from what the phone recorded, not recorded by the phone itself. Text in brackets such as [withheld] or [masked] is a placeholder written by the export, not message text. Characters that do not show when printed (zero-width, direction and other invisible characters) are written as a code such as \u{27E8}U+200B\u{27E9} when markers are on. The character \u{27E8} itself is always escaped inside message text, so a placeholder can never be forged by a message.";
+
+    pub const MASKING: &str = "One-time codes are masked only when the phone marked the message as holding one; other codes in message text are not detected. Text captured before a message was unsent or edited, and the attachments of unsent parts, are withheld unless the export was made with that option, after confirming the count.";
+
+    pub const ORDER: &str = "Items are in the order of their recorded time. When two items have the same recorded time, their order is the order the archive imported them in, and they are flagged as a tie: that order is not something the phone recorded. Items without a usable recorded time come after the dated ones.";
+
+    pub const ORDINALS: &str = "Conversations, messages, people's addresses and attachment files are numbered within this export only (1, 2, 3 ...). The numbers do not match the archive's own row numbers and say nothing about the archive's size; two exports cannot be matched on them.";
+
+    pub const ARCHIVE_IDS: &str = "This export also carries the archive's row ids (as decimal strings) and the identifiers the phone recorded. Row ids have gaps that reveal how many rows the archive holds outside this export, and the phone's identifiers can match these records to other copies of the same messages.";
+
+    pub const CSV: &str = "CSV files are UTF-8, comma-separated, with CRLF line ends (RFC 4180). In the 'for spreadsheets' profile, a cell that a spreadsheet could run as a formula starts with an apostrophe, and the column 'neutralised_columns' names the columns where that was done.";
+
+    pub const XLSX: &str = "In XLSX workbooks, a value longer than a cell can hold continues on the next rows, marked as continuation rows.";
+
+    pub const PDF: &str = "PDF files show the text with the bundled fonts; a character no font can draw shows as a box and is counted in manifest.json, while the text layer keeps the true character.";
+
+    pub const JSON: &str = "The JSON files keep values as recorded, with codes instead of sentences, and follow the schema named by 'schemaVersion'. 'Raw' there means as stored in the archive, which is not always the bytes the phone stored.";
+
+    pub const CONTRACT: &str = "Columns and keys are only ever added in a minor version; a key is never removed or renamed within a major version. The versions are in manifest.json.";
+
+    /// The paragraphs of an export's `README.txt`, in order.
+    pub fn paragraphs(formats: &[Format], identifiers: IdentifierMode) -> Vec<&'static str> {
+        let mut out = vec![WHAT, VERIFY, MANIFEST, MARKERS, MASKING, ORDER];
+        out.push(match identifiers {
+            IdentifierMode::Ordinals => ORDINALS,
+            IdentifierMode::ArchiveAndSource => ARCHIVE_IDS,
+        });
+        for f in formats {
+            match f {
+                Format::Csv => out.push(CSV),
+                Format::Xlsx => out.push(XLSX),
+                Format::Pdf => out.push(PDF),
+                Format::Json => out.push(JSON),
+                Format::Txt | Format::Html => {}
+            }
+        }
+        out.push(CONTRACT);
+        out
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WordsDoc {
@@ -812,5 +869,15 @@ mod tests {
             direction::sentence(Direction::FromMe),
             "Sent from the backed-up phone's account"
         );
+        let all = readme::paragraphs(
+            &crate::plan::Format::ALL,
+            crate::ids::IdentifierMode::ArchiveAndSource,
+        );
+        for p in all
+            .iter()
+            .chain(readme::paragraphs(&[], crate::ids::IdentifierMode::Ordinals).iter())
+        {
+            assert!(!says_you(p), "{p}");
+        }
     }
 }

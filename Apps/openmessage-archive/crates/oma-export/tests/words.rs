@@ -4,6 +4,8 @@
 //! committed, and the Vitest `export-words.spec.ts` compares it with
 //! `viewerText.ts`.
 
+#![allow(clippy::disallowed_methods)] // regenerating export-words.json
+
 use std::path::PathBuf;
 
 fn generated_dir() -> PathBuf {

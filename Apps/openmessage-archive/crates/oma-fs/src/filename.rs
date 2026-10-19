@@ -68,6 +68,42 @@ pub fn sanitize_filename(untrusted: &str) -> String {
     truncate_preserving_extension(&name, MAX_FILENAME_BYTES)
 }
 
+/// The smallest budget [`sanitize_filename_max`] honours: the fallback name
+/// plus one byte. A smaller `max_bytes` is treated as this.
+pub const MIN_FILENAME_BUDGET: usize = 8;
+
+/// [`sanitize_filename`], then cut to at most `max_bytes` UTF-8 bytes
+/// (clamped to `MIN_FILENAME_BUDGET..=MAX_FILENAME_BYTES`).
+///
+/// The cut is on a character boundary and keeps a short extension (at most
+/// 16 bytes, dot included) when the budget leaves room for it, as
+/// [`sanitize_filename`] does at 255 bytes. The result is still a name
+/// [`sanitize_filename`] leaves unchanged: trailing dots and spaces exposed
+/// by the cut are trimmed, and a cut that turns the stem into a Windows
+/// device name (`CONSOLE.txt` cut to `CON.txt`) gets the `_` prefix within
+/// the same budget.
+///
+/// Callers that build a longer path (an export's attachment names, M6 spec
+/// §6.2) compute the budget from what the rest of the path leaves.
+pub fn sanitize_filename_max(untrusted: &str, max_bytes: usize) -> String {
+    let max = max_bytes.clamp(MIN_FILENAME_BUDGET, MAX_FILENAME_BYTES);
+    let name = sanitize_filename(untrusted);
+    if name.len() <= max {
+        return name;
+    }
+    let cut = truncate_preserving_extension(&name, max);
+    if is_windows_reserved(&cut) {
+        // One byte for the prefix: cut again one byte shorter. The shorter
+        // stem cannot be reserved and also start with `_`.
+        let shorter = truncate_preserving_extension(&name, max - 1);
+        if is_windows_reserved(&shorter) {
+            return format!("_{shorter}");
+        }
+        return shorter;
+    }
+    cut
+}
+
 fn is_forbidden(c: char) -> bool {
     matches!(c, '/' | '\\' | '<' | '>' | ':' | '"' | '|' | '?' | '*') || c.is_control()
 }
@@ -97,6 +133,12 @@ fn truncate_preserving_extension(name: &str, max_bytes: usize) -> String {
         .filter(|&dot| dot > 0 && name.len() - dot <= MAX_PRESERVED_EXTENSION_BYTES)
         .map(|dot| &name[dot..])
         .unwrap_or("");
+    // A budget too small for the extension cuts the name plainly.
+    let extension = if extension.len() < max_bytes {
+        extension
+    } else {
+        ""
+    };
     let budget = max_bytes - extension.len();
     let stem = &name[..name.len() - extension.len()];
     let mut cut = budget.min(stem.len());
@@ -107,7 +149,9 @@ fn truncate_preserving_extension(name: &str, max_bytes: usize) -> String {
     if out.is_empty() {
         out.push_str(FALLBACK_NAME);
     }
-    out.push_str(extension);
+    if out.len() + extension.len() <= max_bytes {
+        out.push_str(extension);
+    }
     out
 }
 
@@ -200,6 +244,70 @@ mod tests {
         let out = sanitize_filename(&dotted);
         assert_eq!(out.len(), MAX_FILENAME_BYTES);
         assert!(out.starts_with("a.b"));
+    }
+
+    #[test]
+    fn the_budgeted_form_cuts_within_the_budget_and_stays_sanitized() {
+        // Short names are what sanitize_filename makes of them.
+        assert_eq!(sanitize_filename_max("photo.jpg", 120), "photo.jpg");
+        assert_eq!(sanitize_filename_max("a/b", 120), "a_b");
+        // A long name keeps its extension within the budget.
+        let long = format!("{}.heic", "é".repeat(100));
+        let out = sanitize_filename_max(&long, 40);
+        assert!(out.len() <= 40, "{}", out.len());
+        assert!(out.ends_with(".heic") && out.starts_with('é'));
+        // A budget too small for the extension cuts plainly.
+        let out = sanitize_filename_max("abcdefghijkl.verylongext", 10);
+        assert_eq!(out, "abcdefghij");
+        // Budgets are clamped to MIN_FILENAME_BUDGET..=MAX_FILENAME_BYTES.
+        assert_eq!(
+            sanitize_filename_max("abcdefghijkl", 0).len(),
+            MIN_FILENAME_BUDGET
+        );
+        assert_eq!(
+            sanitize_filename_max(&"x".repeat(400), 1000).len(),
+            MAX_FILENAME_BYTES
+        );
+        // A cut that exposes trailing dots or spaces trims them.
+        assert_eq!(sanitize_filename_max("abc. . . defghijkl", 8), "abc");
+        // A cut that makes a device name keeps the prefix inside the budget.
+        let out = sanitize_filename_max("CONSOLE-LOG-0001.txt", 8);
+        assert!(out.len() <= 8 && !is_windows_reserved(&out), "{out}");
+        let out = sanitize_filename_max("CONx", 8);
+        assert_eq!(out, "CONx");
+        let out = sanitize_filename_max("COM1xxxxxxxxx.log", 8);
+        assert!(out.len() <= 8 && !is_windows_reserved(&out), "{out}");
+        // Leading dots cut to nothing fall back to the fallback name.
+        let out = sanitize_filename_max(&format!("{}x.jpg", ".".repeat(40)), 12);
+        assert!(out.len() <= 12, "{out}");
+        assert_eq!(sanitize_filename(&out), out);
+    }
+
+    #[test]
+    fn the_budgeted_form_is_idempotent_and_never_exceeds_its_budget() {
+        let inputs = [
+            "IMG_1234.HEIC",
+            "\u{202E}gpj.exe",
+            "CON.txt",
+            "con",
+            "a. . . . . . . . . . . . . .b",
+            "日本語のファイル名がとても長い場合の切り詰め.pdf",
+            "emoji 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉.jpg",
+            "....",
+            "",
+            "x.y.z.tar.gz",
+        ];
+        for input in inputs {
+            for max in [0, 8, 9, 10, 12, 16, 17, 20, 33, 120, 255, 300] {
+                let out = sanitize_filename_max(input, max);
+                let bound = max.clamp(MIN_FILENAME_BUDGET, MAX_FILENAME_BYTES);
+                assert!(out.len() <= bound, "{input:?} {max}: {out:?}");
+                assert!(!out.is_empty());
+                assert_eq!(sanitize_filename(&out), out, "{input:?} {max}");
+                assert_eq!(sanitize_filename_max(&out, max), out, "{input:?} {max}");
+                assert!(!is_windows_reserved(&out), "{input:?} {max}: {out:?}");
+            }
+        }
     }
 
     #[test]

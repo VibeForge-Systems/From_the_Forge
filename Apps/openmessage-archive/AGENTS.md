@@ -153,7 +153,8 @@ Each one is enforced in code. Keep it that way.
   `Archive::import`; and the report-only verifier `Archive::verify` with
   `open_blob`), driven by the shell's six archive commands and its
   import and verify jobs (slice 4l), and the Archive page (slice 4m).
-  `oma-export` (M6) has its record core from slice 6d; `oma-device` (M7)
+  `oma-export` (M6) has its record core from slice 6d and its files core
+  (names, staging, the manifest, the writer trait) from 6e1; `oma-device` (M7)
   is planned. Each must build and test without
   Tauri. The shell's `src-tauri/src/backups/` (registry, job table, worker,
   DTOs, messages) and `src-tauri/src/archives/` (listing, details, the
@@ -606,6 +607,21 @@ Never hand-edit generated files.
   are placed only through `time.rs` (`ZoneTable`, `format_iso`,
   `format_human`); hidden characters are classified only by `hidden.rs`,
   whose tables `scripts/make-export-unicode-tables.mjs` regenerates.
+- **Export files (M6 slice 6e1, `oma-export`).** Only `naming.rs` builds
+  a path inside or beside a bundle (`.join(` nowhere else) and only
+  `stage.rs` creates, renames or removes files (`clippy.toml` and
+  `tests/source_rules.rs` ban `OpenOptions`, `File::create`, `fs::write`,
+  `fs::copy` and temporary directories). On Linux every staged write is
+  relative to the `O_DIRECTORY | O_NOFOLLOW` handles; keep it so, and
+  keep the `(dev, ino)` and canonical-parent check before the publish
+  rename. The marker stays locked until **after** the publish rename;
+  never remove it earlier. Names are refused, never changed
+  (`TargetName`); an attachment's name keeps its extension only through
+  `naming::PASSIVE` (test-pinned). Provenance is written only by
+  `manifest::write_provenance` (README, manifest, sums), and
+  `ManifestBody` must never gain a field for a query, a device fact, an
+  archive id or label, a GUID or a path. A new crash point goes into
+  `FaultPoint::ALL` and `tests/crash.rs` together.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush

@@ -417,6 +417,29 @@ node scripts/make-export-unicode-tables.mjs              # crates/oma-export/src
   viewer and export catalogues and maps them whole; it is the place for a
   new record rule's test.
 
+### Export staging and crash tests (M6 slice 6e1)
+
+```sh
+cargo test -p oma-export --test stage    # staging, publish, removal, the sweep; the swap tests are Linux only
+cargo test -p oma-export --test crash    # kills a child export at every crash point
+cargo test -p oma-export --test fanout   # the writer trait and fan-out over the view catalogue's records
+```
+
+- `tests/crash.rs` re-runs its own binary with `OMA_EXPORT_TEST_FAULT`
+  and `OMA_EXPORT_TEST_DEST` set (`crash_child` does nothing without
+  them). A new `fault::point` goes into `FaultPoint::ALL` and into one of
+  the test's point lists in the same change: `every_fault_point_has_a_kill`
+  fails otherwise.
+- The tests write only below their own temporary folder and check that
+  nothing appears beside the destination. The swap tests rename the
+  staging folder (and the parent) mid-export and plant links; they need a
+  Linux file system with symbolic links.
+- Windows: the staging code was only compiled and linted for
+  `x86_64-pc-windows-msvc` with a scratch harness (the crate as a whole
+  needs MSVC for the bundled SQLite). Its behaviour there (sharing
+  violations, retries, `remove_dir_all` of a leftover) is **UNVERIFIED**
+  until the Windows CI job runs these tests.
+
 ### The bulk generator (M5)
 
 `crates/oma-archive/tests/common/bulk.rs` writes a schema-valid v1 archive
@@ -666,18 +689,19 @@ Linux job, 6 on Windows), measured from slice 6a.** The baseline is `main`
 at `9883217` (milestones 1–5), run in a Linux container (4 CPUs, debug
 build, `CARGO_INCREMENTAL=0`, after compiling), then again with slice 6a:
 
-| What | Baseline (`9883217`) | Slice 6a | Slice 6b1 | Slice 6b2 | Slice 6c | Slice 6d |
-|---|---|---|---|---|---|---|
-| `cargo test --workspace`, wall clock | 2 min 8 s | 2 min 6 s | 2 min 26 s | 2 min 38 s | 2 min 42 s | 2 min 42 s |
-| Sum of all test binaries' run times | 124.2 s | 123.1 s | 142.9 s | 153.9 s | 158.5 s | 159.0 s |
-| Rust tests passed | 1,241 (12 ignored) | 1,251 (12 ignored) | 1,270 (12 ignored) | 1,284 (15 ignored) | 1,290 (16 ignored) | 1,332 (16 ignored) |
-| `oma-archive`'s `export_caps.rs` | — | 2.4 s (4 tests) | 3.0 s | 2.7 s | 3.3 s | 3.3 s |
-| `oma-archive`'s `export_reads.rs` | — | — | 5.4 s (12 tests) | 5.5 s | 5.3 s | 5.7 s |
-| `oma-archive`'s `export_scope.rs` | — | — | — | 2.0 s (7 tests) | 2.6 s (the oracle also reads the export catalogue) | 2.4 s |
-| `oma-archive`'s `export_memory.rs` | — | — | — | 10.6 s (1 test; Linux only) | 9.8 s | 10.1 s |
-| `oma-archive`'s `export_fixtures.rs` | — | — | — | — | 0.7 s (5 tests, 1 ignored) | 0.7 s |
-| `oma-archive`'s `bulk.rs` | — | — | — | — | 0.9 s (2 tests; the blob option's test is new) | 0.8 s |
-| `oma-export`'s `record_catalogue.rs` | — | — | — | — | — | 8.1 s (7 tests) |
+| What | Baseline (`9883217`) | Slice 6a | Slice 6b1 | Slice 6b2 | Slice 6c | Slice 6d | Slice 6e1 |
+|---|---|---|---|---|---|---|---|
+| `cargo test --workspace`, wall clock | 2 min 8 s | 2 min 6 s | 2 min 26 s | 2 min 38 s | 2 min 42 s | 2 min 42 s | 2 min 41 s |
+| Sum of all test binaries' run times | 124.2 s | 123.1 s | 142.9 s | 153.9 s | 158.5 s | 159.0 s | 150.0 s |
+| Rust tests passed | 1,241 (12 ignored) | 1,251 (12 ignored) | 1,270 (12 ignored) | 1,284 (15 ignored) | 1,290 (16 ignored) | 1,332 (16 ignored) | 1,371 (16 ignored) |
+| `oma-archive`'s `export_caps.rs` | — | 2.4 s (4 tests) | 3.0 s | 2.7 s | 3.3 s | 3.3 s | 2.6 s |
+| `oma-archive`'s `export_reads.rs` | — | — | 5.4 s (12 tests) | 5.5 s | 5.3 s | 5.7 s | 5.6 s |
+| `oma-archive`'s `export_scope.rs` | — | — | — | 2.0 s (7 tests) | 2.6 s (the oracle also reads the export catalogue) | 2.4 s | 2.6 s |
+| `oma-archive`'s `export_memory.rs` | — | — | — | 10.6 s (1 test; Linux only) | 9.8 s | 10.1 s | 8.9 s |
+| `oma-archive`'s `export_fixtures.rs` | — | — | — | — | 0.7 s (5 tests, 1 ignored) | 0.7 s | 0.7 s |
+| `oma-archive`'s `bulk.rs` | — | — | — | — | 0.9 s (2 tests; the blob option's test is new) | 0.8 s | 0.8 s |
+| `oma-export`'s `record_catalogue.rs` | — | — | — | — | — | 8.1 s (7 tests) | 7.7 s |
+| `oma-export`'s `stage.rs`, `crash.rs`, `fanout.rs` | — | — | — | — | — | — | 0.1 s, 0.1 s, 0.6 s (15, 4 and 3 tests) |
 
 The difference between the two runs is inside the run-to-run noise: a
 first, cold run of the baseline in the same container took 3 min 58 s
@@ -697,7 +721,10 @@ adds the crate `oma-export`: 42 tests, of which `record_catalogue.rs`
 (8.1 s: it imports all 21 entries and scenarios of the two catalogues for
 each of its 7 tests, in parallel) is the only one that takes measurable
 time; the rest of its run is inside the noise. The Vitest
-`export-words.spec.ts` adds 4 frontend tests.
+`export-words.spec.ts` adds 4 frontend tests. Slice 6e1 adds 39 tests (2
+in `oma-fs`, 14 unit tests and 23 integration tests in `oma-export`); the
+crash test's 14 child processes take about 0.1 s together. The lower
+summed time of that run is within the run-to-run noise described above.
 Windows has not been measured for M6. Slices 6h and 6l record the figures again, with CI's.
 
 **Export read measurements (slice 6b2; synthetic, one host, no timing

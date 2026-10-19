@@ -28,8 +28,25 @@
 //! - [`hidden`]: hidden-character markers (D121's rule inverted), the
 //!   reserved `⟨` marker form, and the combining-run limit.
 //!
-//! The writers, staging, attachment copy and manifest follow in slices 6e
-//! to 6g. Nothing here logs; errors carry kinds only (I6).
+//! Slice 6e1, the files core:
+//!
+//! - [`naming`]: the only builder of paths inside or beside a bundle
+//!   (fixed names, the ordinal grammar, attachment names through
+//!   `oma_fs::sanitize_filename_max` within the path budget, shards, the
+//!   passive allowlist of owner Q3b, the staging entries' names);
+//! - [`stage`]: the staging folder or `.partial-file` inside the
+//!   destination, written relative to `O_DIRECTORY | O_NOFOLLOW` handles
+//!   on Linux, the locked marker kept until after the no-replace publish,
+//!   removal on cancel or failure, and the sweep of crash leftovers;
+//! - [`manifest`]: `README.txt`, `manifest.json` and `SHA256SUMS`, in that
+//!   order, with the counting identities;
+//! - [`writer`]: the [`ExportWriter`] trait and the [`FanOut`] that drives
+//!   every format with the same records;
+//! - [`fault`]: crash points for the kill tests.
+//!
+//! The attachment copy, the TXT writer and the job's pipeline follow in
+//! slice 6e2, the other writers in 6f to 6j. Nothing here logs; errors
+//! carry kinds only (I6).
 #![cfg_attr(
     not(test),
     deny(
@@ -42,25 +59,41 @@
 
 pub mod codes;
 pub mod error;
+pub mod fault;
 pub mod hidden;
 pub mod ids;
+pub mod jsonfmt;
 pub mod ledger;
+pub mod manifest;
 pub mod map;
+pub mod naming;
 pub mod plan;
 pub mod record;
+pub mod stage;
 pub mod time;
 mod unicode_tables;
 pub mod words;
+pub mod writer;
 
 pub use codes::{Code, ExportCode, Registry, REGISTRIES, UNRECOGNISED_TOKEN};
 pub use error::{DateRangeRefusal, ExportError, LimitKind, PlanRefusal, ZoneTableRefusal};
 pub use ids::{IdentifierMode, Ordinal, Ordinals};
+pub use manifest::{write_provenance, ManifestBody, ManifestCounts, ManifestInput};
 pub use map::{
     order_ties, AttachmentFiles, ExportZone, FileDecision, Mapper, Placement, RecordCounts,
 };
+pub use naming::{BundlePath, EntryId, EntryKind, EntryName, TargetName};
 pub use plan::{
     AttachmentMode, CsvProfile, ExportOptions, ExportPlan, Format, Packaging, RecordOptions,
     RevealPlan, ScopePlan,
 };
 pub use record::{ConversationRecord, HandleRecord, ItemRecord, VersionRecord};
+pub use stage::{
+    find_leftovers, probe_writable, remove_leftovers, FileEntry, Leftover, LeftoverScan, Published,
+    Replace, StagedFile, Staging, SweepReport, SWEEP_MIN_AGE,
+};
 pub use time::{CivilDate, ZoneTable, ZoneTableInput};
+pub use writer::{
+    AboutDraft, ConversationFile, ConversationTotals, ExportContext, ExportWriter, FanOut,
+    WriterReport,
+};
