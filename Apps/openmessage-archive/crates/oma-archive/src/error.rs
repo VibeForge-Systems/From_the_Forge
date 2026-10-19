@@ -134,6 +134,25 @@ pub enum BlobProblem {
     Io(io::ErrorKind),
 }
 
+/// Why a search query was refused (M5 spec §4.1). The query text is never
+/// kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum QueryProblem {
+    /// More than 512 bytes.
+    TooLong,
+    /// More than 16 terms.
+    TooManyTerms,
+    /// A term of more than 128 bytes.
+    TermTooLong,
+    /// A NUL or another C0 control character.
+    ControlCharacter,
+    /// No term with a letter or a number (or an empty exact-text needle).
+    NoTerms,
+    /// An exact-text needle of more than 64 code points.
+    NeedleTooLong,
+}
+
 /// An error from the archive library.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -206,6 +225,14 @@ pub enum ArchiveError {
     /// (M5 §3.5), or the message does not exist.
     #[error("anchor not found")]
     AnchorNotFound,
+    /// A search query was refused (M5 §4.1).
+    #[error("invalid query")]
+    InvalidQuery(QueryProblem),
+    /// The full-text index could not be read (M5 §4.3): search is
+    /// unavailable, browsing still works. Verify reports the damage;
+    /// repair is M8.
+    #[error("search unavailable")]
+    SearchUnavailable,
     /// A bug.
     #[error("internal")]
     Internal(&'static str),

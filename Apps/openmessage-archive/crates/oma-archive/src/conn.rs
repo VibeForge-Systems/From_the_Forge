@@ -74,6 +74,9 @@ struct Budget {
     deadline_on: AtomicBool,
     deadline: Mutex<Option<Instant>>,
     deadline_hit: AtomicBool,
+    /// Progress-handler ticks seen in the current viewer phase (for the
+    /// `cancel_at_view_tick` test fault).
+    phase_ticks: AtomicU64,
 }
 
 impl Budget {
@@ -107,6 +110,17 @@ impl Budget {
 
     /// The progress handler: `true` interrupts the running statement.
     fn tick(&self) -> bool {
+        if let Some(n) = crate::fault::cancel_at_view_tick() {
+            if self.deadline_on.load(Ordering::Relaxed)
+                && self.phase_ticks.fetch_add(1, Ordering::Relaxed) + 1 == n
+            {
+                if let Ok(g) = self.cancel.lock() {
+                    if let Some(t) = g.as_ref() {
+                        t.cancel();
+                    }
+                }
+            }
+        }
         if self.cancellable.load(Ordering::Relaxed) && self.cancel_hit() {
             return true;
         }
@@ -144,7 +158,6 @@ impl Budget {
 /// viewer call runs under its own budget, which resets at the phase's
 /// start, so a trip in one phase never interrupts the next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[allow(dead_code)] // the search slice (5c) uses `Search`, `Hits` and `ScanBatch`
 pub(crate) enum ViewBudget {
     /// `conversation_index`, `conversations`.
     List,
@@ -181,11 +194,13 @@ impl ViewBudget {
     }
 
     /// How long a call whose first phase is this one may take in total:
-    /// 2 s for a page, a detail or a month; 5 s for the conversation list
-    /// and a words search; 20 s for an exact-text scan.
+    /// 2 s for a page, a detail, a month or one page of search hits; 5 s
+    /// for the conversation list and a words search; 20 s for an
+    /// exact-text scan.
     pub(crate) const fn window(self) -> Duration {
         match self {
-            ViewBudget::List | ViewBudget::Search | ViewBudget::Hits => Duration::from_secs(5),
+            ViewBudget::List | ViewBudget::Search => Duration::from_secs(5),
+            ViewBudget::Hits => Duration::from_secs(2),
             ViewBudget::ScanBatch => Duration::from_secs(20),
             ViewBudget::Scan
             | ViewBudget::Assembly
@@ -222,8 +237,8 @@ pub(crate) struct Phase<'a> {
 }
 
 impl Phase<'_> {
-    /// The connection.
-    #[allow(dead_code)] // the thread pages (5b2) read through it directly
+    /// The connection (for statements prepared once per phase; map their
+    /// errors with [`Phase::err`]).
     pub(crate) fn conn(&self) -> &Connection {
         self.conn
     }
@@ -457,6 +472,7 @@ impl ReadConn {
         budget.tripped.store(false, Ordering::Relaxed);
         budget.cancelled.store(false, Ordering::Relaxed);
         budget.deadline_hit.store(false, Ordering::Relaxed);
+        budget.phase_ticks.store(0, Ordering::Relaxed);
         budget.ticks_left.store(
             ops / u64::try_from(OPS_PER_TICK).unwrap_or(1000),
             Ordering::Relaxed,
@@ -529,9 +545,37 @@ impl ReadConn {
     /// A handle that interrupts this connection's running statement from
     /// another thread (`cancel_search`, M5 spec §3.2). Kept outside any
     /// lock on the reader; an interrupt it causes surfaces as `Cancelled`.
-    #[allow(dead_code)] // the search slice (5c) calls it
     pub(crate) fn interrupt_handle(&self) -> rusqlite::InterruptHandle {
         self.conn.get_interrupt_handle()
+    }
+}
+
+/// Interrupts the statement a reader is running, from another thread
+/// (M5 spec §3.2, §7.1): the shell keeps one outside the search reader's
+/// mutex, sets the old search's cancel token, then calls
+/// [`SearchInterrupt::interrupt`] **before** it waits for the mutex, so a
+/// long FTS5 statement never holds a lock that cancellation needs.
+///
+/// An interrupt takes effect between VM opcodes of the running statement
+/// and surfaces as `Cancelled`. With no statement running it does
+/// nothing; the cancel token, checked between statements, covers that
+/// gap.
+pub struct SearchInterrupt(rusqlite::InterruptHandle);
+
+impl SearchInterrupt {
+    pub(crate) fn of(conn: &ReadConn) -> SearchInterrupt {
+        SearchInterrupt(conn.interrupt_handle())
+    }
+
+    /// Interrupt the reader's running statement, if any.
+    pub fn interrupt(&self) {
+        self.0.interrupt();
+    }
+}
+
+impl std::fmt::Debug for SearchInterrupt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SearchInterrupt")
     }
 }
 

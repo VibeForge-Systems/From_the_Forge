@@ -22,6 +22,12 @@
 //! worth, ordered by their M4 order key) sort in a temporary B-tree. The
 //! detail's unkeyed identifier probe walks the partial index of unkeyed
 //! messages, under its own budget.
+//!
+//! Search (M5 §4, slice 5c): FTS5 is reached only through its `MATCH`
+//! index (the global collection newest rowid first with no sort, the
+//! per-body probe and `highlight()` with `rowid=`); the exact-text scan
+//! and the scoped plan walk `message_sort` and `chat_message_timeline` by
+//! keyset; only the once-per-session unsearchable count scans `message`.
 #![allow(clippy::disallowed_methods)]
 
 mod common;
@@ -537,6 +543,84 @@ const PINNED: &[(&str, &[&str])] = &[
             "SEARCH x USING COVERING INDEX chat_message_by_message (message_id=? AND chat_id=?)",
         ],
     ),
+    (
+        "search hit message",
+        &["SEARCH message USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "search hit body",
+        &["SEARCH message_body USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "search hit chats",
+        &["SEARCH chat_message USING COVERING INDEX chat_message_by_message (message_id=?)"],
+    ),
+    (
+        "search highlight",
+        &["SCAN message_fts VIRTUAL TABLE INDEX 0:=M1"],
+    ),
+    (
+        "search unsearchable count",
+        &[
+            "SCAN m",
+            "SEARCH b USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN",
+        ],
+    ),
+    (
+        "search words global",
+        &[
+            "SCAN f VIRTUAL TABLE INDEX 192:M1",
+            "SEARCH b USING INTEGER PRIMARY KEY (rowid=?)",
+            "SEARCH m USING INTEGER PRIMARY KEY (rowid=?)",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SEARCH ma USING PRIMARY KEY (message_id=?)",
+            "CORRELATED SCALAR SUBQUERY 2",
+            "SEARCH cm USING PRIMARY KEY (chat_id=? AND message_id=?)",
+        ],
+    ),
+    (
+        "search chat rows",
+        &[
+            "CO-ROUTINE (subquery-1)",
+            "SEARCH chat_message USING COVERING INDEX chat_message_timeline (chat_id=?)",
+            "SCAN (subquery-1)",
+        ],
+    ),
+    (
+        "search chat batch",
+        &["SEARCH chat_message USING COVERING INDEX chat_message_timeline (chat_id=? AND sort_key>? AND (sort_key,message_id)<(?,?))"],
+    ),
+    (
+        "search message filter row",
+        &["SEARCH message USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "search body ids",
+        &["SEARCH message_body USING COVERING INDEX sqlite_autoindex_message_body_1 (message_id=?)"],
+    ),
+    (
+        "search words probe",
+        &["SCAN message_fts VIRTUAL TABLE INDEX 0:=M1"],
+    ),
+    (
+        "search scan batch",
+        &[
+            "SEARCH m USING INDEX message_sort (sort_key>? AND sort_key<?)",
+            "SEARCH b USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN",
+        ],
+    ),
+    (
+        "search scan body text",
+        &["SEARCH message_body USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "search scan body texts",
+        &["SEARCH message_body USING INDEX sqlite_autoindex_message_body_1 (message_id=?)"],
+    ),
+    (
+        "search attachment exists",
+        &["SEARCH message_attachment USING PRIMARY KEY (message_id=?)"],
+    ),
 ];
 
 fn plan(c: &rusqlite::Connection, sql: &str) -> Vec<String> {
@@ -597,6 +681,14 @@ fn viewer_statements_stay_on_their_indexes() {
                 let allowed = list_scans.contains(&name)
                     || (name, line.as_str()) == ("viewer newest session", "SCAN import_session")
                     || (name, line.as_str()) == ("viewer sessions", "SCAN import_session")
+                    // The unsearchable count is one pass over `message`,
+                    // once per viewer session, under the Search budget.
+                    || (name, line.as_str()) == ("search unsearchable count", "SCAN m")
+                    // FTS5 is reached only through its MATCH index
+                    // (`M1`), alone or with `rowid=` (`=M1`).
+                    || (name.starts_with("search ")
+                        && line.contains("VIRTUAL TABLE INDEX")
+                        && (line.ends_with(":M1") || line.ends_with(":=M1")))
                     // The unkeyed probe walks the partial index of unkeyed
                     // messages only, under its own budgeted phase.
                     || (name, line.as_str())

@@ -230,6 +230,21 @@ pub mod hooks {
         pub provenance_fails: bool,
         /// Replace every viewer phase's op budget (VM operations; M5 §3.2).
         pub view_op_budget: Option<u64>,
+        /// Set a viewer phase's cancel token at the n-th tick of its
+        /// progress handler (counted from 1 per phase): a cancel that
+        /// arrives in the middle of a statement (M5 §13.4).
+        pub cancel_at_view_tick: Option<u64>,
+        /// Replace the largest chat (in timeline rows) that a chat-scoped
+        /// words search walks itself (M5 §4.3); larger chats use the global
+        /// plan with a chat filter. `Some(0)` forces the global plan.
+        pub scoped_search_rows: Option<u64>,
+        /// Replace the most messages one exact-text scan examines
+        /// (M5 §4.4).
+        pub scan_examined_limit: Option<u64>,
+        /// Replace the deadline of the `highlight()` phase of
+        /// `search_hits` (milliseconds; M5 §4.5). The op budget cannot see
+        /// work inside FTS5's own calls, so the deadline is what stops it.
+        pub hits_window_ms: Option<u64>,
     }
 
     thread_local! {
@@ -270,7 +285,9 @@ pub mod hooks {
     /// The viewer's index-dependent statements, by name, exactly as the
     /// code prepares them (for `tests/query_plans.rs`, M5 §3.5).
     pub fn viewer_statements() -> Vec<(&'static str, String)> {
-        crate::view::plan_statements()
+        let mut v = crate::view::plan_statements();
+        v.extend(crate::search::plan_statements());
+        v
     }
 
     pub use crate::bulk::{sort_key, BulkFinalize, BulkWriter};
@@ -546,6 +563,63 @@ pub(crate) fn view_op_budget(ops: u64) -> u64 {
     #[cfg(not(feature = "fault-injection"))]
     {
         ops
+    }
+}
+
+/// The tick of a viewer phase at which its cancel token is set, if a test
+/// set one.
+#[inline]
+pub(crate) fn cancel_at_view_tick() -> Option<u64> {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current().cancel_at_view_tick
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        None
+    }
+}
+
+/// The scoped-search threshold to use instead of `rows`, if a test set one.
+#[inline]
+pub(crate) fn scoped_search_rows(rows: u64) -> u64 {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current().scoped_search_rows.unwrap_or(rows)
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        rows
+    }
+}
+
+/// The exact-text scan's examined limit to use instead of `n`, if a test
+/// set one.
+#[inline]
+pub(crate) fn scan_examined_limit(n: u64) -> u64 {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current().scan_examined_limit.unwrap_or(n)
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        n
+    }
+}
+
+/// The `highlight()` phase's window to use instead of `w`, if a test set
+/// one.
+#[inline]
+pub(crate) fn hits_window(w: std::time::Duration) -> std::time::Duration {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current()
+            .hits_window_ms
+            .map_or(w, std::time::Duration::from_millis)
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        w
     }
 }
 

@@ -299,6 +299,43 @@ fn logs_errors_and_debug_output_hold_no_label_id_or_path() {
     assert!(items > 0, "the catalogue has thread items");
     let e = ArchiveError::AnchorNotFound;
     shown.push(format!("{e} {e:?}"));
+    // Search (slice 5c): requests, result sets, hits (earlier text
+    // included), progress and errors carry no query text or content.
+    let mut hits_seen = 0;
+    for (text, exact, chat) in [
+        ("SYNTH", false, None),
+        ("synth", true, None),
+        ("\"SYNTH\"", false, index.ids.first().copied()),
+        ("SYNTH", true, index.ids.first().copied()),
+    ] {
+        let mut q = oma_archive::SearchRequest::new(text);
+        if exact {
+            q.mode = oma_archive::SearchMode::Exact;
+        }
+        q.filters.chat = chat;
+        q.include_earlier = true;
+        q.include_events = true;
+        let mut progress = Vec::new();
+        let set = reader
+            .search(&q, &CancelToken::new(), &mut |p| progress.push(p))
+            .expect("search");
+        let n = set.entries.len().min(oma_archive::HITS_PER_CALL);
+        let hits = reader.search_hits(&set, 0..n, &q).expect("hits");
+        hits_seen += hits.len();
+        shown.push(format!("{q:?} {set:?} {hits:?} {hits:#?} {progress:?}"));
+    }
+    assert!(hits_seen > 0, "the sentinels are searchable");
+    shown.push(format!(
+        "{:?} {:?}",
+        reader.search_interrupt(),
+        reader.unsearchable_count().expect("count")
+    ));
+    for e in [
+        ArchiveError::InvalidQuery(oma_archive::QueryProblem::ControlCharacter),
+        ArchiveError::SearchUnavailable,
+    ] {
+        shown.push(format!("{e} {e:?}"));
+    }
     drop(reader);
     for depth in [
         oma_archive::VerifyDepth::Quick,

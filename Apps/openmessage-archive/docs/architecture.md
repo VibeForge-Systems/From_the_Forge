@@ -1860,6 +1860,152 @@ anything or writes a file.
   probe is the only new scan (of the unkeyed partial index), and a
   message's attachment ids the only new temporary B-tree.
 
+### Viewer search (M5 slice 5c)
+
+Full-text and exact-text search in `crates/oma-archive` (`search/`):
+`ArchiveReader::search`, `search_hits`, `unsearchable_count` and
+`search_interrupt`. No schema change (D92), nothing is stored and there
+is no search history (owner-confirmed, Q1c).
+
+- **Grammar (`search/query.rs`, §4.1).** User text never reaches
+  `MATCH`: terms (words or `"quoted phrases"`; an unterminated quote runs
+  to the end) are re-quoted with `"` doubled and joined with ` AND `; only
+  the last unquoted term whose last token has 3 or more characters gets
+  ` *`; terms without a letter, number or private-use character are
+  dropped. Refused as `InvalidQuery(QueryProblem)`: over 512 bytes, 16
+  terms or 128 bytes per term, any NUL or C0 control, nothing left, or an
+  exact needle over 64 code points. `OR`, `NOT`, `NEAR`, `^`, `*`, `-`,
+  `+` and `x:` column filters are all quoted text (table-tested).
+- **Modes (§4.2).** A query with an emoji or a CJK, kana, Hangul, Thai,
+  Lao, Khmer, Myanmar or Tibetan character (our own approximate table)
+  runs as **exact text**, as does any query when the caller asks; the
+  needle is the whole trimmed query. Otherwise **words** through FTS5.
+- **Words, global plan.** One statement: FTS5 newest body rowid first
+  (no sort), each match joined to its body and message by primary key,
+  filters in SQL, at most 10,001 rows. Rowid order is import order, so a
+  capped global set reports `newest_kept: false` ("not necessarily the
+  newest 10,000").
+- **Words, scoped plan (deviation: threshold 5,000, not 50,000).** With a
+  conversation filter, a chat of at most `SCOPED_CHAT_ROWS` = 5,000
+  timeline rows is walked newest first in keyset batches of 500, each
+  kept message's bodies checked with a rowid-constrained `MATCH`. A query
+  with a **prefix term always uses the global plan**: FTS5 rebuilds a
+  prefix's merged doclist on every `MATCH` it starts, so one call per body
+  costs 2–15 ms instead of 0.03 ms (measured below; the spec's inference
+  is now observed). The threshold follows the measurement: the walk costs
+  about 30–80 µs per message, the global plan with the chat filter about
+  0.2 s for a word in a fifth of 500,000 messages, so the plans cross at
+  a few thousand rows.
+- **Exact text (`search/scan.rs`, §4.4).** Keyset batches of 5,000 keys,
+  newest first (dated range, then undated), on `message_sort` with each
+  message's current body joined and **streamed** (never a batch of texts
+  in memory), or on `chat_message_timeline` for one conversation. Filters
+  run in Rust, so a batch bounds rows *examined*. Matching is
+  `str::contains` (case-, accent- and normalisation-sensitive). Each batch
+  is its own `ScanBatch` phase within one 20 s deadline; the cancel token
+  and the deadline are checked every 64 rows. Limits: 2,000,000 examined,
+  10,000 matches. A cancel is `Cancelled`; any other stop returns what
+  was found with `ScanCoverage { examined, complete, stop }`
+  (`ExaminedLimit`, `MatchCap` or `TooBroad`). Progress is pushed after
+  every batch.
+- **Result sets.** Ids only (`SetEntry { message, body, current, dated
+  }`), one entry per message (its current body when that matched, else
+  the highest body id), dated by `(sort_key DESC, id DESC)` then undated
+  (`dated` says where "Undated" begins), at most 10,000. Defaults:
+  current bodies of message items only; `include_events` adds reactions
+  and system rows; `include_earlier` is the explicit reveal for search
+  (D115, Q3b), and its hits say `Earlier` or `Unsent` (an earlier body of
+  a message with an unsent part). Filters: one conversation, a UTC range
+  (always dated: undated rows leave the set), `message_attachment` rows
+  (never the cache flag), and the sender on `is_from_me` as recorded (an
+  unrecorded direction matches neither "me" nor "others").
+- **Hits and highlighting (`search/highlight.rs`, §4.5).** At most 50 per
+  call. Facts load under `Assembly`: the lowest chat id and "also in N
+  other conversations" (capped at 100), the dated instant, the direction,
+  the item and association codes and the version. Words hits run
+  `highlight()` with U+FDD0/U+FDD1 bound as markers, on the base table,
+  for the page only, in a `Hits` phase with a **2 s** deadline; a body
+  holding a marker or NUL is never highlighted, and the output is used
+  only when the markers pair up and the stripped text equals the stored
+  text. Exact hits use the scan's substring search. One-time codes are
+  then withheld by range (or the whole text when the formatting did not
+  read cleanly); a match only inside withheld text is `matched_hidden`.
+  The snippet is at most 200 characters, starting 60 before the first
+  visible match, with `cut_start`/`cut_end` and no inserted ellipsis.
+  Fallbacks are closed codes (`MarkerInText`, `Mismatch`, `Budget`,
+  `NotFound`).
+- **Budgets, cancel and errors.** Words collection: one `Search` phase
+  (30 M ops, 5 s, the cancel token). `SearchInterrupt::interrupt` (kept
+  by the shell outside the reader's mutex) stops a running statement as
+  `Cancelled`. **The op budget cannot see work inside one FTS5 call**
+  (`xFilter`, `highlight()`), which is a single VM opcode: a `Hits`
+  budget of zero ops does not stop a highlight, so the `Hits` phase is
+  bounded by its deadline, and words collection by its deadline, the
+  cancel and the interrupt (§3.2's granularity limit, now observed). Any
+  other SQLite error from an FTS statement is `SearchUnavailable`
+  (browsing still works; Verify reports the damage; repair is M8).
+- **Unsearchable count (deviation: budget).** Message items whose current
+  body is missing or has no `display_text`, one pass over `message` under
+  the `Search` budget and 5 s (the spec named `Detail`; the pass measured
+  about 0.3 s at 500,000 messages). Computed once per viewer session.
+- **Measurements (synthetic, one host, not real data, no CI assertion).**
+  `tests/perf_search.rs` (`#[ignore]`) on a 500,000-message bulk archive
+  (410 MiB, 300 chats: one of 201,336 messages, the others about 1,000),
+  dev profile with `oma-archive` and SQLite at `opt-level = 3`, a 4-core
+  2.1 GHz Xeon VM, medians of warm runs:
+
+  | Operation | Measured | §11 target |
+  |---|---|---|
+  | Words, common word (global, capped) | 25 ms | ≤ 150 ms |
+  | Words, common word scoped to a 1,101-message chat | 31–32 ms | ≤ 50 ms |
+  | The same through the global plan with the filter | 206–235 ms | — |
+  | Words, common word in the 201,336-message chat (global) | 70–81 ms | — |
+  | Words, prefix `lor*` / `synthbulk1*` | 26–27 ms | ≤ 2.5 s |
+  | Words, prefix `syn*` (500,000 distinct terms sharing it) | 66–72 ms | — |
+  | Exact text, whole archive, rare needle | 0.79–0.81 s | ≤ 400 ms (**not met**) |
+  | Exact text, common needle (stops at 10,000) | 76–93 ms | — |
+  | `search_hits` 50, common word | 5–7 ms | ≤ 30 ms |
+  | `search_hits` 50, prefix `lor*` / `synthbulk1*` | 0.16–0.19 s / 0.59–0.74 s | within `Hits` (2 s) |
+  | Rowid-constrained `MATCH` per body: word / `lor*` / `synthbulk1*` | 0.03 / 2.3 / 10–15 ms | — |
+  | Unsearchable count | 0.25–0.32 s | — |
+  | Cancel during `syn*`: token / `SearchInterrupt` | returns 2–15 ms / 0.07–0.12 ms after | measured only |
+
+  The whole-archive scan misses its target: its date-ordered reads alone
+  (a plain connection walking `message_sort` with each current body)
+  took 0.5–0.9 s on this host, against 0.15 s for `instr` over
+  `message_body` in rowid order (the scratch figure's shape), which is not
+  newest first. The hostile-index row used 5 × 10^5 terms, not the spec's
+  10^6. The spec's §11 rows are re-measured in slice 5k.
+- **Plans.** Fifteen statements are pinned in `tests/query_plans.rs`.
+  FTS5 is reached only through its `MATCH` index (`192:M1` for the global
+  collection, rowid descending with no sort; `0:=M1` for the probe and
+  `highlight()`); the only new scan is the unsearchable count's pass over
+  `message`. On `message_sort` the row-value keyset seeks on `sort_key`
+  only (SQLite does not seek on the rowid alias `id` there), so messages
+  that share one `sort_key` are re-read by each batch; a crafted archive
+  of many ties is stopped by the batch budget, never mis-read.
+- **Tests.** `tests/viewer_search.rs`: for every catalogue entry and
+  scenario, about 1,900 searches (words, quoted words, exact needles
+  including non-ASCII, and the model's withheld strings) under every
+  filter, compared with an oracle built from plain rows (`str::contains`,
+  or a plain FTS5 `MATCH` with filters in Rust), every hit's facts and
+  snippet checked, no one-time code or withheld earlier text in any
+  snippet unless `include_earlier`, and the scoped plan equal to the
+  global one; capping and order; scan batches, progress, coverage and the
+  examined limit; case sensitivity; a 2-character CJK query that FTS5
+  misses and the scan finds; deterministic cancels (before the call,
+  between batches, at the n-th progress tick) and `SearchInterrupt` from
+  another thread; budget trips (`QueryTooBroad`, partial coverage,
+  unhighlighted hits); a corrupted FTS shadow table
+  (`SearchUnavailable`, browsing works); refused queries; the
+  unsearchable count; and that searches write nothing. Unit tests cover
+  the grammar, the mode table, marker parsing and reconstruction, masking
+  inside snippets, a hit inside an RLO run and the ordering.
+- **Not verified here.** Nothing has run on Windows. Spike 5s (playback
+  and the virtualiser) cannot run in this environment; its results stay
+  **UNVERIFIED** and the designed behaviour stays behind feature
+  detection.
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`

@@ -19,7 +19,8 @@
 //! layer ([`assemble`]); slice 5b3 the message detail with edit texts
 //! decoded at read time, the reaction history, `message_text`, value
 //! history and the attachment facts and cards ([`detail`]), and date seek
-//! and day counts ([`calendar`]). Search and media follow in later slices.
+//! and day counts ([`calendar`]). Slice 5c adds search in `crate::search`;
+//! media follows in slice 5d.
 
 pub mod assemble;
 pub mod calendar;

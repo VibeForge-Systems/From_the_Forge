@@ -65,6 +65,7 @@ mod progress;
 mod provenance;
 mod reader;
 pub mod schema;
+mod search;
 mod sortkey;
 pub mod space;
 mod store_fs;
@@ -76,8 +77,10 @@ pub use fault::hooks;
 
 pub use archive::{Archive, CheckpointOutcome, CloseReport, Recovery, RecoveryReport};
 pub use blobs::BlobReader;
+pub use conn::SearchInterrupt;
 pub use error::{
-    ArchiveError, BlobProblem, DamageKind, IoOp, LocationRefusal, PermProblem, RefusalKind, Stage,
+    ArchiveError, BlobProblem, DamageKind, IoOp, LocationRefusal, PermProblem, QueryProblem,
+    RefusalKind, Stage,
 };
 pub use id::{ArchiveId, IdError, Label, LabelState, ARCHIVE_ID_LEN, LABEL_MAX_BYTES};
 pub use import::{
@@ -101,6 +104,14 @@ pub use reader::{
 pub use schema::codes::{BlobVerifyState, Pass, QualifierBit, SessionState, VerifyOutcome};
 pub use schema::migrate::MigrationReport;
 pub use schema::{APPLICATION_ID, DECODER_VERSION, DERIVER_VERSION, SCHEMA_VERSION};
+pub use search::scan::{SCAN_BATCH, SCAN_EXAMINED_LIMIT};
+pub use search::words::{SCOPED_BATCH, SCOPED_CHAT_ROWS};
+pub use search::{
+    Highlight, HitPiece, HitText, HitVersion, NoHighlight, ScanCoverage, ScanProgress, ScanStop,
+    SearchFilters, SearchHit, SearchMode, SearchRan, SearchRequest, SearchResultSet, SenderFilter,
+    SetEntry, WordsPlan, HITS_PER_CALL, HIT_OTHER_CHATS, NEEDLE_CHARS, PREFIX_MIN_CHARS,
+    QUERY_BYTES, QUERY_TERMS, SEARCH_MATCH_CAP, SNIPPET_CHARS, TERM_BYTES,
+};
 pub use space::SpaceEstimate;
 pub use store_fs::{DirSync, Placed, RealFs, StoreFs};
 pub use verify::{

@@ -352,6 +352,16 @@ Never hand-edit generated files.
   request's `Reveal` asks (D115, Q3b). A new viewer statement goes into
   `view::plan_statements` and `tests/query_plans.rs`; SQL that excludes
   folded reactions with `NOT (…)` must `coalesce` a NULL `assoc_kind`.
+- **Search never passes user text to `MATCH` (M5 slice 5c).** Build
+  FTS5 expressions only with `search/query.rs` (quoted terms, ` AND `, a
+  prefix `*` only on a last unquoted token of 3+ characters), bound as a
+  parameter. Exact text matches in Rust over keyset batches that bound
+  rows examined; keep texts streamed, never a batch in memory.
+  `highlight()` output is used only after the marker and reconstruction
+  checks, and one-time codes are masked in every snippet. A cancel must
+  reach the statement through `SearchInterrupt` as well as the token:
+  the op budget cannot see work inside one FTS5 call. A new search
+  statement goes into `search::plan_statements` and `tests/query_plans.rs`.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush

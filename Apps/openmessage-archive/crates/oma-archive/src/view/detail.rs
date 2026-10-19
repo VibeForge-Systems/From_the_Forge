@@ -527,7 +527,8 @@ const SQL_TEXT_BODY: &str = "SELECT b.message_id, b.display_text, b.display_sour
      FROM message_body b JOIN message m ON m.id = b.message_id WHERE b.id = ?1";
 const SQL_CURRENT_STATE: &str = "SELECT display_text IS NOT NULL AND display_source IS NOT NULL, \
        edit_label FROM message_body WHERE id = ?1";
-const SQL_ANY_UNSENT: &str = "SELECT 1 FROM message_unsent_part WHERE body_id = ?1 LIMIT 1";
+pub(crate) const SQL_ANY_UNSENT: &str =
+    "SELECT 1 FROM message_unsent_part WHERE body_id = ?1 LIMIT 1";
 
 #[cfg_attr(not(feature = "fault-injection"), allow(dead_code))]
 pub(crate) fn plan_statements() -> Vec<(&'static str, String)> {
