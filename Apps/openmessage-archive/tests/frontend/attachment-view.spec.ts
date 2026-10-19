@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   bytesText,
+  cardNotes,
   cardSentence,
   cardView,
   declaredBytes,
@@ -15,7 +16,7 @@ import {
 } from '@/services/attachmentView';
 import type { CardStateDto, DecimalString, SniffedKindDto } from '@/types';
 import { CARD_TEXT, FILE_PROBLEM_TEXT, MEDIA_UI_TEXT, PLAYBACK_TEXT, SNIFFED_KIND_TEXT } from '@/services/viewerText';
-import { TOKEN, attachmentFacts, inspection } from './helpers';
+import { TOKEN, attachmentFacts, inspection, sid } from './helpers';
 
 const yes = () => true;
 const no = () => false;
@@ -135,5 +136,45 @@ describe('sizes and labels', () => {
       'Preview, re-encoded, at most 2048 px; original size shown after the preview loads; 20 KB stored (20 KB declared)',
     );
     expect(renditionLabel({ width: 4032, height: 3024 }, 20480, d('20480'))).toContain('original 4032×3024');
+  });
+});
+
+describe('cardNotes (review fix: notes on the card itself, §5.9)', () => {
+  const dates = {
+    importDate: (s: unknown) => (s === 1 ? '2026-01-01' : s === 2 ? '2026-06-01' : null),
+    date: () => '2026-07-01',
+  };
+
+  it('says nothing for a file the newest backup had and no verify problem', () => {
+    expect(cardNotes(inspection(1), dates)).toEqual([]);
+    expect(cardNotes(null, dates)).toEqual([]);
+  });
+
+  it('names the older backup a file is shown from, on an image card too', () => {
+    const i = inspection(1, {
+      facts: attachmentFacts(1, { card: { kind: 'file', olderBackup: { heldBy: sid(1), newest: sid(2) } } }),
+    });
+    expect(cardView(i, 'confirm', yes).kind).toBe('image');
+    expect(cardNotes(i, dates)).toEqual([
+      'Showing the file from the import of 2026-01-01; not found by the import of 2026-06-01',
+    ]);
+    // Imports not loaded: the general sentence.
+    expect(cardNotes(i, { ...dates, importDate: () => null })).toEqual([
+      'Showing the file from an older backup; not found in the newest backup',
+    ]);
+  });
+
+  it('shows a full verify problem with its date and the stale note, on a playable card too', () => {
+    const i = playable('mp4', {
+      facts: attachmentFacts(1, { verify: { state: 'hashMismatch', raw: d('4'), verifiedMs: 5, mayBeStale: true } }),
+    });
+    expect(cardNotes(i, dates)).toEqual([
+      'The full verify reported: checksum mismatch (verify of 2026-07-01)',
+      'This result may be out of date; run Verify',
+    ]);
+    const unknown = inspection(1, {
+      facts: attachmentFacts(1, { verify: { state: null, raw: d('9'), verifiedMs: null, mayBeStale: false } }),
+    });
+    expect(cardNotes(unknown, dates)).toEqual(['The full verify reported code 9']);
   });
 });

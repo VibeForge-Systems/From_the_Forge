@@ -16,12 +16,14 @@
 // - "Copy with sender and time": a first line with the sender and the
 //   time, and the time zone the time is shown in; then the bubble's
 //   qualifiers in brackets ("Direction not recorded", "Unsent by the
-//   sender", "… (derived)"); then the text.
+//   sender", "… (derived)"); then the text. It is offered for messages
+//   and association rows only: a conversation event or an unrecognised
+//   item asserts no actor (§3.6), so it has no sender line to copy.
 // - "Copy link": URL runs only. A run with hidden characters is refused
 //   (the menu says to use Copy text); one that is not complete here (a
 //   masked or cut part) is refused too.
 import type { HandleDto, MessageDto, SafeId, SegmentDto, TextPieceDto } from '@/types';
-import { editView } from './messageView';
+import { editView, itemShape } from './messageView';
 import {
   hasHiddenCharacters,
   isBidiControl,
@@ -169,13 +171,23 @@ export function qualifiers(m: MessageDto, prefs: TimePrefs): string[] {
   return out;
 }
 
-/** "Sender — time (times in UTC+01:00, this computer's zone)". */
+/** A row that may name a sender: a message or an association row, never an event. */
+export function hasActor(m: Pick<MessageDto, 'item' | 'association'>): boolean {
+  const shape = itemShape(m);
+  return shape === 'bubble' || shape === 'association';
+}
+
+/**
+ * "Sender — time (times in UTC+01:00, this computer's zone)". An event or
+ * an unrecognised item names no sender: the line is the time only.
+ */
 export function senderTimeLine(m: MessageDto, ctx: SenderTimeContext): string {
   const t = timeText(m.date, ctx.prefs);
   const zone =
     t.kind !== 'instant'
       ? ''
       : ` (${ctx.prefs.timeZone === 'utc' ? COPY_ACTION_TEXT.zoneUtc : fill(COPY_ACTION_TEXT.zoneSystem, { offset: utcOffset(t.ms) })})`;
+  if (!hasActor(m)) return `${t.text}${zone}`;
   return `${senderName(m, ctx.handles)} — ${t.text}${zone}`;
 }
 
@@ -253,7 +265,7 @@ export function menuItems(m: MessageDto): MenuItem[] {
     const clean: MenuItem = { action: { kind: 'copyClean' }, label: COPY_ACTION_TEXT.copyClean };
     if (b.bidiControls || b.invisible) items.push(clean, plain);
     else items.push(plain, clean);
-    items.push({ action: { kind: 'copyWithSender' }, label: COPY_ACTION_TEXT.copyWithSender });
+    if (hasActor(m)) items.push({ action: { kind: 'copyWithSender' }, label: COPY_ACTION_TEXT.copyWithSender });
     const links = linkRuns(m).slice(0, MAX_LINK_ITEMS);
     links.forEach((_, index) =>
       items.push({

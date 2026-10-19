@@ -127,12 +127,12 @@ async function choose(item: MenuItem): Promise<void> {
   if (!s) return;
   const m = s.message;
   const body = m.body;
-  const full = body.kind === 'text' ? (viewer.fullTexts.get(body.body) ?? null) : null;
+  const full = body.kind === 'text' ? viewer.fullTextFor(body.body, m.id) : null;
   const text = bodyText(m, full);
   switch (item.action.kind) {
     case 'details':
       close();
-      viewer.openDetails(m.id);
+      viewer.openDetails(m.id, false, s.returnTo);
       return;
     case 'copyLink': {
       const run = linkRuns(m)[item.action.index];

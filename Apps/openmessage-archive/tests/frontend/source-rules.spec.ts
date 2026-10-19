@@ -7,17 +7,79 @@
 // and object URLs, casts to the content brands, and `console.` outside
 // `services/devlog.ts`. Each banned form has a fixture that must fail and
 // one that must pass.
+//
+// Attribute bindings are read from the template's AST (Vue's own SFC
+// parser, the version the app is built with), not matched as text, so
+// every form Vue compiles into a binding is seen: `:x`, `v-bind:x` and the
+// `.x` prop shorthand, with any modifiers, any quoting, any case, and the
+// same-name shorthand `:alt` (which binds the variable `alt`).
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse } from 'vue/compiler-sfc';
 import { describe, expect, it } from 'vitest';
 
 const SRC = fileURLToPath(new URL('../../src/', import.meta.url));
 
-/** Attributes whose bindings must be a listed non-content expression. */
-const BOUND_ATTRS =
-  'href|src|srcset|poster|xlink:href|formaction|style|class|id|name|title|alt|aria-[\\w-]+|data-[\\w-]+';
-const BINDING = new RegExp(`(?:^|\\s)(?::|v-bind:)(${BOUND_ATTRS})\\s*=\\s*"([^"]*)"`, 'gm');
+/** Attributes whose bindings must be a listed non-content expression (lower case, kebab case). */
+const BOUND_ATTR =
+  /^(?:href|src|srcset|poster|xlink:href|formaction|style|class|id|name|title|alt|aria-[\w-]+|data-[\w-]+)$/;
+
+/** A `:src` must be exactly one `mediaUrl(…)` call (optionally `?? undefined`). */
+const MEDIA_SRC = /^mediaUrl\([^()]*\)(?: \?\? undefined)?$/;
+
+/** `ariaLabel` → `aria-label`, `HREF` → `href`: the attribute a binding reaches. */
+function attributeName(arg: string): string {
+  return arg.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+}
+
+/** Vue's camelize, for the same-name shorthand (`:aria-label` binds `ariaLabel`). */
+function camelize(name: string): string {
+  return name.replace(/-(\w)/g, (_, c: string) => c.toUpperCase());
+}
+
+interface Binding {
+  /** The argument as written (`aria-label`, `title`). */
+  arg: string;
+  /** The expression, whitespace collapsed. */
+  expr: string;
+}
+
+interface AstNode {
+  type: number;
+  props?: AstProp[];
+  children?: AstNode[];
+}
+
+interface AstProp {
+  type: number;
+  name: string;
+  arg?: { content: string; isStatic: boolean };
+  exp?: { loc: { source: string } };
+}
+
+/**
+ * Every `v-bind` of a static attribute in a `.vue` file's template, and the
+ * parse errors (a template the parser cannot read is a violation).
+ */
+function bindings(file: string, text: string): { found: Binding[]; errors: string[] } {
+  if (!/<template[\s>]/.test(text)) return { found: [], errors: [] };
+  const { descriptor, errors } = parse(text, { filename: file });
+  const found: Binding[] = [];
+  const walk = (node: AstNode): void => {
+    if (node.type === 1) {
+      for (const p of node.props ?? []) {
+        if (p.type !== 7 || p.name !== 'bind' || !p.arg || !p.arg.isStatic) continue;
+        const source = p.exp ? p.exp.loc.source : camelize(p.arg.content);
+        found.push({ arg: p.arg.content, expr: source.split(/\s+/).join(' ').trim() });
+      }
+    }
+    for (const c of node.children ?? []) walk(c);
+  };
+  const ast = descriptor.template?.ast as AstNode | undefined;
+  if (ast) walk(ast);
+  return { found, errors: errors.map((e) => (e instanceof Error ? e.message : String(e))) };
+}
 
 /**
  * The non-content expressions each file may bind (whitespace collapsed).
@@ -91,16 +153,22 @@ const ALLOWED_BINDINGS: Record<string, readonly string[]> = {
   'components/viewer/SafeText.vue': ["class=\"mode === 'identifier' ? 'oma-safe-id' : 'oma-safe-body'\""],
   // Captions are named `<idBase>-a<n>`: an app-made article prefix with a
   // checked integer, and the attachment's position (5h3).
+  // The Play and image buttons are `<caption id>-play` and `-open`, return
+  // targets for the play flow's dialogs; `aria-disabled` is a boolean state.
   'components/viewer/AttachmentView.vue': [
+    "aria-disabled=\"isChecking ? 'true' : undefined\"",
     'aria-describedby="captionId"',
     'aria-labelledby="captionId"',
     'class="boxClass"',
     'id="captionId"',
+    'id="openId"',
+    'id="playId"',
   ],
   // The calendar (5i): cell ids from the grid position, classes and
   // `aria-selected` from closed day states, weekday names from Intl, and
   // fixed words; none is archive content.
   'components/viewer/DateJumpDialog.vue': [
+    "aria-disabled=\"nearestSeeking ? 'true' : undefined\"",
     'aria-invalid="typedBad"',
     'aria-selected="sameDay(c, focusDay)"',
     'class="cellClass(c, w * 7 + d)"',
@@ -115,6 +183,7 @@ const ALLOWED_BINDINGS: Record<string, readonly string[]> = {
     'id="`${base}-t`"',
   ],
   'components/viewer/SearchPanel.vue': [
+    "aria-disabled=\"state.loadingMore ? 'true' : undefined\"",
     'aria-invalid="fromInvalid"',
     'aria-invalid="toInvalid"',
     'aria-label="SEARCH_TEXT.close"',
@@ -138,10 +207,14 @@ const ALLOWED_BINDINGS: Record<string, readonly string[]> = {
   ],
   // Classes from closed flags and states (5h2).
   'components/viewer/MessageBody.vue': [
+    "aria-disabled=\"full?.loading === true ? 'true' : undefined\"",
     "class=\"collapsed ? 'oma-collapsed' : ''\"",
     'class="segmentClass(seg)"',
   ],
   'components/viewer/ReactionChips.vue': ['class="stateClass(chip)"'],
+  'components/viewer/MessageBubble.vue': [
+    "class=\"earlier.kind === 'revealed' ? 'oma-earlier oma-earlier-shown' : 'oma-earlier'\"",
+  ],
   // `base` is `oma-m-<SafeId>`: an app-made prefix and a checked integer;
   // the classes come from the item's shape and direction codes.
   'components/viewer/ThreadItem.vue': [
@@ -208,7 +281,11 @@ const RULES: readonly Rule[] = [
     id: 'dynamic-binding',
     pattern: /\sv-bind\s*=|\s(?::|v-bind:|@|v-on:)\[|\s(?::|v-bind:)is\s*=|\sis\s*=\s*"vue:|<component\b/,
   },
-  { id: 'render-function', pattern: /\bh\s*\(|\brender\s*\(/, except: RENDER_FUNCTION_FILES },
+  {
+    id: 'render-function',
+    pattern: /\bh\s*\(|\brender\s*\(|\b(?:createVNode|createElementVNode|createBlock|createElementBlock|resolveDynamicComponent)\s*\(/,
+    except: RENDER_FUNCTION_FILES,
+  },
   {
     id: 'dom-write',
     pattern: /\bsetAttribute(?:NS)?\s*\(|\.(?:src|href|srcset|innerText|textContent)\s*=(?!=)/,
@@ -219,7 +296,14 @@ const RULES: readonly Rule[] = [
     pattern:
       /\bURL\.createObjectURL\b|\bwindow\.open\b|\blocation\.assign\b|\blocation\.replace\b|(?<!(?:const|let|var)\s+)(?<![\w$.])location(?:\.href)?\s*=(?!=)|\.location(?:\.href)?\s*=(?!=)/,
   },
-  { id: 'brand-cast', pattern: /\bas\s+(?:UntrustedText|MediaToken|MediaBase|SafeId|DecimalString)\b/ },
+  {
+    id: 'brand-cast',
+    // `x as Brand`, and the angle-bracket cast `<Brand>x` (valid in `.ts`
+    // and `lang="ts"`); a generic argument (`Set<SafeId>(…)`, `Array<SafeId>`)
+    // follows a name or a bracket, a cast never does.
+    pattern:
+      /\bas\s+(?:UntrustedText|MediaToken|MediaBase|SafeId|DecimalString)\b|(?:(?<![\w$)\]]\s*)|\b(?:return|yield|await|throw|case|typeof|void|in|of|else)\s*)<(?:UntrustedText|MediaToken|MediaBase|SafeId|DecimalString)>\s*[\w($]/,
+  },
   { id: 'console', pattern: /\bconsole\./, except: [DEVLOG] },
 ];
 
@@ -247,14 +331,16 @@ function violations(file: string, text: string): string[] {
   }
   if (file.endsWith('.vue')) {
     const allowed = new Set(ALLOWED_BINDINGS[file] ?? []);
-    for (const m of code.matchAll(BINDING)) {
-      const attr = m[1]!;
-      const expr = m[2]!.split(/\s+/).join(' ').trim();
+    const { found: bound, errors } = bindings(file, text);
+    for (const e of errors) found.push(`template-parse: ${e}`);
+    for (const { arg, expr } of bound) {
+      const attr = attributeName(arg);
+      if (!BOUND_ATTR.test(attr)) continue;
       if (attr === 'src') {
-        if (!/^mediaUrl\(/.test(expr)) found.push(`src-binding: :src="${expr}"`);
+        if (!MEDIA_SRC.test(expr)) found.push(`src-binding: :src="${expr}"`);
         continue;
       }
-      if (!allowed.has(`${attr}="${expr}"`)) found.push(`attribute-binding: :${attr}="${expr}"`);
+      if (!allowed.has(`${arg}="${expr}"`)) found.push(`attribute-binding: :${arg}="${expr}"`);
     }
   }
   return found;
@@ -287,9 +373,7 @@ describe('the source rule over src/', () => {
     const used = new Set<string>();
     for (const { file, text } of FILES) {
       if (!file.endsWith('.vue')) continue;
-      for (const m of stripComments(text).matchAll(BINDING)) {
-        used.add(`${file} ${m[1]}="${m[2]!.split(/\s+/).join(' ').trim()}"`);
-      }
+      for (const { arg, expr } of bindings(file, text).found) used.add(`${file} ${arg}="${expr}"`);
     }
     const stale = Object.entries(ALLOWED_BINDINGS).flatMap(([file, list]) =>
       list.filter((b) => !used.has(`${file} ${b}`)).map((b) => `${file} ${b}`),
@@ -314,6 +398,10 @@ describe('each banned form', () => {
     ['string-eval', 'setInterval(`go()`, 5)', 'setInterval(() => go(), 5)'],
     ['render-function', "return h('div')", 'return each(x)'],
     ['render-function', 'render(vnode, el)', 'const rendered = 1;'],
+    ['render-function', "createVNode('a', { href: row.url })", 'const vnodeCount = 1;'],
+    ['render-function', "createElementVNode('a', p)", 'createElement(a)'],
+    ['render-function', 'createBlock(c)', 'const blocks = 1;'],
+    ['render-function', 'resolveDynamicComponent(name)', 'resolveComponent(name)'],
     ['dom-write', "el.setAttribute('title', x)", "el.getAttribute('title')"],
     ['dom-write', 'img.src = url', 'const src = url;'],
     ['dom-write', 'a.href = url', 'if (a.href === url) go();'],
@@ -329,6 +417,9 @@ describe('each banned form', () => {
     ['brand-cast', 'x as UntrustedText', 'x as string'],
     ['brand-cast', 'x as MediaToken', 'x as MediaTokenish'],
     ['brand-cast', 'x as SafeId', 'x satisfies number'],
+    ['brand-cast', 'const id = <SafeId>raw;', 'const ids = new Set<SafeId>();'],
+    ['brand-cast', 'f(<UntrustedText>(x))', 'const list: Array<UntrustedText> = [];'],
+    ['brand-cast', 'return <DecimalString>s;', 'function f(): Promise<DecimalString> {}'],
     ['console', 'console.log(x)', 'devNote("jobIdMismatch")'],
   ];
 
@@ -347,6 +438,9 @@ describe('each banned form', () => {
     ['dynamic-binding', '<div :is="x"></div>', '<div :dir="x"></div>'],
     ['dynamic-binding', '<component :is="x" />', '<span />'],
     ['src-binding', '<img :src="row.url" alt="" />', '<img :src="mediaUrl(base, token, \'thumb\')" alt="" />'],
+    ['src-binding', '<img :src="mediaUrl(a) || row.url" alt="" />', '<img :src="mediaUrl(a) ?? undefined" alt="" />'],
+    ['src-binding', '<img :src.attr="row.url" alt="" />', '<img src="" alt="" />'],
+    ['src-binding', "<img :src='row.url' alt='' />", "<img src='' alt='' />"],
     ['attribute-binding', '<img alt="" :alt="row.name" />', '<img alt="" />'],
     ['attribute-binding', '<a :href="u">x</a>', '<a href="#main">x</a>'],
     ['attribute-binding', '<video :poster="u"></video>', '<video preload="none"></video>'],
@@ -361,6 +455,15 @@ describe('each banned form', () => {
     ['attribute-binding', '<div v-bind:title="label"></div>', '<div title="Fixed"></div>'],
     ['attribute-binding', '<div :aria-label="label"></div>', '<div aria-labelledby="x"></div>'],
     ['attribute-binding', '<div :data-name="label"></div>', '<div data-x="1"></div>'],
+    // Forms Vue 3.5 compiles into bindings that a text match missed.
+    ['attribute-binding', '<img alt="" :alt>', '<img alt="" />'],
+    ['attribute-binding', '<div :aria-label></div>', '<div aria-label="Fixed"></div>'],
+    ['attribute-binding', "<div :title='label'></div>", "<div title='Fixed'></div>"],
+    ['attribute-binding', '<div :title.prop="label"></div>', '<div :tabindex.prop="0"></div>'],
+    ['attribute-binding', '<div .title="label"></div>', '<div .scrollTop="0"></div>'],
+    ['attribute-binding', '<a :HREF="u">x</a>', '<a HREF="#main">x</a>'],
+    ['attribute-binding', '<div :ariaLabel="label"></div>', '<div :tabIndex="0"></div>'],
+    ['attribute-binding', '<template v-if="a"><p :title="label" /></template>', '<template v-if="a"><p /></template>'],
   ];
 
   for (const [id, bad, good] of VUE_CASES) {

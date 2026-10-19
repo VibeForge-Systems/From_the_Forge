@@ -4,7 +4,9 @@ import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 
 /** The zones the DST Vitest projects run in (M5 §13.8). */
-const DST_ZONES = ['Europe/London', 'America/Sao_Paulo', 'Australia/Lord_Howe'];
+// Pacific/Apia skipped a whole local day (2011-12-30) when Samoa moved
+// across the date line.
+const DST_ZONES = ['Europe/London', 'America/Sao_Paulo', 'Australia/Lord_Howe', 'Pacific/Apia'];
 
 // Tauri expects a fixed dev port and must see Rust compiler output, so the
 // screen is not cleared and a busy port fails fast instead of moving.

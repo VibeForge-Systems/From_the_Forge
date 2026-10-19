@@ -69,9 +69,12 @@ const rightLabel = computed(() =>
         : THREAD_TEXT.infoHeading,
 );
 
-// Asking for details or replies shows the right panel.
+// Asking for details or replies shows the right panel. Closing it while
+// it is an overlay closes the overlay too, so focus can return to the
+// message instead of staying under the backdrop.
 watch(panel, (now) => {
   if (now !== null) void layout.openRight();
+  else if (layout.rightOverlay) layout.closeOverlays();
 });
 
 watch(
@@ -83,7 +86,12 @@ watch(
   { immediate: true },
 );
 
+// Choosing a conversation (the list overlay) or opening a search result
+// (the search overlay) moves the user into the thread: an overlay closes
+// so it never covers the conversation or the focused message (WCAG
+// 2.4.11). Docked panels stay.
 function openChat(id: SafeId): void {
+  layout.closeOverlays();
   void router.push({ name: 'viewer-chat', params: { archiveId: props.archiveId, chatId: String(id) } });
 }
 

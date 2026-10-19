@@ -554,6 +554,33 @@ fn hiding_drops_cached_renditions_but_keeps_failures() {
     assert_eq!(refused.counts.calls.load(Ordering::SeqCst), 1);
 }
 
+/// A decode still running when the screen is hidden answers its request
+/// but is not put back into the cache that the hide emptied (review
+/// finding: the rendition stayed in memory while the screen was hidden).
+#[test]
+fn a_decode_running_at_hide_is_not_cached() {
+    let gate = Arc::new(Gate::default());
+    let r = rig(Mode::Image, Some(Arc::clone(&gate)));
+    let s = r.session();
+    let images = r.classes().remove("image").expect("images");
+    let (tok, _) = &images[0];
+    let running = ask(&r.host, &url(tok, "thumb"), &GET);
+    gate.wait_entered(1);
+    crate::viewer::hide(&s).expect("hide");
+    gate.release();
+    let got = wait(&running);
+    assert_eq!(got.status, 200, "the request is still answered");
+    assert_eq!(
+        s.media().cached_renditions(),
+        0,
+        "nothing cached after the hide"
+    );
+    // Asked again (the screen shown again), it is decoded and cached.
+    assert_eq!(send(&r.host, &url(tok, "thumb"), &GET).status, 200);
+    assert_eq!(r.counts.calls.load(Ordering::SeqCst), 2, "decoded again");
+    assert_eq!(s.media().cached_renditions(), 1);
+}
+
 /// A refused decode is remembered: a hostile image is decoded at most
 /// once per session.
 #[test]

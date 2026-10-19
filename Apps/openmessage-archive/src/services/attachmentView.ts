@@ -11,17 +11,29 @@
 // - Audio and video show a Play card only when playback is not `off` and
 //   the engine might play the sniffed container (`canPlayType`).
 // - Sizes: the stored length beside the declared one, labelled "declared".
+// - Notes on every card, whatever its kind (`cardNotes`, §5.9): a file
+//   shown from an older backup than the newest that listed the
+//   attachment says so, and a full verify that reported a problem with the
+//   stored file says what and when (with the stale note), so neither shows
+//   only in Details.
 import type {
   AttachmentInspectionDto,
   CardStateDto,
   DecimalString,
   MediaPlayback,
   MediaToken,
+  SafeId,
   SniffedKindDto,
 } from '@/types';
 import {
   ATTACHMENT_TEXT,
+  BLOB_VERIFY_TEXT,
   CARD_TEXT,
+  DETAILS_TEXT,
+  OLDER_BACKUP_TEXT,
+  VERIFY_RAW_TEXT,
+  VERIFY_STALE_TEXT,
+  VERIFY_WHEN_TEXT,
   CONTAINER_REFUSAL_TEXT,
   CONTENT_KIND_TEXT,
   FILE_PROBLEM_TEXT,
@@ -116,6 +128,36 @@ export function cardView(
     case 'unrecognised':
       return { kind: 'file', sniffed: null, lines: [SNIFFED_KIND_TEXT.unknown] };
   }
+}
+
+/** How the card's notes name dates: an import's, and an instant. */
+export interface NoteDates {
+  importDate: (session: SafeId) => string | null;
+  date: (ms: number) => string;
+}
+
+/**
+ * The notes every card shows under its preview, Play button or file
+ * lines: the older-backup note and a full verify's problem. Nothing when
+ * the newest backup had the file and the last full verify found none.
+ */
+export function cardNotes(inspection: AttachmentInspectionDto | null, dates: NoteDates): string[] {
+  if (inspection === null) return [];
+  const out: string[] = [];
+  const card = inspection.facts.card;
+  if (card.kind === 'file' && card.olderBackup) {
+    const date = dates.importDate(card.olderBackup.heldBy);
+    const newest = dates.importDate(card.olderBackup.newest);
+    out.push(date && newest ? fill(DETAILS_TEXT.olderBackup, { date, newest }) : OLDER_BACKUP_TEXT);
+  }
+  const v = inspection.facts.verify;
+  if (v && v.state !== 'ok' && !(v.state === null && v.raw === '0')) {
+    let line = v.state ? BLOB_VERIFY_TEXT[v.state] : fill(VERIFY_RAW_TEXT, { raw: v.raw });
+    if (v.verifiedMs !== null) line = `${line} ${fill(VERIFY_WHEN_TEXT, { date: dates.date(v.verifiedMs) })}`;
+    out.push(line);
+    if (v.mayBeStale) out.push(VERIFY_STALE_TEXT);
+  }
+  return out;
 }
 
 /** The sentence for a playback verdict that is not "allowed". */

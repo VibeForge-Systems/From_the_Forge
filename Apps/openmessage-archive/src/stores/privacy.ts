@@ -17,7 +17,10 @@
 // - **Show** remounts at the same anchor: the open conversation opens
 //   around the message that was focused (focused again) or, without one,
 //   the first one in view (shown, not focused). The thread names that
-//   place through `setPlaceProvider` while it is mounted.
+//   place through `setPlaceProvider` while it is mounted. A focus loss
+//   while "Show" is still reopening the session is remembered: the screen
+//   then stays hidden (reason `focusLoss`) instead of showing the
+//   conversations in a window that no longer has focus.
 //
 // It works only while the viewer page is mounted (`attach`/`detach`) and a
 // session is open. It keeps ids only (the archive id, a chat and a message
@@ -85,6 +88,8 @@ export const usePrivacy = defineStore('privacy', () => {
   const attached = ref(false);
 
   let place: Place | null = null;
+  /** The window lost focus while "Show" was reopening the session. */
+  let lostWhileShowing = false;
   let provider: (() => ThreadPlace | null) | null = null;
   let lastActivity = Date.now();
   let timer: ReturnType<typeof setInterval> | null = null;
@@ -114,6 +119,9 @@ export const usePrivacy = defineStore('privacy', () => {
       void viewer.hideContent();
     } else if (why === 'idle') {
       reason.value = 'idle';
+    } else if (why === 'focusLoss' && showing.value) {
+      // "Show" is still opening the session: it must not end by showing.
+      lostWhileShowing = true;
     }
     if (why === 'idle' && !closed.value) {
       closed.value = true;
@@ -137,6 +145,7 @@ export const usePrivacy = defineStore('privacy', () => {
     const viewer = useViewer();
     const p = place;
     showing.value = true;
+    lostWhileShowing = false;
     try {
       if (closed.value && p) await viewer.open(p.archiveId);
       if (p && p.chatId !== null && p.message !== null && viewer.session) {
@@ -144,6 +153,14 @@ export const usePrivacy = defineStore('privacy', () => {
       }
     } finally {
       showing.value = false;
+    }
+    if (lostWhileShowing) {
+      // The window lost focus during the reopen: keep the curtain up. The
+      // session is open now, so the next "Show" only lowers it.
+      lostWhileShowing = false;
+      if (viewer.session) closed.value = false;
+      reason.value = 'focusLoss';
+      return;
     }
     hidden.value = false;
     closed.value = false;
@@ -202,6 +219,7 @@ export const usePrivacy = defineStore('privacy', () => {
     hidden.value = false;
     closed.value = false;
     showing.value = false;
+    lostWhileShowing = false;
     reason.value = 'manual';
     place = null;
   }

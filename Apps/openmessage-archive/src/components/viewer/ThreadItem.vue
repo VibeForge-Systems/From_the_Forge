@@ -83,13 +83,16 @@ const senderClass = computed(() => (senderVisible.value ? 'oma-item-sender' : 'o
 
 const serviceText = computed(() => {
   if (props.serviceChange === undefined) return null;
+  // `null`: the service cell was NULL, absent or unreadable (Rust stores
+  // unrecognised text as `other` and empty text as `empty`).
   return props.serviceChange === null
-    ? BUBBLE_TEXT.serviceNotRecognised
+    ? BUBBLE_TEXT.serviceNotRecorded
     : fill(BUBBLE_TEXT.serviceChanged, { service: SERVICE_TEXT[props.serviceChange] });
 });
 
 function openDetails(): void {
-  viewer.openDetails(props.message.id);
+  // Close gives focus back to this article.
+  viewer.openDetails(props.message.id, false, base.value);
 }
 
 async function reveal(what: RevealInput): Promise<void> {

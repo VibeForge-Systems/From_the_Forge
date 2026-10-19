@@ -98,7 +98,7 @@ function close(): void {
 </script>
 
 <template>
-  <ModalDialog :open="open !== null" :title="title" @close="close">
+  <ModalDialog :open="open !== null" :title="title" :return-to="open?.returnTo ?? null" @close="close">
     <figure v-if="attachment" class="oma-media-viewer">
       <template v-if="image && base && token && !failed">
         <img

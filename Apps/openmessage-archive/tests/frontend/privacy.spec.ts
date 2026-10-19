@@ -38,6 +38,8 @@ vi.mock('@/services/features', async (importOriginal) => {
   };
 });
 import ViewerView from '@/views/ViewerView.vue';
+import ConversationList from '@/components/viewer/ConversationList.vue';
+import { useLayout } from '@/stores/layout';
 import PrivacyCurtain from '@/components/PrivacyCurtain.vue';
 import { guardedKey, installViewerGuards } from '@/services/guards';
 import { matchShortcut } from '@/services/shortcuts';
@@ -247,12 +249,37 @@ describe('the privacy curtain', () => {
   });
 });
 
+describe('overlays in a narrow window (review fix, WCAG 2.4.11)', () => {
+  it('close the list overlay when a conversation is chosen, and the panel overlay with the panel', async () => {
+    stubMatchMedia(() => false);
+    mounted = await mountViewer();
+    const layout = useLayout();
+    layout.leftOverlay = true;
+    await flushPromises();
+    mounted.findComponent(ConversationList).vm.$emit('open', sid(CHAT));
+    await flushPromises();
+    expect(layout.leftOverlay).toBe(false);
+    useViewer().openDetails(sid(30));
+    await flushPromises();
+    expect(layout.rightOverlay).toBe(true);
+    useViewer().closePanel();
+    await flushPromises();
+    expect(layout.rightOverlay).toBe(false);
+  });
+});
+
 describe('blur on focus loss and idle hide', () => {
   it('hide on window blur or a hidden document only when the setting is on', async () => {
     mounted = await mountViewer();
     window.dispatchEvent(new Event('blur'));
     await flushPromises();
     expect(usePrivacy().hidden).toBe(false);
+    // A hidden document (minimised) leaves the screen alone with the setting off.
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+    await flushPromises();
+    expect(usePrivacy().hidden).toBe(false);
+    delete (document as unknown as Record<string, unknown>).visibilityState;
     setViewerPrefs({ blurOnFocusLoss: true });
     window.dispatchEvent(new Event('blur'));
     await flushPromises();
@@ -266,6 +293,37 @@ describe('blur on focus loss and idle hide', () => {
     await flushPromises();
     expect(usePrivacy().hidden).toBe(true);
     delete (document as unknown as Record<string, unknown>).visibilityState;
+  });
+
+  it('keep the curtain up when focus is lost while Show reopens an idle-closed session', async () => {
+    setViewerPrefs({ blurOnFocusLoss: true, idleHideMinutes: 1 });
+    mounted = await mountViewer();
+    const privacy = usePrivacy();
+    await privacy.hide('idle');
+    await flushPromises();
+    expect(privacy.closed).toBe(true);
+    let release: () => void = () => undefined;
+    fake.handlers.openViewer = () =>
+      new Promise((resolve) => {
+        release = () => resolve(viewerSession({ viewer: VIEWER }));
+      });
+    const showing = privacy.show();
+    await flushPromises();
+    // The user switches away while the archive opens again.
+    window.dispatchEvent(new Event('blur'));
+    release();
+    await showing;
+    await flushPromises();
+    expect(privacy.hidden).toBe(true);
+    expect(privacy.reason).toBe('focusLoss');
+    expect(privacy.closed).toBe(false);
+    expect(document.querySelector('.oma-thread')).toBeNull();
+    // The next Show only lowers the curtain: the session is open.
+    fake.calls.length = 0;
+    await privacy.show();
+    await flushPromises();
+    expect(privacy.hidden).toBe(false);
+    expect(named('openViewer')).toEqual([]);
   });
 
   it('close the session after the idle time, reset on activity, and Show reopens at the same place', async () => {

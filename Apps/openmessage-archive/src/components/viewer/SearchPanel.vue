@@ -19,6 +19,9 @@
 //   and Cancel. A capped result says it is not complete, and how.
 // - The form stays in the store until the viewer closes; nothing is
 //   persisted (owner Q1c). The query is never echoed in a sentence.
+// - Results that no search would show now are cleared: an empty query or
+//   an invalid date clears them, so snippets of earlier or unsent text
+//   never outlive "Include earlier versions and unsent text".
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { SafeId, SearchFiltersInput, SearchHitDto } from '@/types';
 import SearchHit from './SearchHit.vue';
@@ -35,7 +38,7 @@ const viewer = useViewer();
 const settings = useSettings();
 
 const query = ref<HTMLInputElement | null>(null);
-const dateProblem = ref<'from' | 'to' | 'order' | null>(null);
+const dateProblem = ref<'from' | 'to' | 'order' | 'empty' | null>(null);
 const cancelled = ref(false);
 let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -71,6 +74,10 @@ function run(): void {
   const range = dateFilter(build.value, f.from, f.to);
   if (!range.ok) {
     dateProblem.value = range.problem;
+    // No search runs with these filters: the results of the last one no
+    // longer match the form (they may hold earlier text the user has just
+    // stopped including), so they go.
+    void viewer.clearSearch();
     return;
   }
   dateProblem.value = null;
@@ -166,8 +173,12 @@ const dated = computed(() => state.value.hits.slice(0, started.value?.dated ?? s
 const undated = computed(() => state.value.hits.slice(dated.value.length));
 const more = computed(() => !!started.value && state.value.hits.length < started.value.total);
 const unsearchable = computed(() => viewer.session?.unsearchable ?? 0);
-const fromInvalid = computed(() => dateProblem.value === 'from' || dateProblem.value === 'order');
-const toInvalid = computed(() => dateProblem.value === 'to' || dateProblem.value === 'order');
+const fromInvalid = computed(
+  () => dateProblem.value === 'from' || dateProblem.value === 'order' || dateProblem.value === 'empty',
+);
+const toInvalid = computed(
+  () => dateProblem.value === 'to' || dateProblem.value === 'order' || dateProblem.value === 'empty',
+);
 const dateMessage = computed(() =>
   dateProblem.value === 'from'
     ? SEARCH_TEXT.badFrom
@@ -175,7 +186,9 @@ const dateMessage = computed(() =>
       ? SEARCH_TEXT.badTo
       : dateProblem.value === 'order'
         ? SEARCH_TEXT.badOrder
-        : null,
+        : dateProblem.value === 'empty'
+          ? SEARCH_TEXT.badEmpty
+          : null,
 );
 
 function open(hit: SearchHitDto): void {
@@ -337,15 +350,17 @@ function open(hit: SearchHitDto): void {
           </li>
         </ol>
       </template>
-      <p v-if="state.loadingMore" role="status">{{ SEARCH_TEXT.loadingMore }}</p>
+      <!-- One button for both states, so focus stays on it while more load. -->
       <button
-        v-else-if="more && !state.running"
+        v-if="(more || state.loadingMore) && !state.running"
         type="button"
         class="btn btn-sm btn-outline-secondary mb-3"
-        @click="viewer.loadMoreHits()"
+        :aria-disabled="state.loadingMore ? 'true' : undefined"
+        @click="state.loadingMore || viewer.loadMoreHits()"
       >
-        {{ SEARCH_TEXT.more }}
+        {{ state.loadingMore ? SEARCH_TEXT.loadingMore : SEARCH_TEXT.more }}
       </button>
+      <p class="visually-hidden" role="status">{{ state.loadingMore ? SEARCH_TEXT.loadingMore : '' }}</p>
     </div>
   </div>
 </template>

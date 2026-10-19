@@ -95,6 +95,11 @@ const recordedBy = computed(() => {
 const replies = computed(() => replyCountText(props.message.replyCount));
 const reactions = computed(() => (hasReactions(props.message.reactions) ? props.message.reactions : null));
 const canHideEarlier = computed(() => earlier.value.kind === 'revealed' && props.revealed?.earlierText === true);
+
+function toggleEarlier(): void {
+  if (earlier.value.kind === 'withheld') emit('reveal', { earlierText: true });
+  else emit('hide', { earlierText: true });
+}
 </script>
 
 <template>
@@ -108,21 +113,28 @@ const canHideEarlier = computed(() => earlier.value.kind === 'revealed' && props
       @hide-code="emit('hide', { oneTimeCode: true })"
     />
 
-    <div v-if="earlier.kind === 'withheld'" class="oma-earlier">
-      <span>{{ WITHHELD_TEXT[earlier.reason] }}</span>
-      <button type="button" class="btn btn-link btn-sm oma-inline-btn" @click="emit('reveal', { earlierText: true })">
-        {{ BUBBLE_TEXT.showEarlier }}
-      </button>
-    </div>
-    <div v-else-if="earlier.kind === 'revealed'" class="oma-earlier oma-earlier-shown">
-      <p class="oma-body-note">
-        {{ REVEALED_TEXT[earlier.reason] }}<template v-if="revealedFrom"> ({{ revealedFrom }})</template>
-      </p>
-      <p class="oma-earlier-text">
-        <SafeText :pieces="earlier.pieces" :show-hidden="settings.viewer.showHiddenCharacters" />
-      </p>
-      <button v-if="canHideEarlier" type="button" class="btn btn-link btn-sm oma-inline-btn" @click="emit('hide', { earlierText: true })">
-        {{ BUBBLE_TEXT.hideEarlier }}
+    <!-- One container and one toggle button for both states, so the button
+         the user pressed keeps focus when the text appears or goes. -->
+    <div
+      v-if="earlier.kind === 'withheld' || earlier.kind === 'revealed'"
+      :class="earlier.kind === 'revealed' ? 'oma-earlier oma-earlier-shown' : 'oma-earlier'"
+    >
+      <span v-if="earlier.kind === 'withheld'">{{ WITHHELD_TEXT[earlier.reason] }}</span>
+      <template v-else>
+        <p class="oma-body-note">
+          {{ REVEALED_TEXT[earlier.reason] }}<template v-if="revealedFrom"> ({{ revealedFrom }})</template>
+        </p>
+        <p class="oma-earlier-text">
+          <SafeText :pieces="earlier.pieces" :show-hidden="settings.viewer.showHiddenCharacters" />
+        </p>
+      </template>
+      <button
+        v-if="earlier.kind === 'withheld' || canHideEarlier"
+        type="button"
+        class="btn btn-link btn-sm oma-inline-btn"
+        @click="toggleEarlier"
+      >
+        {{ earlier.kind === 'withheld' ? BUBBLE_TEXT.showEarlier : BUBBLE_TEXT.hideEarlier }}
       </button>
     </div>
     <p v-if="error" class="oma-body-note" role="alert">{{ BUBBLE_TEXT.revealFailed }} {{ error }}</p>
@@ -144,12 +156,12 @@ const canHideEarlier = computed(() => earlier.value.kind === 'revealed' && props
 
     <ReactionChips v-if="reactions" :reactions="reactions" :handles="handles" />
     <p v-if="reactions" class="mb-0">
-      <button type="button" class="btn btn-link btn-sm oma-inline-btn" @click="viewer.openDetails(message.id, true)">
+      <button type="button" class="btn btn-link btn-sm oma-inline-btn" @click="viewer.openDetails(message.id, true, idBase)">
         {{ BUBBLE_TEXT.reactionRows }}
       </button>
     </p>
     <p v-if="replies" class="mb-0">
-      <button type="button" class="btn btn-link btn-sm oma-inline-btn" @click="viewer.openReplies(message.id)">
+      <button type="button" class="btn btn-link btn-sm oma-inline-btn" @click="viewer.openReplies(message.id, idBase)">
         {{ replies }}
       </button>
     </p>

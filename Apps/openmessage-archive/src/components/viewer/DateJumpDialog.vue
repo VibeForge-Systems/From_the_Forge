@@ -15,6 +15,11 @@
 //   finds its first visible item and the thread opens around it. "No
 //   messages on this day" offers the nearest earlier and later items.
 // - Rust stays zone-free (D104). Undated items are never on the calendar.
+// - A day the zone skipped entirely is an empty interval: it shows no
+//   items, and Rust is sent only strictly increasing bounds.
+// - Closing the dialog cancels a pick still being answered: the thread
+//   never jumps after the user closed it. "Earlier" and "Later" stay in
+//   place (disabled) while they seek, so focus is not lost.
 import { computed, nextTick, ref, watch } from 'vue';
 import type { SafeId } from '@/types';
 import ModalDialog from '@/components/ModalDialog.vue';
@@ -33,7 +38,7 @@ import {
   weekdayLabels,
   type CivilDate,
 } from '@/services/calendar';
-import { dayBoundaryFor, type DayBoundaryBuilder } from '@/services/time';
+import { countsPerDay, dayBoundaryFor, strictBounds, type DayBoundaryBuilder } from '@/services/time';
 import { DATE_JUMP_TEXT, fill } from '@/services/viewerText';
 import { useSettings } from '@/stores/settings';
 import { useViewer } from '@/stores/viewer';
@@ -65,6 +70,8 @@ const typedBad = ref(false);
 const picked = ref<CivilDate | null>(null);
 const outcome = ref<'seeking' | 'none' | 'noEarlier' | 'noLater' | 'failed' | null>(null);
 const error = ref<string | null>(null);
+/** "Earlier" or "Later" is seeking: keep both buttons, disabled. */
+const nearestSeeking = ref(false);
 let countsSeq = 0;
 let pickSeq = 0;
 
@@ -113,13 +120,15 @@ async function loadMonth(): Promise<void> {
   }
   counts.value = null;
   countsState.value = 'loading';
-  const got = await viewer.dayCounts(props.chatId, bounds);
+  // A day the zone skipped is empty: Rust gets strictly increasing bounds.
+  const strict = strictBounds(bounds);
+  const got = await viewer.dayCounts(props.chatId, strict.bounds);
   if (mine !== countsSeq) return;
-  if (got === null || 'error' in got || got.counts.length !== 42) {
+  if (got === null || 'error' in got || got.counts.length !== strict.bounds.length - 1) {
     countsState.value = 'failed';
     return;
   }
-  counts.value = got.counts;
+  counts.value = countsPerDay(strict.slots, got.counts);
   countsState.value = 'idle';
 }
 
@@ -136,7 +145,14 @@ function moveTo(c: CivilDate, focusCell = true): void {
 watch(
   () => props.open,
   (open) => {
-    if (!open) return;
+    if (!open) {
+      // Closed (Escape, Close, the backdrop): answers still on their way
+      // are dropped, so nothing jumps after the user cancelled.
+      pickSeq += 1;
+      countsSeq += 1;
+      nearestSeeking.value = false;
+      return;
+    }
     const start = civilOf(props.initial ?? (props.now ?? Date.now)(), zone.value);
     focusDay.value = start;
     shown.value = { year: start.year, month: start.month };
@@ -175,6 +191,7 @@ async function pick(c: CivilDate): Promise<void> {
   const mine = (pickSeq += 1);
   focusDay.value = c;
   picked.value = c;
+  nearestSeeking.value = false;
   outcome.value = 'seeking';
   error.value = null;
   let range: [number, number];
@@ -182,6 +199,11 @@ async function pick(c: CivilDate): Promise<void> {
     range = dayRange(build.value, c);
   } catch {
     outcome.value = 'failed';
+    return;
+  }
+  // A day the zone skipped has no instant, so no item.
+  if (range[1] <= range[0]) {
+    outcome.value = 'none';
     return;
   }
   const counted = await viewer.dayCounts(props.chatId, range);
@@ -206,7 +228,8 @@ async function seek(
 ): Promise<void> {
   outcome.value = 'seeking';
   const got = await viewer.seekDate(props.chatId, utcMs, dir);
-  if (mine !== pickSeq || got === null) return;
+  if (mine !== pickSeq || got === null || !props.open) return;
+  nearestSeeking.value = false;
   if ('error' in got) {
     outcome.value = 'failed';
     error.value = got.error;
@@ -222,7 +245,7 @@ async function seek(
 
 function nearest(dir: 'earlier' | 'later'): void {
   const c = picked.value;
-  if (!c) return;
+  if (!c || nearestSeeking.value) return;
   let range: [number, number];
   try {
     range = dayRange(build.value, c);
@@ -230,6 +253,7 @@ function nearest(dir: 'earlier' | 'later'): void {
     outcome.value = 'failed';
     return;
   }
+  nearestSeeking.value = true;
   if (dir === 'earlier') void seek(range[0], 'before', 'noEarlier');
   else void seek(range[1], 'onOrAfter', 'noLater');
 }
@@ -258,7 +282,13 @@ const outcomeText = computed(() => {
       return '';
   }
 });
-const offerNearest = computed(() => outcome.value === 'none' || outcome.value === 'noEarlier' || outcome.value === 'noLater');
+const offerNearest = computed(
+  () =>
+    outcome.value === 'none' ||
+    outcome.value === 'noEarlier' ||
+    outcome.value === 'noLater' ||
+    (outcome.value === 'seeking' && nearestSeeking.value),
+);
 </script>
 
 <template>
@@ -346,10 +376,20 @@ const offerNearest = computed(() => outcome.value === 'none' || outcome.value ==
         </p>
       </div>
       <div v-if="offerNearest" class="d-flex gap-2 flex-wrap">
-        <button type="button" class="btn btn-sm btn-outline-secondary" @click="nearest('earlier')">
+        <button
+          type="button"
+          class="btn btn-sm btn-outline-secondary"
+          :aria-disabled="nearestSeeking ? 'true' : undefined"
+          @click="nearest('earlier')"
+        >
           {{ DATE_JUMP_TEXT.earlier }}
         </button>
-        <button type="button" class="btn btn-sm btn-outline-secondary" @click="nearest('later')">
+        <button
+          type="button"
+          class="btn btn-sm btn-outline-secondary"
+          :aria-disabled="nearestSeeking ? 'true' : undefined"
+          @click="nearest('later')"
+        >
           {{ DATE_JUMP_TEXT.later }}
         </button>
       </div>

@@ -33,6 +33,11 @@
 //   screen where it is (the focused message, or the first in view), so
 //   "Show" returns there; an open asked with `focus: false` shows the
 //   message without moving keyboard focus.
+// - Review fixes: the header's first date is the first of 2007 or later,
+//   with "and N earlier-dated items" (§3.6), and the time-zone note; a
+//   reload around an anchor an import moved keeps focus on that message;
+//   the conversation's row is loaded again if the row cache dropped it;
+//   an open at an end never re-centres an earlier jump's focus.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { AnchorInput, MessageDto, SafeId } from '@/types';
 import type { FeedHandle } from '@/services/feedModel';
@@ -43,13 +48,16 @@ import ConversationLabel from './ConversationLabel.vue';
 import DateJumpDialog from './DateJumpDialog.vue';
 import { matchShortcut } from '@/services/shortcuts';
 import { parseSafeId } from '@/services/ids';
-import { dayKey, formatInstant, timeText } from '@/services/time';
+import { dayKey, formatInstant, isBefore2007, timeText } from '@/services/time';
 import {
+  BEFORE_2007_TEXT,
   DATE_JUMP_TEXT,
   FOCUS_REASON_TEXT,
   LIST_TEXT,
   SERVICE_TEXT,
   THREAD_TEXT,
+  TIME_ZONE_NOTE,
+  TIME_ZONE_NOTE_UTC,
   VIEWER_STATE_TEXT,
   fill,
 } from '@/services/viewerText';
@@ -100,14 +108,37 @@ const recorded = computed(() => {
   return s ? fill(THREAD_TEXT.itemsRecorded, { n: s.itemsRecorded }) : null;
 });
 
+/**
+ * The dated range (§3.6): from the first item dated 2007 or later to the
+ * last dated item (both live), and "and N earlier-dated items" for dates
+ * before 2007, which are never used silently as the first date.
+ */
 const dates = computed(() => {
-  const s = row.value?.stats;
-  if (!s || s.firstMs === null || s.lastMs === null) return null;
-  return fill(THREAD_TEXT.dateRange, {
-    first: formatInstant(s.firstMs, settings.viewer, 'date'),
-    last: formatInstant(s.lastMs, settings.viewer, 'date'),
-  });
+  const r = row.value;
+  if (!r) return null;
+  const date = (ms: number) => formatInstant(ms, settings.viewer, 'date');
+  const parts: string[] = [];
+  const first = r.firstDated2007Ms;
+  const last = r.lastDatedMs;
+  if (first !== null && last !== null) {
+    parts.push(fill(THREAD_TEXT.dateRange, { first: date(first), last: date(last) }));
+  } else if (last !== null) {
+    const text = fill(THREAD_TEXT.lastDatedOnly, { last: date(last) });
+    parts.push(isBefore2007(last) ? `${text} (${BEFORE_2007_TEXT})` : text);
+  }
+  const e = r.earlierDated;
+  if (e.n > 0) {
+    parts.push(
+      fill(e.capped ? THREAD_TEXT.earlierDatedCapped : e.n === 1 ? THREAD_TEXT.earlierDatedOne : THREAD_TEXT.earlierDated, {
+        n: e.n,
+      }),
+    );
+  }
+  return parts.length > 0 ? parts.join(' ') : null;
 });
+
+/** No zone is recorded in the archive: say which one the times are shown in (§8.5). */
+const zoneNote = computed(() => (settings.viewer.timeZone === 'utc' ? TIME_ZONE_NOTE_UTC : TIME_ZONE_NOTE));
 
 const undated = computed(() => {
   const u = notices.value?.undatedCount ?? row.value?.undated ?? null;
@@ -138,7 +169,8 @@ const dayLabels = computed(() => {
     if (t.kind !== 'instant') continue;
     const key = dayKey(t.ms, settings.viewer.timeZone);
     if (key !== previous) {
-      out.set(m.id, formatInstant(t.ms, settings.viewer, 'date'));
+      const day = formatInstant(t.ms, settings.viewer, 'date');
+      out.set(m.id, t.before2007 ? `${day} (${BEFORE_2007_TEXT})` : day);
       previous = key;
     }
   }
@@ -161,7 +193,7 @@ const dateStart = computed<number | null>(() => {
     const t = timeText(items.value[i]!.date);
     if (t.kind === 'instant') return t.ms;
   }
-  return row.value?.stats?.lastMs ?? null;
+  return row.value?.lastDatedMs ?? row.value?.stats?.lastMs ?? null;
 });
 
 const empty = computed(
@@ -176,6 +208,15 @@ function open(anchor: AnchorInput, align: Align, focus = false): void {
   // below sees, so align once the open has settled as well.
   void viewer.openChat(props.chatId, anchor).then(alignOpened);
 }
+
+// The row cache is bounded: when it drops this conversation's row, load
+// it again (the header, the sender labels and the undated count use it).
+watch(
+  () => viewer.rows.has(props.chatId),
+  (has) => {
+    if (!has && viewer.session) void viewer.loadRows([props.chatId]);
+  },
+);
 
 watch(
   () => props.chatId,
@@ -203,7 +244,9 @@ async function alignOpened(): Promise<void> {
   aligning = true;
   await nextTick();
   const f = feed.value;
-  const focus = w.notices?.focus;
+  // A page's focus reason belongs to an open at a message; an open at an
+  // end (Jump to newest, Ctrl+End, a kept window) never re-centres it.
+  const focus = lastOpen.anchor.kind === 'message' ? w.notices?.focus : null;
   const shown = !!focus && items.value.some((m) => m.id === focus.id);
   if (f && focus && shown) f.scrollToKey(focus.id, 'center');
   else if (f && pending.align === 'start') f.scrollToStart();
@@ -227,6 +270,29 @@ async function alignOpened(): Promise<void> {
   aligning = false;
 }
 
+// An import moved an anchor and the store reloaded the window around it:
+// show that message and keep keyboard focus there (§3.5).
+watch(
+  () => win.value?.reloaded?.n,
+  async () => {
+    const r = win.value?.reloaded;
+    if (!r) return;
+    const had = focusedId.value;
+    const target = had !== null && items.value.some((m) => m.id === had) ? had : r.around;
+    if (!items.value.some((m) => m.id === target)) return;
+    focusedId.value = target;
+    await nextTick();
+    feed.value?.scrollToKey(target, 'center');
+    const active = document.activeElement;
+    const lost = active === null || active === document.body;
+    const inFeed = active instanceof Element && active.closest('.oma-thread-feed') !== null;
+    if (had !== null && (lost || inFeed)) {
+      await nextTick();
+      document.getElementById(`${ARTICLE_ID_PREFIX}${target}`)?.focus({ preventScroll: true });
+    }
+  },
+);
+
 function canLoad(): boolean {
   const w = win.value;
   return pendingAlign === null && !!w && w.loading === null && w.error === null && w.pages.length > 0;
@@ -244,7 +310,18 @@ function onNearEnd(): void {
   void viewer.loadMore('newer', feed.value?.firstVisibleKey() ?? null);
 }
 
+/** Retry goes away with the error: keep focus in the thread, not on `<body>`. */
+function keepFocusAfterRetry(): void {
+  void nextTick(() => {
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    const at = focusedId.value === null ? null : document.getElementById(`${ARTICLE_ID_PREFIX}${focusedId.value}`);
+    (at ?? document.getElementById('oma-thread-title'))?.focus({ preventScroll: true });
+  });
+}
+
 function retry(): void {
+  keepFocusAfterRetry();
   const w = win.value;
   if (!w || w.pages.length === 0 || lastEdge === null) {
     open(lastOpen.anchor, lastOpen.align);
@@ -321,8 +398,9 @@ function onFeedKeydown(event: KeyboardEvent): void {
     const id = shortcut ? articleId(event.target) : null;
     if (shortcut && id !== null) {
       event.preventDefault();
-      if (shortcut.id === 'viewer-details') viewer.openDetails(id);
-      else if (shortcut.id === 'viewer-reply-thread') viewer.openReplies(id);
+      const back = `${ARTICLE_ID_PREFIX}${id}`;
+      if (shortcut.id === 'viewer-details') viewer.openDetails(id, false, back);
+      else if (shortcut.id === 'viewer-reply-thread') viewer.openReplies(id, back);
       // The same path as the context menu: the article opens its menu.
       else event.target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       return;
@@ -346,7 +424,7 @@ function onFeedKeydown(event: KeyboardEvent): void {
 <template>
   <div class="oma-thread">
     <header class="oma-thread-head">
-      <h2 id="oma-thread-title" class="oma-thread-title">
+      <h2 id="oma-thread-title" class="oma-thread-title" tabindex="-1">
         <ConversationLabel v-if="row" :label="row.label" :chat-id="chatId" />
         <template v-else>{{ LIST_TEXT.loadingRow }}</template>
       </h2>
@@ -355,6 +433,7 @@ function onFeedKeydown(event: KeyboardEvent): void {
         <span v-if="row?.service">{{ SERVICE_TEXT[row.service] }}</span>
         <span v-if="recorded">{{ recorded }}</span>
         <span v-if="dates">{{ dates }}</span>
+        <span class="oma-thread-zone">{{ zoneNote }}</span>
       </p>
       <div class="oma-thread-actions">
         <template v-if="inUndated">

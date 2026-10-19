@@ -30,6 +30,7 @@ import { useViewer } from '@/stores/viewer';
 import { useSettings } from '@/stores/settings';
 import { dayKey } from '@/services/time';
 import type { GetThreadPageRequest, MessageDto, ThreadPageDto } from '@/types';
+import { TIME_ZONE_NOTE } from '@/services/viewerText';
 import {
   ARCHIVE_ID,
   content,
@@ -462,5 +463,107 @@ describe('ThreadView: dates, search and shortcuts (5i)', () => {
     await w.findAll('button').find((b) => b.text() === 'Search this conversation')!.trigger('click');
     expect(store.panel).toEqual({ kind: 'search' });
     expect(store.searchForm.chatId).toBe(CHAT);
+  });
+});
+
+describe('ThreadView (review fixes)', () => {
+  it('never shows a date before 2007 as the first date: it counts it, with the zone note', async () => {
+    fake.handlers.getConversations = (arg) => {
+      const [, wanted] = arg as [number, number[]];
+      return Promise.resolve({
+        rows: wanted.map((id) =>
+          conversationRow(id, {
+            stats: { itemsRecorded: 12, undated: 0, firstMs: 1000, lastMs: Date.UTC(2026, 0, 1) },
+            firstDated2007Ms: Date.UTC(2015, 5, 1),
+            lastDatedMs: Date.UTC(2026, 9, 19),
+            earlierDated: { n: 1, capped: false },
+          }),
+        ),
+        skippedRows: 0,
+      });
+    };
+    const w = await mountThread();
+    const facts = w.get('.oma-thread-facts').text();
+    expect(facts).toContain('2015');
+    expect(facts).not.toContain('1970');
+    expect(facts).toContain('and 1 earlier-dated item');
+    expect(facts).toContain(TIME_ZONE_NOTE);
+  });
+
+  it('says a NULL service was not recorded, never "not recognised"', async () => {
+    const serve = fake.handlers.getThreadPage!;
+    fake.handlers.getThreadPage = async (arg) => {
+      const p = (await serve(arg)) as ThreadPageDto;
+      return { ...p, items: p.items.map((m) => (m.id === 200 ? { ...m, service: null } : m)) };
+    };
+    const w = await mountThread();
+    const text = w.text();
+    expect(text).toContain('Service not recorded or unreadable');
+    expect(text).not.toContain('not recognised');
+  });
+
+  it('loads its conversation row again when the row cache dropped it', async () => {
+    const w = await mountThread();
+    fake.calls.length = 0;
+    useViewer().rows = new Map();
+    await flushPromises();
+    expect(fake.calls.some(([n]) => n === 'getConversations')).toBe(true);
+    expect(w.get('#oma-thread-title').text()).toContain('Synthetic chat 4');
+  });
+
+  it('focuses the newest item on Ctrl+End after a search result, not the old result', async () => {
+    const serve = fake.handlers.getThreadPage!;
+    fake.handlers.getThreadPage = (arg) => {
+      const r = arg as GetThreadPageRequest;
+      if (r.anchor.kind === 'message' && r.direction === 'around') {
+        const at = r.anchor.message;
+        return Promise.resolve(page(range(at - 5, 11), 200, { focus: { id: sid(at), reason: 'anchor' } }));
+      }
+      return serve(arg);
+    };
+    const w = await mountThread();
+    useViewer().focusOnOpen(sid(CHAT), sid(195));
+    await flushPromises();
+    await flushPromises();
+    expect(document.activeElement?.id).toBe('oma-m-195');
+    fake.calls.length = 0;
+    useViewer().requestThread('last');
+    await flushPromises();
+    await flushPromises();
+    expect(pageRequests()).toHaveLength(0); // shown from the kept window
+    expect(document.activeElement?.id).toBe('oma-m-200');
+    expect(useViewer().openWindow!.notices?.focus ?? null).toBeNull();
+    w.unmount();
+  });
+
+  it('keeps focus on the same message when an import moved the anchor and the page was reloaded', async () => {
+    const serve = fake.handlers.getThreadPage!;
+    let moved = false;
+    fake.handlers.getThreadPage = (arg) => {
+      const r = arg as GetThreadPageRequest;
+      // Only the first page from 151's remembered key reports the move.
+      if (r.anchor.kind === 'message' && r.direction === 'older' && r.anchor.message === 151 && !moved) {
+        moved = true;
+        return Promise.resolve(page([149, 150, 151, 152], 200, { anchorMoved: true }));
+      }
+      if (r.anchor.kind === 'message' && r.direction === 'around') {
+        return Promise.resolve(page(range(r.anchor.message - 5, 11), 200));
+      }
+      return serve(arg);
+    };
+    const w = await mountThread();
+    // The focused message is not in the reloaded page: focus goes to the
+    // anchor, the message the page was reloaded around.
+    const article = document.getElementById('oma-m-200');
+    expect(article).not.toBeNull();
+    article!.focus();
+    nearStart(w);
+    await flushPromises();
+    await flushPromises();
+    const ids = useViewer().openWindow!.pages.flatMap((p) => p.items.map((m) => m.id));
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(useViewer().openWindow!.reloaded?.around).toBe(151);
+    expect(document.activeElement?.id).toBe('oma-m-151');
+    w.unmount();
   });
 });

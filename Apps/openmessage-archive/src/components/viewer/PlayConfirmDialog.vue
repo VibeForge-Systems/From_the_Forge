@@ -17,7 +17,12 @@ const attachment = computed(() => viewer.pendingPlay);
 </script>
 
 <template>
-  <ModalDialog :open="attachment !== null" :title="PLAY_CONFIRM_TEXT.title" @close="viewer.answerPlay('cancel')">
+  <ModalDialog
+    :open="attachment !== null"
+    :title="PLAY_CONFIRM_TEXT.title"
+    :return-to="viewer.playReturnTo()"
+    @close="viewer.answerPlay('cancel')"
+  >
     <template v-if="attachment">
       <p class="oma-play-file">
         <SafeText v-if="attachment.name.kind === 'text'" :value="attachment.name" mode="identifier" />

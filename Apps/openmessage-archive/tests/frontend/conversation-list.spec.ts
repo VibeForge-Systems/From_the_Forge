@@ -240,3 +240,27 @@ describe('ConversationLabel precedence', () => {
     expect(render({ kind: 'name', value: content('a‮b', { bidiControls: true }) })).toContain('⟨U+202E⟩');
   });
 });
+
+describe('ConversationList (review fixes)', () => {
+  it('says how many addresses are recorded, never "Group", and marks a last date before 2007', async () => {
+    vi.useFakeTimers();
+    fake.handlers.getConversations = (arg) => {
+      const [, wanted] = arg as [number, number[]];
+      return Promise.resolve({
+        rows: wanted.map((id) =>
+          conversationRow(id, { addresses: id === 1 ? 2 : 1, group: true, lastDatedMs: id === 2 ? Date.UTC(2001, 0, 1) : Date.UTC(2026, 0, 1) }),
+        ),
+        skippedRows: 0,
+      });
+    };
+    const w = await mountList();
+    await vi.advanceTimersByTimeAsync(100);
+    await flushPromises();
+    const first = w.get('#oma-conv-opt-0').text();
+    expect(first).toContain('2 addresses recorded');
+    expect(first).not.toMatch(/\bGroup\b/);
+    expect(w.get('#oma-conv-opt-1').text()).not.toContain('addresses recorded');
+    expect(w.get('#oma-conv-opt-1').text()).toContain('Before 2007');
+    expect(first).not.toContain('Before 2007');
+  });
+});

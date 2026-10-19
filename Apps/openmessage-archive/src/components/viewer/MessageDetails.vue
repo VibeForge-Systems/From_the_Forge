@@ -22,13 +22,18 @@
 //   rule that derives the chips.
 //
 // No read, delivery or sent value is shown (D94); there is none in the DTO.
-import { computed, ref, watch } from 'vue';
+//
+// It takes focus on its heading when it opens (the store gives focus back
+// to the opener on Close). Text revealed here carries the same caution as
+// in the bubble (REVEALED_TEXT), and dates before 2007 their mark.
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import type { HandleDto, MessageDetailDto, OptContentDto, RawValueDto, ReactionRecordDto, SafeId, TimeDto } from '@/types';
 import SafeText from './SafeText.vue';
 import { bytesText, cardSentence, sizeLine } from '@/services/attachmentView';
 import { formatInstant, isoAtPrecision, timeText } from '@/services/time';
 import {
   ASSOC_KIND_TEXT,
+  BEFORE_2007_TEXT,
   BLOB_VERIFY_TEXT,
   CHIP_SENDER_TEXT,
   COPY_TEXT,
@@ -46,6 +51,7 @@ import {
   PATH_CLASS_TEXT,
   PREVIEW_BODY_TEXT,
   REACTION_RULE_TEXT,
+  REVEALED_TEXT,
   SENDER_TEXT,
   SERVICE_TEXT,
   SUMMARY_TIME_KIND_TEXT,
@@ -76,11 +82,19 @@ const rows = ref<ReactionRecordDto[]>([]);
 const rowsShown = ref(false);
 const rowsMore = ref(false);
 const rowsLoading = ref(false);
+const heading = ref<HTMLElement | null>(null);
 let seq = 0;
+
+function focusHeading(): void {
+  void nextTick(() => heading.value?.focus({ preventScroll: true }));
+}
+onMounted(focusHeading);
+watch(() => viewer.panelFocus, focusHeading);
 
 async function load(withReactions: boolean): Promise<void> {
   const mine = (seq += 1);
   loading.value = true;
+  rowsLoading.value = false;
   error.value = null;
   const got = await viewer.loadDetail(props.messageId, withReactions ? null : undefined);
   if (mine !== seq) return;
@@ -99,6 +113,9 @@ async function load(withReactions: boolean): Promise<void> {
 watch(
   () => [props.messageId, props.reactions] as const,
   ([, reactions]) => {
+    // A reply still on its way (`load` or `moreRows`) is for the old message.
+    seq += 1;
+    rowsLoading.value = false;
     detail.value = null;
     rows.value = [];
     rowsShown.value = false;
@@ -115,8 +132,13 @@ watch(
 
 async function moreRows(): Promise<void> {
   const last = rows.value[rows.value.length - 1];
+  // The panel is reused for another message: a late answer for this one
+  // must not land there.
+  const id = props.messageId;
+  const mine = seq;
   rowsLoading.value = true;
-  const got = await viewer.loadDetail(props.messageId, rowsShown.value && last ? last.id : null);
+  const got = await viewer.loadDetail(id, rowsShown.value && last ? last.id : null);
+  if (mine !== seq || id !== props.messageId) return;
   rowsLoading.value = false;
   if (got === null) return;
   if ('error' in got) {
@@ -151,8 +173,16 @@ function raw(v: RawValueDto): string {
 interface TimeRow {
   label: string;
   text: string;
+  /** The date is before 2007: shown as recorded, marked (§3.6). */
+  before2007: boolean;
   raw: string | null;
   iso: string | null;
+}
+
+/** A time's text, with the before-2007 mark when it applies. */
+function markedTime(t: TimeDto): string {
+  const shown = timeText(t, settings.viewer);
+  return shown.kind === 'instant' && shown.before2007 ? `${shown.text} (${BEFORE_2007_TEXT})` : shown.text;
 }
 
 function timeRow(label: string, t: TimeDto): TimeRow {
@@ -161,6 +191,7 @@ function timeRow(label: string, t: TimeDto): TimeRow {
   return {
     label,
     text: shown.text,
+    before2007: shown.kind === 'instant' && shown.before2007,
     raw: t.raw === null ? null : fill(DETAILS_TEXT.raw, { raw: t.raw }),
     iso: iso === null ? null : fill(DETAILS_TEXT.utc, { iso }),
   };
@@ -209,6 +240,12 @@ const reactionTotal = computed(() => {
 });
 const reactionsUnkeyed = computed(() => detail.value?.reactions?.keyed === false);
 
+/** Earlier text is shown here because the user revealed it: why it was withheld. */
+const revealedReason = computed(() => {
+  const e = m.value?.edit.earlier;
+  return e && e.kind === 'revealed' ? e.reason : null;
+});
+
 const hasEarlierWithheld = computed(() =>
   (detail.value?.versions ?? []).some(
     (v) => v.text.kind === 'withheld' || v.edits.some((e) => e.text.kind === 'withheld'),
@@ -230,7 +267,7 @@ async function showEarlier(): Promise<void> {
 <template>
   <div class="oma-details">
     <div class="oma-panel-header">
-      <h2 id="oma-details-title" class="oma-panel-title">{{ DETAILS_TEXT.title }}</h2>
+      <h2 id="oma-details-title" ref="heading" class="oma-panel-title" tabindex="-1">{{ DETAILS_TEXT.title }}</h2>
       <button type="button" class="btn-close" :aria-label="DETAILS_TEXT.close" @click="emit('close')"></button>
     </div>
     <div class="oma-panel-body px-3 small" aria-labelledby="oma-details-title" role="region">
@@ -268,6 +305,7 @@ async function showEarlier(): Promise<void> {
             <dt>{{ t.label }}</dt>
             <dd>
               {{ t.text }}
+              <span v-if="t.before2007" class="oma-badge-inline">{{ BEFORE_2007_TEXT }}</span>
               <span v-if="t.iso" class="d-block">{{ t.iso }}</span>
               <span v-if="t.raw" class="d-block oma-raw">{{ t.raw }}</span>
             </dd>
@@ -276,6 +314,7 @@ async function showEarlier(): Promise<void> {
 
         <h3 class="oma-details-heading">{{ DETAILS_TEXT.versions }}</h3>
         <p class="oma-body-note">{{ DETAILS_TEXT.versionsNote }} {{ EDIT_UI_TEXT.searchCovers }}</p>
+        <p v-if="revealedReason" class="oma-body-note oma-revealed-note" role="note">{{ REVEALED_TEXT[revealedReason] }}</p>
         <ol class="oma-details-versions">
           <li v-for="v in detail.versions" :key="v.body">
             <p class="mb-1">
@@ -458,7 +497,7 @@ async function showEarlier(): Promise<void> {
               ·
               <SafeText v-if="rowSender(r).address" :value="rowSender(r).address" mode="identifier" ltr quiet />
               <template v-else>{{ rowSender(r).text }}</template>
-              · {{ timeText(r.time, settings.viewer).text }}
+              · {{ markedTime(r.time) }}
               <template v-if="r.targetPart !== null"> · {{ fill(DETAILS_TEXT.targetPart, { part: r.targetPart }) }}</template>
             </li>
           </ol>

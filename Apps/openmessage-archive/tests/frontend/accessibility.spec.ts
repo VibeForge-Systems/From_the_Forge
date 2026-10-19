@@ -68,6 +68,11 @@ describe('forced colours', () => {
     expect(forced).toContain('CanvasText');
   });
 
+  it('keep the open conversation marked by a bar, not only a fill (review fix)', () => {
+    expect(viewer).toMatch(/\.oma-conv-option\.oma-selected \{[^}]*border-inline-start-color: var\(--bs-primary\)/);
+    expect(forced).toMatch(/\.oma-conv-option\.oma-selected \{[^}]*border-inline-start-color: SelectedItem/);
+  });
+
   it('keep focus rings and search marks visible', () => {
     expect(forced).toMatch(/\.oma-thread-item:focus-visible[\s\S]*?outline: 2px solid Highlight/);
     expect(forced).toMatch(/mark[\s\S]*?background: Highlight/);

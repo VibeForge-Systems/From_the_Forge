@@ -324,3 +324,61 @@ describe('SearchPanel', () => {
     expect(store.searchForm.query).toBe('');
   });
 });
+
+describe('SearchPanel (review fixes)', () => {
+  it('clears revealed snippets when "Include earlier versions" is unticked while a date is invalid', async () => {
+    hits = [searchHit(1, { version: 'earlier' })];
+    started = searchStarted(1);
+    const w = await mountPanel();
+    await w.find('#oma-search-earlier').setValue(true);
+    await typeQuery(w, QUERY);
+    expect(w.findAll('.oma-hit')).toHaveLength(1);
+    // A half-typed date, then the reveal is withdrawn.
+    await w.find('#oma-search-from').setValue('2026-0');
+    await w.find('#oma-search-earlier').setValue(false);
+    vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+    await flushPromises();
+    expect(w.findAll('.oma-hit')).toHaveLength(0);
+    expect(useViewer().search.hits).toEqual([]);
+  });
+
+  it('names no direction for a conversation event, and marks a date before 2007', async () => {
+    hits = [
+      searchHit(1, { item: 'participantAdded', direction: 'you' }),
+      searchHit(2, { ms: Date.UTC(2001, 0, 1) }),
+    ];
+    started = searchStarted(2);
+    const w = await mountPanel();
+    await typeQuery(w, QUERY);
+    const [event, early] = w.findAll('.oma-hit');
+    expect(event!.find('.oma-hit-dir').exists()).toBe(false);
+    expect(early!.find('.oma-hit-dir').exists()).toBe(true);
+    expect(early!.find('.oma-hit-head').text()).toContain('Before 2007');
+    expect(event!.find('.oma-hit-head').text()).not.toContain('Before 2007');
+  });
+
+  it('keeps one "more results" button while more load, so focus stays on it', async () => {
+    started = searchStarted(80);
+    hits = Array.from({ length: 80 }, (_, i) => searchHit(i + 1));
+    let release: () => void = () => undefined;
+    const w = await mountPanel();
+    await typeQuery(w, QUERY);
+    fake.handlers.getSearchResults = (arg) => {
+      const r = arg as { offset: number; limit: number };
+      return new Promise((resolve) => {
+        release = () => resolve({ hits: hits.slice(r.offset, r.offset + r.limit), skippedRows: 0 });
+      });
+    };
+    const button = w.findAll('button').find((b) => b.text() === SEARCH_TEXT.more)!;
+    (button.element as HTMLButtonElement).focus();
+    await button.trigger('click');
+    await flushPromises();
+    expect(button.element.isConnected).toBe(true);
+    expect(button.attributes('aria-disabled')).toBe('true');
+    expect(button.text()).toBe(SEARCH_TEXT.loadingMore);
+    expect(document.activeElement).toBe(button.element);
+    release();
+    await flushPromises();
+    expect(w.findAll('.oma-hit')).toHaveLength(80);
+  });
+});

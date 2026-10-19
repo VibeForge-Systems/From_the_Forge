@@ -6,13 +6,16 @@
 // one-time code says so and shows nothing of it. "Open in conversation"
 // opens the thread around the message and focuses it; the message id
 // never enters the URL. Ids are built from the result's position only.
+// Conversation events and unrecognised items name no direction: an event
+// asserts no actor (§3.6). A date before 2007 carries its mark.
 import { computed } from 'vue';
 import type { ConversationRowDto, SearchHitDto } from '@/types';
 import SafeText from './SafeText.vue';
 import ConversationLabel from './ConversationLabel.vue';
-import { formatInstant } from '@/services/time';
+import { formatInstant, isBefore2007 } from '@/services/time';
 import {
   ASSOC_KIND_TEXT,
+  BEFORE_2007_TEXT,
   DIRECTION_TEXT,
   HIT_VERSION_TEXT,
   ITEM_KIND_TEXT,
@@ -31,6 +34,13 @@ const base = computed(() => `oma-hit-${props.index}`);
 const when = computed(() =>
   props.hit.ms === null ? SEARCH_TEXT.undated : formatInstant(props.hit.ms, settings.viewer),
 );
+const before2007 = computed(() => props.hit.ms !== null && isBefore2007(props.hit.ms));
+/** Only a message or an association row has a sender; an event has no actor. */
+const direction = computed(() => {
+  const h = props.hit;
+  const association = h.association !== null && h.association !== 'noAssociation';
+  return association || h.item === 'message' ? DIRECTION_TEXT[h.direction] : null;
+});
 const kind = computed(() => {
   if (props.hit.association !== null && props.hit.association !== 'noAssociation') {
     return ASSOC_KIND_TEXT[props.hit.association];
@@ -49,7 +59,8 @@ const others = computed(() => {
   <div class="oma-hit">
     <p :id="`${base}-h`" class="oma-hit-head">
       <span class="oma-hit-time">{{ when }}</span>
-      {{ ' ' }}<span class="oma-hit-dir">{{ DIRECTION_TEXT[hit.direction] }}</span>
+      <template v-if="before2007">{{ ' ' }}<span class="oma-badge-inline">{{ BEFORE_2007_TEXT }}</span></template>
+      <template v-if="direction">{{ ' ' }}<span class="oma-hit-dir">{{ direction }}</span></template>
       {{ ' ' }}<span class="oma-hit-chat">
         <ConversationLabel v-if="row && hit.chat !== null" :label="row.label" :chat-id="hit.chat" quiet />
         <template v-else-if="hit.chat !== null">{{ LIST_TEXT.loadingRow }}</template>

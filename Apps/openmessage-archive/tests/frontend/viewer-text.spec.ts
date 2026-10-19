@@ -93,3 +93,28 @@ describe('the viewer DTO types', () => {
     }
   });
 });
+
+describe('viewerText (review fixes)', () => {
+  it('never calls a conversation a group', () => {
+    for (const [name, table] of TABLES) {
+      for (const [key, value] of Object.entries(table)) {
+        // Raw column names (group_title, group_action_type) are not words.
+        const words = value.replace(/\bgroup_\w+/g, '');
+        expect(/\bgroups?\b/i.test(words), `${name}.${key}: ${value}`).toBe(false);
+      }
+    }
+  });
+
+  it('words the edit codes neutrally: never a whole unsend, never "partly"', () => {
+    for (const value of Object.values(words.EDIT_LABEL_TEXT)) {
+      expect(value).not.toBe(words.BUBBLE_TEXT.unsentWhole);
+      expect(value.toLowerCase()).not.toContain('partly');
+      expect(value.startsWith(words.BUBBLE_TEXT.unsentWhole)).toBe(false);
+    }
+  });
+
+  it('never says a NULL service is unrecognised', () => {
+    expect(words.BUBBLE_TEXT.serviceNotRecorded).toBe('Service not recorded or unreadable');
+    expect(Object.values(words.BUBBLE_TEXT).join(' ')).not.toContain('not recognised by this version');
+  });
+});

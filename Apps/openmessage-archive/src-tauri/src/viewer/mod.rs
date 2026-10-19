@@ -775,9 +775,10 @@ pub fn search_results(
 
 /// `hide_viewer`: the privacy screen is up (slice 5j). The page has
 /// unmounted everything it showed; the cached renditions are dropped too,
-/// so nothing decoded stays in memory while the screen is hidden. The
-/// session, its tokens and the failure cache stay, so "Show" needs no
-/// reopen.
+/// and a decode still running is not cached when it ends (the hide epoch,
+/// `media/engine.rs`). A request that reaches the protocol only after the
+/// hide is served and cached as usual. The session, its tokens and the
+/// failure cache stay, so "Show" needs no reopen.
 pub fn hide(s: &ViewerSession) -> IpcResult<()> {
     s.media().hide();
     tracing::info!(outcome = "hidden", "viewer hidden");

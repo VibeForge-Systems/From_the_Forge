@@ -111,7 +111,8 @@ export function monthGrid(
  */
 export type DateFilter =
   | { ok: true; fromUtcMs?: number; untilUtcMs?: number }
-  | { ok: false; problem: 'from' | 'to' | 'order' };
+  /** `empty`: every day of the range was skipped by the zone (no instant in it). */
+  | { ok: false; problem: 'from' | 'to' | 'order' | 'empty' };
 
 export function dateFilter(build: DayBoundaryBuilder, from: string, to: string): DateFilter {
   const out: { ok: true; fromUtcMs?: number; untilUtcMs?: number } = { ok: true };
@@ -131,8 +132,11 @@ export function dateFilter(build: DayBoundaryBuilder, from: string, to: string):
   } catch {
     return { ok: false, problem: a && !b ? 'from' : 'to' };
   }
+  if (a && b && isoDate(b) < isoDate(a)) return { ok: false, problem: 'order' };
+  // Days the zone skipped hold no instant (dayBounds): a range made only of
+  // them is empty, and Rust refuses an empty range.
   if (out.fromUtcMs !== undefined && out.untilUtcMs !== undefined && out.untilUtcMs <= out.fromUtcMs) {
-    return { ok: false, problem: 'order' };
+    return { ok: false, problem: 'empty' };
   }
   return out;
 }

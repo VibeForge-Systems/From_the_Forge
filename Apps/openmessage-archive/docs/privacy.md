@@ -475,8 +475,13 @@ attachment is M6.
   **UNVERIFIED** (the milestone 5 manual checklist).
 - The window title is "Viewer — OpenMessage Archive" in the viewer, never
   a conversation name.
-- Hiding the screen drops the image previews kept in memory as well; idle
-  hide closes the viewer, which drops everything it held.
+- Hiding the screen drops the image previews kept in memory as well, and
+  a preview still being decoded at that moment is answered but not kept.
+  A preview request the page sent just before hiding that reaches the app
+  only after the hide is decoded and kept like any other, until the
+  viewer closes or the screen is hidden again (a narrow race between the
+  page and the app; not tested). Idle hide closes the viewer, which drops
+  everything it held.
 
 ### The privacy screen
 

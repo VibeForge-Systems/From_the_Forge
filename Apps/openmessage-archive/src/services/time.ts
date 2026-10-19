@@ -50,8 +50,11 @@ export const MAX_BOUNDS = 43;
 
 /**
  * `count + 1` boundaries for `count` consecutive days from (year, month,
- * day): the start of each day and the end of the last. Throws when the
- * result would not be strictly increasing (a builder bug) or too long.
+ * day): the start of each day and the end of the last. Two equal
+ * neighbours are a day the zone skipped entirely (Pacific/Apia skipped
+ * 2011-12-30): an empty interval, which holds no instant. Throws when a
+ * boundary goes backwards or is not finite (a builder bug), or when the
+ * result would be too long.
  */
 export function dayBounds(
   build: DayBoundaryBuilder,
@@ -66,8 +69,8 @@ export function dayBounds(
   const bounds: number[] = [];
   for (let i = 0; i <= count; i += 1) bounds.push(build(year, month, day + i));
   for (let i = 1; i < bounds.length; i += 1) {
-    if (!(bounds[i]! > bounds[i - 1]!) || !Number.isFinite(bounds[i]!)) {
-      throw new RangeError('dayBounds: boundaries must increase');
+    if (!(bounds[i]! >= bounds[i - 1]!) || !Number.isFinite(bounds[i]!)) {
+      throw new RangeError('dayBounds: boundaries must not decrease');
     }
   }
   return bounds;
@@ -99,6 +102,26 @@ export function gridBounds(
     day: first.getUTCDate(),
   };
   return { start, bounds: dayBounds(build, start.year, start.month, start.day, 42) };
+}
+
+/**
+ * Bounds Rust accepts (strictly increasing) for bounds that may hold empty
+ * days, and where each day's count is in the answer: `slots[i]` is the
+ * index of day `i` among the strict intervals, or -1 for an empty day.
+ */
+export function strictBounds(bounds: readonly number[]): { bounds: number[]; slots: number[] } {
+  const out: number[] = [];
+  const slots: number[] = [];
+  for (let i = 0; i < bounds.length; i += 1) {
+    if (out.length === 0 || bounds[i]! > out[out.length - 1]!) out.push(bounds[i]!);
+    if (i + 1 < bounds.length) slots.push(bounds[i + 1]! > bounds[i]! ? out.length - 1 : -1);
+  }
+  return { bounds: out, slots };
+}
+
+/** Counts per day from counts per strict interval (`strictBounds`): 0 for an empty day. */
+export function countsPerDay(slots: readonly number[], counts: readonly number[]): number[] {
+  return slots.map((s) => (s < 0 ? 0 : (counts[s] ?? 0)));
 }
 
 /** The index of the day interval that holds `ms`, or -1. */
@@ -173,6 +196,14 @@ function fixedFormat(ms: number, prefs: TimePrefs, part: 'date' | 'time' | 'both
   return `${date} ${time}${zone}`;
 }
 
+/** 2007-01-01T00:00Z: earlier dates are marked "Before 2007" (§3.6), as Rust marks a `TimeDto`. */
+export const FLOOR_2007_MS = Date.UTC(2007, 0, 1);
+
+/** An instant before 2007, for values that cross without a `TimeDto` flag. */
+export function isBefore2007(ms: number): boolean {
+  return Number.isFinite(ms) && ms < FLOOR_2007_MS;
+}
+
 function formatter(prefs: TimePrefs, part: 'date' | 'time' | 'both'): Intl.DateTimeFormat {
   const options: Intl.DateTimeFormatOptions = {
     timeZone: prefs.timeZone === 'utc' ? 'UTC' : undefined,
@@ -189,7 +220,9 @@ function formatter(prefs: TimePrefs, part: 'date' | 'time' | 'both'): Intl.DateT
 /**
  * An instant as text. Seconds are shown only when the setting asks; no
  * sub-second digits are ever shown, so a seconds-unit value never claims
- * more precision than it has.
+ * more precision than it has. In UTC mode a time carries " UTC", on the
+ * Intl path as on the fixed-format one (the styles print no zone name, and
+ * `timeZoneName` cannot be combined with them).
  */
 export function formatInstant(
   ms: number,
@@ -199,7 +232,8 @@ export function formatInstant(
   if (!Number.isFinite(ms)) return '';
   if (!intlStyleSupported) return fixedFormat(ms, prefs, part);
   try {
-    return formatter(prefs, part).format(new Date(ms));
+    const text = formatter(prefs, part).format(new Date(ms));
+    return prefs.timeZone === 'utc' && part !== 'date' ? `${text} UTC` : text;
   } catch {
     return fixedFormat(ms, prefs, part);
   }

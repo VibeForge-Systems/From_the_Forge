@@ -161,11 +161,15 @@ describe('MessageBubble', () => {
     expect(w.text()).toContain('One-time code hidden');
     expect(w.text()).not.toContain('123456');
     expect(detailCalls()).toHaveLength(0);
-    await w.findAll('button').find((b) => b.text() === 'Show code')!.trigger('click');
+    const show = w.findAll('button').find((b) => b.text() === 'Show code')!;
+    await show.trigger('click');
     await flushPromises();
     expect(detailCalls()).toEqual([{ viewer: 3, messageId: 11, reveal: { oneTimeCode: true } }]);
     expect(w.get('.oma-seg-code').text()).toBe('123456');
-    await w.findAll('button').find((b) => b.text() === 'Hide code')!.trigger('click');
+    // The same button (focus stays on it), now "Hide code" (review fix).
+    const hide = w.findAll('button').find((b) => b.text() === 'Hide code')!;
+    expect(hide.element).toBe(show.element);
+    await hide.trigger('click');
     await flushPromises();
     expect(w.text()).not.toContain('123456');
     expect(w.text()).toContain('One-time code hidden');
@@ -195,13 +199,16 @@ describe('MessageBubble', () => {
     expect(w.text()).not.toContain('kept words');
     // Page requests never carried a reveal, and nothing was asked yet.
     expect(detailCalls()).toHaveLength(0);
-    await w.findAll('button').find((b) => b.text() === 'Show earlier text')!.trigger('click');
+    const show = w.findAll('button').find((b) => b.text() === 'Show earlier text')!;
+    await show.trigger('click');
     await flushPromises();
     expect(detailCalls()).toEqual([{ viewer: 3, messageId: 12, reveal: { earlierText: true } }]);
     expect(w.text()).toContain('kept words');
     expect(w.text()).toContain('the phone no longer shows it');
     expect(w.text()).toContain('First kept by the import of');
-    await w.findAll('button').find((b) => b.text() === 'Hide earlier text')!.trigger('click');
+    const hide = w.findAll('button').find((b) => b.text() === 'Hide earlier text')!;
+    expect(hide.element).toBe(show.element);
+    await hide.trigger('click');
     await flushPromises();
     expect(w.text()).not.toContain('kept words');
   });

@@ -39,6 +39,7 @@ import type {
   GetMessageTextRequest,
   GetThreadPageRequest,
   MessageDetailDto,
+  SafeId,
   SearchMessagesRequest,
   TextChunkDto,
 } from '@/types';
@@ -468,7 +469,7 @@ describe('viewer store: attachments, playback and the panel (5h3)', () => {
     await store.requestPlay(attachment(3));
     expect(store.pendingPlay?.id).toBe(3);
     await store.answerPlay('play');
-    expect(store.media).toEqual({ attachment: attachment(3), mode: 'play' });
+    expect(store.media).toEqual({ attachment: attachment(3), mode: 'play', returnTo: null });
     store.closeMedia();
     await store.requestPlay(attachment(3));
     expect(store.pendingPlay).toBeNull();
@@ -575,5 +576,229 @@ describe('viewer store: search and dates (5i)', () => {
     store.requestThread('first');
     expect(store.threadCommand?.kind).toBe('first');
     expect(store.threadCommand?.n).not.toBe(a?.n);
+  });
+});
+
+/** A promise the test resolves by hand. */
+function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
+  let resolve: (v: T) => void = () => undefined;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
+describe('viewer store: sequencing (review fixes)', () => {
+  /** A chunk that echoes whether it was read with codes shown. */
+  function chunkFor(r: GetMessageTextRequest): TextChunkDto {
+    return {
+      body: r.bodyId,
+      fromUtf16: r.fromUtf16,
+      endUtf16: r.fromUtf16 + 10,
+      fullUtf16: 100,
+      text: { kind: 'text', pieces: [textPiece(r.reveal?.oneTimeCode ? 'CODE 123456' : 'masked')] },
+    };
+  }
+
+  it('drops a full-text chunk read with the code shown when "Hide code" comes first', async () => {
+    const store = await openSession();
+    serveDetail();
+    await store.revealMessage(sid(3), { oneTimeCode: true });
+    const pending = deferred<TextChunkDto>();
+    let asked: GetMessageTextRequest | null = null;
+    fake.handlers.getMessageText = (arg) => {
+      asked = arg as GetMessageTextRequest;
+      return pending.promise;
+    };
+    const loading = store.loadFullText(sid(3), sid(3));
+    expect(asked!.reveal).toEqual({ oneTimeCode: true });
+    await store.unreveal(sid(3), { oneTimeCode: true });
+    pending.resolve(chunkFor(asked!));
+    await loading;
+    expect(store.fullTexts.has(sid(3))).toBe(false);
+    expect(store.fullTextFor(sid(3), sid(3))).toBeNull();
+  });
+
+  it('shows a full text only under the reveal it was read with, and drops it on eviction', async () => {
+    const store = await openSession();
+    serveDetail();
+    fake.handlers.getMessageText = (arg) => Promise.resolve(chunkFor(arg as GetMessageTextRequest));
+    await store.loadFullText(sid(3), sid(3));
+    expect(store.fullTextFor(sid(3), sid(3))?.codes).toBe(false);
+    // "Show code": the masked text no longer matches what the bubble shows.
+    await store.revealMessage(sid(3), { oneTimeCode: true });
+    expect(store.fullTextFor(sid(3), sid(3))).toBeNull();
+    await store.loadFullText(sid(3), sid(3));
+    expect(store.fullTextFor(sid(3), sid(3))?.codes).toBe(true);
+    // 100 more reveals evict message 3's: its code text goes with it.
+    for (let i = 100; i < 200; i += 1) await store.revealMessage(sid(i), { earlierText: true });
+    expect(store.revealed.has(sid(3))).toBe(false);
+    expect(store.fullTexts.has(sid(3))).toBe(false);
+  });
+
+  it('never stores a reveal answered after "Hide" was pressed', async () => {
+    const store = await openSession();
+    serveDetail();
+    await store.revealMessage(sid(3), { earlierText: true });
+    const slow = deferred<MessageDetailDto>();
+    fake.handlers.getMessageDetail = (arg) => {
+      const r = arg as GetMessageDetailRequest;
+      if (r.reveal?.earlierText && r.reveal.oneTimeCode) return slow.promise;
+      return Promise.resolve(messageDetail(message(r.messageId)));
+    };
+    // "Show code" is on its way when "Hide earlier text" is pressed.
+    const showing = store.revealMessage(sid(3), { oneTimeCode: true });
+    await store.unreveal(sid(3), { earlierText: true });
+    expect(fake.calls.at(-1)?.[1]).toEqual({ viewer: 7, messageId: 3, reveal: { oneTimeCode: true } });
+    slow.resolve(messageDetail(message(3, { edit: { ...message(3).edit, earlier: { kind: 'revealed', reason: 'unsent', pieces: [textPiece('hidden')], session: sid(1) } } })));
+    await showing;
+    expect(store.revealed.get(sid(3))?.reveal).toEqual({ oneTimeCode: true });
+    expect(store.shown(message(3)).edit.earlier.kind).not.toBe('revealed');
+  });
+
+  it('reloads around an anchor an import moved, and never holds an item twice', async () => {
+    const store = await openSession();
+    serveChat(200);
+    await store.openChat(sid(4));
+    const oldest = store.openWindow!.pages[0]!.olderAnchor!;
+    fake.handlers.getThreadPage = (arg) => {
+      const r = arg as GetThreadPageRequest;
+      if (r.direction === 'older') {
+        // Rows from the old key, including the moved anchor and rows already loaded.
+        return Promise.resolve(threadPage([oldest - 3, oldest - 2, oldest, oldest + 1], { anchorMoved: true }));
+      }
+      return Promise.resolve(threadPage(range(oldest - 10, 21), { focus: { id: oldest, reason: 'anchor' } }));
+    };
+    fake.calls.length = 0;
+    await store.loadMore('older');
+    const around = fake.calls.filter(([n]) => n === 'getThreadPage').at(-1)![1] as GetThreadPageRequest;
+    expect(around).toMatchObject({ anchor: { kind: 'message', message: oldest, include: true }, direction: 'around' });
+    const w = store.openWindow!;
+    const ids = w.pages.flatMap((p) => p.items.map((m) => m.id));
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toContain(oldest);
+    expect(w.notices?.anchorMoved).toBe(true);
+    expect(w.notices?.focus).toBeNull();
+    expect(w.reloaded?.around).toBe(oldest);
+  });
+
+  it('drops items already in the window from a page that overlaps it', async () => {
+    const store = await openSession();
+    serveChat(200);
+    await store.openChat(sid(4));
+    const first = store.openWindow!.pages[0]!.items[0]!.id;
+    fake.handlers.getThreadPage = () => Promise.resolve(threadPage([first - 2, first - 1, first, first + 1]));
+    await store.loadMore('older');
+    const ids = store.openWindow!.pages.flatMap((p) => p.items.map((m) => m.id));
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(store.openWindow!.pages[0]!.items.map((m) => m.id)).toEqual([first - 2, first - 1]);
+  });
+
+  it('forgets an earlier jump’s focus when a kept window opens at the newest item', async () => {
+    const store = await openSession();
+    fake.handlers.getThreadPage = () =>
+      Promise.resolve(threadPage(range(1, 20), { hasOlder: false, hasNewer: false, focus: { id: sid(15), reason: 'anchor' } }));
+    await store.openChat(sid(4), { kind: 'message', message: sid(15) });
+    expect(store.openWindow!.notices?.focus?.id).toBe(15);
+    fake.calls.length = 0;
+    await store.openChat(sid(4));
+    expect(fake.calls).toEqual([]);
+    expect(store.openWindow!.notices?.focus).toBeNull();
+  });
+
+  it('applies only the latest conversation list, whatever order the answers come in', async () => {
+    const store = await openSession();
+    const first = deferred<{ ids: SafeId[]; total: number; truncated: boolean; skippedRows: number }>();
+    fake.handlers.listConversations = (arg) => {
+      const [, , filter] = arg as [number, string, string | null];
+      if (filter === 'an') return first.promise;
+      return Promise.resolve({ ids: [sid(9)], total: 1, truncated: false, skippedRows: 0 });
+    };
+    const older = store.listConversations('recent', 'an');
+    await store.listConversations('name', 'anna');
+    first.resolve({ ids: [sid(1), sid(2)], total: 2, truncated: false, skippedRows: 0 });
+    await older;
+    expect(store.conversationIds).toEqual([9]);
+    expect(store.sort).toBe('name');
+  });
+
+  it('keeps rows in use from being evicted first', async () => {
+    const store = await openSession();
+    fake.handlers.getConversations = (arg) => {
+      const [, ids] = arg as [number, number[]];
+      return Promise.resolve({ rows: ids.map((id) => ({ id: sid(id) })), skippedRows: 0 });
+    };
+    await store.loadRows([sid(1)]);
+    await store.loadRows(range(2, 1998).map(sid));
+    // The open chat's row is asked for again: it moves to the newest end.
+    await store.loadRows([sid(1)]);
+    await store.loadRows(range(3000, 5).map(sid));
+    expect(store.rows.has(sid(1))).toBe(true);
+    expect(store.rows.has(sid(2))).toBe(false);
+  });
+
+  it('opens nothing when the privacy screen closed the dialogs during a Play check', async () => {
+    useSettings().snapshot = snapshot();
+    const store = await openSession();
+    const check = deferred<ReturnType<typeof inspection>>();
+    fake.handlers.inspectAttachment = () => check.promise;
+    const playing = store.requestPlay(attachment(3), 'oma-m-1-a1-play');
+    store.closeDialogs();
+    check.resolve(
+      inspection(3, {
+        content: { kind: 'sniffed', sniffed: 'mp4', class: { kind: 'playable', structureChecked: true }, storedBytes: 9 },
+        playback: { kind: 'allowed', structureChecked: true },
+      }),
+    );
+    await playing;
+    expect(store.pendingPlay).toBeNull();
+    expect(store.media).toBeNull();
+  });
+
+  it('asks each inspection once while it runs, drops queued ones no longer wanted, and keeps failures per card', async () => {
+    const store = await openSession();
+    const gates: (() => void)[] = [];
+    fake.handlers.inspectAttachment = (arg) => {
+      const r = arg as InspectAttachmentRequest;
+      if (r.attachmentId === 99) return Promise.reject(new IpcError('inspect_attachment', 'messageNotFound', 'gone'));
+      return new Promise((resolve) => gates.push(() => resolve(inspection(r.attachmentId))));
+    };
+    const running = [1, 2, 3, 4].map((id) => store.inspect(sid(id)));
+    // The same card asking again joins the running inspection.
+    void store.inspect(sid(1));
+    let wanted = false;
+    const queued = store.inspect(sid(5), false, false, () => wanted);
+    await flush();
+    expect(fake.calls.filter(([n]) => n === 'inspectAttachment')).toHaveLength(4);
+    gates.forEach((g) => g());
+    await Promise.all(running);
+    expect(await queued).toBeNull();
+    expect(fake.calls.filter(([n]) => n === 'inspectAttachment')).toHaveLength(4);
+    wanted = true;
+    expect(await store.inspect(sid(99))).toBeNull();
+    expect(store.inspectionErrors.get(sid(99))).toBeTruthy();
+    expect(store.error).toBeNull();
+    store.retryInspection(sid(99));
+    expect(store.inspectionErrors.has(sid(99))).toBe(false);
+  });
+
+  it('moves focus into the panel when it opens and gives it back to the message on Close', async () => {
+    const store = await openSession();
+    const article = document.createElement('article');
+    article.id = 'oma-m-5';
+    article.tabIndex = 0;
+    document.body.appendChild(article);
+    article.focus();
+    const focus = store.panelFocus;
+    store.openDetails(sid(5));
+    expect(store.panelFocus).toBe(focus + 1);
+    // The panel's Close button had focus and is gone with the panel.
+    (document.activeElement as HTMLElement | null)?.blur();
+    store.closePanel();
+    await flush();
+    expect(document.activeElement).toBe(article);
+    article.remove();
   });
 });

@@ -5,7 +5,7 @@
 // (whether Node honours it on Windows runners is UNVERIFIED) fails loudly
 // instead of passing on UTC.
 import { describe, expect, it } from 'vitest';
-import { dayBounds, gridBounds, monthBounds, systemDayBoundary } from '@/services/time';
+import { countsPerDay, dayBounds, gridBounds, monthBounds, strictBounds, systemDayBoundary } from '@/services/time';
 
 const HOUR = 3_600_000;
 
@@ -14,6 +14,8 @@ interface ZoneCase {
   offsets: { at: [number, number, number]; minutes: number }[];
   /** Local days with their length in hours. */
   days: { at: [number, number, number]; hours: number }[];
+  /** A local day the zone skipped entirely (no instant falls in it). */
+  skipped?: [number, number, number];
 }
 
 const CASES: Record<string, ZoneCase> = {
@@ -57,6 +59,21 @@ const CASES: Record<string, ZoneCase> = {
       { at: [2026, 9, 5], hours: 24 },
     ],
   },
+  'Pacific/Apia': {
+    // Samoa moved across the date line: 2011-12-29 (UTC-10) was followed
+    // by 2011-12-31 (UTC+14). The 30th never happened there.
+    offsets: [
+      { at: [2011, 5, 15], minutes: 660 },
+      { at: [2011, 11, 29], minutes: 600 },
+      { at: [2012, 0, 15], minutes: -840 },
+    ],
+    days: [
+      { at: [2011, 8, 24], hours: 23 },
+      { at: [2011, 11, 29], hours: 24 },
+      { at: [2011, 11, 31], hours: 24 },
+    ],
+    skipped: [2011, 11, 30],
+  },
 };
 
 const zone = process.env.TZ ?? '';
@@ -78,6 +95,24 @@ describe(`day boundaries in ${zone || '(no TZ)'}`, () => {
       expect((end! - start!) / HOUR, `length of ${d.at.join('-')}`).toBe(d.hours);
       expect(new Date(start!).getDate()).toBe(day);
     }
+  });
+
+  it('makes a skipped day an empty interval, and the month still builds', () => {
+    if (!c!.skipped) return;
+    const [y, m, d] = c!.skipped;
+    const [start, end] = dayBounds(systemDayBoundary, y, m, d, 1);
+    expect(end).toBe(start);
+    const month = monthBounds(systemDayBoundary, y, m);
+    expect(month[d]).toBe(month[d - 1]);
+    const grid = gridBounds(systemDayBoundary, y, m);
+    expect(grid.bounds).toHaveLength(43);
+    // Rust gets strictly increasing bounds; the skipped day counts 0.
+    const strict = strictBounds(grid.bounds);
+    expect(strict.bounds).toHaveLength(42);
+    for (let i = 1; i < strict.bounds.length; i += 1) expect(strict.bounds[i]!).toBeGreaterThan(strict.bounds[i - 1]!);
+    const perDay = countsPerDay(strict.slots, Array.from({ length: 41 }, () => 1));
+    expect(perDay).toHaveLength(42);
+    expect(perDay.filter((n) => n === 0)).toHaveLength(1);
   });
 
   it('builds strictly increasing month and grid bounds that cover every day', () => {

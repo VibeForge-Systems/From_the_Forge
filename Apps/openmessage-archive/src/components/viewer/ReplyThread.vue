@@ -2,10 +2,11 @@
 // The reply thread (M5 §3.6), slice 5h3, in the viewer's right panel:
 // the replies recorded with one message as their originator, across
 // conversations, read with `get_reply_thread` (built and masked in Rust,
-// oldest first, capped). Each reply is a ThreadItem with its own id prefix
+// oldest first, capped). It takes focus on its heading when it opens, and
+// the store gives focus back to the opener on Close. Each reply is a ThreadItem with its own id prefix
 // (`oma-r-`), so its ids never collide with the thread's; the quote of the
 // originator is left out, because the panel is about that originator.
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import type { HandleDto, SafeId, ThreadPageDto } from '@/types';
 import ThreadItem from './ThreadItem.vue';
 import { DETAILS_TEXT, VIEWER_STATE_TEXT } from '@/services/viewerText';
@@ -16,6 +17,13 @@ const emit = defineEmits<{ close: [] }>();
 const viewer = useViewer();
 
 const page = ref<ThreadPageDto | null>(null);
+const heading = ref<HTMLElement | null>(null);
+
+function focusHeading(): void {
+  void nextTick(() => heading.value?.focus({ preventScroll: true }));
+}
+onMounted(focusHeading);
+watch(() => viewer.panelFocus, focusHeading);
 const loading = ref(false);
 const error = ref<string | null>(null);
 let seq = 0;
@@ -48,7 +56,7 @@ const more = computed(() => !!page.value && (page.value.hasNewer || page.value.h
 <template>
   <div class="oma-replies">
     <div class="oma-panel-header">
-      <h2 id="oma-replies-title" class="oma-panel-title">{{ DETAILS_TEXT.replies }}</h2>
+      <h2 id="oma-replies-title" ref="heading" class="oma-panel-title" tabindex="-1">{{ DETAILS_TEXT.replies }}</h2>
       <button type="button" class="btn-close" :aria-label="DETAILS_TEXT.close" @click="emit('close')"></button>
     </div>
     <div class="oma-panel-body px-3 small" role="region" aria-labelledby="oma-replies-title">

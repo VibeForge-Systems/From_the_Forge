@@ -217,7 +217,8 @@ Never hand-edit generated files.
 
 - **Rust tests live beside the code.** Filesystem tests use `tempfile`.
 - **Frontend tests live in `tests/frontend/*.spec.ts`** (the DST tests in
-  `tests/frontend/dst/`, run under three `TZ` values).
+  `tests/frontend/dst/`, run under four `TZ` values, one of which skipped a
+  whole local day).
   `tests/frontend/helpers.ts` provides snapshot and status builders, plus a
   `matchMedia` stub, because jsdom has none.
 - **Fixtures in `tests/fixtures/` must be synthetic.** Never commit a real
@@ -438,7 +439,9 @@ Never hand-edit generated files.
   and take a `src` only from `services/media.ts`'s `mediaUrl`.
   `tests/frontend/source-rules.spec.ts` enforces this over all of `src/`:
   a new `:class`, `:id`, `:title`, `:aria-*`… binding must be added to its
-  per-file allowlist of non-content expressions, deliberately. Viewer words
+  per-file allowlist of non-content expressions, deliberately. It reads
+  bindings from the template AST (`vue/compiler-sfc`), so every form Vue
+  compiles into a binding counts (`.x`, modifiers, `:alt` shorthand). Viewer words
   live in `services/viewerText.ts` (exhaustive tables; never a read,
   delivery or sent word, D94). The console is reached only through
   `services/devlog.ts` (`devNote(kind, number?)`, dev builds only). Local
@@ -475,7 +478,11 @@ Never hand-edit generated files.
   never the row's sender (no roles). Reveals never change a page: "Show
   code" and "Show earlier text" call `useViewer().revealMessage`, which
   re-reads that one message with `get_message_detail` and keeps an overlay
-  (`shown(m)`, at most 100); "Hide" drops it. Put explicit `{{ ' ' }}`
+  (`shown(m)`, at most 100); "Hide" drops it. A reveal or full-text answer
+  is kept only if no newer reveal, Hide or eviction of that message came
+  while it ran (`revealEpoch`), and a full text is shown only under the
+  code reveal it was read with (`fullTextFor`; never read `fullTexts`
+  directly in a component). Put explicit `{{ ' ' }}`
   separators between inline elements whose text forms an accessible name,
   and wherever a space sits at the start or end of an element or a
   `<template>` (`<span> {{ x }}</span>`, `{{ x }} </span>`): Vue's

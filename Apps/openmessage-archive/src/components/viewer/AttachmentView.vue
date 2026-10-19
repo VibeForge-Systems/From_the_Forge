@@ -17,10 +17,18 @@
 //   a usable engine type, or with playback off, there is no Play button.
 // - Media boxes are fixed-size placeholders, so a late image never
 //   reflows the feed.
+// - Review fixes: an inspection still queued when the card leaves the view
+//   is dropped, and a failed one says so on the card with Retry. The card
+//   notes a file shown from an older backup and a full verify's problem,
+//   whatever its kind (`cardNotes`). Play stays focusable while its check
+//   runs (`aria-disabled`, clicks ignored), and the play flow's dialogs
+//   give focus back to it (`returnTo`).
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import type { SafeId } from '@/types';
 import type { AttachmentDto } from '@/types';
 import SafeText from './SafeText.vue';
-import { cardView, sizeLine } from '@/services/attachmentView';
+import { cardNotes, cardView, sizeLine } from '@/services/attachmentView';
+import { formatInstant } from '@/services/time';
 import { mediaUrl, retryDelayMs } from '@/services/media';
 import { ATTACHMENT_TEXT, SNIFFED_KIND_TEXT, fill } from '@/services/viewerText';
 import { useSettings } from '@/stores/settings';
@@ -50,6 +58,20 @@ const view = computed(() => cardView(inspection.value, settings.viewer.mediaPlay
 const base = computed(() => viewer.session?.mediaBase ?? null);
 const captionId = computed(() => `${props.idBase}-a${props.index}`);
 const isChecking = computed(() => viewer.checking.has(props.attachment.id));
+const playId = computed(() => `${captionId.value}-play`);
+const openId = computed(() => `${captionId.value}-open`);
+const inspectError = computed(() => viewer.inspectionErrors.get(props.attachment.id) ?? null);
+let mounted = false;
+
+function importDate(session: SafeId): string | null {
+  const found = viewer.session?.imports.find((i) => i.session === session);
+  return found ? formatInstant(found.startedMs, settings.viewer, 'date') : null;
+}
+
+/** The older-backup and verify notes, on every kind of card. */
+const notes = computed(() =>
+  cardNotes(inspection.value, { importDate, date: (ms) => formatInstant(ms, settings.viewer, 'date') }),
+);
 
 const sticker = computed(() => props.attachment.sticker === true);
 const emoji = computed(() => {
@@ -76,7 +98,20 @@ const loadThumb = computed(
 const thumbToken = computed(() => (view.value.kind === 'image' ? view.value.token : null));
 
 function inspectIfNeeded(): void {
-  if (visible.value && inspection.value === null) void viewer.inspect(props.attachment.id);
+  if (visible.value && inspection.value === null && inspectError.value === null) {
+    // Still wanted when its turn comes only while this card is in view.
+    void viewer.inspect(props.attachment.id, false, false, () => mounted && visible.value);
+  }
+}
+
+function retryInspect(): void {
+  viewer.retryInspection(props.attachment.id);
+  inspectIfNeeded();
+}
+
+function play(): void {
+  if (isChecking.value) return;
+  void viewer.requestPlay(props.attachment, playId.value);
 }
 
 function setVisible(now: boolean): void {
@@ -85,6 +120,7 @@ function setVisible(now: boolean): void {
 }
 
 onMounted(() => {
+  mounted = true;
   const el = root.value;
   if (el && typeof IntersectionObserver === 'function') {
     observer = new IntersectionObserver((entries) => {
@@ -99,6 +135,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  mounted = false;
   observer?.disconnect();
   if (timer !== null) clearTimeout(timer);
 });
@@ -134,14 +171,23 @@ function retry(): void {
 
 <template>
   <figure ref="root" :class="boxClass">
-    <div v-if="view.kind === 'pending'" class="oma-media-box oma-media-placeholder" aria-hidden="true"></div>
+    <template v-if="view.kind === 'pending'">
+      <div class="oma-media-box oma-media-placeholder" aria-hidden="true"></div>
+      <p v-if="inspectError" class="oma-body-note" role="status">
+        {{ ATTACHMENT_TEXT.inspectFailed }} {{ inspectError }}
+        <button type="button" class="btn btn-link btn-sm oma-inline-btn" @click="retryInspect">
+          {{ ATTACHMENT_TEXT.retry }}
+        </button>
+      </p>
+    </template>
 
     <template v-else-if="view.kind === 'image'">
       <button
+        :id="openId"
         type="button"
         class="oma-media-btn"
         :aria-labelledby="captionId"
-        @click="viewer.openImage(attachment)"
+        @click="viewer.openImage(attachment, openId)"
       >
         <img
           v-if="loadThumb && base && thumbToken"
@@ -175,11 +221,12 @@ function retry(): void {
         <p v-if="view.blocked" class="oma-body-note">{{ view.blocked }}</p>
         <p v-else class="mb-0">
           <button
+            :id="playId"
             type="button"
             class="btn btn-sm btn-outline-secondary"
-            :disabled="isChecking"
+            :aria-disabled="isChecking ? 'true' : undefined"
             :aria-describedby="captionId"
-            @click="viewer.requestPlay(attachment)"
+            @click="play"
           >
             <i class="bi bi-play-fill" aria-hidden="true"></i> {{ ATTACHMENT_TEXT.play }}
           </button>
@@ -190,6 +237,7 @@ function retry(): void {
         {{ line }}
       </p>
     </div>
+    <p v-for="(note, i) in notes" :key="`n${i}`" class="oma-body-note oma-card-note">{{ note }}</p>
 
     <figcaption :id="captionId" class="oma-attachment-caption">
       <span class="visually-hidden">{{ fill(ATTACHMENT_TEXT.numbered, { n: index }) }}{{ ' ' }}</span>

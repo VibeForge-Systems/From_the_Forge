@@ -255,8 +255,10 @@ export const EDIT_LABEL_TEXT: Record<EditLabelDto, string> = {
   undeterminable: 'Edit state could not be determined',
   notRecorded: 'No edit information recorded',
   summaryUnreadable: 'Edit state could not be determined',
-  unsentPartsAndEditHistory: 'Edited and partly unsent (derived)',
-  unsentParts: 'Unsent by the sender (derived)',
+  // Neutral: which parts were unsent is in the parts listed, never implied
+  // by the code (a whole unsend is said only when every part is listed).
+  unsentPartsAndEditHistory: 'Edited, and an unsend is recorded (derived)',
+  unsentParts: 'An unsend is recorded (derived); see the parts listed',
   editHistory: 'Edited (derived)',
   dateEditedNoBody: 'An edit date is recorded; no edit history in this version',
   dateEditedOnly: 'An edit date is recorded; no edit history in this version',
@@ -524,6 +526,11 @@ export const BLOB_VERIFY_TEXT: Record<BlobVerifyStateDto, string> = {
 
 export const VERIFY_STALE_TEXT = 'This result may be out of date; run Verify';
 
+/** A full-verify code this version does not know, on the card. */
+export const VERIFY_RAW_TEXT = 'The full verify reported code {raw}';
+/** When the full verify ran, after its finding on the card. */
+export const VERIFY_WHEN_TEXT = '(verify of {date})';
+
 export const LOOKUP_TEXT: Record<LookupDto, string> = {
   notLookedUp: 'Not looked up',
   notAttemptedNull: 'Not looked up: no location recorded',
@@ -648,6 +655,7 @@ export const ATTACHMENT_TEXT = {
   play: 'Play',
   open: 'Open preview',
   previewFailed: 'Preview could not be loaded.',
+  inspectFailed: 'This attachment could not be inspected.',
   retry: 'Retry',
   structureNotChecked: 'Structure not checked for this format (its first bytes only)',
   renditionPrefix: 'Preview, re-encoded, at most 2048 px',
@@ -824,6 +832,7 @@ export const SEARCH_TEXT = {
   badFrom: 'The "from" date is not a date in the form YYYY-MM-DD.',
   badTo: 'The "to" date is not a date in the form YYYY-MM-DD.',
   badOrder: 'The "to" date is before the "from" date.',
+  badEmpty: 'No time falls in that range in this time zone: its days were skipped by a time-zone change.',
   attachmentLabel: 'Has an attachment',
   senderLabel: 'Sender',
   earlierLabel: 'Include earlier versions and unsent text',
@@ -949,7 +958,7 @@ export const LIST_TEXT = {
   noDated: 'No dated items',
   undated: '{n} undated',
   undatedCapped: '{n}+ undated',
-  group: 'Group',
+  addresses: '{n} addresses recorded',
   empty: 'No messages in the archive',
   truncated: 'Showing the first {n} of {total} conversations. Narrow the filter to see the rest.',
   noMatch: 'No conversation matches this filter',
@@ -970,6 +979,10 @@ export const THREAD_TEXT = {
   oneAddress: '1 address recorded in this conversation',
   itemsRecorded: '{n} items recorded',
   dateRange: '{first} – {last}',
+  lastDatedOnly: 'Last dated item {last}',
+  earlierDated: 'and {n} earlier-dated items',
+  earlierDatedOne: 'and 1 earlier-dated item',
+  earlierDatedCapped: 'and {n}+ earlier-dated items',
   jumpFirst: 'Jump to first',
   jumpNewest: 'Jump to newest',
   searchConversation: 'Search this conversation',
@@ -1065,7 +1078,7 @@ export const BUBBLE_TEXT = {
   recordedText: 'Text recorded with this item:',
   newTitle: 'Name recorded:',
   serviceChanged: 'Service: {service}',
-  serviceNotRecognised: 'Service not recognised by this version',
+  serviceNotRecorded: 'Service not recorded or unreadable',
 } as const;
 
 // ------------------------------------------------------------- privacy (5j)

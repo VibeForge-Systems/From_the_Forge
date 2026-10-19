@@ -316,3 +316,62 @@ describe('ReplyThread', () => {
     expect(w.text()).toContain('No replies are recorded for this message.');
   });
 });
+
+describe('MessageDetails (review fixes)', () => {
+  it('drops a late "more reaction rows" answer once the panel shows another message', async () => {
+    setup();
+    let releaseX: () => void = () => undefined;
+    fake.handlers.getMessageDetail = (arg) => {
+      const r = arg as GetMessageDetailRequest;
+      const m = message(r.messageId, { body: { ...message(r.messageId).body } });
+      if (r.messageId === 5 && r.reactionPage) {
+        return new Promise((resolve) => {
+          releaseX = () =>
+            resolve(
+              messageDetail(m, {
+                reactions: { target: sid(5), keyed: true, rows: [row(20)], total: { n: 1, capped: false }, hasMore: false },
+              }),
+            );
+        });
+      }
+      return Promise.resolve(messageDetail(m, { subject: text(`subject of ${r.messageId}`) }));
+    };
+    const w = mount(MessageDetails, { props: { messageId: sid(5), handles: HANDLES } });
+    await flushPromises();
+    await w.findAll('button').find((b) => b.text() === 'Show the recorded reaction rows')!.trigger('click');
+    // Enter on another article before the rows came back.
+    await w.setProps({ messageId: sid(6) });
+    await flushPromises();
+    releaseX();
+    await flushPromises();
+    expect(w.text()).toContain('subject of 6');
+    expect(w.text()).not.toContain('subject of 5');
+    expect(w.findAll('.oma-details-reactions li')).toHaveLength(0);
+  });
+
+  it('says revealed text was taken before it was unsent, and marks dates before 2007', async () => {
+    setup();
+    const m = message(5, {
+      date: { ms: Date.UTC(2001, 0, 1), raw: d('1'), unit: 'seconds', state: null, before2007: true },
+      edit: {
+        ...message(5).edit,
+        earlier: { kind: 'revealed', reason: 'unsent', pieces: [textPiece('before')], session: sid(1) },
+      },
+    });
+    fake.handlers.getMessageDetail = () => Promise.resolve(messageDetail(m));
+    const w = mount(MessageDetails, { props: { messageId: sid(5), handles: HANDLES } });
+    await flushPromises();
+    expect(w.find('.oma-revealed-note').text()).toContain('taken before it was unsent');
+    const times = w.findAll('.oma-details-list').map((l) => l.text()).join(' ');
+    expect(times).toContain('Before 2007');
+  });
+
+  it('takes focus on its heading when it opens', async () => {
+    setup();
+    fake.handlers.getMessageDetail = () => Promise.resolve(messageDetail(message(5)));
+    const w = mount(MessageDetails, { props: { messageId: sid(5), handles: HANDLES }, attachTo: document.body });
+    await flushPromises();
+    expect(document.activeElement?.id).toBe('oma-details-title');
+    w.unmount();
+  });
+});

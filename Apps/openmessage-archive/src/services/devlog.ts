@@ -11,12 +11,14 @@ export type DevNoteKind =
   | 'jobIdMismatch'
   | 'viewerPageMs'
   | 'viewerWindowEvicted'
+  | 'viewerAnchorMoved'
   | 'featureDegraded';
 
 const NOTES: Record<DevNoteKind, string> = {
   jobIdMismatch: 'job id mismatch between response and events; ignored',
   viewerPageMs: 'viewer page loaded (ms)',
   viewerWindowEvicted: 'viewer pages evicted (count)',
+  viewerAnchorMoved: 'an import moved a page anchor; reloaded around it',
   featureDegraded: 'engine features missing, degraded paths in use (count)',
 };
 

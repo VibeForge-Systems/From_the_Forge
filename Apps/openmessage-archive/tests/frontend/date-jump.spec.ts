@@ -201,3 +201,71 @@ describe('DateJumpDialog', () => {
     expect(w.emitted('jump')).toBeUndefined();
   });
 });
+
+describe('DateJumpDialog (review fixes)', () => {
+  it('never jumps after the dialog was closed while a pick was being answered', async () => {
+    const w = await mountDialog();
+    let release: () => void = () => undefined;
+    fake.handlers.seekDate = () =>
+      new Promise((resolve) => {
+        release = () => resolve({ messageId: 77 });
+      });
+    await cell(w, 19).trigger('click');
+    await flushPromises();
+    expect(seekCalls()).toHaveLength(1);
+    // Escape, Close or the backdrop.
+    await w.setProps({ open: false });
+    release();
+    await flushPromises();
+    expect(w.emitted('jump')).toBeUndefined();
+  });
+
+  it('counts a day the zone skipped as empty and sends Rust strictly increasing bounds', async () => {
+    // In this fake zone 2026-10-20 never happened: it starts where the 21st does.
+    const skipping: DayBoundaryBuilder = (y, m, d) => {
+      const n = dayNo(y, m, d);
+      return (n >= dayNo(2026, 9, 21) ? n - 1 : n) * DAY;
+    };
+    await useViewer().open(ARCHIVE_ID);
+    items = new Map([[dayNo(2026, 9, 21) - 1, 4]]);
+    const w = mount(DateJumpDialog, {
+      attachTo: document.body,
+      props: { open: true, chatId: sid(4), initial: Date.UTC(2026, 9, 21, 12), build: skipping },
+    });
+    await flushPromises();
+    const bounds = countsCalls().at(-1)!.boundsUtcMs;
+    expect(bounds).toHaveLength(42);
+    for (let i = 1; i < bounds.length; i += 1) expect(bounds[i]!).toBeGreaterThan(bounds[i - 1]!);
+    expect(w.find('[role="status"]').exists() && w.text().includes(DATE_JUMP_TEXT.countsFailed)).toBe(false);
+    // The skipped day shows no items; the 21st shows its four.
+    expect(cell(w, 20).classes()).not.toContain('oma-cal-has');
+    expect(cell(w, 21).classes()).toContain('oma-cal-has');
+    // Picking the skipped day says there are no messages, without asking Rust.
+    fake.calls.length = 0;
+    await cell(w, 20).trigger('click');
+    await flushPromises();
+    expect(countsCalls()).toHaveLength(0);
+    expect(w.find('.oma-cal-outcome').text()).toContain(DATE_JUMP_TEXT.noMessages);
+  });
+
+  it('keeps Earlier and Later in place while they seek, so focus stays', async () => {
+    const w = await mountDialog();
+    await cell(w, 20).trigger('click');
+    await flushPromises();
+    let release: () => void = () => undefined;
+    fake.handlers.seekDate = () =>
+      new Promise((resolve) => {
+        release = () => resolve({ messageId: null });
+      });
+    const earlier = w.findAll('button').find((b) => b.text() === DATE_JUMP_TEXT.earlier)!;
+    (earlier.element as HTMLButtonElement).focus();
+    await earlier.trigger('click');
+    await flushPromises();
+    expect(earlier.element.isConnected).toBe(true);
+    expect(earlier.attributes('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(earlier.element);
+    release();
+    await flushPromises();
+    expect(w.find('.oma-cal-outcome').text()).toContain(DATE_JUMP_TEXT.noEarlier);
+  });
+});

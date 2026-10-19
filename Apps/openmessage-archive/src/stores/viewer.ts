@@ -37,8 +37,16 @@
 // viewer dialog for the privacy screen, and `hideContent` asks Rust to drop
 // its cached renditions (`hide_viewer`, D120). A pending focus may ask only
 // to show a message, not to focus it (the privacy screen's "Show").
+//
+// Sequencing (review fixes): a reveal, a full-text chunk, a conversation
+// list, a Play check and a moved-anchor reload each check, after their
+// await, that nothing newer replaced what they were asked for. A reveal's
+// answer is kept only when no other reveal, Hide or eviction of that
+// message came in between (`revealEpoch`), and a full text records whether
+// it was read with codes shown (`FullText.codes`), so it is shown only
+// under the same reveal (`fullTextFor`).
 import { defineStore } from 'pinia';
-import { computed, markRaw, ref, shallowRef } from 'vue';
+import { computed, markRaw, nextTick, ref, shallowRef } from 'vue';
 import { IpcError, ipc } from '@/services/ipc';
 import { devNote } from '@/services/devlog';
 import { playGate } from '@/services/media';
@@ -138,6 +146,8 @@ export interface ThreadCommand {
 export interface MediaOpen {
   attachment: AttachmentDto;
   mode: 'image' | 'play';
+  /** The element id (app-made) that gets focus back when it closes. */
+  returnTo?: string | null;
 }
 
 /** A message re-read with a reveal, shown over the page's copy. */
@@ -157,6 +167,8 @@ export interface FullText {
   none: boolean;
   loading: boolean;
   error: string | null;
+  /** It was read with the message's one-time codes revealed. */
+  codes: boolean;
 }
 
 /** A message to show in a chat that is about to open (a reply's originator). */
@@ -209,16 +221,23 @@ export interface ChatWindow {
     'partial' | 'extrasIncomplete' | 'anchorMoved' | 'focus' | 'cutForSize' | 'skippedRows' | 'undatedCount'
   > | null;
   error: string | null;
+  /**
+   * Set when an import moved an anchor and the window was reloaded around
+   * that message (§3.5); `n` is bumped per reload so the thread sees each.
+   */
+  reloaded: { around: SafeId; n: number } | null;
 }
 
 export function windowItemCount(w: Pick<ChatWindow, 'pages'>): number {
   return w.pages.reduce((n, p) => n + p.items.length, 0);
 }
 
-function pageOf(dto: ThreadPageDto): LoadedPage {
+function pageOf(dto: ThreadPageDto, drop: ReadonlySet<SafeId> = new Set()): LoadedPage {
   return {
     // Items are immutable DTOs: kept raw, so 1,500 of them are not proxied.
-    items: markRaw(dto.items),
+    // An item already in the window is never added twice (§3.5: the UI
+    // de-duplicates by message id).
+    items: markRaw(drop.size === 0 ? dto.items : dto.items.filter((m) => !drop.has(m.id))),
     olderAnchor: dto.olderAnchor,
     newerAnchor: dto.newerAnchor,
     hasOlder: dto.hasOlder,
@@ -252,6 +271,13 @@ export function evictPages(w: Pick<ChatWindow, 'pages'>, keep: number, max = MAX
     evicted += 1;
   }
   return evicted;
+}
+
+/** The ids of every item loaded in a window. */
+export function windowIds(w: Pick<ChatWindow, 'pages'>): Set<SafeId> {
+  const out = new Set<SafeId>();
+  for (const p of w.pages) for (const m of p.items) out.add(m.id);
+  return out;
 }
 
 /** The index of the page that holds a message, or -1. */
@@ -315,6 +341,8 @@ export const useViewer = defineStore('viewer', () => {
   const threadCommand = ref<ThreadCommand | null>(null);
   let commands = 0;
   const inspections = shallowRef(new Map<SafeId, AttachmentInspectionDto>());
+  /** Inspections that failed, with the sentence the card shows (and Retry). */
+  const inspectionErrors = shallowRef(new Map<SafeId, string>());
   const revealed = shallowRef(new Map<SafeId, RevealedMessage>());
   const fullTexts = shallowRef(new Map<SafeId, FullText>());
   const pendingFocus = ref<PendingFocus | null>(null);
@@ -322,18 +350,41 @@ export const useViewer = defineStore('viewer', () => {
   const linkCopy = shallowRef<LinkCopyState | null>(null);
 
   const panel = shallowRef<SidePanel | null>(null);
+  /** Bumped when details or replies open, so the panel takes focus. */
+  const panelFocus = ref(0);
+  /** What had focus when the panel opened, to give it back on Close. */
+  let panelOpener: { element: HTMLElement | null; id: string | null } | null = null;
   const media = shallowRef<MediaOpen | null>(null);
   /** The attachment waiting for the play confirmation (`confirm`). */
   const pendingPlay = shallowRef<AttachmentDto | null>(null);
   /** Attachments whose Play check is running. */
   const checking = shallowRef(new Set<SafeId>());
+  /** The element id the play flow returns focus to. */
+  let playReturn: string | null = null;
   /** Attachments the user confirmed for playback in this session. */
   let confirmed = new Set<SafeId>();
   let inspecting = 0;
-  const waiting: (() => void)[] = [];
+  /** Inspections queued for a slot, each with its "still wanted" check. */
+  const waiting: { go: (run: boolean) => void; wanted: () => boolean }[] = [];
+  /**
+   * Inspections asked or running, so one id is asked once at a time; each
+   * asker's "still wanted" check is kept, and the inspection runs while any
+   * of them says yes.
+   */
+  const inFlight = new Map<string, { work: Promise<AttachmentInspectionDto | null>; wants: (() => boolean)[] }>();
+
+  /** The reveal last asked per message (before its answer came). */
+  const intents = new Map<SafeId, RevealInput>();
+  /** Bumped per message by every reveal, Hide and eviction. */
+  const revealEpoch = new Map<SafeId, number>();
+  let revealSeq = 0;
 
   let epochs = 0;
   let searchSeq = 0;
+  let listSeq = 0;
+  /** Bumped by `closeDialogs`, so a Play check that ends later opens nothing. */
+  let dialogEpoch = 0;
+  let reloads = 0;
 
   const viewer = computed(() => session.value?.viewer ?? null);
   const openWindow = computed(
@@ -359,8 +410,14 @@ export const useViewer = defineStore('viewer', () => {
     dateJumpOpen.value = false;
     threadCommand.value = null;
     inspections.value = new Map();
+    inspectionErrors.value = new Map();
     revealed.value = new Map();
     fullTexts.value = new Map();
+    intents.clear();
+    revealEpoch.clear();
+    inFlight.clear();
+    playReturn = null;
+    panelOpener = null;
     pendingFocus.value = null;
     menu.value = null;
     linkCopy.value = null;
@@ -412,22 +469,41 @@ export const useViewer = defineStore('viewer', () => {
   async function listConversations(next: ConversationSortInput, filter: string | null): Promise<void> {
     const v = viewer.value;
     if (v === null) return;
+    // Calls run on Rust's blocking pool and may answer out of order: only
+    // the latest call's answer is applied.
+    const mine = (listSeq += 1);
     try {
       const index = await ipc.listConversations(v, next, filter);
-      if (viewer.value !== v) return;
+      if (viewer.value !== v || mine !== listSeq) return;
       sort.value = next;
       conversationIds.value = index.ids;
       conversationTotal.value = index.total;
       conversationsTruncated.value = index.truncated;
     } catch (e) {
+      if (mine !== listSeq) return;
       error.value = failed(e);
     }
   }
 
-  /** Load the rows of `ids` not yet cached, 200 per request. */
+  /**
+   * Load the rows of `ids` not yet cached, 200 per request. Rows asked for
+   * that are cached already move to the newest end of the eviction order,
+   * so the rows in use (the open chat's, the visible list's) are the last
+   * to go.
+   */
   async function loadRows(ids: readonly SafeId[]): Promise<void> {
     const v = viewer.value;
     if (v === null) return;
+    const cached = ids.filter((id) => rows.value.has(id));
+    if (cached.length > 0) {
+      const next = new Map(rows.value);
+      for (const id of cached) {
+        const row = next.get(id)!;
+        next.delete(id);
+        next.set(id, row);
+      }
+      rows.value = next;
+    }
     const missing = ids.filter((id) => !rows.value.has(id));
     for (let i = 0; i < missing.length; i += ROWS_PER_REQUEST) {
       const chunk = missing.slice(i, i + ROWS_PER_REQUEST);
@@ -484,6 +560,9 @@ export const useViewer = defineStore('viewer', () => {
       !kept.error &&
       !kept.pages[kept.pages.length - 1]!.hasNewer
     ) {
+      // The kept notices may be an earlier jump's: its focus no longer
+      // applies to an open at the newest item.
+      if (kept.notices?.focus) kept.notices = { ...kept.notices, focus: null };
       return;
     }
     // The undated section is read in source order from its start.
@@ -502,6 +581,7 @@ export const useViewer = defineStore('viewer', () => {
       loading: 'initial',
       notices: null,
       error: null,
+      reloaded: null,
     };
     windows.value = windows.value.filter((x) => x.chatId !== chatId);
     windows.value.push(w);
@@ -552,10 +632,17 @@ export const useViewer = defineStore('viewer', () => {
         ...(r ? { reveal: r } : {}),
       });
       if (viewer.value !== v || w.epoch !== epoch || !windows.value.includes(w)) return;
+      if (page.anchorMoved) {
+        // An import moved the anchor (§3.5): paging from its old key would
+        // bring rows back that are already loaded. Reload around it.
+        await reloadAround(w, v, anchor, epoch);
+        return;
+      }
       addHandles(w, page.handles);
       w.notices = page;
-      if (edge === 'older') w.pages.unshift(pageOf(page));
-      else w.pages.push(pageOf(page));
+      const loaded = pageOf(page, windowIds(w));
+      if (edge === 'older') w.pages.unshift(loaded);
+      else w.pages.push(loaded);
       const viewed = inView === null ? -1 : pageIndexOf(w, inView);
       const keep = viewed >= 0 ? viewed : edge === 'older' ? 0 : w.pages.length - 1;
       const evicted = evictPages(w, keep);
@@ -565,6 +652,32 @@ export const useViewer = defineStore('viewer', () => {
     } finally {
       w.loading = null;
     }
+  }
+
+  /**
+   * Replace the window with a page around `around` (an anchor an import
+   * moved). The thread keeps focus on that message (`reloaded`).
+   */
+  async function reloadAround(w: ChatWindow, v: number, around: SafeId, epoch: number): Promise<void> {
+    const r = reveal();
+    const page = await ipc.getThreadPage({
+      viewer: v,
+      chatId: w.chatId,
+      anchor: { kind: 'message', message: around, include: true },
+      direction: 'around',
+      limit: PAGE_LIMIT,
+      ...(r ? { reveal: r } : {}),
+    });
+    if (viewer.value !== v || w.epoch !== epoch || !windows.value.includes(w)) return;
+    w.epoch = epochs += 1;
+    w.range = page.range;
+    w.pages = [pageOf(page)];
+    addHandles(w, page.handles);
+    // The notice says the page was reloaded around the same message: now
+    // it was. An "around" page's own focus reason is not shown for it.
+    w.notices = { ...page, anchorMoved: true, focus: null };
+    w.reloaded = { around, n: (reloads += 1) };
+    devNote('viewerAnchorMoved');
   }
 
   /** Start a search; a newer one supersedes it (dropped silently). */
@@ -629,6 +742,7 @@ export const useViewer = defineStore('viewer', () => {
 
   /** Show the search panel, scoped to one conversation or to all. */
   function openSearch(scope: SafeId | null): void {
+    rememberOpener(null);
     searchForm.value = { ...searchForm.value, chatId: scope };
     panel.value = { kind: 'search' };
     searchFocus.value += 1;
@@ -697,35 +811,84 @@ export const useViewer = defineStore('viewer', () => {
     }
   }
 
-  async function slot(): Promise<void> {
+  /** Wait for an inspection slot; false when the waiter is no longer wanted. */
+  async function slot(wanted: () => boolean): Promise<boolean> {
     if (inspecting < MAX_INSPECTING) {
       inspecting += 1;
-      return;
+      return true;
     }
-    await new Promise<void>((resolve) => waiting.push(resolve));
+    return new Promise<boolean>((go) => waiting.push({ go, wanted }));
   }
 
+  /** Hand the slot to the next waiter still wanted; the others are told to give up. */
   function release(): void {
-    const next = waiting.shift();
-    if (next) next();
-    else inspecting = Math.max(0, inspecting - 1);
+    for (;;) {
+      const next = waiting.shift();
+      if (!next) {
+        inspecting = Math.max(0, inspecting - 1);
+        return;
+      }
+      if (next.wanted()) {
+        next.go(true);
+        return;
+      }
+      next.go(false);
+    }
+  }
+
+  function setInspectionError(attachmentId: SafeId, sentence: string | null): void {
+    if (sentence === null && !inspectionErrors.value.has(attachmentId)) return;
+    const next = new Map(inspectionErrors.value);
+    if (sentence === null) next.delete(attachmentId);
+    else next.set(attachmentId, sentence);
+    while (next.size > MAX_INSPECTIONS) next.delete(next.keys().next().value!);
+    inspectionErrors.value = next;
   }
 
   /**
    * Inspect a surfaced attachment, cached per session. `fresh` asks again
    * (the original size is known only after a preview was made). At most
-   * `MAX_INSPECTING` run at once.
+   * `MAX_INSPECTING` run at once; the same question asked while one is
+   * queued or running gets that one's answer. A queued inspection whose
+   * `wanted` check says no when its turn comes (the card left the view) is
+   * dropped. A failure is kept per attachment (`inspectionErrors`), for
+   * the card's sentence and Retry.
    */
-  async function inspect(
+  function inspect(
     attachmentId: SafeId,
     forPlayback = false,
     fresh = false,
+    wanted: () => boolean = () => true,
   ): Promise<AttachmentInspectionDto | null> {
     const v = viewer.value;
-    if (v === null) return null;
+    if (v === null) return Promise.resolve(null);
     const cached = inspections.value.get(attachmentId);
-    if (!fresh && cached && (!forPlayback || cached.playback !== null)) return cached;
-    await slot();
+    if (!fresh && cached && (!forPlayback || cached.playback !== null)) return Promise.resolve(cached);
+    const key = `${v}:${attachmentId}:${forPlayback ? 'p' : 'i'}:${fresh ? 'f' : ''}`;
+    const running = inFlight.get(key);
+    if (running) {
+      running.wants.push(wanted);
+      return running.work;
+    }
+    const wants = [wanted];
+    const entry = {
+      wants,
+      work: runInspection(v, attachmentId, forPlayback, () => wants.some((w) => w())).finally(() => {
+        if (inFlight.get(key) === entry) inFlight.delete(key);
+      }),
+    };
+    inFlight.set(key, entry);
+    return entry.work;
+  }
+
+  async function runInspection(
+    v: number,
+    attachmentId: SafeId,
+    forPlayback: boolean,
+    wanted: () => boolean,
+  ): Promise<AttachmentInspectionDto | null> {
+    // A Play check is always wanted: the user pressed Play.
+    if (!(await slot(forPlayback ? () => true : wanted))) return null;
     try {
       if (viewer.value !== v) return null;
       const got = await ipc.inspectAttachment({ viewer: v, attachmentId, forPlayback });
@@ -738,18 +901,25 @@ export const useViewer = defineStore('viewer', () => {
       next.set(attachmentId, kept);
       while (next.size > MAX_INSPECTIONS) next.delete(next.keys().next().value!);
       inspections.value = next;
+      setInspectionError(attachmentId, null);
       return kept;
     } catch (e) {
-      error.value = failed(e);
+      const sentence = failed(e);
+      if (viewer.value === v) setInspectionError(attachmentId, sentence);
       return null;
     } finally {
       release();
     }
   }
 
+  /** Forget a failed inspection, so the card asks again (its Retry). */
+  function retryInspection(attachmentId: SafeId): void {
+    setInspectionError(attachmentId, null);
+  }
+
   /** Open the media viewer on an image's preview. */
-  function openImage(attachment: AttachmentDto): void {
-    media.value = { attachment, mode: 'image' };
+  function openImage(attachment: AttachmentDto, returnTo: string | null = null): void {
+    media.value = { attachment, mode: 'image', returnTo };
   }
 
   function closeMedia(): void {
@@ -760,12 +930,15 @@ export const useViewer = defineStore('viewer', () => {
    * Play: Rust's checks first (the structural check and the full hash),
    * then the confirmation under `confirm`, then the media viewer.
    */
-  async function requestPlay(attachment: AttachmentDto): Promise<void> {
+  async function requestPlay(attachment: AttachmentDto, returnTo: string | null = null): Promise<void> {
     const setting = useSettings().viewer.mediaPlayback;
     if (setting === 'off' || checking.value.has(attachment.id)) return;
     const busy = new Set(checking.value);
     busy.add(attachment.id);
     checking.value = busy;
+    // The privacy screen may close every dialog while the check runs; then
+    // nothing opens when it ends (`closeDialogs` bumps the epoch).
+    const epoch = dialogEpoch;
     let got: AttachmentInspectionDto | null;
     try {
       got = await inspect(attachment.id, true);
@@ -774,14 +947,21 @@ export const useViewer = defineStore('viewer', () => {
       done.delete(attachment.id);
       checking.value = done;
     }
+    if (epoch !== dialogEpoch) return;
     if (!got || got.playback?.kind !== 'allowed') return;
     const gate = playGate(useSettings().viewer.mediaPlayback, confirmed.has(attachment.id));
     if (gate === 'none') return;
+    playReturn = returnTo;
     if (gate === 'confirm') {
       pendingPlay.value = attachment;
       return;
     }
-    media.value = { attachment, mode: 'play' };
+    media.value = { attachment, mode: 'play', returnTo };
+  }
+
+  /** The element id the play confirmation returns focus to. */
+  function playReturnTo(): string | null {
+    return playReturn;
   }
 
   /** The answer to the play confirmation. */
@@ -789,22 +969,60 @@ export const useViewer = defineStore('viewer', () => {
     const attachment = pendingPlay.value;
     pendingPlay.value = null;
     if (!attachment || answer === 'cancel') return;
+    const epoch = dialogEpoch;
     if (answer === 'always') await useSettings().setViewer({ mediaPlayback: 'clickToPlay' });
+    if (epoch !== dialogEpoch) return;
     confirmed.add(attachment.id);
-    media.value = { attachment, mode: 'play' };
+    media.value = { attachment, mode: 'play', returnTo: playReturn };
   }
 
-  /** Show a message's details (and its reaction rows) in the right panel. */
-  function openDetails(message: SafeId, reactions = false): void {
+  /**
+   * Remember what has focus, to give it back when the panel closes. A
+   * panel opened from inside the panel (a reply's Details) keeps the
+   * opener of the panel it replaces.
+   */
+  function rememberOpener(returnTo: string | null): void {
+    const active = typeof document === 'undefined' ? null : document.activeElement;
+    const element = active instanceof HTMLElement && active !== document.body ? active : null;
+    const fromPanel = element?.closest('#oma-right-panel') != null;
+    if (panel.value !== null && panelOpener !== null && fromPanel) return;
+    panelOpener = { element: fromPanel ? null : element, id: returnTo ?? (element?.id || null) };
+  }
+
+  /**
+   * Show a message's details (and its reaction rows) in the right panel.
+   * Focus moves into the panel (`panelFocus`) and returns to `returnTo`
+   * (an element id), or to what had it, on Close.
+   */
+  function openDetails(message: SafeId, reactions = false, returnTo: string | null = null): void {
+    rememberOpener(returnTo);
     panel.value = { kind: 'details', message, reactions };
+    panelFocus.value += 1;
   }
 
-  function openReplies(message: SafeId): void {
+  function openReplies(message: SafeId, returnTo: string | null = null): void {
+    rememberOpener(returnTo);
     panel.value = { kind: 'replies', message };
+    panelFocus.value += 1;
   }
 
+  /** Close the panel and give focus back to what opened it, if focus was lost. */
   function closePanel(): void {
     panel.value = null;
+    const back = panelOpener;
+    panelOpener = null;
+    if (back === null || typeof document === 'undefined') return;
+    void nextTick(() => {
+      const now = document.activeElement;
+      if (now !== null && now !== document.body) return;
+      const target =
+        back.element && back.element.isConnected
+          ? back.element
+          : back.id
+            ? document.getElementById(back.id)
+            : null;
+      if (target && !target.closest('dialog:not([open])')) target.focus({ preventScroll: true });
+    });
   }
 
   /**
@@ -852,29 +1070,78 @@ export const useViewer = defineStore('viewer', () => {
     return revealed.value.get(m.id)?.message ?? m;
   }
 
+  function bumpReveal(id: SafeId): number {
+    const n = (revealSeq += 1);
+    revealEpoch.set(id, n);
+    return n;
+  }
+
+  /** The codes are shown for this message (its overlay was read with them). */
+  function codesShown(messageId: SafeId): boolean {
+    return revealed.value.get(messageId)?.reveal.oneTimeCode === true;
+  }
+
+  /** Forget the full text of a body (read under a reveal that no longer holds). */
+  function dropFullText(bodyId: SafeId | null): void {
+    if (bodyId === null || !fullTexts.value.has(bodyId)) return;
+    const texts = new Map(fullTexts.value);
+    texts.delete(bodyId);
+    fullTexts.value = texts;
+  }
+
+  function textBodyOf(m: MessageDto | undefined): SafeId | null {
+    return m && m.body.kind === 'text' ? m.body.body : null;
+  }
+
   /**
    * Re-read one message with a reveal added (D115): "Show code" or "Show
    * earlier text". Nothing is revealed until the user asks. Returns the
    * error sentence, or null.
    */
   async function revealMessage(id: SafeId, add: RevealInput): Promise<string | null> {
-    const v = viewer.value;
-    if (v === null) return null;
-    const before = revealed.value.get(id)?.reveal ?? {};
+    const before = intents.get(id) ?? revealed.value.get(id)?.reveal ?? {};
     const reveal: RevealInput = {
       ...(before.earlierText || add.earlierText ? { earlierText: true } : {}),
       ...(before.oneTimeCode || add.oneTimeCode ? { oneTimeCode: true } : {}),
     };
+    return readRevealed(id, reveal);
+  }
+
+  /**
+   * Read `id` with exactly `reveal` and keep it as the overlay, unless a
+   * newer reveal, a Hide or an eviction of that message came while the
+   * request ran: then the answer is dropped (it would bring back what the
+   * user hid).
+   */
+  async function readRevealed(id: SafeId, reveal: RevealInput): Promise<string | null> {
+    const v = viewer.value;
+    if (v === null) return null;
+    intents.set(id, reveal);
+    const mine = bumpReveal(id);
     try {
       const detail = await ipc.getMessageDetail({ viewer: v, messageId: id, reveal });
-      if (viewer.value !== v) return null;
+      if (viewer.value !== v || revealEpoch.get(id) !== mine) return null;
+      intents.delete(id);
       const next = new Map(revealed.value);
+      const old = next.get(id);
       next.delete(id);
       next.set(id, { reveal, message: markRaw(detail.message) });
-      while (next.size > MAX_REVEALED) next.delete(next.keys().next().value!);
+      // A full text read under the other code state no longer matches.
+      if ((old?.reveal.oneTimeCode === true) !== (reveal.oneTimeCode === true)) {
+        dropFullText(textBodyOf(detail.message));
+      }
+      while (next.size > MAX_REVEALED) {
+        const [oldest, gone] = next.entries().next().value!;
+        next.delete(oldest);
+        // An evicted reveal takes its full text and pending answers with it.
+        bumpReveal(oldest);
+        intents.delete(oldest);
+        dropFullText(textBodyOf(gone.message));
+      }
       revealed.value = next;
       return null;
     } catch (e) {
+      if (revealEpoch.get(id) === mine) intents.delete(id);
       return failed(e);
     }
   }
@@ -882,22 +1149,23 @@ export const useViewer = defineStore('viewer', () => {
   /** "Hide": drop the revealed copy, or only one of its reveals. */
   async function unreveal(id: SafeId, drop: RevealInput): Promise<string | null> {
     const kept = revealed.value.get(id);
-    if (!kept) return null;
+    const asked = intents.get(id) ?? kept?.reveal;
+    if (!asked) return null;
     const rest: RevealInput = {
-      ...(kept.reveal.earlierText && !drop.earlierText ? { earlierText: true } : {}),
-      ...(kept.reveal.oneTimeCode && !drop.oneTimeCode ? { oneTimeCode: true } : {}),
+      ...(asked.earlierText && !drop.earlierText ? { earlierText: true } : {}),
+      ...(asked.oneTimeCode && !drop.oneTimeCode ? { oneTimeCode: true } : {}),
     };
-    const next = new Map(revealed.value);
-    next.delete(id);
-    revealed.value = next;
-    // Drop the full text read under the old reveal as well.
-    const body = kept.message.body;
-    if (body.kind === 'text' && fullTexts.value.has(body.body)) {
-      const texts = new Map(fullTexts.value);
-      texts.delete(body.body);
-      fullTexts.value = texts;
+    // Any answer still on its way was asked under the old reveal.
+    bumpReveal(id);
+    intents.delete(id);
+    if (kept) {
+      const next = new Map(revealed.value);
+      next.delete(id);
+      revealed.value = next;
+      // Drop the full text read under the old reveal as well.
+      dropFullText(textBodyOf(kept.message));
     }
-    if (rest.earlierText || rest.oneTimeCode) return revealMessage(id, rest);
+    if (rest.earlierText || rest.oneTimeCode) return readRevealed(id, rest);
     return null;
   }
 
@@ -910,19 +1178,45 @@ export const useViewer = defineStore('viewer', () => {
   }
 
   /**
+   * The full text of a body as the message shows now: only when it was
+   * read under the same code reveal (D115), else null.
+   */
+  function fullTextFor(bodyId: SafeId, messageId: SafeId): FullText | null {
+    const t = fullTexts.value.get(bodyId);
+    return t && t.codes === codesShown(messageId) ? t : null;
+  }
+
+  /**
    * Read the next chunk of a truncated body's text (from the start, then
    * from where the last chunk ended). Codes stay masked unless the
-   * message's code was revealed.
+   * message's code was revealed. An answer is dropped when the message's
+   * reveal changed (or its text was dropped) while it was read.
    */
   async function loadFullText(bodyId: SafeId, messageId: SafeId): Promise<void> {
     const v = viewer.value;
     if (v === null) return;
-    const have = fullTexts.value.get(bodyId);
+    const codes = codesShown(messageId);
+    const stored = fullTexts.value.get(bodyId);
+    // Text read under the other code state is not continued: start again.
+    const have = stored && stored.codes === codes ? stored : undefined;
     if (have && (have.loading || have.withheld !== null || have.none || have.end >= have.full)) return;
     const from = have?.end ?? 0;
-    const base: FullText = have ?? { pieces: [], end: 0, full: 0, withheld: null, none: false, loading: false, error: null };
-    setFullText(bodyId, { ...base, loading: true, error: null });
-    const codes = revealed.value.get(messageId)?.reveal.oneTimeCode === true;
+    const base: FullText = have ?? {
+      pieces: [],
+      end: 0,
+      full: 0,
+      withheld: null,
+      none: false,
+      loading: false,
+      error: null,
+      codes,
+    };
+    const pending: FullText = { ...base, loading: true, error: null };
+    setFullText(bodyId, pending);
+    const epoch = revealEpoch.get(messageId) ?? 0;
+    /** Still ours: the entry was not replaced or dropped, and the reveal held. */
+    const current = (): boolean =>
+      viewer.value === v && fullTexts.value.get(bodyId) === pending && (revealEpoch.get(messageId) ?? 0) === epoch;
     try {
       const chunk = await ipc.getMessageText({
         viewer: v,
@@ -930,12 +1224,14 @@ export const useViewer = defineStore('viewer', () => {
         fromUtf16: from,
         ...(codes ? { reveal: { oneTimeCode: true } } : {}),
       });
-      if (viewer.value !== v) return;
-      const now = fullTexts.value.get(bodyId) ?? base;
-      const next: FullText = { ...now, loading: false, error: null, full: chunk.fullUtf16 };
+      if (!current()) {
+        if (fullTexts.value.get(bodyId) === pending) dropFullText(bodyId);
+        return;
+      }
+      const next: FullText = { ...pending, loading: false, error: null, full: chunk.fullUtf16 };
       if (chunk.text.kind === 'text') {
-        next.pieces = markRaw([...now.pieces, ...chunk.text.pieces]);
-        next.end = Math.max(chunk.endUtf16, now.end);
+        next.pieces = markRaw([...pending.pieces, ...chunk.text.pieces]);
+        next.end = Math.max(chunk.endUtf16, pending.end);
         // A chunk that ends where it started has nothing more to give.
         if (chunk.endUtf16 <= from) next.none = true;
       } else if (chunk.text.kind === 'withheld') {
@@ -945,8 +1241,11 @@ export const useViewer = defineStore('viewer', () => {
       }
       setFullText(bodyId, next);
     } catch (e) {
-      const now = fullTexts.value.get(bodyId) ?? base;
-      setFullText(bodyId, { ...now, loading: false, error: failed(e) });
+      if (!current()) {
+        if (fullTexts.value.get(bodyId) === pending) dropFullText(bodyId);
+        return;
+      }
+      setFullText(bodyId, { ...pending, loading: false, error: failed(e) });
     }
   }
 
@@ -991,6 +1290,7 @@ export const useViewer = defineStore('viewer', () => {
    * plays), the date dialog, the message menu and the link confirmation.
    */
   function closeDialogs(): void {
+    dialogEpoch += 1;
     media.value = null;
     pendingPlay.value = null;
     dateJumpOpen.value = false;
@@ -1029,8 +1329,10 @@ export const useViewer = defineStore('viewer', () => {
     dateJumpOpen,
     threadCommand,
     inspections,
+    inspectionErrors,
     revealed,
     fullTexts,
+    panelFocus,
     pendingFocus,
     menu,
     linkCopy,
@@ -1055,9 +1357,11 @@ export const useViewer = defineStore('viewer', () => {
     dayCounts,
     seekDate,
     inspect,
+    retryInspection,
     openImage,
     closeMedia,
     requestPlay,
+    playReturnTo,
     answerPlay,
     openDetails,
     openReplies,
@@ -1068,6 +1372,7 @@ export const useViewer = defineStore('viewer', () => {
     revealMessage,
     unreveal,
     loadFullText,
+    fullTextFor,
     focusOnOpen,
     takePending,
     takePendingFocus,

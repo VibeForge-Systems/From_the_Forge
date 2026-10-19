@@ -188,3 +188,25 @@ describe('links and the menu', () => {
     expect(menuItems(message(1, { body: { kind: 'noBody' } })).map((i) => i.action.kind)).toEqual(['details']);
   });
 });
+
+describe('events name no actor in copies (review fix, §3.6)', () => {
+  const handles = new Map([[sid(1), { id: sid(1), address: text('+1 555 0100'), service: 'iMessage' as const }]]);
+  const prefs = { timeFormat: 'h23', timeZone: 'utc', showSeconds: false } as const;
+
+  it('offers no "Copy with sender and time" for an event or an unrecognised item', () => {
+    for (const item of ['participantAdded', 'unknown'] as const) {
+      const kinds = menuItems(withBody([words('An address was added')], {}, { item, direction: 'you' })).map(
+        (i) => i.action.kind,
+      );
+      expect(kinds).toEqual(['copyText', 'copyClean', 'details']);
+    }
+  });
+
+  it('writes a time-only first line for an event, never its row’s handle or "You"', () => {
+    const m = withBody([words('x')], {}, { item: 'participantAdded', direction: 'you' });
+    const first = withSenderAndTime(m, 'x', { handles, prefs }).split('\n')[0]!;
+    expect(first).not.toContain('+1 555 0100');
+    expect(first).not.toContain('You');
+    expect(first).toMatch(/\(times in UTC\)$/);
+  });
+});

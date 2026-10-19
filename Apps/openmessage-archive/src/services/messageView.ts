@@ -247,9 +247,10 @@ export function runStarts(
 
 /**
  * The items where the service changes from the item before (§3.6): each
- * maps to its new service (`null`: a class this version does not
- * recognise). The first loaded item has no divider, since what precedes
- * it is not loaded.
+ * maps to its new service (`null`: no service was recorded for it, or the
+ * cell could not be read; text this version does not recognise is
+ * `other`, and empty text `empty`). The first loaded item has no divider,
+ * since what precedes it is not loaded.
  */
 export function serviceChanges(items: readonly MessageDto[]): Map<SafeId, ServiceClassDto | null> {
   const out = new Map<SafeId, ServiceClassDto | null>();

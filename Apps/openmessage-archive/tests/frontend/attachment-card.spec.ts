@@ -35,6 +35,7 @@ import { MEDIA_UI_TEXT, PLAYBACK_TEXT } from '@/services/viewerText';
 import type {
   AttachmentDto,
   AttachmentInspectionDto,
+  DecimalString,
   InspectAttachmentRequest,
   MediaPlayback,
   SniffedKindDto,
@@ -139,7 +140,7 @@ describe('attachment cards', () => {
     expect(w.findAll('img')).toHaveLength(1);
     expect(caption.text()).toContain('20 KB stored (20 KB declared)');
     await button.trigger('click');
-    expect(useViewer().media).toEqual({ attachment: hostile, mode: 'image' });
+    expect(useViewer().media).toEqual({ attachment: hostile, mode: 'image', returnTo: 'oma-m-7-a1-open' });
   });
 
   it('set src only while in view', async () => {
@@ -358,5 +359,69 @@ describe('the media viewer', () => {
     // No download, open or share control.
     const labels = w.find('.oma-dialog').findAll('button').map((b) => b.text().toLowerCase());
     for (const l of labels) expect(l).not.toMatch(/download|save|open|share/);
+  });
+});
+
+describe('attachment cards (review fixes)', () => {
+  it('keep Play focusable while Rust checks the file, and ignore a second press', async () => {
+    setup('confirm');
+    let release: () => void = () => undefined;
+    fake.handlers.inspectAttachment = (arg) => {
+      const r = arg as InspectAttachmentRequest;
+      if (!r.forPlayback) return Promise.resolve(playableInspection('mp4', r));
+      return new Promise((resolve) => {
+        release = () => resolve(playableInspection('mp4', r));
+      });
+    };
+    const w = mountHost([attachment(1)]);
+    await flushPromises();
+    const button = w.get('#oma-m-1-a1-play');
+    (button.element as HTMLButtonElement).focus();
+    await button.trigger('click');
+    await flushPromises();
+    expect(button.attributes('disabled')).toBeUndefined();
+    expect(button.attributes('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(button.element);
+    await button.trigger('click');
+    expect(forPlayback()).toBe(1);
+    release();
+    await flushPromises();
+    expect(useViewer().pendingPlay?.id).toBe(1);
+  });
+
+  it('say on the card when the inspection failed, with Retry', async () => {
+    setup();
+    let fail = true;
+    fake.handlers.inspectAttachment = (arg) =>
+      fail
+        ? Promise.reject(new Error('could not read'))
+        : Promise.resolve(inspection((arg as InspectAttachmentRequest).attachmentId));
+    const w = mountHost([attachment(1)]);
+    await flushPromises();
+    expect(w.text()).toContain('This attachment could not be inspected.');
+    fail = false;
+    await w.findAll('button').find((b) => b.text() === 'Retry')!.trigger('click');
+    await flushPromises();
+    expect(w.text()).not.toContain('could not be inspected');
+    expect(w.find('img').exists()).toBe(true);
+  });
+
+  it('note a file shown from an older backup and a verify problem on an image card', async () => {
+    setup();
+    answer((r) =>
+      inspection(r.attachmentId, {
+        facts: {
+          ...inspection(r.attachmentId).facts,
+          card: { kind: 'file', olderBackup: { heldBy: r.attachmentId, newest: r.attachmentId } },
+          verify: { state: 'lengthMismatch', raw: '3' as DecimalString, verifiedMs: null, mayBeStale: false },
+        },
+      }),
+    );
+    const w = mountHost([attachment(1)]);
+    await flushPromises();
+    expect(w.find('img').exists()).toBe(true);
+    const notes = w.findAll('.oma-card-note').map((n) => n.text());
+    expect(notes[0]).toMatch(/^Showing the file from/);
+    expect(notes[1]).toBe('The full verify reported: wrong size');
   });
 });

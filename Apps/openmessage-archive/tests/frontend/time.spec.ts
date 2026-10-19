@@ -8,6 +8,9 @@ import {
   isoAtPrecision,
   monthBounds,
   setIntlStyleSupported,
+  countsPerDay,
+  isBefore2007,
+  strictBounds,
   systemDayBoundary,
   timeText,
   utcDayBoundary,
@@ -33,11 +36,23 @@ describe('day boundaries with an injected builder', () => {
     expect(dayBounds(fake, 2026, 0, 1, 3)).toEqual([1010, 1020, 1030, 1040]);
   });
 
-  it('refuses a builder that does not increase, and more than 42 days', () => {
-    const flat: DayBoundaryBuilder = () => 5;
-    expect(() => dayBounds(flat, 2026, 0, 1, 2)).toThrow(RangeError);
+  it('refuses a builder that goes backwards, and more than 42 days', () => {
+    const backwards: DayBoundaryBuilder = (_y, _m, d) => 1000 - d;
+    expect(() => dayBounds(backwards, 2026, 0, 1, 2)).toThrow(RangeError);
+    expect(() => dayBounds(() => Number.NaN, 2026, 0, 1, 2)).toThrow(RangeError);
     expect(() => dayBounds(fake, 2026, 0, 1, 43)).toThrow(RangeError);
     expect(() => dayBounds(fake, 2026, 0, 1, 0)).toThrow(RangeError);
+  });
+
+  it('takes equal neighbours as a skipped (empty) day, and sends Rust strict bounds', () => {
+    // Day 2 of this fake zone never happened: it starts where day 3 does.
+    const skips: DayBoundaryBuilder = (y, m, d) => (d >= 3 ? fake(y, m, d) - 10 : fake(y, m, d));
+    const b = dayBounds(skips, 2026, 0, 1, 3);
+    expect(b).toEqual([1010, 1020, 1020, 1030]);
+    expect(dayIndex(b, 1020)).toBe(2);
+    const strict = strictBounds(b);
+    expect(strict).toEqual({ bounds: [1010, 1020, 1030], slots: [0, -1, 1] });
+    expect(countsPerDay(strict.slots, [4, 7])).toEqual([4, 0, 7]);
   });
 
   it('builds a month and a six-week grid', () => {
@@ -73,6 +88,20 @@ describe('formatting', () => {
     const h12 = formatInstant(at, { timeFormat: 'h12', timeZone: 'utc', showSeconds: false });
     expect(h12).toMatch(/2:05/);
     expect(h12).not.toContain(':09');
+  });
+
+  it('marks UTC times as UTC on the Intl path, as the fallback does, and dates not', () => {
+    const utc = { timeFormat: 'h23', timeZone: 'utc', showSeconds: false } as const;
+    expect(formatInstant(at, utc)).toMatch(/14:05 UTC$/);
+    expect(formatInstant(at, utc, 'time')).toMatch(/14:05 UTC$/);
+    expect(formatInstant(at, utc, 'date')).not.toContain('UTC');
+    expect(formatInstant(at, { ...utc, timeZone: 'system' })).not.toContain('UTC');
+  });
+
+  it('marks instants before 2007 like Rust does (2007-01-01T00:00Z)', () => {
+    expect(isBefore2007(Date.UTC(2006, 11, 31, 23, 59, 59))).toBe(true);
+    expect(isBefore2007(Date.UTC(2007, 0, 1))).toBe(false);
+    expect(isBefore2007(Number.NaN)).toBe(false);
   });
 
   it('falls back to a fixed format when the engine lacks dateStyle', () => {

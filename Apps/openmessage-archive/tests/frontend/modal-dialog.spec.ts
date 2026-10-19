@@ -50,6 +50,39 @@ describe('ModalDialog', () => {
     expect(document.activeElement).toBe(opener);
     w.unmount();
   });
+
+  it('returns focus to `returnTo` when the opener is <body> or inside a closed dialog (review fix)', async () => {
+    const proto = HTMLDialogElement.prototype as unknown as Record<string, unknown>;
+    proto.showModal = function showModal(this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+      this.querySelector('button')?.focus();
+    };
+    proto.close = function close(this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    };
+    // The Play button was disabled when pressed: focus fell to <body>.
+    const play = document.createElement('button');
+    play.id = 'oma-m-1-a1-play';
+    document.body.append(play);
+    (document.activeElement as HTMLElement | null)?.blur();
+    const w = mount(ModalDialog, { props: { open: false, title: 'T', returnTo: 'oma-m-1-a1-play' }, attachTo: document.body });
+    await w.setProps({ open: true });
+    await w.setProps({ open: false });
+    expect(document.activeElement).toBe(play);
+
+    // Opened from a button inside another dialog that has closed since.
+    const other = document.createElement('dialog');
+    const inner = document.createElement('button');
+    other.append(inner);
+    other.setAttribute('open', '');
+    document.body.append(other);
+    inner.focus();
+    await w.setProps({ open: true });
+    other.removeAttribute('open');
+    await w.setProps({ open: false });
+    expect(document.activeElement).toBe(play);
+    w.unmount();
+  });
 });
 
 afterEach(() => {

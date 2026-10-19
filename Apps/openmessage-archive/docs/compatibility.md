@@ -1188,6 +1188,66 @@ contrast themes (forced colours); zoom to 400 % at a 1280 px window, which
 gives 320 CSS px. Spike 5s is still **UNVERIFIED**; this slice does not
 depend on it.
 
+### Milestone 5 PR B review fixes
+
+Run in the Linux container on 2026-10-19 (Node 22.22.0, Vitest 4.1.12, jsdom
+27.4.0, Rust 1.97.0 debug build); not CI, not a desktop, no window,
+synthetic data only. Each fix below has a regression test that ran there:
+
+- **Reveals and full text (D115):** a full-text chunk read with the code
+  shown is dropped when "Hide code" comes first; a reveal answered after
+  "Hide" is dropped; a full text shows only under the code reveal it was
+  read with, and goes when its reveal is evicted
+  (`viewer-store.spec.ts`).
+- **Paging:** an `anchorMoved` page reloads the window around the anchor
+  and keeps focus on it, and no message id is ever held twice; a kept
+  window opened at the newest item forgets an earlier jump's focus;
+  conversation-list answers apply only when they are the latest; rows in
+  use are evicted last and the thread reloads its row when it was
+  evicted; a Play check that ends after the privacy screen opens nothing;
+  inspections are asked once at a time, dropped when no card wants them,
+  and their failures shown on the card with Retry.
+- **Privacy:** a focus loss while "Show" reopens an idle-closed session
+  keeps the curtain up; a hidden document leaves the screen alone with the
+  setting off; unticking "Include earlier versions and unsent text" with
+  an invalid date clears the results. In Rust, a decode still running when
+  `hide_viewer` arrives is answered but not cached
+  (`a_decode_running_at_hide_is_not_cached`); a preview request that
+  reaches the app only after the hide is still cached (not tested; see
+  `privacy.md`).
+- **Faithfulness:** the thread header's first date is the first of 2007
+  or later, with "and N earlier-dated items" and the time-zone note; UTC
+  times read "UTC" on the Intl path too; no conversation is called a
+  group; a NULL service reads "not recorded or unreadable"; events name
+  no direction in search and no sender in copies; the edit codes are
+  worded neutrally; dates before 2007 are marked in search results, the
+  list, day separators and Details; text revealed in Details carries the
+  "before it was unsent" caution; the attachment card notes an older
+  backup and a full verify's problem on every kind of card.
+- **Dates:** a day the zone skipped is an empty day in the calendar (Rust
+  gets strictly increasing bounds) and in the search filter; a fifth DST
+  project, `Pacific/Apia` (2011-12-30 never happened there), ran on
+  Linux. Whether Node honours `TZ=Pacific/Apia` on the Windows runner is
+  checked by that project's first assertion in CI.
+- **Focus and keyboard:** Play, "Show code"/"Hide code", "Show earlier
+  text", "Read more", "Show more results" and the date dialog's "Earlier"
+  and "Later" keep focus (one element per action, `aria-disabled` while
+  busy); `ModalDialog` returns focus to a named target when its opener was
+  `<body>` or inside a closed dialog; details and replies take focus on
+  their heading and give it back on Close; choosing a conversation or a
+  search result closes an overlay over the thread; Escape in the date
+  dialog no longer closes an overlay; closing the date dialog cancels a
+  pending jump; the open conversation keeps a bar in forced colours (a
+  style-sheet check, not a rendering).
+- **The source rule** reads bindings from the template AST, and fails on
+  the same-name shorthand, single quotes, modifiers, the `.x` shorthand,
+  upper case, an angle-bracket brand cast and `createVNode`.
+
+**Not tested, so UNVERIFIED:** all of the focus behaviour on WebKitGTK or
+WebView2 and with a screen reader; forced colours on Windows; the
+focus-loss race on a real desktop. Spike 5s(2) (playback) is still
+**UNVERIFIED**; nothing here depends on it.
+
 ### Milestone 5 headless smoke test of the viewer (slice 5k; Linux container, not a desktop)
 
 On 2026-10-19 the release binary of the PR B branch (slices 5g–5k), built

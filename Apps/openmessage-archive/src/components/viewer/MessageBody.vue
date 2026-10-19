@@ -15,6 +15,10 @@
 //   chunk by chunk, still masked.
 // - An attachment placed in the text is named by its number in the list
 //   below the text ("Attachment 2 (shown below)", slice 5h3).
+// - "Show code" and "Hide code" are one button whose words change, and
+//   "Read more" stays focusable while it loads (`aria-disabled`), so the
+//   control the user pressed keeps focus; when it goes away (the whole
+//   text is read), focus goes to the message's article.
 import { computed, ref } from 'vue';
 import type { MessageDto, SafeId, SegmentDto } from '@/types';
 import SafeText from './SafeText.vue';
@@ -37,6 +41,7 @@ import {
 } from '@/services/viewerText';
 import { useSettings } from '@/stores/settings';
 import { useViewer } from '@/stores/viewer';
+import { keepFocusNear } from '@/services/focus';
 
 const props = defineProps<{
   message: MessageDto;
@@ -60,7 +65,9 @@ const hasCode = computed(() => segments.value.some((s) => s.oneTimeCode));
 const transcription = computed(() => segments.value.some((s) => s.transcription));
 const hiddenLink = computed(() => segments.value.some((s) => s.url && s.urlHidden));
 
-const full = computed(() => (text.value ? (viewer.fullTexts.get(text.value.body) ?? null) : null));
+// Only a full text read under the reveal the message shows now (D115): a
+// text read with the code shown never outlives "Hide code".
+const full = computed(() => (text.value ? viewer.fullTextFor(text.value.body, props.message.id) : null));
 const showingFull = computed(() => full.value !== null && full.value.pieces.length > 0);
 const long = computed(() => (text.value?.fullUtf16 ?? 0) > COLLAPSE_UTF16);
 const collapsed = computed(() => long.value && !expanded.value && !showingFull.value);
@@ -131,9 +138,24 @@ function placedText(id: SafeId): string {
   return i < 0 ? ATTACHMENT_TEXT.inTextUnlisted : fill(ATTACHMENT_TEXT.inText, { n: i + 1 });
 }
 
-function readMore(): void {
+async function readMore(event: MouseEvent): Promise<void> {
   const t = text.value;
-  if (t) void viewer.loadFullText(t.body, props.message.id);
+  if (!t || full.value?.loading === true) return;
+  const from = event.currentTarget as Element | null;
+  await viewer.loadFullText(t.body, props.message.id);
+  keepFocusNear(from);
+}
+
+/** The code toggle: one button, so focus stays on it across the change. */
+const codeButton = computed(() => (masked.value ? BUBBLE_TEXT.showCode : codesShownHere() ? BUBBLE_TEXT.hideCode : null));
+
+function codesShownHere(): boolean {
+  return props.codesRevealed && hasCode.value;
+}
+
+function toggleCode(): void {
+  if (masked.value) emit('revealCode');
+  else emit('hideCode');
 }
 </script>
 
@@ -168,14 +190,17 @@ function readMore(): void {
       <button v-if="long && !showingFull" type="button" class="btn btn-link btn-sm oma-inline-btn" @click="expanded = !expanded">
         {{ expanded ? BUBBLE_TEXT.showLess : BUBBLE_TEXT.showMore }}
       </button>
-      <button v-if="fullButton" type="button" class="btn btn-link btn-sm oma-inline-btn" :disabled="full?.loading === true" @click="readMore">
+      <button
+        v-if="fullButton"
+        type="button"
+        class="btn btn-link btn-sm oma-inline-btn"
+        :aria-disabled="full?.loading === true ? 'true' : undefined"
+        @click="readMore"
+      >
         {{ fullButton }}
       </button>
-      <button v-if="masked" type="button" class="btn btn-link btn-sm oma-inline-btn" @click="emit('revealCode')">
-        {{ BUBBLE_TEXT.showCode }}
-      </button>
-      <button v-else-if="codesRevealed && hasCode" type="button" class="btn btn-link btn-sm oma-inline-btn" @click="emit('hideCode')">
-        {{ BUBBLE_TEXT.hideCode }}
+      <button v-if="codeButton" type="button" class="btn btn-link btn-sm oma-inline-btn" @click="toggleCode">
+        {{ codeButton }}
       </button>
     </div>
     <p v-if="full?.loading" class="oma-body-note" role="status">{{ BUBBLE_TEXT.loadingText }}</p>

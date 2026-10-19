@@ -204,8 +204,9 @@ These apply to Milestone 5. The viewer's come first, then the archive's
   synthetic, from one machine. Two of the read targets were missed there
   (a month of day counts in a 200,000-message chat, 24 ms against 10 ms;
   a page around a message, 11.5 ms against 10 ms), as were the
-  whole-archive exact-text search (0.8 s against 0.4 s) and the preview of
-  a 12-megapixel photo (0.84 s against 0.7 s, in process). Real photo
+  whole-archive exact-text search (0.8 s against 0.4 s) and the renditions
+  of a 12-megapixel photo (0.84 s for the thumbnail and 1.33 s for the full
+  view against 0.7 s, in process). Real photo
   decode times, search index sizes and timings at real scale are unknown.
 - **HEIC and HEIF images are not previewed**; they show as file cards.
   On iPhones that store photos as HEIC, many photos will not preview.
