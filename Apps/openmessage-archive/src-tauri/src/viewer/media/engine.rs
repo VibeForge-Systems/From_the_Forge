@@ -19,9 +19,14 @@
 //! second request for it waits for that answer), so a hostile image is
 //! decoded at most once per session. After [`CRASH_CAP`] helper crashes in
 //! a session, previews are off for the rest of it.
+//!
+//! **Hiding** (the privacy screen, slice 5j) drops the cached renditions
+//! and starts a new hide epoch. A decode is cached only when no hide came
+//! between its request and its end, so a decode still running when the
+//! screen is hidden answers its request but puts nothing back in memory.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use oma_archive::media::MAX_INPUT_BYTES;
@@ -76,6 +81,9 @@ pub struct DecodeJob {
     pub blob: BlobId,
     pub rendition: Rendition,
     pub reply: Reply,
+    /// The hide epoch the request arrived in; its result is cached only
+    /// while that epoch is current.
+    pub epoch: u64,
 }
 
 /// A stream chunk to read: bytes `start..=end`, answered `206`, or the
@@ -100,6 +108,9 @@ struct Shared {
     inflight: Mutex<HashMap<Key, Vec<Reply>>>,
     crashes: AtomicU32,
     previews_off: AtomicBool,
+    /// Bumped by every hide; a decode requested in an older epoch is not
+    /// cached.
+    hide_epoch: AtomicU64,
 }
 
 impl Shared {
@@ -230,6 +241,7 @@ impl MediaEngine {
             blob,
             rendition,
             reply,
+            epoch: self.shared.hide_epoch.load(Ordering::SeqCst),
         }) {
             Pushed::Queued => {}
             Pushed::Displaced(old) => old.reply.send(Outcome::Dropped, MediaResponse::busy()),
@@ -247,6 +259,25 @@ impl MediaEngine {
     /// Jobs waiting in the decode queue (for tests).
     pub fn decode_queued(&self) -> usize {
         self.decode.queued()
+    }
+
+    /// The privacy screen (slice 5j): drop the cached renditions and start
+    /// a new hide epoch, so a decode still running is not cached when it
+    /// ends. The failure cache, the tokens and the workers stay; the page
+    /// asks for renditions again once it is shown.
+    pub fn hide(&self) {
+        // Under the cache lock, so no decode can check the old epoch and
+        // insert after the renditions were dropped.
+        if let Ok(mut c) = self.shared.cache.lock() {
+            self.shared.hide_epoch.fetch_add(1, Ordering::SeqCst);
+            c.drop_renditions();
+        }
+    }
+
+    /// Cached renditions (tests).
+    #[cfg(test)]
+    pub fn cached_renditions(&self) -> usize {
+        self.shared.cache.lock().map(|c| c.len()).unwrap_or(0)
     }
 
     /// End the session's media: waiting requests answer `503`, the
@@ -313,7 +344,7 @@ fn decode_one(
             }
         }
     }
-    let (outcome, response) = render_key(key, shared, source, rd, backend, factory, cap);
+    let (outcome, response) = render_key(key, job.epoch, shared, source, rd, backend, factory, cap);
     let waiting = shared
         .inflight
         .lock()
@@ -328,8 +359,10 @@ fn decode_one(
 
 /// Read, verify and render `key` once: the outcome and the response every
 /// request for it gets.
+#[allow(clippy::too_many_arguments)]
 fn render_key(
     key: Key,
+    epoch: u64,
     shared: &Shared,
     source: &ReaderSource,
     rd: &mut Option<ArchiveReader>,
@@ -358,14 +391,17 @@ fn render_key(
                 s.insert(blob, (img.source_width, img.source_height));
             }
             let bytes = Arc::new(img.bytes);
+            // Not cached when the screen was hidden since the request.
             if let Ok(mut c) = shared.cache.lock() {
-                c.insert(
-                    key,
-                    CachedImage {
-                        format: img.format,
-                        bytes: Arc::clone(&bytes),
-                    },
-                );
+                if shared.hide_epoch.load(Ordering::SeqCst) == epoch {
+                    c.insert(
+                        key,
+                        CachedImage {
+                            format: img.format,
+                            bytes: Arc::clone(&bytes),
+                        },
+                    );
+                }
             }
             (
                 Outcome::Decoded,

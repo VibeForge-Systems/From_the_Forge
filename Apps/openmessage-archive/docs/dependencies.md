@@ -190,6 +190,14 @@ Apache-2.0), and a direct dependency on `rustix` 1.1.5 on Linux, which was
 already in the tree; the new workspace crate `oma-archive`; no JavaScript
 dependency change; `deny.toml` unchanged. Slice 4n changed no dependency.
 
+**Milestone 5 in summary:** two new third-party crates, `image` 0.25.10
+(with ten crates it brings in) and `heic-rs` 0.1.4 (optional, behind
+`oma-archive`'s non-default `heic` feature, never in official or CI release
+builds); `getrandom` 0.3.4 as a direct dependency (already locked through
+Tauri); the npm package virtua 0.53.1 added for spike 5s(1) and removed
+again (41 runtime npm packages, as before); `deny.toml` unchanged. Slice 5k
+changed no dependency.
+
 | Date | Change | Reason |
 |---|---|---|
 | 2026-10-17 | Initial set (Milestone 1) | — |
@@ -224,3 +232,6 @@ dependency change; `deny.toml` unchanged. Slice 4n changed no dependency.
 | on merge (M5, slice 5a) | Dev-only Python tooling: `make_synthetic_viewer.py` needs only the existing `requirements.txt` (`cryptography`) | The viewer catalogue. It imports the M2, M3 and M4 generators as modules; no new Python package |
 | on merge (M5, slice 5d) | `image` 0.25.10 becomes a regular dependency of `oma-archive` (it was a dev-dependency); added `heic-rs` 0.1.4 (`=0.1.4`, default features off, `std` on) as a workspace dependency and an **optional** dependency of `oma-archive` behind the non-default `heic` feature | `media::render` decodes images (in the decode helper only). `heic-rs` is owner decision Q2: an opt-in HEIC decoder for self-builders, never in official or CI release builds (HEVC patents; `privacy.md`). One new crate in `Cargo.lock` (`heic-rs`, MIT OR Apache-2.0, no dependencies with this feature set). `cargo deny check` and `cargo deny --features oma-archive/heic check` pass with the unchanged `deny.toml` (whose `all-features = false` would otherwise not see an optional crate; CI runs both) |
 | on merge (M5, slice 5f) | Added getrandom 0.3.4 (`=0.3.4`, default features) as a workspace dependency and a direct dependency of `src-tauri` | Media tokens for the `oma-media` protocol. No new crate in `Cargo.lock` (0.3.4 was already locked through Tauri); the only lockfile change is `getrandom` added to the shell's own dependency list. No new npm package. `cargo deny check` passes with the unchanged `deny.toml` |
+| on merge (M5, slice 5g) | Added the npm package virtua 0.53.1 (exact pin, a runtime dependency) | Spike 5s(1): virtualised lists with prepend support (`shift`) for the thread feed (spec §8.4, §15, D109). MIT, no dependencies; Vue (≥ 3.2) and the other frameworks are optional peers, and only `virtua/vue` would be imported. Chosen by the spec's rule, the newest release at least 14 days old when the spike ran on 2026-10-19: 0.53.1 (2026-10-05; 0.53.2 to 0.53.5 were younger). Pre-1.0 with frequent releases, so the `VirtualFeed` wrapper keeps it swappable. **Nothing under `src/` imports it yet**, so it is not in the bundle. The spike on WebKitGTK 2.52.6 (`compatibility.md`) passed except for prepends at scrollTop 0; slice 5h1 decides between a mitigation and the in-house feed (5h0), and removes this package if 5h0 replaces it. `npm run licenses` passes (42 runtime packages) |
+| on merge (M5, slice 5h1) | Removed the npm package virtua 0.53.1 | It failed spike 5s(1) on WebKitGTK 2.52.6 (prepends at scrollTop 0), so slice 5h0 replaced it with the in-house `VirtualFeed` (`src/components/viewer/VirtualFeed.vue` over `src/services/feedModel.ts`, written without reference to any library's code). It was never imported, so the bundle is unchanged by the removal. `package.json` and `package-lock.json` lose its entry and nothing else. `npm run licenses` passes (41 runtime packages) |
+| on merge (M5, slice 5k) | No dependency change. Two ignored test files in `oma-archive` (`perf_viewer.rs`, `smoke_library.rs`) use only its existing dev-dependencies | The viewer's performance numbers and the smoke-test library. `Cargo.lock`, `package.json` and `package-lock.json` are unchanged; `cargo deny check` and `npm run licenses` (41 runtime packages) pass |

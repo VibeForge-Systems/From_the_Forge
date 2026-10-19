@@ -10,12 +10,31 @@ describe('roadmap', () => {
     }
   });
 
-  it('claims milestones 1 to 4 as available and everything later as planned', () => {
+  it('claims milestones 1 to 4 and the M5 viewer (5h3), search (5i) and privacy screen (5j) as available, and everything else as planned', () => {
     const available = CAPABILITIES.filter((c) => c.status === 'available').map((c) => c.id);
-    expect(available).toEqual(['shell', 'backup-import', 'extraction', 'archive-database']);
+    expect(available).toEqual([
+      'shell',
+      'backup-import',
+      'extraction',
+      'archive-database',
+      'viewer',
+      'search',
+      'privacy-screen',
+    ]);
+    // It never claims to be a lock.
+    expect(capability('privacy-screen').summary).toContain('it is not a lock');
     for (const c of CAPABILITIES) {
-      if (c.milestone >= 5) expect(c.status).toBe('planned');
+      if (c.milestone >= 6) expect(c.status).toBe('planned');
     }
+  });
+
+  it('describes the viewer without claiming search, exports or saving', () => {
+    const v = capability('viewer');
+    expect(v.milestone).toBe(5);
+    expect(v.summary).toContain('your confirmation');
+    expect(v.summary.toLowerCase()).not.toContain('search');
+    expect(v.summary.toLowerCase()).not.toContain('export');
+    expect(v.summary.toLowerCase()).not.toContain('save');
   });
 
   it('describes the extraction check as counts only, and the archive import as shipped', () => {

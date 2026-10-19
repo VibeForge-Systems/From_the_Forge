@@ -45,6 +45,14 @@ body {
   }
 }
 
+/* The viewer's "Always reduce motion" setting (M5 §10). */
+.oma-reduce-motion *,
+.oma-reduce-motion *::before,
+.oma-reduce-motion *::after {
+  transition-duration: 0.01ms !important;
+  animation-duration: 0.01ms !important;
+}
+
 .oma-skip-link {
   position: absolute;
   z-index: 2000;
@@ -90,6 +98,10 @@ body {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  /* One row the height of the window: a tall panel scrolls inside itself
+     instead of growing the row and scrolling the whole page (seen in the
+     slice 5k smoke test with the search panel). */
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
   min-height: 0;
 }

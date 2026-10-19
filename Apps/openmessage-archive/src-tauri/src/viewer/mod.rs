@@ -1,7 +1,7 @@
 //! The viewer: the shell side of milestone 5 (spec §7).
 //!
 //! Nothing here depends on Tauri, so the session, the operations behind
-//! the 14 viewer commands, the DTOs and their guards are tested without a
+//! the 15 viewer commands, the DTOs and their guards are tested without a
 //! window. `commands::viewer` adds the blocking pool, the raw-request
 //! parsing and the progress `Channel`.
 //!
@@ -702,7 +702,7 @@ pub fn search(
     let started = Instant::now();
     let result = {
         let r = s.search_reader()?;
-        r.search(&q, &token, &mut |p| progress(p.into()))
+        r.search(&q, &token, &mut |p| progress(ScanProgressDto::new(id, p)))
     };
     let mut slot = s.searches()?;
     if slot.running.as_ref().is_some_and(|(r, _)| *r == id) {
@@ -771,6 +771,18 @@ pub fn search_results(
         hits,
         skipped_rows: cx.skipped,
     })
+}
+
+/// `hide_viewer`: the privacy screen is up (slice 5j). The page has
+/// unmounted everything it showed; the cached renditions are dropped too,
+/// and a decode still running is not cached when it ends (the hide epoch,
+/// `media/engine.rs`). A request that reaches the protocol only after the
+/// hide is served and cached as usual. The session, its tokens and the
+/// failure cache stay, so "Show" needs no reopen.
+pub fn hide(s: &ViewerSession) -> IpcResult<()> {
+    s.media().hide();
+    tracing::info!(outcome = "hidden", "viewer hidden");
+    Ok(())
 }
 
 /// `cancel_search`: stop the running search with that id (its token, then

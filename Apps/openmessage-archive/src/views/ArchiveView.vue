@@ -120,7 +120,8 @@ const libraryError = computed(() =>
             are shown; the backup itself is never modified.
           </li>
           <li>
-            <strong>Browse, search, and export.</strong> <PlannedBadge capability="viewer" />
+            <strong>Browse, search, and export.</strong> Read and search your conversations in the
+            viewer. Exports <PlannedBadge capability="exports" /> come later.
           </li>
         </ol>
         <template #actions>

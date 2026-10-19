@@ -8,18 +8,22 @@ services, accounts, subscriptions or telemetry.
 Targets **Windows 11** and **Linux**. Built with Tauri 2, Rust, Vue 3,
 TypeScript, Bootstrap 5 and SQLite. Licensed **Apache-2.0**.
 
-> **Status: Milestone 4 (the archive database and import) is implemented
-> and awaiting sign-off.** The app finds iPhone backups, checks them, and
-> **imports their messages and attachment files into a local archive**: a
-> versioned SQLite database with a full-text index, and a folder of
-> attachment files. Imports are transactional and can be cancelled and
-> continued. The app shows **counts and status only**; reading your
-> messages in the app (the conversation viewer and search) is milestone 5.
-> **Archives are stored unencrypted** (archive encryption is milestone 8).
-> Milestones 2 to 4 have been tested only on synthetic backups (and, for
-> the extraction check, two third-party macOS samples), never on a backup
-> made from a real iPhone. Every unfinished capability appears in the app
-> disabled and marked "Planned · M*n*". See [the roadmap](#roadmap).
+> **Status: Milestone 5 (the rich viewer) is implemented and awaiting
+> sign-off.** The app finds iPhone backups, checks them, **imports their
+> messages and attachment files into a local archive** (a versioned SQLite
+> database with a full-text index, and a folder of attachment files), and
+> **shows them**: a conversation list, threads with reactions, replies,
+> edits and attachments, image previews, search and "jump to a date". The
+> viewer reads the archive and never writes to it. **Archives are stored
+> unencrypted** (archive encryption is milestone 8), and the viewer's
+> privacy screen hides the window but is not a lock. Milestones 2 to 5
+> have been tested only on synthetic data (and, for the extraction check,
+> two third-party macOS samples), never on a backup made from a real
+> iPhone. The viewer has run in a real window only in a headless Linux
+> container; nobody has used it on a desktop or on Windows yet, and its
+> manual checklist is open ([compatibility.md](docs/compatibility.md)).
+> Every unfinished capability appears in the app disabled and marked
+> "Planned · M*n*". See [the roadmap](#roadmap).
 
 ## What works today
 
@@ -95,6 +99,33 @@ TypeScript, Bootstrap 5 and SQLite. Licensed **Apache-2.0**.
   - **Quick verify** and **Full verify** check the database, the search
     index and every attachment file (a full verify re-hashes each one), and
     report problems by kind. They repair nothing.
+- **Viewer** (milestone 5; **Browse conversations** or **Search
+  messages** on the Archive page):
+  - A conversation list (by recent activity, name or size, with a name
+    filter) and the thread of the chosen conversation, paged in both
+    directions as you scroll, with undated messages in their own section.
+  - Messages show who sent them, reactions (derived from the recorded
+    reaction rows, which stay one click away), replies, per-part "Edited"
+    and "Unsent" marks, group events, and labels such as "not in the
+    newest complete import from this phone". **No read, delivery or sent
+    state is shown.** One-time codes and text captured before an unsend
+    are hidden until you press "Show code" or "Show earlier text".
+  - A details panel per message (recorded times, earlier versions and the
+    phone's earlier edit text, observations, every reaction row) and a
+    reply thread.
+  - Attachment cards decided from the file's bytes, never from its
+    declared type. Images are previewed after a separate helper process
+    has decoded and re-encoded them; audio and video play from the checked
+    file only after you confirm (by default). HEIC shows as a file card.
+    No attachment is ever opened by another program or saved.
+  - Search (words, or exact text for Chinese, Japanese, Korean, Thai and
+    emoji) with filters for conversation, dates, attachments and sender,
+    and a calendar to jump to a date. Nothing about a search is saved.
+  - A privacy screen (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd>,
+    optionally when the window loses focus or after an idle time), copy
+    actions in each message's menu, and guards against printing, saving
+    and dragging out. Viewer settings (time format and zone, playback,
+    zoom and the privacy options) are on the Settings page.
 - Strict security posture:
   - The webview can call only the app's own allow-listed commands.
   - The Content Security Policy allows no network connections.
@@ -136,8 +167,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 |---|---|
 | [architecture.md](docs/architecture.md) | Invariants, components, IPC boundary, key decisions |
 | [supported-formats.md](docs/supported-formats.md) | Research on backup formats, encryption, the sms.db schema and device tooling, with sources |
-| [compatibility.md](docs/compatibility.md) | What has actually been tested, by OS, iOS version and backup type, including the synthetic catalogues, oracle runs, synthetic performance, headless smoke tests and the manual checklists |
-| [privacy.md](docs/privacy.md) | What is stored and where, the backup-password path, what validation, the extraction check and an import copy and for how long, what an archive holds (unencrypted), Recently Deleted and edited messages, network posture, the difference between backup and archive encryption, deletion limits |
+| [compatibility.md](docs/compatibility.md) | What has actually been tested, by OS, iOS version and backup type, including the synthetic catalogues, oracle runs, synthetic performance, headless smoke tests (including the viewer's, M5) and the manual checklists, with what each engine was seen to do |
+| [privacy.md](docs/privacy.md) | What is stored and where, the backup-password path, what validation, the extraction check and an import copy and for how long, what an archive holds (unencrypted), Recently Deleted and edited messages, what the viewer lets into the window, plays, keeps in memory and lets you copy, and what it cannot prevent (M5), network posture, the difference between backup and archive encryption, deletion limits |
 | [development.md](docs/development.md) | Setup, commands, adding IPC commands, testing |
 | [dependencies.md](docs/dependencies.md) | Every dependency and its license, the audit policy, the upgrade log |
 
@@ -149,15 +180,99 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 2 Backup discovery and validation | Find backups, read their manifests, detect encryption, unlock, validate | Implemented; sign-off pending (fixture-generator review, manual tests) |
 | 3 Extraction check | Locate sms.db, probe the schema, and check that messages, chats, handles and attachment references can be read (counts only) | Implemented; sign-off pending (Windows CI, the clean-room review of the typedstream decoder and the fixture generators, the manual tests) |
 | 4 Archive database | Extract messages and copy attachments into the archive; versioned SQLite schema, transactional and resumable imports, FTS5, integrity verification | Implemented; sign-off pending (CI of slices 4g–4n, two §18.8 Windows tests that are not written yet (a held partial file, a killed lock holder; see `docs/compatibility.md`), the manual tests, the owner's answers on D69, D70, D71, D79 and D82) |
-| 5 Rich viewer | Conversation list, threads, inline media, search, date navigation | In progress: PR A (viewer reads, search, media checks, the 14 viewer commands, the `oma-media` protocol, the image decode helper and the window built in Rust) implemented and tested on synthetic data in a Linux container, without a window; the screens are PR B |
+| 5 Rich viewer | Conversation list, threads, inline media, search, date navigation | Implemented; sign-off pending (CI of PR B, the manual checklist in `docs/compatibility.md`: nothing of the viewer has been used on a desktop or on Windows; only a headless smoke test in a Linux container ran it in a real window). PR A (viewer reads, search, media checks, the viewer commands, the `oma-media` protocol, the image decode helper and the window built in Rust) passed CI on `ubuntu-22.04` and `windows-2022` ([run 39205163013](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39205163013)); PR B (the screens and the documents) is in review |
 | 6 Exports | TXT, CSV, JSON, HTML, PDF, XLSX, and attachments | Planned |
 | 7 Direct device backup | USB device detection and local backup creation | Planned |
 | 8 Hardening and release | Archive repair, recovery tests, diagnostic log, accessibility, signed packages | Planned |
 
 ## Known limitations
 
-These apply to Milestone 4. The archive-specific ones come first; those
-carried over from milestones 2 and 3 follow.
+These apply to Milestone 5. The viewer's come first, then the archive's
+(milestone 4), then those carried over from milestones 2 and 3.
+
+### The viewer (milestone 5)
+
+- **The archive is still unencrypted at rest, and the privacy screen is
+  not a lock.** It hides the window; anyone at the computer can show it
+  again. Encryption and a real lock are milestone 8.
+- **Not used on a real desktop or on Windows yet.** The viewer has run in
+  a real window only once, headlessly, on WebKitGTK 2.52.6 in a Linux
+  container without audio. Nothing of it has run in WebView2. The manual
+  checklist in [compatibility.md](docs/compatibility.md) is open, so no
+  minimum WebKitGTK or WebView2 version is established.
+- **Tested only on synthetic data.** All performance figures are
+  synthetic, from one machine. Two of the read targets were missed there
+  (a month of day counts in a 200,000-message chat, 24 ms against 10 ms;
+  a page around a message, 11.5 ms against 10 ms), as were the
+  whole-archive exact-text search (0.8 s against 0.4 s) and the renditions
+  of a 12-megapixel photo (0.84 s for the thumbnail and 1.33 s for the full
+  view against 0.7 s, in process). Real photo
+  decode times, search index sizes and timings at real scale are unknown.
+- **HEIC and HEIF images are not previewed**; they show as file cards.
+  On iPhones that store photos as HEIC, many photos will not preview.
+  (Self-builders can enable an optional decoder at their own legal risk;
+  official builds never include it. See
+  [privacy.md](docs/privacy.md).)
+- **Audio and video:**
+  - they play through your system's media codecs, which the app cannot
+    make safe; a file crafted by its sender could exploit them, and on
+    Linux the web engine's sandbox may be off (not tested). The
+    structural check covers MP4, QuickTime, M4A and WAV only;
+  - they play only where the web engine has the codec: on Linux that
+    depends on the installed GStreamer plugins (without `gst-libav`, MP4
+    and M4A offer no Play), and on Windows HEVC may need an extension;
+  - iOS voice messages (`.caf`) usually do not play;
+  - **actual playback and seeking have not been observed on either
+    engine** (the container had no audio device).
+- **Image decoding runs in a helper process that is not an operating-system
+  sandbox.** Animated GIFs show their first frame only, and wide-gamut
+  colours are not managed.
+- **Search:**
+  - words mode cannot find parts of unspaced Chinese, Japanese, Thai or
+    Korean text or a single emoji, and does not match `ß` as `ss`; the
+    automatic mode switches to exact text for those;
+  - exact text is case-, accent- and normalisation-sensitive, and bounded
+    to the newest 2,000,000 messages;
+  - prefixes need 3 characters; more than 10,000 matches are capped, and
+    the shown 10,000 are not necessarily the newest; there is no "best
+    match" order;
+  - subjects and group titles are not searchable (chat names can be
+    filtered in the conversation list), nor is edit text decoded from the
+    phone's edit history; messages without stored text cannot be found
+    (their count is shown);
+  - cancelling a broad prefix search may take a moment.
+- **Reactions show a state derived from the recorded rows**, or "cannot be
+  determined" when their order is unknown; whether the phone keeps every
+  reaction event is unverified. The rows are one click away.
+- **Direction ("You") follows the highest-ranked backup** and is labelled
+  when backups disagree. **Read, delivery and sent information is not
+  shown at all.** Group events do not say who did what to whom.
+- **No links, link previews, polls or app content.** URLs are text; a link
+  with hidden characters cannot be copied as a link.
+- **No attachment can be opened in another program or saved;** saving a
+  copy is milestone 6.
+- **Ways content can still leave the screen:** printing (if an engine
+  handles Ctrl+P before the app; not tested), copied text in clipboard
+  history or cloud clipboard, crash dumps, swap and hibernation files,
+  and window previews. Capture protection is a Windows-only setting,
+  not a guarantee, and its effect on Windows Recall is unknown.
+- **Times are shown in this computer's time zone or in UTC.** Phone numbers
+  are not formatted, and iMessage, SMS and RCS chats with the same address
+  stay separate.
+- **New chats appear after an import finishes**, or on refresh; counts are
+  as of the last completed import and include reactions and events. The
+  scrollbar shows the loaded part of a conversation, not all of it.
+- **Media checked for playback is verified once per viewer session.** On
+  Windows, a same-size rewrite that keeps the modification time would go
+  unnoticed until a full verify.
+- **"Not in the newest complete import" and the Recently Deleted labels
+  apply to messages only.** The archive location cannot be changed while
+  the viewer is open.
+- **Screen readers, forced colours and 400 % zoom are designed for but not
+  tested** on any engine. The thread omits `aria-posinset` by design.
+- **Follow-up:** `connect-src` still names `http://ipc.localhost` on
+  Linux, where it is a real loopback origin; it is to be scoped per
+  platform in a separate change.
 
 ### The archive (milestone 4)
 
@@ -166,8 +281,6 @@ carried over from milestones 2 and 3 follow.
   `message_summary_info` bytes, and any future pre-migration copy.
   Archive encryption is milestone 8; until then, rely on full-disk
   encryption. See [privacy.md](docs/privacy.md).
-- **You cannot read your messages in the app yet.** The Archive page shows
-  counts and status only; the viewer and search are milestone 5.
 - **Tested only on synthetic data.** No backup made from a real iPhone has
   been imported. Whether message, chat and attachment GUIDs stay stable
   across iOS versions, restores and devices is unverified.
@@ -177,7 +290,7 @@ carried over from milestones 2 and 3 follow.
 - **De-duplication is per archive.** Two archives for the same phone do not
   merge. The confirmation step shows whether the model and name match, but
   cannot prove which phone a backup came from; picking the wrong import set
-  mislabels "not in the latest import" (a label milestone 5 will show).
+  mislabels "not in the newest complete import" (a label the viewer shows).
 - **Rows without a usable or unique key** (for example a duplicated GUID)
   are imported unkeyed: importing the identical backup again adds nothing,
   but a changed backup may add them again. They are counted.
@@ -189,9 +302,6 @@ carried over from milestones 2 and 3 follow.
   values of the history columns are kept regardless.
 - **Nothing is ever removed.** Messages deleted on the phone stay, and text
   captured before an unsend stays and stays searchable.
-- **Search limits** (for milestone 5's search): parts of unspaced Chinese,
-  Japanese, Thai and Korean text, a single emoji, and `ß`/`ss` do not
-  match. Subjects, group titles and chat names are not indexed.
 - **Attachments already in the archive are checked for presence and
   length, not re-read,** so bytes that changed at the same size go unseen
   until a full verify.
@@ -211,10 +321,12 @@ carried over from milestones 2 and 3 follow.
   and the attachment copy. A crash leaves the copy until the next sweep.
 - **The password is asked again to continue an import.** Only one job runs
   at a time. A changed backup or an app update starts the import over.
-- **Not decoded yet:** the text of earlier edits (kept raw),
-  `chat.properties` (not kept), polls and link previews (kept raw).
-- **No repair, no archive deletion, no thumbnails, and no pre-migration
-  copy yet** (there is no real migration yet either). Verify only reports.
+- **Not decoded:** `chat.properties` (not kept), polls and link previews
+  (kept raw). The text of earlier edits is kept raw and decoded only when
+  you open a message's details in the viewer; it is never stored or
+  indexed.
+- **No repair, no archive deletion, no thumbnails on disk (previews are
+  kept in memory only), and no pre-migration copy yet** (there is no real migration yet either). Verify only reports.
 - **Copying attachments shows progress in attachment rows, not bytes.**
 - **Real-backup performance, memory use and archive size are unknown.**
   Synthetic numbers are in [compatibility.md](docs/compatibility.md).
@@ -333,27 +445,18 @@ against attachment rows, date-unit histograms, tapback-history counts, and
 the extraction report's sections for services, reactions, replies, edits
 and message bodies.
 
-### Next: milestone 5 (rich viewer)
+### Next: milestone 6 (exports)
 
-Its backend (PR A) is implemented; the screens (PR B) are next.
+Milestone 6 builds on the viewer's reading layer:
 
-- The conversation list and threads, paged through the archive's
-  lock-free reader.
-- Inline media through the app's own `oma-media` scheme (Tauri's asset
-  protocol stays off): images decoded and re-encoded in a separate helper
-  process, audio and video played from the verified file after a
-  structural check and, by default, your confirmation. HEIC shows as a
-  file card in official builds.
-- **Not verified yet:** nothing of the viewer has run in a window or on
-  Windows. Whether WebKitGTK and WebView2 load media from the scheme,
-  request ranges as expected and honour the window's download and
-  permission refusals is on the manual checklist
-  ([compatibility.md](docs/compatibility.md)).
-- Search over the full-text index, with a bounded fallback for short
-  Chinese, Japanese and Korean queries and emoji.
-- Labels: "not in the latest import from this phone", "edited", "unsent;
-  earlier text kept", "matched an earlier version", and "provisional
-  (untested iOS version)".
+- TXT, CSV, JSON, HTML, PDF and XLSX exports, plus attachments, streamed
+  from the same assembly of messages the viewer uses (uncapped), with the
+  same sentences for derived states. Each export will ask how to treat
+  one-time codes and withheld earlier text.
+- HTML exports escape their output with the viewer's rendering rules.
+- "Save a copy" of an attachment, through Rust (never a web download),
+  with a sanitised file name. It will be the first plaintext the app writes
+  outside the archive on request, so it gets its own privacy entry.
 
 ## Contributing
 

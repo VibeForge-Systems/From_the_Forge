@@ -7,8 +7,33 @@ import type {
   SettingsSnapshot,
   SettingsUpdate,
   Theme,
+  ViewerPreferences,
 } from '@/types';
 import { useNotifications } from './notifications';
+
+/**
+ * The viewer's defaults (M5 §7.6), used until settings load. They match
+ * `ViewerPreferences::default()` in Rust (owner decisions Q3b and Q4).
+ */
+export const VIEWER_DEFAULTS: Readonly<ViewerPreferences> = Object.freeze({
+  timeFormat: 'system',
+  timeZone: 'system',
+  showSeconds: false,
+  motion: 'system',
+  listPreviews: true,
+  revealEarlierText: false,
+  mediaPlayback: 'confirm',
+  showHiddenCharacters: false,
+  blurOnFocusLoss: false,
+  idleHideMinutes: 0,
+  captureProtection: false,
+  uiZoom: 100,
+});
+
+/** The zoom steps the backend accepts: 100 to 400 in steps of 10 (D116). */
+export const ZOOM_STEPS: readonly number[] = Array.from({ length: 31 }, (_, i) => 100 + i * 10);
+/** The idle-hide choices the backend accepts, in minutes (0 is off). */
+export const IDLE_HIDE_CHOICES: readonly number[] = [0, 1, 5, 15, 30];
 
 export const useSettings = defineStore('settings', () => {
   const snapshot = ref<SettingsSnapshot | null>(null);
@@ -23,6 +48,7 @@ export const useSettings = defineStore('settings', () => {
   const layout = computed<LayoutPreferences>(
     () => settings.value?.layout ?? { leftPanelOpen: true, rightPanelOpen: true },
   );
+  const viewer = computed<ViewerPreferences>(() => settings.value?.viewer ?? { ...VIEWER_DEFAULTS });
   const locationUsable = computed(
     () => location.value.state === 'ready' || location.value.state === 'warning',
   );
@@ -69,6 +95,13 @@ export const useSettings = defineStore('settings', () => {
 
   const setTheme = (next: Theme) => update({ theme: next });
   const setLayout = (next: LayoutPreferences) => update({ layout: next });
+  /**
+   * Change viewer preferences. The backend replaces the whole object and
+   * refuses unknown fields or out-of-range values, so the change is merged
+   * into the current preferences first.
+   */
+  const setViewer = (change: Partial<ViewerPreferences>) =>
+    update({ viewer: { ...viewer.value, ...change } });
 
   async function chooseLocation(): Promise<void> {
     busy.value = true;
@@ -134,6 +167,7 @@ export const useSettings = defineStore('settings', () => {
     settings,
     theme,
     layout,
+    viewer,
     location,
     locationUsable,
     loaded,
@@ -142,6 +176,7 @@ export const useSettings = defineStore('settings', () => {
     load,
     setTheme,
     setLayout,
+    setViewer,
     chooseLocation,
     refreshLocation,
     clearLocation,

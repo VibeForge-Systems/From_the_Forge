@@ -36,18 +36,30 @@ M8). All slices pass CI on `ubuntu-22.04` and `windows-2022`. Its sign-off
 is pending the manual checklist in
 `docs/compatibility.md`, and the owner's answers on D69, D70, D71, D79 and
 D82 (D51, D59, D60 and D61 are owner-confirmed). **Milestone 5 (the rich
-viewer) is in progress:** PR A (slices 5a–5f: the viewer catalogue, the
-viewer reads and search in `oma-archive`, media sniffing and checks, the 14
+viewer) is implemented:** PR A (slices 5a–5f: the viewer catalogue, the
+viewer reads and search in `oma-archive`, media sniffing and checks, the
 viewer commands, the `oma-media` protocol, the image decode helper and the
-main window built in Rust) is implemented and tested in a Linux container
-without a window; the UI is PR B. The owner answered the M5 questions
-(`docs/architecture.md`, "Milestone 5 decisions").
+main window built in Rust) is merged into `main` (`eabb759`) after CI
+passed on `ubuntu-22.04` and `windows-2022` ([run 39205163013](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39205163013),
+including the Windows-only tests). PR B (slices 5g–5k: the frontend
+foundations, the in-house `VirtualFeed`, the conversation list and thread,
+bubbles, attachments, the media viewer, details, search, the date dialog,
+the privacy screen, copy actions, page guards, the accessibility pass and
+the documents) is in review. The viewer opens from the Archive page and
+the roadmap's `viewer`, `search` and `privacy-screen` are available. It
+was tested in jsdom and once in a real window, a headless smoke test of the
+release binary on WebKitGTK 2.52.6 in a Linux container
+(`docs/compatibility.md`); its sign-off is pending PR B's CI and the M5
+manual checklist there (no desktop, audio, screen-reader or WebView2 run
+yet, so no engine floor is established).
+The owner answered the M5 questions (`docs/architecture.md`, "Milestone 5
+decisions").
 
 Read these before designing anything:
 
 | Doc | Read it for |
 |---|---|
-| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, the archive (layout, threat model, import data flow, one section per M4 slice), and the decision records (D1–D117; D43 is how "do not fabricate" is read for the check) |
+| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, the archive (layout, threat model, import data flow, one section per M4 and M5 slice), the viewer, and the decision records (D1–D122; D43 is how "do not fabricate" is read for the check) |
 | [`docs/supported-formats.md`](docs/supported-formats.md) | Sourced research on the backup format, encryption, the sms.db schema (columns with sources, timestamps, codes, typedstream) and device tooling. Items marked **UNVERIFIED** are hypotheses, not facts. |
 | [`docs/privacy.md`](docs/privacy.md) | What is copied, where and for how long, including the plaintext copies of sms.db, and what an archive holds (plaintext at rest) |
 | [`docs/compatibility.md`](docs/compatibility.md) | What has actually been tested |
@@ -204,7 +216,9 @@ Never hand-edit generated files.
 ## Testing
 
 - **Rust tests live beside the code.** Filesystem tests use `tempfile`.
-- **Frontend tests live in `tests/frontend/*.spec.ts`.**
+- **Frontend tests live in `tests/frontend/*.spec.ts`** (the DST tests in
+  `tests/frontend/dst/`, run under four `TZ` values, one of which skipped a
+  whole local day).
   `tests/frontend/helpers.ts` provides snapshot and status builders, plus a
   `matchMedia` stub, because jsdom has none.
 - **Fixtures in `tests/fixtures/` must be synthetic.** Never commit a real
@@ -418,6 +432,106 @@ Never hand-edit generated files.
   window is built in Rust (`window.rs`, `"create": false`, `incognito`):
   navigation to the app's origin only, new windows, downloads and
   permission requests denied; keep those hooks when touching `setup`.
+- **The viewer frontend (M5 slice 5g).** `components/viewer/SafeText.vue`
+  is the only renderer of archive content (`ContentText`, `OptContent`,
+  text pieces), by interpolation inside a `<bdi>`; never bind content into
+  an attribute (accessible names use `aria-labelledby`, images `alt=""`),
+  and take a `src` only from `services/media.ts`'s `mediaUrl`.
+  `tests/frontend/source-rules.spec.ts` enforces this over all of `src/`:
+  a new `:class`, `:id`, `:title`, `:aria-*`… binding must be added to its
+  per-file allowlist of non-content expressions, deliberately. It reads
+  bindings from the template AST (`vue/compiler-sfc`), so every form Vue
+  compiles into a binding counts (`.x`, modifiers, `:alt` shorthand). Viewer words
+  live in `services/viewerText.ts` (exhaustive tables; never a read,
+  delivery or sent word, D94). The console is reached only through
+  `services/devlog.ts` (`devNote(kind, number?)`, dev builds only). Local
+  day boundaries come from an injectable `DayBoundaryBuilder`
+  (`services/time.ts`); its DST tests in `tests/frontend/dst/` run once
+  per `TZ` as separate Vitest projects (`vite.config.ts`), and each run
+  first checks that its zone took effect. `stores/viewer.ts` keeps at most
+  1,500 items per chat and windows for three chats, and persists nothing.
+- **The list and the thread (M5 slices 5h0, 5h1).** `virtua` failed spike
+  5s(1) (prepends at scrollTop 0 on WebKitGTK), so `VirtualFeed` is our own
+  (`components/viewer/VirtualFeed.vue` over `services/feedModel.ts`). It
+  keeps an anchor (a row and its offset) and rewrites `scrollTop` from it
+  after every patch and every `ResizeObserver` height, so prepends,
+  evictions and re-measured rows never move what is on screen. Keep
+  `overflow-anchor: none` on `.oma-feed` (Chromium would compensate a
+  second time), keep rows `display: flow-root` (margins inside the measured
+  box), pass a **new** `items` array on every change (the watch is
+  shallow), and put the focused article, the active option and any playing
+  medium in `keepMounted`. `ConversationList` is a listbox with
+  `aria-activedescendant` (option ids from the snapshot position, never
+  content); `ThreadView` is the APG feed (`aria-setsize="-1"`, no
+  `aria-posinset`) and blocks edge loads until its open is aligned and
+  after a failed page (Retry). Leaving the `viewer`/`viewer-chat` routes
+  closes the session (`closeViewerOnLeave`, D114); chat ids from the URL
+  go through `services/ids.ts`, and message ids never enter a URL.
+- **Bubbles and system rows (M5 slice 5h2).** `ThreadItem` picks a
+  `MessageBubble` or a centred `SystemRow` by `services/messageView.ts`'s
+  `itemShape`; that module holds the pure rules (edit and unsend sentences
+  per part, chips, sender runs, service changes) and is where new reading
+  rules go, with a test in `message-view.spec.ts`. "Edited" and "Unsent"
+  mark only the parts the record lists, a whole-bubble "Unsent" needs
+  `unsentWhole`, codes 6 and 7 never say unsent, and codes 1 and 8 show
+  nothing on the bubble. Events show the addresses recorded with them but
+  never the row's sender (no roles). Reveals never change a page: "Show
+  code" and "Show earlier text" call `useViewer().revealMessage`, which
+  re-reads that one message with `get_message_detail` and keeps an overlay
+  (`shown(m)`, at most 100); "Hide" drops it. A reveal or full-text answer
+  is kept only if no newer reveal, Hide or eviction of that message came
+  while it ran (`revealEpoch`), and a full text is shown only under the
+  code reveal it was read with (`fullTextFor`; never read `fullTexts`
+  directly in a component). Put explicit `{{ ' ' }}`
+  separators between inline elements whose text forms an accessible name,
+  and wherever a space sits at the start or end of an element or a
+  `<template>` (`<span> {{ x }}</span>`, `{{ x }} </span>`): Vue's
+  whitespace condensing drops a whitespace-only text node there. Assert
+  the space with `element.textContent` in a test.
+- **Attachments, details and media (M5 slice 5h3).** Card rules live in
+  `services/attachmentView.ts` (tests in `attachment-view.spec.ts`): Rust's
+  card state first, then the sniffed content, never the declared type.
+  Cards inspect when they come into view through `useViewer().inspect`,
+  which runs at most four at once; take a `src` only from `mediaUrl` with
+  the inspection's token, and only while the card is in view. Play goes
+  through `requestPlay` (Rust's check, then `PlayConfirmDialog` under
+  `confirm`, D118) and plays only in `MediaViewer`; never create an
+  `<audio>`/`<video>` elsewhere, never autoplay, and keep `controlslist`,
+  `disablepictureinpicture` and `disableremoteplayback`. Under `off` no
+  element exists. `MediaViewer` and `PlayConfirmDialog` are mounted once in
+  `ViewerView`; the right panel (`viewer.panel`) shows `MessageDetails` or
+  `ReplyThread`, and closes when another conversation opens (its
+  addresses come from the open chat's window; search stays open). A
+  `ThreadItem` outside the feed needs its own `idPrefix`, so ids stay
+  unique. Details repeat only the reveal the user asked for.
+- **Search and dates (M5 slice 5i).** The search form lives in
+  `stores/viewer.ts` (`searchForm`) until the viewer closes; never persist
+  it or put the query, a filter or a message id in a URL or a sentence.
+  Every text field in the search panel and the date dialog keeps
+  `spellcheck="false"`, `autocomplete="off"` and `autocapitalize="off"`.
+  Local dates become UTC instants only through `services/calendar.ts` and
+  the injected `DayBoundaryBuilder` (D104); add a case to
+  `tests/frontend/dst/` when that arithmetic changes. Snippets render only
+  through `SafeText`'s `hits` mode (one isolate, `<mark>` per match).
+  Cancel names a running scan by the `searchId` its progress carries
+  (D119). Shortcuts that act on a focused message are declared with
+  `scope: 'message'` and matched only by `ThreadView` on the article;
+  the global handler reaches the thread through the store
+  (`dateJumpOpen`, `threadCommand`), never through the DOM.
+- **Privacy and the page guards (M5 slice 5j).** The privacy screen
+  (`stores/privacy.ts`, `components/PrivacyCurtain.vue`) **unmounts** the
+  viewer (`v-if` in `ViewerView`), never covers it with a blur: it stops
+  every medium, leaves fullscreen, closes the viewer's dialogs through
+  `useViewer().closeDialogs()` (a new viewer dialog must be closed there
+  too), calls `hide_viewer` (D120) and opens the curtain last. Never word
+  it as a lock. Idle hide closes the session; "Show" reopens at the place
+  the thread reports through `setPlaceProvider`. Copy only on an explicit
+  menu choice, through `services/copyText.ts` (masked codes stay masked,
+  withheld text is never copied, "Copy link" refuses hidden characters
+  and shows the exact string first) and `copyText`; toasts never carry
+  what was copied. `services/guards.ts` stops print, save, reload, the
+  engine's context menu and drag-out while the viewer is mounted; keep
+  media and bubbles `draggable="false"`.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush
@@ -478,6 +592,19 @@ Never hand-edit generated files.
   volume free, clamped to 1–10 GiB, and refuse before the gate below that.
   On a nearly full development disk, put the smoke test's library on a
   tmpfs such as `/dev/shm` (classified as local).
+- **Smoke-test the viewer on a prepared library.** Make one with
+  `OMA_SMOKE_LIB=<empty dir> cargo test -p oma-archive --test
+  smoke_library -- --ignored` (three viewer catalogue entries, one
+  archive) and point `archiveDirectory` at it; `docs/development.md` has
+  the steps. The slice 5k run found layout and wording defects that jsdom
+  could not show (dropped spaces, a page that scrolled as a whole, cut-off
+  selects), so look at screenshots after any change to the viewer's
+  layout. `perf_viewer.rs` (ignored) measures the §11 reads on bulk
+  archives; never assert a timing.
+- **The three-panel grid has one `minmax(0, 1fr)` row.** A panel's view
+  must be a flex column with `min-height: 0` whose `.oma-panel-body`
+  scrolls (`.oma-details`, `.oma-replies`, `.oma-search`); otherwise a tall
+  panel grows the row and the whole page scrolls under the navigation bar.
 - **Headless smoke testing works**, using `xvfb-run` with
   `WEBKIT_DISABLE_DMABUF_RENDERER=1` and `XDG_CONFIG_HOME` pointed at a
   scratch directory. However, the GTK folder picker cannot list directories

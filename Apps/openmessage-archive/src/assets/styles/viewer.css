@@ -1,0 +1,1012 @@
+/*
+ * The viewer's styles (M5 §8.1, §8.4, §8.10). Untrusted text is laid out
+ * so it cannot paint outside its box or reorder its neighbours; every
+ * fallback for a missing engine feature is keyed on an `oma-no-*` class
+ * that `services/features.ts` sets on <html>.
+ */
+
+/* SafeText: the only renderer of archive content. */
+.oma-safe-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.oma-safe-text bdi {
+  unicode-bidi: isolate;
+}
+
+.oma-safe-id bdi {
+  /* A long address or file name wraps instead of widening its row. */
+  overflow-wrap: anywhere;
+}
+
+/* A visible token for a hidden or direction-control character. */
+.oma-cp {
+  display: inline-block;
+  padding-inline: 0.15em;
+  margin-inline: 0.05em;
+  font-family: var(--bs-font-monospace);
+  font-size: 0.85em;
+  color: var(--bs-warning-text-emphasis);
+  background: var(--bs-warning-bg-subtle);
+  border: 1px solid var(--bs-warning-border-subtle);
+  border-radius: var(--bs-border-radius-sm);
+  unicode-bidi: isolate;
+  direction: ltr;
+}
+
+.oma-missing,
+.oma-masked {
+  font-style: italic;
+  color: var(--bs-secondary-color);
+}
+
+.oma-masked {
+  border: 1px dashed var(--bs-border-color);
+  border-radius: var(--bs-border-radius-sm);
+  padding-inline: 0.25em;
+}
+
+.oma-badge-inline {
+  display: inline-block;
+  margin-inline-start: 0.35em;
+  padding: 0 0.35em;
+  font-size: var(--oma-text-xs);
+  font-style: normal;
+  line-height: 1.4;
+  white-space: nowrap;
+  color: var(--bs-secondary-color);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-pill);
+}
+
+/*
+ * A bubble (5h2) and any box holding untrusted text: stacked combining
+ * marks cannot paint over neighbours, and no height is fixed (WCAG 1.4.12).
+ */
+.oma-contained {
+  contain: paint;
+  overflow: clip;
+}
+
+.oma-no-overflow-clip .oma-contained {
+  overflow: hidden;
+}
+
+/* Without `unicode-bidi: isolate`, <bdi> alone isolates. */
+.oma-no-bidi-isolate .oma-safe-text bdi,
+.oma-no-bidi-isolate .oma-cp {
+  unicode-bidi: normal;
+}
+
+/* The off-screen buffer of the degraded clipboard path. */
+.oma-copy-buffer {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline-start: -9999px;
+  opacity: 0;
+}
+
+/* Media boxes (5h3) are fixed-aspect placeholders, so a late image never
+ * reflows the feed. */
+.oma-media-box {
+  width: 320px;
+  max-width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  background: var(--bs-tertiary-bg);
+}
+
+/*
+ * VirtualFeed (slice 5h0/5h1). The feed compensates prepends itself, so
+ * native scroll anchoring must stay off: WebKitGTK has none, and Chromium
+ * (WebView2) would otherwise compensate a second time. Each row is a
+ * flow-root box, so its children's margins are inside the measured height.
+ */
+.oma-feed {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overflow-anchor: none;
+  overscroll-behavior: contain;
+}
+
+.oma-feed-row {
+  display: flow-root;
+}
+
+.oma-feed-gap {
+  pointer-events: none;
+}
+
+/* ---- The viewer page ---------------------------------------------------- */
+
+.oma-viewer-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ---- The conversation list ---------------------------------------------- */
+
+.oma-conv-list {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.oma-conv-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oma-space-1);
+  padding: var(--oma-space-2);
+}
+
+.oma-conv-tools input {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+/* Sized to its longest choice, so "Most recent dated activity" is never
+   cut off; it moves to its own row when the panel is narrow. */
+.oma-conv-tools select {
+  flex: 1 1 auto;
+  width: auto;
+  max-width: 100%;
+}
+
+.oma-conv-note {
+  margin: 0;
+  padding: 0 var(--oma-space-2) var(--oma-space-2);
+  font-size: var(--oma-text-xs);
+  color: var(--bs-secondary-color);
+}
+
+.oma-conv-feed:focus-visible {
+  outline: 2px solid var(--bs-focus-ring-color);
+  outline-offset: -2px;
+}
+
+.oma-conv-option {
+  padding: var(--oma-space-2);
+  border-block-end: 1px solid var(--bs-border-color-translucent);
+  /* Room for the open conversation's bar, so rows never shift. */
+  border-inline-start: 4px solid transparent;
+  cursor: default;
+}
+
+/* The open conversation: a bar at the start (a shape, at least 3:1 against
+   the panel), not only a faint fill. */
+.oma-conv-option.oma-selected {
+  background: var(--bs-secondary-bg);
+  border-inline-start-color: var(--bs-primary);
+}
+
+.oma-conv-option.oma-active {
+  outline: 2px solid var(--bs-primary);
+  outline-offset: -2px;
+}
+
+.oma-conv-title {
+  font-weight: 600;
+  overflow: clip;
+}
+
+.oma-conv-meta {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--oma-space-2);
+  font-size: var(--oma-text-xs);
+  color: var(--bs-secondary-color);
+}
+
+.oma-conv-preview {
+  max-height: 2.8em;
+  font-size: var(--oma-text-sm);
+}
+
+.oma-label-note {
+  font-weight: normal;
+  font-size: var(--oma-text-xs);
+  color: var(--bs-secondary-color);
+}
+
+/* ---- The thread ---------------------------------------------------------- */
+
+.oma-thread {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.oma-thread-head {
+  padding: var(--oma-space-2) var(--oma-space-3);
+  border-block-end: 1px solid var(--bs-border-color-translucent);
+}
+
+.oma-thread-title {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.oma-thread-facts {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--oma-space-3);
+  margin: 0;
+  font-size: var(--oma-text-xs);
+  color: var(--bs-secondary-color);
+}
+
+.oma-thread-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oma-space-1);
+  margin-block-start: var(--oma-space-1);
+}
+
+.oma-thread-range {
+  font-size: var(--oma-text-xs);
+  color: var(--bs-secondary-color);
+}
+
+.oma-notice,
+.oma-thread-loading,
+.oma-thread-empty {
+  margin: 0;
+  padding: var(--oma-space-1) var(--oma-space-3);
+  font-size: var(--oma-text-sm);
+  color: var(--bs-secondary-color);
+}
+
+.oma-notice {
+  background: var(--bs-info-bg-subtle);
+  border-block-end: 1px solid var(--bs-info-border-subtle);
+  color: var(--bs-info-text-emphasis);
+}
+
+.oma-thread-error {
+  display: flex;
+  align-items: center;
+  gap: var(--oma-space-2);
+  padding: var(--oma-space-1) var(--oma-space-3);
+  background: var(--bs-danger-bg-subtle);
+  color: var(--bs-danger-text-emphasis);
+}
+
+.oma-day-sep {
+  margin: var(--oma-space-3) 0 var(--oma-space-1);
+  text-align: center;
+  font-size: var(--oma-text-xs);
+  color: var(--bs-secondary-color);
+}
+
+/*
+ * Items (5h2). Sent and received differ by alignment and label, never by
+ * colour alone (WCAG 1.4.1); a message whose direction is not recorded
+ * takes the full width in a neutral style. The article carries focus; the
+ * bubble inside it carries the border, which stays visible in forced
+ * colours.
+ */
+.oma-thread-item {
+  max-width: min(42rem, 85%);
+  margin: var(--oma-space-1) var(--oma-space-3);
+  border-radius: var(--bs-border-radius-lg);
+}
+
+.oma-thread-item.oma-dir-you {
+  margin-inline-start: auto;
+}
+
+.oma-thread-item.oma-dir-notRecorded,
+.oma-thread-item.oma-system-item {
+  max-width: none;
+}
+
+.oma-thread-item:focus-visible {
+  outline: 2px solid var(--bs-focus-ring-color);
+  outline-offset: 1px;
+}
+
+.oma-bubble {
+  padding: var(--oma-space-2);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-lg);
+  background: var(--bs-body-bg);
+}
+
+.oma-dir-you .oma-bubble {
+  background: var(--bs-tertiary-bg);
+}
+
+.oma-dir-notRecorded .oma-bubble {
+  border-style: dashed;
+}
+
+.oma-system {
+  padding: var(--oma-space-1) var(--oma-space-2);
+  text-align: center;
+  font-size: var(--oma-text-sm);
+  color: var(--bs-secondary-color);
+}
+
+.oma-system-item .oma-item-head {
+  justify-content: center;
+}
+
+.oma-system-body {
+  text-align: start;
+}
+
+.oma-service-sep {
+  margin: var(--oma-space-2) var(--oma-space-3) 0;
+  text-align: center;
+  font-size: var(--oma-text-xs);
+  color: var(--bs-secondary-color);
+  border-block-start: 1px dashed var(--bs-border-color);
+}
+
+/* A long body starts collapsed behind "Show more" (§8.1). */
+.oma-body-text.oma-collapsed {
+  max-height: 20em;
+  overflow: clip;
+}
+
+.oma-no-overflow-clip .oma-body-text.oma-collapsed {
+  overflow: hidden;
+}
+
+.oma-body-note,
+.oma-reply-head {
+  font-size: var(--oma-text-xs);
+  color: var(--bs-secondary-color);
+}
+
+.oma-body-badges,
+.oma-bubble-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oma-space-1);
+}
+
+.oma-bubble-badges .oma-badge-inline,
+.oma-body-badges .oma-badge-inline {
+  margin-inline-start: 0;
+  white-space: normal;
+}
+
+.oma-placeholder {
+  display: inline-block;
+  padding-inline: 0.3em;
+  font-size: var(--oma-text-xs);
+  font-style: italic;
+  color: var(--bs-secondary-color);
+  border: 1px dashed var(--bs-border-color);
+  border-radius: var(--bs-border-radius-sm);
+}
+
+/* Segment styles: closed flags from Rust, applied only when formatting could be trusted. */
+.oma-seg-bold { font-weight: 700; }
+.oma-seg-italic { font-style: italic; }
+.oma-seg-underline { text-decoration: underline; }
+.oma-seg-strike { text-decoration: line-through; }
+.oma-seg-underline.oma-seg-strike { text-decoration: underline line-through; }
+/* Mentions are styled spans and URL runs stay text: nothing is a link. */
+.oma-seg-mention { font-weight: 600; color: var(--bs-emphasis-color); }
+.oma-seg-url { text-decoration: underline dotted; }
+.oma-seg-code {
+  font-family: var(--bs-font-monospace);
+  border: 1px dashed var(--bs-border-color);
+  border-radius: var(--bs-border-radius-sm);
+  padding-inline: 0.2em;
+}
+
+/* Buttons inside a bubble: at least 24×24 CSS px (WCAG 2.5.8). */
+.oma-inline-btn {
+  min-height: 24px;
+  min-width: 24px;
+  padding: 0 var(--oma-space-1);
+  font-size: var(--oma-text-xs);
+  vertical-align: baseline;
+}
+
+.oma-body-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oma-space-1);
+}
+
+.oma-reply {
+  margin-block-end: var(--oma-space-1);
+  padding-inline-start: var(--oma-space-2);
+  border-inline-start: 3px solid var(--bs-border-color);
+}
+
+.oma-reply-quote {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--oma-text-sm);
+}
+
+.oma-earlier {
+  margin-block-start: var(--oma-space-1);
+  font-size: var(--oma-text-sm);
+  color: var(--bs-secondary-color);
+}
+
+.oma-earlier-shown {
+  padding: var(--oma-space-1) var(--oma-space-2);
+  border: 1px dashed var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+}
+
+.oma-earlier-text {
+  color: var(--bs-body-color);
+}
+
+/* Reaction chips read as text: kind, sender, derived state. */
+.oma-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oma-space-1);
+  margin: var(--oma-space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.oma-chip {
+  display: inline-block;
+  min-height: 24px;
+  line-height: 22px;
+  padding: 0 var(--oma-space-2);
+  font-size: var(--oma-text-xs);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-pill);
+}
+
+.oma-chip-undeterminable,
+.oma-chip-added,
+.oma-chip-removed {
+  border-style: dashed;
+}
+
+.oma-chip-state {
+  color: var(--bs-secondary-color);
+}
+
+/* Attachments (5h3): cards in a fixed box; nothing reflows when a
+ * preview arrives late. */
+.oma-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oma-space-2);
+  margin-top: var(--oma-space-1);
+}
+
+.oma-attachment {
+  max-width: 320px;
+  margin: 0;
+  contain: paint;
+}
+
+.oma-attachment-sticker {
+  max-width: 160px;
+}
+
+.oma-attachment-sticker .oma-media-box {
+  width: 160px;
+}
+
+.oma-media-btn {
+  display: block;
+  padding: 0;
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.oma-media-btn:focus-visible {
+  outline: 2px solid var(--bs-focus-ring-color);
+  outline-offset: 2px;
+}
+
+.oma-media-btn .oma-media-box {
+  display: block;
+}
+
+.oma-media-placeholder {
+  display: block;
+}
+
+.oma-file-card {
+  min-width: 200px;
+  padding: var(--oma-space-2);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  background: var(--bs-tertiary-bg);
+}
+
+.oma-file-kind {
+  font-weight: 600;
+}
+
+.oma-attachment-caption {
+  font-size: var(--oma-text-xs);
+  color: var(--bs-secondary-color);
+  overflow-wrap: anywhere;
+}
+
+.oma-attachment-size {
+  display: block;
+}
+
+/* The media viewer shows the display rendition (at most 2048 px) inside
+ * the dialog, scaled down to fit. */
+.oma-media-viewer {
+  margin: 0;
+}
+
+.oma-media-full {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  margin-inline: auto;
+  object-fit: contain;
+  background: var(--bs-tertiary-bg);
+}
+
+/* A tiny image (a 6×4 sticker) is scaled up to a visible size, as its
+   card is, instead of showing a few pixels in an empty dialog (seen in
+   the slice 5k smoke test). */
+img.oma-media-full {
+  min-width: min(100%, 16rem);
+  height: auto;
+}
+
+audio.oma-media-full,
+.oma-media-viewer audio {
+  width: 100%;
+  background: transparent;
+}
+
+.oma-item-actions {
+  margin: 0;
+  font-size: var(--oma-text-xs);
+}
+
+.oma-system-item .oma-item-actions {
+  text-align: center;
+}
+
+.oma-dir-you .oma-item-actions {
+  text-align: end;
+}
+
+/* The details panel, "As recorded". */
+.oma-details-heading {
+  margin: var(--oma-space-3) 0 var(--oma-space-1);
+  font-size: var(--oma-text-sm);
+  font-weight: 600;
+}
+
+.oma-details-list {
+  margin-bottom: var(--oma-space-2);
+}
+
+.oma-details-list dt {
+  font-family: var(--bs-font-monospace);
+  font-weight: 400;
+  font-size: var(--oma-text-xs);
+  color: var(--bs-secondary-color);
+}
+
+.oma-details-list dd {
+  margin-bottom: var(--oma-space-1);
+  overflow-wrap: anywhere;
+}
+
+.oma-details-versions,
+.oma-details-edits,
+.oma-details-observations,
+.oma-details-reactions {
+  padding-inline-start: 1.25em;
+}
+
+.oma-details-attachment {
+  padding-top: var(--oma-space-1);
+  border-top: 1px solid var(--bs-border-color);
+}
+
+.oma-raw {
+  font-family: var(--bs-font-monospace);
+  font-size: var(--oma-text-xs);
+  color: var(--bs-secondary-color);
+}
+
+.oma-reply-list .oma-thread-item {
+  margin-bottom: var(--oma-space-2);
+}
+
+@media (forced-colors: active) {
+  .oma-bubble,
+  .oma-chip,
+  .oma-placeholder,
+  .oma-earlier-shown,
+  .oma-file-card,
+  .oma-media-btn {
+    border-color: CanvasText;
+  }
+}
+
+.oma-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--oma-space-2);
+  font-size: var(--oma-text-xs);
+  color: var(--bs-secondary-color);
+}
+
+.oma-item-sender {
+  font-weight: 600;
+}
+
+.oma-item-body p {
+  margin: 0;
+}
+
+.oma-item-event,
+.oma-item-attachments {
+  font-size: var(--oma-text-sm);
+  color: var(--bs-secondary-color);
+}
+
+/* Search (slice 5i). Matches are marked by <mark>, which forced colours keep. */
+/* The right panel's views are one flex column, so their body scrolls
+   inside the panel. */
+.oma-details,
+.oma-replies,
+.oma-search {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.oma-search-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-block: 0.5rem;
+}
+
+.oma-search-row .form-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.oma-search-filters {
+  margin-block: 0.75rem;
+}
+
+.oma-search-dates {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.5rem;
+}
+
+.oma-search-status-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2rem;
+}
+
+.oma-search-note,
+.oma-hit-note {
+  margin-block: 0.25rem;
+  color: var(--bs-secondary-color);
+}
+
+.oma-search-hints {
+  padding-inline-start: 1.25rem;
+  color: var(--bs-secondary-color);
+}
+
+.oma-hits {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0;
+}
+
+.oma-hits > li {
+  padding-block: 0.5rem;
+  border-top: 1px solid var(--bs-border-color-translucent);
+}
+
+.oma-hits-heading {
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin: 0.75rem 0 0.25rem;
+}
+
+.oma-hit-head,
+.oma-hit-badges,
+.oma-hit-text {
+  margin-block: 0.15rem;
+}
+
+.oma-hit-time {
+  font-weight: 600;
+}
+
+.oma-hit-dir {
+  color: var(--bs-secondary-color);
+}
+
+.oma-hit-text {
+  /* A snippet cannot paint over its neighbours (stacked marks, overrides). */
+  contain: paint;
+  overflow: clip;
+}
+
+.oma-no-overflow-clip .oma-hit-text {
+  overflow: hidden;
+}
+
+.oma-hit-text mark {
+  padding: 0;
+}
+
+/* The date dialog's calendar (slice 5i, the APG date-picker grid). */
+.oma-cal-head {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.oma-cal-title {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: 1rem;
+  text-align: center;
+}
+
+.oma-cal-grid {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  margin-bottom: 0.5rem;
+}
+
+.oma-cal-grid th {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+  padding-block: 0.25rem;
+}
+
+.oma-cal-grid abbr {
+  text-decoration: none;
+}
+
+.oma-cal-grid td {
+  padding: 1px;
+  text-align: center;
+}
+
+.oma-cal-day {
+  /* At least 24 × 24 CSS px (WCAG 2.5.8). */
+  min-width: 2rem;
+  min-height: 2.25rem;
+  width: 100%;
+  padding: 0.125rem;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.1;
+  border: 1px solid transparent;
+  border-radius: var(--bs-border-radius-sm);
+  background: transparent;
+  color: inherit;
+}
+
+.oma-cal-day:hover {
+  background: var(--bs-tertiary-bg);
+}
+
+.oma-cal-outside {
+  color: var(--bs-secondary-color);
+}
+
+/* Days with items: a dot and a solid outline, not colour alone. */
+.oma-cal-has {
+  border-color: var(--bs-border-color);
+  font-weight: 600;
+}
+
+.oma-cal-dot {
+  font-size: 0.5rem;
+  line-height: 1;
+}
+
+.oma-cal-focus {
+  border-color: var(--bs-primary);
+}
+
+@media (forced-colors: active) {
+  .oma-cal-has,
+  .oma-cal-focus {
+    border-color: CanvasText;
+  }
+}
+
+/* ---- Privacy and accessibility (slice 5j) -------------------------------- */
+
+/*
+ * The privacy curtain: an opaque modal dialog over the whole window. Its
+ * backdrop is opaque too, so nothing behind it shows through; it is never
+ * a CSS blur, which can be partly reversed.
+ */
+.oma-curtain {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--bs-body-bg);
+  color: var(--bs-body-color);
+}
+
+.oma-curtain::backdrop {
+  /* Engines whose ::backdrop does not inherit custom properties get Canvas. */
+  background: Canvas;
+  background: var(--bs-body-bg, Canvas);
+  opacity: 1;
+}
+
+.oma-curtain-body {
+  max-width: 32rem;
+  margin: 15vh auto 0;
+  padding: var(--oma-space-4);
+}
+
+/* The message menu: a small modal dialog placed at the pointer. */
+.oma-menu {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: var(--oma-space-1) 0;
+  min-width: min(16rem, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  background: var(--bs-body-bg);
+  color: var(--bs-body-color);
+  box-shadow: var(--bs-box-shadow);
+}
+
+.oma-menu::backdrop {
+  background: transparent;
+}
+
+.oma-menu-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.oma-menu-item {
+  /* At least 24 × 24 CSS px (WCAG 2.5.8). */
+  min-height: 2rem;
+  padding: var(--oma-space-1) var(--oma-space-3);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: start;
+}
+
+.oma-menu-item:hover,
+.oma-menu-item:focus {
+  background: var(--bs-tertiary-bg);
+}
+
+.oma-menu-item:focus-visible {
+  outline: 2px solid var(--bs-focus-ring-color);
+  outline-offset: -2px;
+}
+
+/* The exact link before "Copy link". */
+.oma-link-exact {
+  padding: var(--oma-space-2);
+  font-family: var(--bs-font-monospace);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-sm);
+  contain: paint;
+  overflow: clip;
+}
+
+/* Drag-out (§6.7): nothing in the viewer drags as an image or a link. */
+.oma-thread-item,
+.oma-bubble,
+.oma-media-box,
+.oma-media-full {
+  -webkit-user-drag: none;
+}
+
+/* Jumps never scroll smoothly (§10). */
+.oma-feed,
+.oma-conv-list {
+  scroll-behavior: auto;
+}
+
+/* The print style sheet: an engine that prints anyway gets one sentence. */
+.oma-print-note {
+  display: none;
+}
+
+@media print {
+  html.oma-viewer-open .oma-app,
+  html.oma-viewer-open dialog,
+  html.oma-viewer-open .oma-skip-link {
+    display: none !important;
+  }
+
+  html.oma-viewer-open .oma-print-note {
+    display: block !important;
+  }
+}
+
+/*
+ * Forced colours (Windows contrast themes): borders, focus rings and the
+ * marks that carry meaning stay visible in system colours.
+ */
+@media (forced-colors: active) {
+  .oma-badge-inline,
+  .oma-masked,
+  .oma-cp,
+  .oma-menu,
+  .oma-link-exact,
+  .oma-notice {
+    border: 1px solid CanvasText;
+  }
+
+  .oma-thread-item:focus-visible,
+  .oma-menu-item:focus-visible,
+  .oma-conv-option.oma-active {
+    outline: 2px solid Highlight;
+  }
+
+  /* Backgrounds become Canvas here: the open conversation keeps its bar. */
+  .oma-conv-option {
+    border-inline-start-color: Canvas;
+  }
+
+  .oma-conv-option.oma-selected {
+    border-inline-start-color: SelectedItem;
+  }
+
+  .oma-hit-text mark {
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  .oma-curtain,
+  .oma-curtain::backdrop {
+    background: Canvas;
+    color: CanvasText;
+  }
+}

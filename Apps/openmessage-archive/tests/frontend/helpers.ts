@@ -20,6 +20,25 @@ import type {
   Settings,
   SettingsSnapshot,
   ValidationReportDto,
+  AttachmentDto,
+  AttachmentFactsDto,
+  AttachmentInspectionDto,
+  ContentTextDto,
+  ConversationRowDto,
+  MessageDetailDto,
+  DecimalString,
+  MediaBase,
+  MediaToken,
+  MessageDto,
+  OptContentDto,
+  SafeId,
+  TextPieceDto,
+  ThreadPageDto,
+  UntrustedText,
+  ValueStateDto,
+  ViewerSessionDto,
+  SearchHitDto,
+  SearchStartedDto,
 } from '@/types';
 
 export function snapshot(overrides: Partial<Settings> = {}, readOnly = false): SettingsSnapshot {
@@ -557,6 +576,288 @@ export function verifySummary(overrides: Partial<VerifySummaryDto> = {}): Verify
     endedAtMs: Date.UTC(2026, 9, 18, 11, 0, 3),
     outcome: 'ok',
     counts: verifyCounts(),
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------- M5 viewer
+// Builders for viewer DTOs. Tests may cast to the brands; `src/` may not
+// (the source rule bans it), so only generated types produce them there.
+
+/** A `SafeId`, as Rust would send it. */
+export const sid = (n: number) => n as SafeId;
+
+/** A synthetic content value with the given facts. */
+export function content(text: string, facts: Partial<Omit<ContentTextDto, 'text'>> = {}): ContentTextDto {
+  return {
+    text: text as UntrustedText,
+    lossy: false,
+    storedAsBlob: false,
+    truncated: false,
+    fullUtf16: text.length,
+    bidiControls: false,
+    invisible: false,
+    ...facts,
+  };
+}
+
+export const text = (value: string, facts: Partial<Omit<ContentTextDto, 'text'>> = {}): OptContentDto => ({
+  kind: 'text',
+  value: content(value, facts),
+});
+
+export const missing = (state: ValueStateDto): OptContentDto => ({ kind: 'missing', state });
+
+export const textPiece = (value: string): TextPieceDto => ({ kind: 'text', value: content(value) });
+
+export const MEDIA_BASE = 'oma-media://localhost/' as MediaBase;
+export const TOKEN = 'a'.repeat(32) as MediaToken;
+
+export function viewerSession(overrides: Partial<ViewerSessionDto> = {}): ViewerSessionDto {
+  return {
+    viewer: 1,
+    importRunning: false,
+    provisional: false,
+    imports: [],
+    stats: { chats: 2, messages: 10, attachments: 1 },
+    unsearchable: 0,
+    skippedRows: 0,
+    mediaBase: MEDIA_BASE,
+    ...overrides,
+  };
+}
+
+/** A dated, received text message. */
+export function message(id: number, overrides: Partial<MessageDto> = {}): MessageDto {
+  return {
+    id: sid(id),
+    item: 'message',
+    direction: 'received',
+    directionRecordedBy: null,
+    sender: { kind: 'resolved', handle: sid(1) },
+    service: 'iMessage',
+    date: {
+      ms: Date.UTC(2026, 0, 1) + id * 60_000,
+      raw: '1' as DecimalString,
+      unit: 'nanoseconds',
+      state: null,
+      before2007: false,
+    },
+    body: {
+      kind: 'text',
+      body: sid(id),
+      segments: [],
+      formatting: { kind: 'plain' },
+      source: 'text',
+      fullUtf16: 0,
+      truncated: false,
+      bidiControls: false,
+      invisible: false,
+      lossy: false,
+      storedAsBlob: false,
+      sourcesDiffer: null,
+    },
+    edit: {
+      label: null,
+      editedParts: [],
+      unsentParts: [],
+      partCount: null,
+      unsentWhole: false,
+      storedVersions: 1,
+      earlier: { kind: 'none' },
+    },
+    labels: [],
+    recentlyDeleted: [],
+    association: null,
+    event: null,
+    attachments: [],
+    moreAttachments: 0,
+    extras: true,
+    reactions: null,
+    reply: null,
+    replyCount: null,
+    ...overrides,
+  };
+}
+
+/** A page of `ids` (oldest first) with anchors on its ends. */
+export function threadPage(ids: number[], overrides: Partial<ThreadPageDto> = {}): ThreadPageDto {
+  return {
+    items: ids.map((id) => message(id)),
+    handles: [{ id: sid(1), address: text('+1 555 0100'), service: 'iMessage' }],
+    handlesCapped: false,
+    range: 'dated',
+    olderAnchor: ids.length ? sid(ids[0]!) : null,
+    newerAnchor: ids.length ? sid(ids[ids.length - 1]!) : null,
+    hasOlder: true,
+    hasNewer: false,
+    undatedCount: null,
+    partial: false,
+    extrasIncomplete: false,
+    anchorMoved: false,
+    focus: null,
+    cutForSize: false,
+    skippedRows: 0,
+    ...overrides,
+  };
+}
+
+/** A conversation row with a recorded name. */
+export function conversationRow(id: number, overrides: Partial<ConversationRowDto> = {}): ConversationRowDto {
+  return {
+    id: sid(id),
+    label: { kind: 'name', value: content(`Synthetic chat ${id}`) },
+    service: 'iMessage',
+    addresses: 2,
+    group: false,
+    stats: { itemsRecorded: 12, undated: 0, firstMs: Date.UTC(2025, 0, 1), lastMs: Date.UTC(2026, 0, 1) },
+    statsStale: false,
+    lastDatedMs: Date.UTC(2026, 0, 1),
+    firstDated2007Ms: Date.UTC(2025, 0, 1),
+    earlierDated: { n: 0, capped: false },
+    undated: { n: 0, capped: false },
+    empty: false,
+    preview: null,
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------- 5h3
+
+/** A stored attachment as a page lists it. */
+export function attachment(id: number, overrides: Partial<AttachmentDto> = {}): AttachmentDto {
+  return {
+    id: sid(id),
+    declaredType: text('image/jpeg'),
+    name: text(`IMG_${id}.JPG`),
+    sticker: false,
+    declaredBytes: '20480' as DecimalString,
+    stored: true,
+    storedBytes: 20480,
+    placedInline: false,
+    token: TOKEN,
+    ...overrides,
+  };
+}
+
+/** An attachment's facts, with a stored file and one observation. */
+export function attachmentFacts(id: number, overrides: Partial<AttachmentFactsDto> = {}): AttachmentFactsDto {
+  return {
+    id: sid(id),
+    declaredType: text('image/jpeg'),
+    uti: text('public.jpeg'),
+    name: text(`IMG_${id}.JPG`),
+    declaredBytes: { value: '20480' as DecimalString, state: null },
+    sticker: { value: '0' as DecimalString, state: null },
+    hideAttachment: { value: '0' as DecimalString, state: null },
+    emojiDescription: missing('null'),
+    file: { storedBytes: 20480, heldBy: sid(1) },
+    observations: [
+      {
+        session: sid(1),
+        lookup: 'present',
+        lookupRaw: '9' as DecimalString,
+        copy: 'copied',
+        copyRaw: '1' as DecimalString,
+        pathClass: 'smsAttachments',
+        stored: true,
+        sizeMatchedManifest: true,
+      },
+    ],
+    card: { kind: 'file', olderBackup: null },
+    verify: null,
+    history: [],
+    ...overrides,
+  };
+}
+
+/** `inspect_attachment`'s answer for a sniffed JPEG with a token. */
+export function inspection(id: number, overrides: Partial<AttachmentInspectionDto> = {}): AttachmentInspectionDto {
+  return {
+    facts: attachmentFacts(id),
+    content: { kind: 'sniffed', sniffed: 'jpeg', class: { kind: 'image' }, storedBytes: 20480 },
+    playback: null,
+    token: TOKEN,
+    originalSize: null,
+    previewsOff: false,
+    ...overrides,
+  };
+}
+
+/** `get_message_detail` for a message, with one current version. */
+export function messageDetail(m: MessageDto, overrides: Partial<MessageDetailDto> = {}): MessageDetailDto {
+  const t = { ms: null, raw: null, unit: null, state: 'null' as const, before2007: false };
+  return {
+    message: m,
+    versions: [
+      {
+        body: sid(m.id),
+        current: true,
+        firstSession: sid(1),
+        lastSession: sid(1),
+        text: { kind: 'text', pieces: [textPiece('Synthetic text')] },
+        textUnchanged: false,
+        editLabel: null,
+        edits: [],
+        moreEdits: 0,
+        editTexts: 'notNeeded',
+      },
+    ],
+    moreVersions: 0,
+    times: { date: m.date, edited: t, retracted: t },
+    account: missing('null'),
+    subject: missing('absent'),
+    history: [],
+    chats: [],
+    attachments: [],
+    replyProbe: null,
+    reactionTargetProbe: null,
+    reactions: null,
+    cutForSize: false,
+    skippedRows: 0,
+    ...overrides,
+  };
+}
+
+/** A search's start: `total` kept results, all dated unless `dated` says. */
+export function searchStarted(total: number, overrides: Partial<SearchStartedDto> = {}): SearchStartedDto {
+  return {
+    searchId: 1,
+    total,
+    dated: total,
+    capped: false,
+    newestKept: true,
+    mode: 'words',
+    plan: 'global',
+    coverage: null,
+    ...overrides,
+  };
+}
+
+/** A dated, received search hit in chat 4 whose snippet marks `match`. */
+export function searchHit(id: number, overrides: Partial<SearchHitDto> = {}, match = 'hello'): SearchHitDto {
+  return {
+    message: sid(id),
+    body: sid(id),
+    chat: sid(4),
+    otherChats: { n: 0, capped: false },
+    ms: Date.UTC(2026, 0, 1) + id * 60_000,
+    direction: 'received',
+    item: 'message',
+    association: null,
+    version: 'current',
+    text: {
+      pieces: [
+        { kind: 'text', value: content('say '), hit: false },
+        { kind: 'text', value: content(match), hit: true },
+        { kind: 'text', value: content(` ${id}`), hit: false },
+      ],
+      cutStart: false,
+      cutEnd: false,
+      highlight: { kind: 'shown' },
+      matchedHidden: false,
+      fullUtf16: 20,
+    },
     ...overrides,
   };
 }

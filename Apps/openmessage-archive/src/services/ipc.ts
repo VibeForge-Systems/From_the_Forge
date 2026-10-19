@@ -252,6 +252,8 @@ export const ipc = {
   openViewer: (archiveId: string) =>
     call<ViewerSessionDto>('open_viewer', { request: { archiveId } }),
   closeViewer: (viewer: number) => call<null>('close_viewer', { request: { viewer } }),
+  /** The privacy screen is up: Rust drops its cached renditions (D120). */
+  hideViewer: (viewer: number) => call<null>('hide_viewer', { request: { viewer } }),
   /** Carries free text (the filter): rejections never echo raw text. */
   listConversations: (viewer: number, sort: ConversationSortInput, filter: string | null) => {
     const request: ListConversationsRequest = filter ? { viewer, sort, filter } : { viewer, sort };

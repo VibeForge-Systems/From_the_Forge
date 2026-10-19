@@ -1,8 +1,8 @@
 # Architecture
 
-Status: Milestone 4 (the archive database and import) is implemented;
-its sign-off, like that of milestones 2 and 3, is pending (see the README
-roadmap). Sections marked *planned* describe the intended design for later
+Status: Milestone 5 (the rich viewer) is implemented; its sign-off, like
+that of milestones 2 to 4, is pending (see the README roadmap and the
+manual checklists in `compatibility.md`). Sections marked *planned* describe the intended design for later
 milestones. They will be revised against evidence as each milestone lands.
 Nothing in them is implemented yet.
 
@@ -74,12 +74,12 @@ flowchart LR
 
 | Unit | Responsibility | State |
 |---|---|---|
-| `src/` | Vue 3 UI: views, Pinia stores, the typed IPC client, the shortcut registry, and the capability roadmap | M1, M2 (Backups page), M3 (extraction report), M4 slice 4m (Archive page) |
-| `src-tauri/` | Tauri shell. Holds IPC commands, application state, settings persistence, archive-location validation, the backup registry, job table and DTOs, (M3) the report mapping and the panic hook, and (M4 slice 4l) the archive commands, the import gate and the import and verify jobs. Contains no domain logic. | M1, M2, M3, M4 (slice 4l) |
+| `src/` | Vue 3 UI: views, Pinia stores, the typed IPC client, the shortcut registry, and the capability roadmap | M1, M2 (Backups page), M3 (extraction report), M4 slice 4m (Archive page), M5 slices 5g–5j (the viewer) |
+| `src-tauri/` | Tauri shell. Holds IPC commands, application state, settings persistence, archive-location validation, the backup registry, job table and DTOs, (M3) the report mapping and the panic hook, (M4 slice 4l) the archive commands, the import gate and the import and verify jobs, and (M5 slices 5e, 5f) the viewer session and commands, the `oma-media` protocol handler, the decode helper host and the main window built in Rust. Contains no domain logic. | M1, M2, M3, M4 (slice 4l), M5 (slices 5e, 5f) |
 | `crates/oma-fs` | Filesystem safety: filename sanitization, contained path resolution, and guards for backups, MobileSync, iMazing's default store and cloud sync. From M4: volume facts (`volume`: free space, network/virtualised/FAT detection), the Unix private-permission check (`perm::check_private`), and durable placement (`place`: `fsync_dir`, `create_dir_durable`, `place_noreplace`, `open_nofollow`). From slice 4d: `check_owned_unshared` (the library folder), `rename_dir_noreplace`, `create_new_private` and `total_space` | M1, M4 (slices 4a, 4d) |
 | `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them. From M4: `copy_file_to` streams one listed file's plaintext into a caller's writer, hashing it, under `Limits::attachment_bytes` and per-file stamps | ✔ M2, M3, M4 (slice 4b) |
 | `crates/oma-messages` | Scans and probes the sms.db schema by capability, streams typed records (handles, chats, the joins, messages, attachments, Recently Deleted links) as `Col<T>` values, decodes `attributedBody` with a clean-room typedstream decoder, and produces the aggregate `ExtractionReport`. Persists nothing. From M4: stable `KnownColumn` codes, raw values of unreadable cells (`raw_issues`), `payload_data` on request, the raw association columns, key-only passes and the storage class of text cells | ✔ M3, M4 (slice 4c) |
-| `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep; slices 4e–4j the import; slice 4k the report-only verifier and `open_blob`. Used by the shell since slice 4l | ✔ M4 (slices 4d–4k) |
+| `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep; slices 4e–4j the import; slice 4k the report-only verifier and `open_blob`. Used by the shell since slice 4l. From M5: the viewer reads (`view/`, `sortkey.rs`, phased budgets), search (`search/`) and media sniffing, checks and rendering (`media/`, `blobs::open_range`) | ✔ M4 (slices 4d–4k), M5 (slices 5a–5d) |
 | `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX | planned, M6 |
 | `crates/oma-device` | Detects devices and creates backups behind a platform trait | planned, M7 |
 
@@ -223,7 +223,8 @@ table is our own, and the fingerprint has matched its schema text.
 
 The directory name is a random id (`a` and 32 lowercase hex characters);
 the user's label lives only in the database (D52). There is no
-`thumbnails/` directory in M4 (D72). Attachments are content-addressed by
+`thumbnails/` directory in M4 (D72), nor in M5: image previews are kept in
+memory only (D102). Attachments are content-addressed by
 SHA-256, and a stored name is parsed against `^[0-9a-f]{64}$` before any
 path is built from it. The original filename stays in the database and is
 used only on export, after `sanitize_filename`.
@@ -1084,7 +1085,9 @@ running until finalize (slice 4j, below).
 - **"Not in the latest import"** (§8.7) needs no new column: a lineage's
   newest full observation is read from `import_session`, and a row it
   labels is one whose `lineage_seen.last_rank` for that lineage is lower.
-  The tests compute it that way; the reader query is M5's.
+  The tests compute it that way; M5's reader computes it the same way
+  for the "not in the newest complete import" label (`view/assemble.rs`,
+  "Viewer reads: thread pages and the assembly layer" below).
 - **Tests**: every entry and every scenario order now also match the
   model's chat handles, message chats, message attachments in the §6.5
   order, Recently Deleted markers, attachment rows and their columns and
@@ -1984,7 +1987,8 @@ is no search history (owner-confirmed, Q1c).
   took 0.5–0.9 s on this host, against 0.15 s for `instr` over
   `message_body` in rowid order (the scratch figure's shape), which is not
   newest first. The hostile-index row used 5 × 10^5 terms, not the spec's
-  10^6. The spec's §11 rows are re-measured in slice 5k.
+  10^6. Slice 5k measured the other §11 rows (`perf_viewer.rs`,
+  `compatibility.md`); these search rows were not re-run.
 - **Plans.** Fifteen statements are pinned in `tests/query_plans.rs`.
   FTS5 is reached only through its `MATCH` index (`192:M1` for the global
   collection, rowid descending with no sort; `0:=M1` for the probe and
@@ -2162,7 +2166,7 @@ rendition. No schema change; nothing is written.
 
 `src-tauri/src/viewer/` (no Tauri types, like `archives/`) and
 `src-tauri/src/commands/viewer.rs`: the viewer session, the 14 viewer
-commands, their DTOs and guards, the viewer settings and their window
+commands (a 15th, `hide_viewer`, came with slice 5j, D120), their DTOs and guards, the viewer settings and their window
 effects. No UI yet (PR B); the media protocol, the decode helper and the
 window built in Rust are slice 5f.
 
@@ -2528,6 +2532,424 @@ The review of PR A changed these rules; each has a regression test
   replaced and the request retried once without counting a crash; a
   helper the watchdog killed is never reused.
 
+### The conversation list and the thread (M5 slices 5h0, 5h1)
+
+The viewer page (`views/ViewerView.vue`, routes `archive/:archiveId/viewer`
+and `…/viewer/c/:chatId`) opens a viewer session for the archive and shows
+the conversation list beside the thread. Leaving those routes closes the
+session (`router/index.ts`, `closeViewerOnLeave`, D114); the window title
+stays "Viewer" (D112); a chat id from the URL is parsed with the `SafeId`
+rule (`services/ids.ts`), and message ids never enter a URL. Since slice
+5h3 the Archive page's "Browse conversations" opens it.
+
+- **`VirtualFeed`** (D109, revised) renders only the rows near the
+  viewport (at most 200) and the rows in `keepMounted`; gaps sized from
+  the prefix sums of the rows' heights stand for the rest
+  (`services/feedModel.ts`). Heights come from a `ResizeObserver` on each
+  `display: flow-root` row, and from an estimate until then. The feed
+  keeps an anchor, the row at the top of the viewport and its offset (or,
+  after "jump to newest", the last row's bottom edge), and after every
+  patch and every height change it sets `scrollTop` from that anchor
+  before the frame is painted. A prepend, an eviction at either end or a
+  re-measured row therefore never moves what is on screen, including at
+  scrollTop 0, where virtua failed. `overflow-anchor: none` keeps
+  Chromium's own anchoring out of it.
+- **`ConversationList`** is a `listbox` over the id snapshot of
+  `list_conversations`, with the active option named by
+  `aria-activedescendant` and kept mounted, `aria-posinset` and
+  `aria-setsize`, and keyboard movement (arrows, Page Up/Down, Home, End;
+  Enter or Space opens). It asks `get_conversations` for the visible
+  window plus 20 rows each side. Labels follow the precedence of spec §8.4
+  (`ConversationLabel`), previews obey `listPreviews`, and the name filter
+  is debounced 250 ms and sent to Rust as the request's filter.
+- **`ThreadView`** shows the recorded facts of the conversation (addresses,
+  service, items recorded, first and last dates), opens at the newest dated
+  item, and offers "Jump to first", "Jump to newest" and "Undated items
+  (N)" (read forwards in source order). Its feed is the APG feed pattern:
+  articles labelled by sender and time and described by their text,
+  `aria-setsize="-1"`, no `aria-posinset`, `aria-busy` while loading. Older
+  and newer pages load within 800 px of an end, never before the open has
+  been aligned and never after a failed page until Retry. Each item is
+  a `ThreadItem` (slice 5h2, below); local-day separators come from
+  `dayKey` in the chosen zone.
+
+### Message bubbles and system rows (M5 slice 5h2)
+
+Each thread item is an `article` (`ThreadItem`) whose content is a
+`MessageBubble` or a centred `SystemRow`, chosen by `itemShape` in
+`services/messageView.ts`: an association row that stays a timeline item
+(a legacy sticker, a poll vote, or a reaction whose target is in another
+conversation, unreadable, not unique or itself a reaction) and every
+`item_kind` other than 1 are system rows; an `item_kind` this build does
+not know reads "Item of a kind this version does not recognise". The rules
+are spec §3.6's, applied to the DTOs' closed codes:
+
+- **Direction and sender.** Bubbles are aligned by direction ("You" right,
+  received left, "Direction not recorded" full width with a dashed
+  border), never by colour alone. A sender label shows above each run of
+  bubbles (a new sender, a system row or a new local day starts a run)
+  when the conversation has more than one recorded address; otherwise the
+  sender stays in the article's accessible name. A sender reason (no
+  sender, column absent, unreadable, not found) always shows. A direction
+  value whose message was seen by more than one backup set says which set
+  it follows.
+- **Body.** Rust's segments render through `SafeText`, with styles,
+  mentions, transcription and URL marks from the segments' closed flags;
+  nothing is a link. One-time codes arrive masked. A body without text
+  lists its recorded reasons (display reason, attributed-body outcome or
+  decode error, the plain column's state). Lossy decoding, differing
+  sources and unreadable formatting are noted once per body. A body over
+  1,500 UTF-16 units starts collapsed behind "Show more"; one cut at the
+  page cap offers "Show the full text", read with `get_message_text`
+  chunk by chunk, still masked.
+- **Edits and unsends, per part** (`editView`). "Edited" names the parts
+  with recorded edit entries; "N of M parts unsent by the sender" when
+  the part count is known, and "Unsent by the sender" for the whole bubble
+  only when `unsentWhole`. A label without listed parts says "An edit (or
+  unsend) is recorded; which parts is not recorded". Codes 6 and 7 read
+  "An edit date is recorded; no edit history in this version" and are
+  never called unsent; codes 0, 2 and 9 read "Edit state could not be
+  determined"; codes 1 and 8 put nothing on the bubble (the details panel
+  of slice 5h3 lists them). "N stored versions" shows whenever more than
+  one body row is stored.
+- **Reveals (D115, owner Q3b).** Withheld earlier text shows its reason
+  and "Show earlier text"; a masked code shows "Show code". Either
+  re-reads that one message with `get_message_detail` and the reveal flag
+  (`stores/viewer.ts`, `revealMessage`) and keeps the result as an overlay
+  over the page's copy, which stays masked; "Hide" drops the overlay. The
+  `revealEarlierText` setting (off by default) instead sends the flag with
+  every page request. Revealed earlier text names the import that first
+  kept it.
+- **Reactions** (`reactionsView`). Chips read as text: "Loved by A,
+  recorded (derived)", "cannot be determined", or one chip per row for a
+  sender that is not recorded. A removal hides its chip, and hidden chips
+  are counted ("1 removed later (derived)"). Unpaired emoji removals, chips
+  over the cap and rows over the cap each have a sentence. In this slice a
+  chip is not a control: the rows behind it are listed by the details
+  panel (slice 5h3).
+- **Replies.** A quote chip (two lines, built and masked in Rust) with a
+  button that opens a page around the originator and focuses it; for an
+  originator in another conversation, the view opens that conversation
+  and the store hands it the originator (`focusOnOpen`), so the message id
+  never enters the URL. An unresolved reference is a sentence, not a
+  control. "N replies across conversations" is shown as a count (since
+  slice 5h3 it is a button that opens the reply thread in the right panel).
+- **System rows.** Events read from closed sentences and list the
+  addresses recorded with them; **no actor or target role is asserted**,
+  so the row's own sender is not shown. A renamed conversation shows the
+  recorded name as isolated text, in identifier mode. An unrecognised item
+  names its raw `item_type` and `group_action_type`, followed by any text.
+  Text recorded with a reaction row (an SMS fallback) is shown as recorded
+  and never parsed.
+- **Labels and dividers.** Message labels and Recently Deleted lines (with
+  the date of the import that read each backup) are text badges and
+  sentences; a divider marks each place where the service changes between
+  loaded items. Attachments were counted until slice 5h3 drew them
+  (below).
+
+### Attachments, the details panel and the media viewer (M5 slice 5h3)
+
+The viewer opens from the Archive page ("Browse conversations", enabled
+for an archive that is ready, importing or verifying; Rust refuses the
+rest), and the roadmap's `viewer` capability is `available`. Search (5i)
+and the privacy screen (5j, a new roadmap entry `privacy-screen`) were
+still planned at this slice, their controls disabled with their badges;
+search has since shipped (slice 5i, below). The
+pure rules are in `services/attachmentView.ts`; the words in
+`services/viewerText.ts` (`ATTACHMENT_TEXT`, `DETAILS_TEXT`,
+`PLAY_CONFIRM_TEXT`).
+
+- **Cards** (`AttachmentList`, `AttachmentView`, spec §5.9). A card is
+  decided from Rust's card state first (the lookup and copy codes of the
+  highest-ranked observation), then from the stored file's sniffed
+  content, never from the declared type. Each card asks
+  `inspect_attachment` when it first comes into view
+  (`IntersectionObserver` where the engine has it; otherwise a mounted
+  card counts as in view, since the feed mounts only rows near the
+  viewport); the store runs at most four inspections at once and caches
+  each answer for the session. An image shows the `thumb` rendition in a
+  fixed 320 × 240 box (160 for stickers), with `alt=""` and the caption
+  ("Image, <file name>", or the recorded emoji description) as its
+  accessible name; its `src` comes only from `mediaUrl` with the token of
+  that inspection, is set only while the card is in view, and a failed
+  load is retried in view after 0.5 s, 1 s and 2 s before "Preview could
+  not be loaded" with Retry. GIFs are marked "first frame only". HEIC,
+  PDF, vCard and other kinds are file cards with their sniffed kind and
+  "Type recorded: X; content: Y"; a missing, unreadable or mismatched file
+  is a sentence. Every card shows the stored size beside the declared
+  one. An attachment placed in the text is named there by its number
+  ("Attachment 2 (shown below)") and drawn in the list below the text;
+  drawing it inside the text run is not done.
+- **Play** (§5.6, owner Q4, D118). A Play card appears only when
+  `mediaPlayback` is not `off` and `canPlayType` does not answer `""` for
+  the sniffed container ("This format can't be played in the app"
+  otherwise). Play first runs `inspect_attachment { forPlayback }`
+  ("Checking the file…": the structural check and the full hash, in
+  Rust); a refusal is shown on the card. Under `confirm` the first Play
+  of each file in a viewer session then opens `PlayConfirmDialog` with
+  the §5.6 sentence and "Play", "Cancel" and "Always play without asking"
+  (which sets `clickToPlay`); `clickToPlay` skips it. Only then does the
+  media viewer create the `<video>` or `<audio>` element, with native
+  controls, `preload="metadata"`, no `autoplay`, `controlslist="nodownload
+  noremoteplayback"`, `disablepictureinpicture` and
+  `disableremoteplayback`; under `off` no element is ever created. While
+  anything plays, the media session's title is "OpenMessage Archive",
+  where the engine has `MediaMetadata`. Confirmations are forgotten when
+  the session closes.
+- **The media viewer** (`MediaViewer`, a `ModalDialog` mounted once in
+  the viewer page) shows the `display` rendition, labelled "Preview,
+  re-encoded, at most 2048 px; original W×H; N stored (M declared)";
+  the original size is asked from Rust once the preview has loaded. It has
+  no download, open or share action. Closing it unmounts the element,
+  which stops playback.
+- **The details panel** (`MessageDetails`, "As recorded", in the right
+  panel; each item has a "Details" button). It reads `get_message_detail`
+  and lists the values under their source column names: direction,
+  sender, service and item kind; the raw values of `date`, `date_edited`
+  and `date_retracted` with their unit and a UTC ISO form at the unit's
+  precision; the account (`destination_caller_id`, meaning unverified) and
+  `subject`; the versions this archive captured, each with the import
+  that first kept it, and per version the edit entries recorded on the
+  phone in stored order, with their time as recorded (unit assumed) and
+  their text decoded at read time (owner Q3a); values other backups
+  recorded; the conversations' raw `style`, `is_filtered` and
+  `is_archived` (meaning unverified); each attachment's declared facts,
+  stored file, card, full-verify result and observations by backup rank
+  (lookup, copy and location codes with their raw values); the identifier
+  checks; and the reaction rows, paged by 200 on request ("Show the
+  recorded reaction rows" on a bubble opens the panel with the first
+  page), with the rule that derives the chips. Earlier text stays
+  withheld until "Show earlier text", which re-reads through the store's
+  reveal overlay as the bubble does (D115); the details then repeat that
+  reveal, and only that one.
+- **The reply thread** (`ReplyThread`) lists `get_reply_thread`'s replies
+  as `ThreadItem`s with their own id prefix (`oma-r-`), so ids stay
+  unique beside the thread; the originator's quote is left out.
+- **Settings.** The viewer's preferences are enabled now that the viewer
+  ships. "Always reduce motion" applies the same reset as the system's
+  reduced-motion preference (`oma-reduce-motion` on `<html>`).
+
+### Search and date navigation (M5 slice 5i)
+
+The roadmap's `search` capability is `available`: the viewer has a search
+panel and a "Jump to a date" dialog, and the Archive page's "Search
+messages" opens the viewer with the panel showing. The privacy screen
+(5j) is still planned. The words are in `services/viewerText.ts`
+(`SEARCH_TEXT`, `SENDER_FILTER_TEXT`, `DATE_JUMP_TEXT`); the date
+arithmetic is in `services/calendar.ts`.
+
+- **The search panel** (`SearchPanel`, in the right panel; "Search" in
+  the toolbar, "Search this conversation" in the thread header, Ctrl+F
+  and Ctrl+Shift+F). The query field and the date fields have
+  `spellcheck="false"`, `autocomplete="off"` and `autocapitalize="off"`.
+  Typing is debounced 250 ms; filter changes search at once. The request
+  carries the query as typed, the mode (`auto`, which Rust turns into
+  exact text for CJK, Thai and emoji, or `exact`), the scope (this
+  conversation or all), a local date range, "has an attachment", the
+  sender as recorded, "include earlier versions and unsent text" (the
+  explicit reveal for search, D115, off by default) and "include reactions
+  and system events". The date range is two typed `YYYY-MM-DD` days, both
+  inclusive, turned into the half-open UTC range `[start of from, start of
+  the day after to)` by the same injected `DayBoundaryBuilder` as the
+  calendar (D104); a malformed or reversed range is refused in the panel
+  and nothing is searched. The form stays in the store until the viewer
+  closes and is never persisted (D110).
+- **What the panel says.** The count is a `role="status"` region, never
+  repeating the query: "N matches", or, when capped, "More than N matches.
+  Showing N of them, newest first. These are not necessarily the newest N
+  in the archive; add words or filters to see all" (or "Showing the
+  newest N" when Rust kept the newest). It names the mode that ran, the
+  exact-text caveat (case-, accent- and normalisation-sensitive), a scan's
+  coverage when it stopped early, and "N messages have no searchable text"
+  from the session. No matches shows three hints (3-character prefixes,
+  exact text for scripts and emoji, filters). `queryTooBroad` reads "Too
+  many matches to search quickly; add a word or a filter";
+  `searchSuperseded` is dropped silently.
+- **Progress and Cancel.** An exact-text scan pushes `{ searchId,
+  examined, matched }` after each batch; the panel shows it with Cancel,
+  which calls `cancel_search` with that id (D119; `ScanProgressDto` gained
+  `searchId`). A late answer from a cancelled search is dropped.
+- **Results** (`SearchHit`), 50 per page with "Show more results": the
+  time (or "Undated", with undated results listed apart under their own
+  heading), the direction, the conversation's label (rows are loaded for
+  the conversations named), "also in N other conversations", the item or
+  association kind when it is not a plain message, the version matched
+  ("Earlier version", "Text from before it was unsent"), and Rust's
+  snippet. `SafeText` gained a `hits` mode: the snippet's pieces sit in
+  **one** `<bdi>`, each match in `<mark>`, a masked code as its sentence,
+  and the UI draws the ellipses for `cutStart` and `cutEnd`. A hit inside
+  a masked code says "Matched hidden text (one-time code)"; an
+  unhighlighted hit names why. "Open in conversation" remembers the
+  message in the store (`focusOnOpen`) and opens the conversation; the
+  thread opens a page around it (`include: true`, `around`) and focuses
+  it, so the message id never enters the URL.
+- **The date dialog** (`DateJumpDialog`, "Jump to date…" in the thread
+  header and Ctrl+G; mounted by the thread). The APG date-picker dialog
+  grid, Monday first: one 6-week month at a time, whose 43 local-day
+  boundaries go to `get_day_counts` (visible items; folded reactions and
+  undated rows never count). Days with items carry a dot, an outline and
+  the words "N items" for assistive technology, never colour alone; a
+  failed count leaves the grid usable and unmarked. Arrow keys move by day
+  and week, Home and End to the week's ends, Page Up and Page Down by
+  month (with Shift, by year), with one tab stop in the grid. A typed
+  `YYYY-MM-DD` field (1900–2200) sits beside it, since `<input
+  type="date">` popups on WebKitGTK are **UNVERIFIED**. Picking a day
+  counts that day again; with items, `seek_date(onOrAfter, start)` finds
+  its first visible item and the thread opens around it without animation
+  and focuses it. Without, it says "No messages on this day" and offers
+  the nearest earlier (`seek_date(before, start)`) and later
+  (`seek_date(onOrAfter, end)`) items. The dialog starts on the focused
+  item's day, else the window's newest dated item's, else the
+  conversation's last.
+- **Shortcuts** (`services/shortcuts.ts`): Ctrl+F (this conversation, or
+  all outside one), Ctrl+Shift+F, Ctrl+G, Ctrl+Home and Ctrl+End (open the
+  first or newest page and focus its end item), Ctrl+= (or Ctrl++),
+  Ctrl+- and Ctrl+0 (`uiZoom` along a ladder of values Rust accepts,
+  D116). Enter and R on a focused message open its details and its reply
+  thread; they are declared with `scope: 'message'` and matched only by
+  the thread, on the article itself, so they never steal Enter from a
+  button and R is never a global single-key shortcut (WCAG 2.1.4). The
+  viewer's shortcuts act only on the viewer page with a session, and
+  never in text fields. The global handler reaches the thread through the
+  store (`dateJumpOpen`, `threadCommand`). Ctrl+Shift+H (the privacy
+  screen) is slice 5j's.
+
+### Privacy controls and accessibility (M5 slice 5j)
+
+The roadmap's `privacy-screen` capability is `available`, and the
+Settings page's privacy-screen preferences are enabled. Every sentence
+about it says what it is: **it hides the screen; it is not a lock**
+(D108). The words are in `services/viewerText.ts` (`PRIVACY_TEXT`,
+`COPY_ACTION_TEXT`). None of this was run on WebKitGTK or WebView2, with a
+screen reader, in forced colours or at 400 % zoom; it is tested in jsdom
+only (`docs/compatibility.md`).
+
+- **The privacy screen** (`stores/privacy.ts`, `components/PrivacyCurtain.vue`;
+  "Hide screen" in the viewer's toolbar, or Ctrl+Shift+H, which also works
+  in text fields). Hiding pauses every `<audio>`/`<video>` and removes its
+  source, leaves fullscreen, closes every viewer dialog (the media viewer,
+  the play confirmation, the date dialog, the message menu and the link
+  confirmation), **unmounts** the viewer page's content (`v-if` in
+  `ViewerView`), calls `hide_viewer` so Rust drops its cached renditions
+  (D120), and then opens the curtain: an opaque modal `<dialog>` whose
+  backdrop is opaque too (never a CSS blur, which can be partly reversed),
+  opened after the other dialogs closed, so nothing sits above it in the
+  top layer. Focus moves to "Show". Escape does not dismiss it (`cancel`
+  is prevented, and an engine that closes it anyway gets it reopened), and
+  while it is up the global shortcuts do nothing. "Show" remounts the
+  viewer at the same place: the thread reports, through
+  `setPlaceProvider`, the focused message (focus returns to it) or the
+  first message in view (shown, not focused), and the conversation opens
+  around it. The window title does not change.
+- **Blur on focus loss** (`blurOnFocusLoss`, off by default): the window's
+  `blur`, or the document becoming hidden, hides the screen. The curtain
+  adds "Window previews may capture a frame before the screen is hidden."
+- **Hide on idle** (`idleHideMinutes`: off, 1, 5, 15 or 30): with no key,
+  pointer or wheel event for that long (checked every 5 s), the screen is
+  hidden **and the viewer session is closed** (readers, tokens, renditions,
+  search, helpers); the store forgets everything. "Show" opens the archive
+  again and returns to the same conversation and message. The user chose
+  it and loses nothing, so WCAG 2.2.1 is not engaged.
+- **Capture protection** (Windows only, off by default): applied by Rust
+  with `set_content_protected` since slice 5e. The setting is now shown
+  only on Windows (tao has no Linux implementation), and says that
+  Microsoft calls display affinity not a security feature, that it blanks
+  the window in screen sharing and remote help, and that its effect,
+  including on Recall, has not been tested.
+- **The message menu** (`components/viewer/MessageMenu.vue`, rules in
+  `services/copyText.ts`, D107). A right click, the context-menu key or
+  Shift+F10 on a message (a `scope: 'message'` shortcut) opens the app's
+  own menu instead of the engine's, which would offer "Save image as" and
+  "Copy link". It is an APG menu in a small modal `<dialog>` at the
+  pointer, kept inside the window: Up, Down, Home and End move, Escape and
+  Tab close, and focus returns to the message. Its items:
+  - "Copy text": the current body as shown. A masked one-time code is
+    copied as "[one-time code hidden]" unless that message was revealed;
+    withheld earlier or unsent text is never copied, since only the
+    current body is; a body cut at the page's cap ends with "[the rest of
+    this text was not loaded]"; the full text is used once it was read.
+  - "Copy text without invisible characters": the same without bidi
+    controls, invisible and control characters (D121). **It is the first,
+    default item when the body has `bidiControls` or `invisible`.**
+  - "Copy with sender and time": a first line with the sender as recorded
+    (or why there is none), the time and the zone it is shown in ("times
+    in UTC+01:00, this computer's zone", or "times in UTC"); then the
+    bubble's qualifiers in brackets ("Direction not recorded", "Unsent by
+    the sender", "Edited", the labels, "… (derived)"); then the text.
+  - "Copy link…" (one item per URL run, "Copy link N of M" when there are
+    several): a run with hidden characters (Rust's `urlHidden`, or any
+    character `SafeText` would show as a code) is **refused** ("This link
+    contains hidden characters and can't be copied as a link; use Copy
+    text"), and so is one with a masked or cut part. Otherwise the exact
+    string is shown first in identifier mode (hidden characters as visible
+    codes), with Copy and Cancel.
+  - "Details".
+
+  Copy uses `navigator.clipboard.writeText`, or `execCommand('copy')`
+  where it is missing (`services/features.ts`), only on a choice. The toast
+  says "Copied to the clipboard." or "The text could not be copied.",
+  never what. There is no automatic copy and no clearing timer.
+- **The page guards** (`services/guards.ts`, installed by `ViewerView`
+  while it is mounted; D106). Ctrl+P, Ctrl+S, F5 and Ctrl+R (with or
+  without Shift) get `preventDefault` in the capture phase, in text fields
+  too. The engine's context menu and any drag out of the viewer are
+  prevented except in text fields; articles, images and video are
+  `draggable="false"` with `-webkit-user-drag: none`. Whether the engines
+  let the page see Ctrl+P and F5 first is **UNVERIFIED**, so the print
+  style sheet shows only "Printing is not available in the conversation
+  viewer." while `<html>` has `oma-viewer-open`.
+- **Accessibility pass.** The feed (`aria-setsize="-1"`, no
+  `aria-posinset`, `aria-busy`) and the listbox (`aria-activedescendant`,
+  `aria-setsize`, `aria-posinset`, the active option kept mounted) are as
+  slice 5h1 built them, and the curtain and the menu move focus as above.
+  `ModalDialog` now gives focus back to what had it when it closes, on
+  engines that do not do it themselves (showModal already focuses its
+  first control). Motion: the system's `prefers-reduced-motion` and the
+  "Always reduce motion" setting apply the same reset, nothing scrolls
+  smoothly (`scroll-behavior: auto` on the feed and the list; jumps call
+  no smooth scroll), and GIFs stay first-frame renditions. Forced colours
+  keep bubble, chip, card, badge, code-token, menu and notice borders in
+  `CanvasText`, focus rings in `Highlight`, and search marks in
+  `Highlight`/`HighlightText`. Buttons in bubbles and menu items are at
+  least 24 × 24 CSS px. The day separators are not sticky, so focus is
+  never hidden under them. For 400 % zoom (`uiZoom`, D116), the side
+  panels already turn into overlays below 768 CSS px; the thread's tool
+  rows wrap and the menu keeps inside the window. `tests/frontend/accessibility.spec.ts`
+  checks the style sheets; the rest needs the manual checklist.
+
+### The viewer in a real window, and the documents (M5 slice 5k)
+
+Slice 5k ran the viewer for the first time in a real window (a headless
+smoke test of the release binary on WebKitGTK 2.52.6 in a Linux container;
+`compatibility.md` records exactly what was seen), measured the spec's §11
+reads (`crates/oma-archive/tests/perf_viewer.rs`, ignored; numbers in
+`compatibility.md`, "Synthetic performance (M5)") and wrote the M5 manual
+checklist. Nothing in the crate or the shell changed.
+
+- **A library for smoke tests.** `tests/smoke_library.rs` (ignored) imports
+  three viewer catalogue entries into one archive below `OMA_SMOKE_LIB`,
+  with the test's fake space probe; it reads the committed fixtures in
+  place and writes nothing else.
+- **Fixes from the smoke test**, each re-observed after a rebuild:
+  explicit `{{ ' ' }}` where Vue's whitespace condensing had dropped the
+  space at an element's edge (the list's label and preview, system rows);
+  the three-panel grid's single `minmax(0, 1fr)` row and flex-column right
+  panels, so a tall panel scrolls inside itself instead of scrolling the
+  page; the conversation list's tools wrap so the sort choice shows whole,
+  and the search mode reads "Words" with a sentence under it; details and
+  replies close when another conversation opens (D122); the media viewer
+  scales a tiny image up to at least 16 rem and its label says "at most
+  2048 px"; the lossy-text source note no longer repeats the badge.
+- **Engine floors (§8.10)** are not established: they are to be the oldest
+  WebKitGTK and WebView2 on which the manual checklist passes. Feature
+  detection keeps the designed degraded paths (`overflow: hidden` for
+  `overflow: clip`, `<bdi>` alone, fixed formatting without the `Intl`
+  options, `execCommand('copy')`, `canPlayType` before any Play), and spike
+  5s(2) (playback on a desktop with audio, and on Windows) is still
+  **UNVERIFIED**: in the container, `canPlayType` offered Play for
+  QuickTime and WAV only, and the one file played through the scheme got
+  one `206` response and then failed for lack of an audio device.
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`
@@ -2663,7 +3085,7 @@ are design decisions of the M4 spec.
 | D69 | Verifier (roadmap: a lean **awaiting the owner's confirmation**) | The library verifier ships in M4, report-only, quick and full (slice 4k); the verify job is the shell's (4l) and its sentence per finding the UI's (4m); repair stays in M8 | All verification in M8 | The M4 brief asks for integrity checks; nothing is repaired before M8 |
 | D70 | Provenance file (product fields: a lean **awaiting the owner's confirmation**) | `imports/session-<n>.json`, content-free, best effort, written at each terminal state; it includes the product type and version | A full copy of the session row | Survives database damage without personal data |
 | D71 | Diagnostic log (a lean **awaiting the owner's confirmation**) | The persistent, redacted log file (D15) is deferred again, to M8 | Ship it in M4 | A new on-disk artifact needs its own review |
-| D72 | Thumbnails | Deferred to M5; no `thumbnails/` directory in v1 | Reserve the directory | No speculative layout |
+| D72 | Thumbnails | Deferred to M5; no `thumbnails/` directory in v1 (M5 keeps renditions in memory only, D102) | Reserve the directory | No speculative layout |
 | D73 | Jobs | `reserve` by subject (backup, archive or both); `Import` and `Verify` kinds; one job at a time (D7) | Key jobs by backup only | An archive can never be double-booked |
 | D74 | Staged sms.db lifetime | The whole import, the gate and P6 included; removed after P8, before finalize | Re-stage per pass | One copy, versus a longer plaintext window (disclosed) |
 | D75 | `application_id` | `0x4F4D4131` ("OMA1"), unregistered | Register it | Registration is optional |
@@ -2683,7 +3105,8 @@ are design decisions of the M4 spec.
 
 ### Milestone 5 decisions
 
-D89–D117 (M5 spec §18), as PR A (slices 5a–5f) implements them. **The
+D89–D117 (M5 spec §18), as PR A (slices 5a–5f) implements them, and
+D118 to D122 from PR B (slices 5h3, 5i, 5j and 5k). **The
 owner answered the spec's four questions on 2026-10-18**: D97's and D99's
 playback wording, D100 and D110 (Q1), D101 (Q2, **which differs from the
 lean**), D105 and D115 (Q3) and D99's default (Q4) are **owner-confirmed**.
@@ -2712,7 +3135,7 @@ D104, D107–D109, D112's UI side) are implemented in PR B.
 | D106 | Webview profile | `incognito: true`, `no-store`, the navigation hook; context-menu, drag, print and reload guards in PR B | A persistent profile | No web cache of media |
 | D107 | Clipboard | Web copy on explicit action only (PR B) | `arboard` (BSL-1.0 transitively) | No new licence class |
 | D108 | Privacy screen | A curtain that unmounts content; idle hide closes the session (PR B) | CSS blur | Honest about not being a lock |
-| D109 | Virtualisation | `virtua` behind `VirtualFeed`, pending spike 5s (PR B) | TanStack; hand-written | Prepend anchoring ready-made if the spike passes |
+| D109 | Virtualisation | **Revised in slice 5h1:** an in-house `VirtualFeed` (slice 5h0), because `virtua` 0.53.1 failed spike 5s(1) on WebKitGTK when rows were prepended at scrollTop 0. Rows are measured with `ResizeObserver`, unrendered rows are gaps sized from prefix sums, and the scroll position is recomputed from an anchor (a row and its offset in the viewport) after every patch and height change; `overflow-anchor: none` on the scroller | `virtua` with older pages requested from 200 px above the top; TanStack | We own the hardest part (prepend anchoring) and its tests, at the cost of code to maintain; no runtime dependency |
 | D110 | Search history (**owner-confirmed, Q1c**) | Nothing persisted | A v2 table | The reader stays read-only |
 | D111 | Handles | Shown as recorded, with the service when one address has two | Phone formatting | No misleading grouping |
 | D112 | Window title | Never a chat name | Show the chat name | Nothing leaks to taskbars or screen shares |
@@ -2721,6 +3144,11 @@ D104, D107–D109, D112's UI side) are implemented in PR B.
 | D115 | Masking and retraction (**owner-confirmed, Q3b**) | Enforced in Rust on every content path, released only by `reveal` after a click; revealing by default is a setting, off | Mask in the bubble only | A one-time code or withdrawn text never reaches the webview unasked |
 | D116 | Zoom | `uiZoom` applied from Rust with `set_zoom`; no webview permission | `zoomHotkeysEnabled` | WCAG reflow without widening the capability |
 | D117 | M6 export source | `view/assemble.rs` is the uncapped layer M6 streams | Export from the paging APIs | Exports are complete |
+| D119 | Cancelling a running scan (slice 5i) | Each `ScanProgressDto` carries the running search's `searchId`, so `cancel_search` can stop an exact-text scan before it returns; a words search that has not answered cannot be named and runs out within its 5 s deadline, its answer dropped | `cancel_search` without an id stops whatever runs | The id still guards against cancelling a newer search; a Cancel button that only hid results would have left a 2,000,000-row scan running |
+| D120 | Dropping renditions under the privacy screen (slice 5j) | A 15th viewer command, `hide_viewer`, drops the session's cached renditions (keeping the failure cache, tokens and workers) when the curtain goes up; idle hide closes the session instead | No command: the renditions stay cached until the viewer closes | The spec's "clear the rendition LRU" (§9.2) needs Rust; one more command through the five steps, and a hostile image still decodes at most once per session |
+| D121 | Copy without invisible characters (slice 5j) | Bidi controls, invisible and control characters are dropped, but a zero-width joiner or non-joiner stays between two non-ASCII letters, marks or emoji, and tag characters stay inside a flag's tag sequence | Drop every character `SafeText` shows as a code | Emoji sequences, subdivision flags and joining scripts (Persian, Indic) keep their shape, while a joiner hidden between ASCII letters is still removed |
+| D122 | The right panel when another conversation opens (slice 5k) | Details and the reply thread close; search stays open | Keep the details open | They describe a message of the conversation that was open and resolve its addresses from that conversation's window; kept open, they showed "Sender" instead of the address (seen in the smoke test) |
+| D118 | Play order (slice 5h3) | Rust's structural check and full hash run on the first Play, **before** the confirmation, so the confirmation's "It has checked the file's structure" is true and a refused file never asks | The spec's §2 order: confirm, then check | A full hash of a file the user may then cancel; no attachment byte reaches the engine before the confirmation either way |
 
 ## Logging
 

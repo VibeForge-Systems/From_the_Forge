@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import ModalDialog from '@/components/ModalDialog.vue';
 
@@ -24,4 +24,70 @@ describe('ModalDialog', () => {
     expect(w.emitted('close')).toHaveLength(1);
     w.unmount();
   });
+
+  it('gives focus back to its opener when it closes (M5 §10)', async () => {
+    const proto = HTMLDialogElement.prototype as unknown as Record<string, unknown>;
+    proto.showModal = function showModal(this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+      this.querySelector('button')?.focus();
+    };
+    proto.close = function close(this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    };
+    const opener = document.createElement('button');
+    document.body.append(opener);
+    opener.focus();
+    const w = mount(ModalDialog, { props: { open: false, title: 'T' }, attachTo: document.body });
+    await w.setProps({ open: true });
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Close');
+    await w.setProps({ open: false });
+    expect(document.activeElement).toBe(opener);
+    // Escape (a native close while meant to be open) restores it too.
+    await w.setProps({ open: true });
+    const el = w.find('dialog').element as HTMLDialogElement;
+    el.removeAttribute('open');
+    el.dispatchEvent(new Event('close'));
+    expect(document.activeElement).toBe(opener);
+    w.unmount();
+  });
+
+  it('returns focus to `returnTo` when the opener is <body> or inside a closed dialog (review fix)', async () => {
+    const proto = HTMLDialogElement.prototype as unknown as Record<string, unknown>;
+    proto.showModal = function showModal(this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+      this.querySelector('button')?.focus();
+    };
+    proto.close = function close(this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    };
+    // The Play button was disabled when pressed: focus fell to <body>.
+    const play = document.createElement('button');
+    play.id = 'oma-m-1-a1-play';
+    document.body.append(play);
+    (document.activeElement as HTMLElement | null)?.blur();
+    const w = mount(ModalDialog, { props: { open: false, title: 'T', returnTo: 'oma-m-1-a1-play' }, attachTo: document.body });
+    await w.setProps({ open: true });
+    await w.setProps({ open: false });
+    expect(document.activeElement).toBe(play);
+
+    // Opened from a button inside another dialog that has closed since.
+    const other = document.createElement('dialog');
+    const inner = document.createElement('button');
+    other.append(inner);
+    other.setAttribute('open', '');
+    document.body.append(other);
+    inner.focus();
+    await w.setProps({ open: true });
+    other.removeAttribute('open');
+    await w.setProps({ open: false });
+    expect(document.activeElement).toBe(play);
+    w.unmount();
+  });
+});
+
+afterEach(() => {
+  const proto = HTMLDialogElement.prototype as unknown as Record<string, unknown>;
+  delete proto.showModal;
+  delete proto.close;
+  document.body.innerHTML = '';
 });

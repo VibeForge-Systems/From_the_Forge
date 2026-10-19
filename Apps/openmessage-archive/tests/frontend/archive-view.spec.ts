@@ -40,6 +40,7 @@ import {
 } from './helpers';
 
 const api = vi.mocked(ipc);
+let lastRouter: ReturnType<typeof createRouter> | null = null;
 
 function mountView() {
   const router = createRouter({
@@ -48,8 +49,10 @@ function mountView() {
       { path: '/', component: ArchiveView },
       { path: '/settings', component: { template: '<div />' } },
       { path: '/backups', component: { template: '<div />' } },
+      { path: '/archive/:archiveId/viewer', name: 'viewer', component: { template: '<div />' } },
     ],
   });
+  lastRouter = router;
   return mount(ArchiveView, { global: { plugins: [router] } });
 }
 
@@ -82,7 +85,7 @@ function button(w: ReturnType<typeof mountView>, text: string) {
 }
 
 describe('ArchiveView', () => {
-  it('welcomes a new user with one working action and only the viewer marked planned', () => {
+  it('welcomes a new user with one working action and only exports marked planned', () => {
     const settings = useSettings();
     settings.loaded = true;
     settings.snapshot = snapshot();
@@ -91,7 +94,7 @@ describe('ArchiveView', () => {
     expect(wrapper.text()).toContain('Welcome to OpenMessage Archive');
     const choose = wrapper.findAll('button').find((b) => b.text().includes('Choose archive folder'));
     expect(choose?.attributes('disabled')).toBeUndefined();
-    expect(wrapper.findAll('.oma-planned').length).toBe(1);
+    expect(wrapper.findAll('.oma-planned').map((b) => b.text())).toEqual(['Planned · M6']);
     expect(api.listArchives).not.toHaveBeenCalled();
     const steps = wrapper.findAll('.oma-steps li').map((li) => li.text());
     expect(steps).toHaveLength(4);
@@ -100,7 +103,9 @@ describe('ArchiveView', () => {
     expect(wrapper.find('.oma-steps a[href="/backups"]').exists()).toBe(true);
     expect(steps[2]).toContain('Import messages.');
     expect(steps[2]).not.toContain('Planned');
-    expect(steps[3]).toContain('Planned · M5');
+    expect(steps[3]).toContain('Read and search your conversations in the viewer.');
+    expect(steps[3]).toContain('Planned · M6');
+    expect(steps[3]).not.toContain('Planned · M5');
   });
 
   it('offers Create archive and Find backups in an empty library, and says archives are unencrypted', async () => {
@@ -134,6 +139,36 @@ describe('ArchiveView', () => {
     expect(wrapper.find('.oma-archive-list').text()).toContain('Synthetic archive');
   });
 
+  it('opens the viewer from Browse conversations, and only for an archive the viewer can read (5h3)', async () => {
+    api.listArchives.mockResolvedValue(archiveListing([archiveEntry()]));
+    api.getArchiveDetails.mockResolvedValue(archiveDetails());
+    const wrapper = await mountReady();
+    const browse = button(wrapper, 'Browse conversations');
+    expect(browse?.attributes('disabled')).toBeUndefined();
+    await browse?.trigger('click');
+    await flushPromises();
+    expect(lastRouter?.currentRoute.value.name).toBe('viewer');
+    expect(lastRouter?.currentRoute.value.params.archiveId).toBe(ARCHIVE_ID);
+
+    api.listArchives.mockResolvedValue(archiveListing([archiveEntry({ status: 'needsUpgrade' })]));
+    const other = await mountReady();
+    expect(button(other, 'Browse conversations')?.attributes('disabled')).toBeDefined();
+  });
+
+  it('opens the viewer with its search panel from Search messages (5i)', async () => {
+    api.listArchives.mockResolvedValue(archiveListing([archiveEntry()]));
+    api.getArchiveDetails.mockResolvedValue(archiveDetails());
+    const wrapper = await mountReady();
+    const search = button(wrapper, 'Search messages');
+    expect(search?.attributes('disabled')).toBeUndefined();
+    await search?.trigger('click');
+    await flushPromises();
+    expect(lastRouter?.currentRoute.value.name).toBe('viewer');
+    expect(lastRouter?.currentRoute.value.params.archiveId).toBe(ARCHIVE_ID);
+    // Nothing about the search enters the URL.
+    expect(lastRouter?.currentRoute.value.fullPath).toBe(`/archive/${ARCHIVE_ID}/viewer`);
+  });
+
   it('shows a damaged archive with its reason and no enabled action', async () => {
     api.listArchives.mockResolvedValue(archiveListing([archiveEntry({ status: 'damaged', damage: 'schemaMismatch' })]));
     api.getArchiveDetails.mockRejectedValue(new (await import('@/services/ipc')).IpcError('get_archive_details', 'archiveDamaged', 'Damaged.'));
@@ -164,7 +199,10 @@ describe('ArchiveView', () => {
     expect(wrapper.text()).toContain('There was not enough free space.');
     expect(wrapper.text()).toContain('1 attachment file is missing.');
     expect(wrapper.text()).toContain('Counts: not recorded until the first import finishes.');
-    expect(wrapper.findAll('.oma-planned').map((b) => b.text())).toEqual(['Planned · M5', 'Planned · M5']);
+    // Nothing is planned here any more: the viewer and its search (slice 5i) open from here.
+    expect(wrapper.findAll('.oma-planned')).toHaveLength(0);
+    expect(button(wrapper, 'Browse conversations')?.attributes('disabled')).toBeUndefined();
+    expect(button(wrapper, 'Search messages')?.attributes('disabled')).toBeUndefined();
 
     await button(wrapper, 'Verify archive (full)')?.trigger('click');
     await flushPromises();

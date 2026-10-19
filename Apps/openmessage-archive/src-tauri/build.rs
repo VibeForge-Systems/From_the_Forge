@@ -25,6 +25,7 @@ const COMMANDS: &[&str] = &[
     "verify_archive",
     "open_viewer",
     "close_viewer",
+    "hide_viewer",
     "list_conversations",
     "get_conversations",
     "get_thread_page",

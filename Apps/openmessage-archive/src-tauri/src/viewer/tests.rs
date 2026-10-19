@@ -604,6 +604,10 @@ fn searches_supersede_and_cancel() {
     assert_eq!(second.mode, SearchRanDto::Exact);
     assert!(second.coverage.is_some());
     assert!(!progress.is_empty(), "the scan reports progress");
+    assert!(
+        progress.iter().all(|p| p.search_id == second.search_id),
+        "progress names the running search"
+    );
     assert_ne!(first.search_id, second.search_id);
     let e = search_results(
         &s,
@@ -627,6 +631,22 @@ fn searches_supersede_and_cancel() {
     let third = run("example", "auto");
     assert!(s.searches().expect("slot").running.is_none());
     cancel_search(&s, 12345).expect("an unknown id is fine");
+    // A scan is cancelled by the id its progress names, before it returns
+    // (the panel's Cancel, slice 5i); it ends as superseded.
+    let mut seen = Vec::new();
+    let e = search(
+        &s,
+        &id_of(json!({ "viewer": v, "query": "SYNTH", "mode": "exact" })),
+        &mut |p| {
+            seen.push(p.search_id);
+            cancel_search(&s, p.search_id).expect("cancel mid-scan");
+        },
+    )
+    .expect_err("cancelled mid-scan");
+    assert_eq!(e.code, ErrorCode::SearchSuperseded);
+    assert!(!seen.is_empty());
+    assert!(s.searches().expect("slot").running.is_none());
+    // The search kept before the cancelled scan is still readable.
     assert!(search_results(
         &s,
         &id_of(json!({ "viewer": v, "searchId": third.search_id, "offset": 0, "limit": 1 }))
@@ -1078,6 +1098,7 @@ fn the_archive_and_viewer_walks_are_disjoint() {
 const VIEWER_COMMANDS: &[&str] = &[
     "open_viewer",
     "close_viewer",
+    "hide_viewer",
     "list_conversations",
     "get_conversations",
     "get_thread_page",

@@ -20,6 +20,7 @@ export type CapabilityId =
   | 'archive-database'
   | 'viewer'
   | 'search'
+  | 'privacy-screen'
   | 'exports'
   | 'device-backup'
   | 'hardening';
@@ -60,15 +61,25 @@ export const CAPABILITIES: readonly Capability[] = [
     id: 'viewer',
     title: 'Conversation viewer',
     milestone: 5,
-    status: 'planned',
-    summary: 'Conversation list, message threads, inline images, and attachment previews.',
+    status: 'available',
+    summary:
+      'Conversation list, message threads, image previews, audio and video after a check and your confirmation, and the recorded details of each message.',
   },
   {
     id: 'search',
     title: 'Search and filtering',
     milestone: 5,
-    status: 'planned',
-    summary: 'Full-text search across conversations with date, sender, and type filters.',
+    status: 'available',
+    summary:
+      'Search message text in one conversation or all of them, with date, sender and attachment filters and an exact-text mode for scripts and emoji the index does not split; jump to a date with a calendar.',
+  },
+  {
+    id: 'privacy-screen',
+    title: 'Privacy screen',
+    milestone: 5,
+    status: 'available',
+    summary:
+      'Hide the viewer on request, when the window loses focus, or after a period of inactivity. It hides the screen only; it is not a lock.',
   },
   {
     id: 'exports',
