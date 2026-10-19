@@ -129,6 +129,7 @@ function close(): void {
           disablepictureinpicture
           disableremoteplayback
           playsinline
+          draggable="false"
           aria-labelledby="oma-media-caption"
           @play="onPlay"
           @error="onError"

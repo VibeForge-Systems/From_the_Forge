@@ -522,6 +522,38 @@ fn renditions_are_decoded_once_and_served_from_memory() {
     let _ = first_id;
 }
 
+/// The privacy screen (`hide_viewer`, slice 5j) drops the cached
+/// renditions, so a rendition asked for again is decoded again; a refused
+/// one stays refused, and the tokens keep working.
+#[test]
+fn hiding_drops_cached_renditions_but_keeps_failures() {
+    let r = rig(Mode::Image, None);
+    let images = r.classes().remove("image").expect("images");
+    let (tok, _) = &images[0];
+    assert_eq!(send(&r.host, &url(tok, "thumb"), &GET).status, 200);
+    assert_eq!(r.session().media().cached_renditions(), 1);
+    crate::viewer::hide(&r.session()).expect("hide");
+    assert_eq!(r.session().media().cached_renditions(), 0);
+    let again = send(&r.host, &url(tok, "thumb"), &GET);
+    assert_eq!(again.status, 200);
+    assert_eq!(again.body, FAKE_JPEG);
+    assert_eq!(r.counts.calls.load(Ordering::SeqCst), 2, "decoded again");
+
+    let refused = rig(Mode::Refuse, None);
+    let images = refused.classes().remove("image").expect("images");
+    let (tok, _) = &images[0];
+    assert_refused(
+        &send(&refused.host, &url(tok, "thumb"), &GET),
+        "refused decode",
+    );
+    crate::viewer::hide(&refused.session()).expect("hide");
+    assert_refused(
+        &now(&ask(&refused.host, &url(tok, "thumb"), &GET)),
+        "still remembered",
+    );
+    assert_eq!(refused.counts.calls.load(Ordering::SeqCst), 1);
+}
+
 /// A refused decode is remembered: a hostile image is decoded at most
 /// once per session.
 #[test]

@@ -149,7 +149,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 2 Backup discovery and validation | Find backups, read their manifests, detect encryption, unlock, validate | Implemented; sign-off pending (fixture-generator review, manual tests) |
 | 3 Extraction check | Locate sms.db, probe the schema, and check that messages, chats, handles and attachment references can be read (counts only) | Implemented; sign-off pending (Windows CI, the clean-room review of the typedstream decoder and the fixture generators, the manual tests) |
 | 4 Archive database | Extract messages and copy attachments into the archive; versioned SQLite schema, transactional and resumable imports, FTS5, integrity verification | Implemented; sign-off pending (CI of slices 4g–4n, two §18.8 Windows tests that are not written yet (a held partial file, a killed lock holder; see `docs/compatibility.md`), the manual tests, the owner's answers on D69, D70, D71, D79 and D82) |
-| 5 Rich viewer | Conversation list, threads, inline media, search, date navigation | In progress: PR A (viewer reads, search, media checks, the 14 viewer commands, the `oma-media` protocol, the image decode helper and the window built in Rust) merged after CI passed on `ubuntu-22.04` and `windows-2022` ([run 39205163013](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39205163013)), tested on synthetic data only; the screens are PR B, in progress (frontend foundations, the virtualised conversation list and thread, message bubbles with reactions, replies, edits, unsends and withheld text, attachment cards, the media viewer with the play confirmation, the details panel and the reply thread, search with filters, a calendar to jump to a date, and the viewer's keyboard shortcuts; opened from the Archive page; tested in jsdom only, not yet in a real window; the privacy screen is next) |
+| 5 Rich viewer | Conversation list, threads, inline media, search, date navigation | In progress: PR A (viewer reads, search, media checks, the 14 viewer commands (15 since slice 5j), the `oma-media` protocol, the image decode helper and the window built in Rust) merged after CI passed on `ubuntu-22.04` and `windows-2022` ([run 39205163013](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39205163013)), tested on synthetic data only; the screens are PR B, in progress (frontend foundations, the virtualised conversation list and thread, message bubbles with reactions, replies, edits, unsends and withheld text, attachment cards, the media viewer with the play confirmation, the details panel and the reply thread, search with filters, a calendar to jump to a date, the viewer's keyboard shortcuts, the privacy screen (not a lock), copy actions with a link guard, and the print, save, reload, context-menu and drag guards; opened from the Archive page; tested in jsdom only, not yet in a real window; the documents and the manual checklist are next) |
 | 6 Exports | TXT, CSV, JSON, HTML, PDF, XLSX, and attachments | Planned |
 | 7 Direct device backup | USB device detection and local backup creation | Planned |
 | 8 Hardening and release | Archive repair, recovery tests, diagnostic log, accessibility, signed packages | Planned |
@@ -337,8 +337,9 @@ and message bodies.
 
 Its backend (PR A) is implemented. Of the screens (PR B), the conversation
 list, the threads, attachments, the media viewer, the details panel,
-search and the date dialog are in place and open from the Archive page
-("Browse conversations", "Search messages"); the privacy screen is next.
+search, the date dialog, the privacy screen and the copy actions are in
+place and open from the Archive page ("Browse conversations", "Search
+messages"); the documents and the manual checklist (slice 5k) are next.
 The screens have been tested in jsdom only.
 
 - The conversation list and threads, paged through the archive's
@@ -363,6 +364,17 @@ The screens have been tested in jsdom only.
 - Labels: "not in the latest import from this phone", "edited", "unsent;
   earlier text kept", "matched an earlier version", and "provisional
   (untested iOS version)".
+- A privacy screen (Ctrl+Shift+H, or when the window loses focus, or
+  after a chosen idle time, which also closes the viewer). **It hides the
+  screen; it is not a lock.** Capture protection is a Windows-only
+  setting that Microsoft says is not a security feature.
+- Copy actions in each message's menu (text, text without invisible
+  characters, with sender and time, and a guarded "Copy link"). Copied
+  text can enter Windows clipboard history and cloud clipboard.
+- **Not verified yet:** whether either engine lets the app stop Ctrl+P
+  (print to PDF), Ctrl+S, F5 and its own context menu; the clipboard API
+  on WebKitGTK; screen readers, forced colours and 400 % zoom on a real
+  engine.
 
 ## Contributing
 

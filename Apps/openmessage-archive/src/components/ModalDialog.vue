@@ -3,18 +3,38 @@ import { onMounted, ref, useId, watch } from 'vue';
 
 // Built on the native <dialog> element: showModal() provides the focus
 // trap, Escape handling, and inert background that a hand-rolled modal
-// would have to reimplement.
+// would have to reimplement. showModal() moves focus to the first control;
+// on close, focus returns to what had it before (M5 §10, slice 5j), also on
+// engines that do not restore it themselves.
 const props = defineProps<{ open: boolean; title: string }>();
 const emit = defineEmits<{ close: [] }>();
 
 const dialog = ref<HTMLDialogElement | null>(null);
 const titleId = useId();
+let opener: HTMLElement | null = null;
+
+/** Give focus back to the opener, unless the user already moved it elsewhere. */
+function restoreFocus(): void {
+  const back = opener;
+  opener = null;
+  if (!back || !back.isConnected) return;
+  const now = document.activeElement;
+  if (now === null || now === document.body || (dialog.value?.contains(now) ?? false)) {
+    back.focus({ preventScroll: true });
+  }
+}
 
 function sync(open: boolean): void {
   const el = dialog.value;
   if (!el || typeof el.showModal !== 'function') return;
-  if (open && !el.open) el.showModal();
-  if (!open && el.open) el.close();
+  if (open && !el.open) {
+    opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    el.showModal();
+  }
+  if (!open && el.open) {
+    el.close();
+    restoreFocus();
+  }
 }
 
 onMounted(() => sync(props.open));
@@ -27,7 +47,10 @@ watch(() => props.open, sync);
  * must not close it again.
  */
 function onNativeClose(): void {
-  if (props.open && !dialog.value?.open) emit('close');
+  if (props.open && !dialog.value?.open) {
+    restoreFocus();
+    emit('close');
+  }
 }
 
 function onBackdropClick(event: MouseEvent): void {

@@ -818,3 +818,152 @@ audio.oma-media-full,
     border-color: CanvasText;
   }
 }
+
+/* ---- Privacy and accessibility (slice 5j) -------------------------------- */
+
+/*
+ * The privacy curtain: an opaque modal dialog over the whole window. Its
+ * backdrop is opaque too, so nothing behind it shows through; it is never
+ * a CSS blur, which can be partly reversed.
+ */
+.oma-curtain {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--bs-body-bg);
+  color: var(--bs-body-color);
+}
+
+.oma-curtain::backdrop {
+  /* Engines whose ::backdrop does not inherit custom properties get Canvas. */
+  background: Canvas;
+  background: var(--bs-body-bg, Canvas);
+  opacity: 1;
+}
+
+.oma-curtain-body {
+  max-width: 32rem;
+  margin: 15vh auto 0;
+  padding: var(--oma-space-4);
+}
+
+/* The message menu: a small modal dialog placed at the pointer. */
+.oma-menu {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: var(--oma-space-1) 0;
+  min-width: min(16rem, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  background: var(--bs-body-bg);
+  color: var(--bs-body-color);
+  box-shadow: var(--bs-box-shadow);
+}
+
+.oma-menu::backdrop {
+  background: transparent;
+}
+
+.oma-menu-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.oma-menu-item {
+  /* At least 24 × 24 CSS px (WCAG 2.5.8). */
+  min-height: 2rem;
+  padding: var(--oma-space-1) var(--oma-space-3);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: start;
+}
+
+.oma-menu-item:hover,
+.oma-menu-item:focus {
+  background: var(--bs-tertiary-bg);
+}
+
+.oma-menu-item:focus-visible {
+  outline: 2px solid var(--bs-focus-ring-color);
+  outline-offset: -2px;
+}
+
+/* The exact link before "Copy link". */
+.oma-link-exact {
+  padding: var(--oma-space-2);
+  font-family: var(--bs-font-monospace);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-sm);
+  contain: paint;
+  overflow: clip;
+}
+
+/* Drag-out (§6.7): nothing in the viewer drags as an image or a link. */
+.oma-thread-item,
+.oma-bubble,
+.oma-media-box,
+.oma-media-full {
+  -webkit-user-drag: none;
+}
+
+/* Jumps never scroll smoothly (§10). */
+.oma-feed,
+.oma-conv-list {
+  scroll-behavior: auto;
+}
+
+/* The print style sheet: an engine that prints anyway gets one sentence. */
+.oma-print-note {
+  display: none;
+}
+
+@media print {
+  html.oma-viewer-open .oma-app,
+  html.oma-viewer-open dialog,
+  html.oma-viewer-open .oma-skip-link {
+    display: none !important;
+  }
+
+  html.oma-viewer-open .oma-print-note {
+    display: block !important;
+  }
+}
+
+/*
+ * Forced colours (Windows contrast themes): borders, focus rings and the
+ * marks that carry meaning stay visible in system colours.
+ */
+@media (forced-colors: active) {
+  .oma-badge-inline,
+  .oma-masked,
+  .oma-cp,
+  .oma-menu,
+  .oma-link-exact,
+  .oma-notice {
+    border: 1px solid CanvasText;
+  }
+
+  .oma-thread-item:focus-visible,
+  .oma-menu-item:focus-visible,
+  .oma-conv-option.oma-active {
+    outline: 2px solid Highlight;
+  }
+
+  .oma-hit-text mark {
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  .oma-curtain,
+  .oma-curtain::backdrop {
+    background: Canvas;
+    color: CanvasText;
+  }
+}

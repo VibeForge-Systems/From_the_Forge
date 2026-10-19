@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-hide-viewer"
+description = "Enables the hide_viewer command without any pre-configured scope."
+commands.allow = ["hide_viewer"]
+
+[[permission]]
+identifier = "deny-hide-viewer"
+description = "Denies the hide_viewer command without any pre-configured scope."
+commands.deny = ["hide_viewer"]

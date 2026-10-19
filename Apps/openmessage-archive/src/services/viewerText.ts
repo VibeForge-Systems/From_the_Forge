@@ -1064,7 +1064,54 @@ export const BUBBLE_TEXT = {
   serviceNotRecognised: 'Service not recognised by this version',
 } as const;
 
-// ------------------------------------------------------------- settings
+// ------------------------------------------------------------- privacy (5j)
+
+/**
+ * The privacy screen (M5 §9.2, D108). Every sentence says what it is:
+ * it hides the screen; it is not a lock.
+ */
+export const PRIVACY_TEXT = {
+  hide: 'Hide screen',
+  title: 'Screen hidden',
+  notALock:
+    'This hides the screen; it is not a lock. Anyone at this computer can show it again. Archive passwords come with encryption in milestone 8.',
+  focusLoss: 'It was hidden when the window lost focus. Window previews may capture a frame before the screen is hidden.',
+  idle: 'The viewer was closed after a period without activity. Show opens it again at the same conversation.',
+  show: 'Show',
+  showing: 'Opening the viewer again…',
+  print: 'Printing is not available in the conversation viewer.',
+} as const;
+
+/** The message menu and its copy actions (M5 §9.3, D107). */
+export const COPY_ACTION_TEXT = {
+  menu: 'Message actions',
+  copyText: 'Copy text',
+  copyClean: 'Copy text without invisible characters',
+  copyWithSender: 'Copy with sender and time',
+  copyLink: 'Copy link…',
+  copyLinkN: 'Copy link {n} of {total}…',
+  details: 'Details',
+  copied: 'Copied to the clipboard.',
+  copyFailed: 'The text could not be copied.',
+  linkTitle: 'Copy link',
+  linkExact: 'The link, exactly as recorded (invisible and direction-control characters are shown as codes):',
+  linkHidden: "This link contains hidden characters and can't be copied as a link; use Copy text.",
+  linkIncomplete: "This link is not complete here (part of it is hidden or was cut); it can't be copied as a link.",
+  copy: 'Copy',
+  cancel: 'Cancel',
+  close: 'Close',
+  // What a copy puts in place of what the bubble does not show as text.
+  codeHidden: '[one-time code hidden]',
+  inlineEmoji: '[inline emoji image not shown]',
+  attachment: '[attachment {n}]',
+  attachmentUnlisted: '[attachment]',
+  placeholder: '[attachment placeholder not matched to a file]',
+  cut: '[the rest of this text was not loaded]',
+  zoneSystem: "times in {offset}, this computer's zone",
+  zoneUtc: 'times in UTC',
+  senderNotLoaded: 'Sender not loaded',
+} as const;
+
 
 export const TIME_FORMAT_TEXT: Record<TimeFormat, string> = {
   system: 'System default',

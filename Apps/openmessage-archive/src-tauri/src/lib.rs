@@ -92,6 +92,7 @@ pub fn run() {
             commands::archives::verify_archive,
             commands::viewer::open_viewer,
             commands::viewer::close_viewer,
+            commands::viewer::hide_viewer,
             commands::viewer::list_conversations,
             commands::viewer::get_conversations,
             commands::viewer::get_thread_page,

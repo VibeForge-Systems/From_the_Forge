@@ -123,6 +123,8 @@ const ALLOWED_BINDINGS: Record<string, readonly string[]> = {
   'components/viewer/MediaViewer.vue': ['title="title"'],
   'components/viewer/MessageDetails.vue': ['aria-label="DETAILS_TEXT.close"'],
   'components/viewer/PlayConfirmDialog.vue': ['title="PLAY_CONFIRM_TEXT.title"'],
+  // The menu's place in CSS px (set through the CSSOM) and a fixed title (5j).
+  'components/viewer/MessageMenu.vue': ['style="position"', 'title="COPY_ACTION_TEXT.linkTitle"'],
   'components/viewer/ReplyThread.vue': ['aria-label="DETAILS_TEXT.close"'],
   // Option ids come from the position in the id snapshot; aria values are
   // counts and booleans.

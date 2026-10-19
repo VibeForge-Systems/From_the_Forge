@@ -31,12 +31,19 @@
 // the date-jump dialog. Requests the global shortcuts make of the open
 // thread (the date dialog, the first or newest item) go through
 // `dateJumpOpen` and `threadCommand`, which the thread watches.
+//
+// Privacy (slice 5j): `menu` is the message menu (copy actions, D107) and
+// `linkCopy` the "Copy link" confirmation; `closeDialogs` closes every
+// viewer dialog for the privacy screen, and `hideContent` asks Rust to drop
+// its cached renditions (`hide_viewer`, D120). A pending focus may ask only
+// to show a message, not to focus it (the privacy screen's "Show").
 import { defineStore } from 'pinia';
 import { computed, markRaw, ref, shallowRef } from 'vue';
 import { IpcError, ipc } from '@/services/ipc';
 import { devNote } from '@/services/devlog';
 import { playGate } from '@/services/media';
 import { VIEWER_ERROR_TEXT } from '@/services/viewerText';
+import type { LinkRun } from '@/services/copyText';
 import type {
   AnchorInput,
   AttachmentDto,
@@ -152,10 +159,30 @@ export interface FullText {
   error: string | null;
 }
 
-/** A message to focus in a chat that is about to open (a reply's originator). */
+/** A message to show in a chat that is about to open (a reply's originator). */
 export interface PendingFocus {
   chatId: SafeId;
   message: SafeId;
+  /** Move keyboard focus to it as well (false: only show it). */
+  focus: boolean;
+}
+
+/** The message menu, opened on a message (context menu, Shift+F10). */
+export interface MessageMenuState {
+  /** The message as its bubble shows it (the revealed copy when there is one). */
+  message: MessageDto;
+  handles: ReadonlyMap<SafeId, HandleDto>;
+  /** Where to open it, in CSS px from the viewport's top left. */
+  x: number;
+  y: number;
+  /** The article's element id (app-made), to return focus to. */
+  returnTo: string;
+}
+
+/** The "Copy link" confirmation: the exact string, or a refusal. */
+export interface LinkCopyState {
+  link: LinkRun;
+  returnTo: string;
 }
 
 /** One loaded page of a chat, with the anchors to load beyond it. */
@@ -291,6 +318,8 @@ export const useViewer = defineStore('viewer', () => {
   const revealed = shallowRef(new Map<SafeId, RevealedMessage>());
   const fullTexts = shallowRef(new Map<SafeId, FullText>());
   const pendingFocus = ref<PendingFocus | null>(null);
+  const menu = shallowRef<MessageMenuState | null>(null);
+  const linkCopy = shallowRef<LinkCopyState | null>(null);
 
   const panel = shallowRef<SidePanel | null>(null);
   const media = shallowRef<MediaOpen | null>(null);
@@ -333,6 +362,8 @@ export const useViewer = defineStore('viewer', () => {
     revealed.value = new Map();
     fullTexts.value = new Map();
     pendingFocus.value = null;
+    menu.value = null;
+    linkCopy.value = null;
     panel.value = null;
     media.value = null;
     pendingPlay.value = null;
@@ -913,16 +944,63 @@ export const useViewer = defineStore('viewer', () => {
     }
   }
 
-  /** Remember a message to focus when `chatId` opens; taken once. */
-  function focusOnOpen(chatId: SafeId, message: SafeId): void {
-    pendingFocus.value = { chatId, message };
+  /** Remember a message to show (and focus) when `chatId` opens; taken once. */
+  function focusOnOpen(chatId: SafeId, message: SafeId, focus = true): void {
+    pendingFocus.value = { chatId, message, focus };
   }
 
-  function takePendingFocus(chatId: SafeId): SafeId | null {
+  /** The pending message of `chatId`, taken once. */
+  function takePending(chatId: SafeId): PendingFocus | null {
     const p = pendingFocus.value;
     if (!p || p.chatId !== chatId) return null;
     pendingFocus.value = null;
-    return p.message;
+    return p;
+  }
+
+  function takePendingFocus(chatId: SafeId): SafeId | null {
+    return takePending(chatId)?.message ?? null;
+  }
+
+  function openMenu(state: MessageMenuState): void {
+    linkCopy.value = null;
+    menu.value = state;
+  }
+
+  function closeMenu(): void {
+    menu.value = null;
+  }
+
+  function openLinkCopy(state: LinkCopyState): void {
+    menu.value = null;
+    linkCopy.value = state;
+  }
+
+  function closeLinkCopy(): void {
+    linkCopy.value = null;
+  }
+
+  /**
+   * Close every viewer dialog (the privacy screen): the media viewer (its
+   * element unmounts, which stops it), the play confirmation (nothing
+   * plays), the date dialog, the message menu and the link confirmation.
+   */
+  function closeDialogs(): void {
+    media.value = null;
+    pendingPlay.value = null;
+    dateJumpOpen.value = false;
+    menu.value = null;
+    linkCopy.value = null;
+  }
+
+  /** Ask Rust to drop the cached renditions (`hide_viewer`, D120). */
+  async function hideContent(): Promise<void> {
+    const v = viewer.value;
+    if (v === null) return;
+    try {
+      await ipc.hideViewer(v);
+    } catch {
+      // A closed session has no renditions left either way.
+    }
   }
 
   return {
@@ -948,6 +1026,8 @@ export const useViewer = defineStore('viewer', () => {
     revealed,
     fullTexts,
     pendingFocus,
+    menu,
+    linkCopy,
     panel,
     media,
     pendingPlay,
@@ -983,6 +1063,13 @@ export const useViewer = defineStore('viewer', () => {
     unreveal,
     loadFullText,
     focusOnOpen,
+    takePending,
     takePendingFocus,
+    openMenu,
+    closeMenu,
+    openLinkCopy,
+    closeLinkCopy,
+    closeDialogs,
+    hideContent,
   };
 });

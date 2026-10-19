@@ -10,11 +10,19 @@ describe('roadmap', () => {
     }
   });
 
-  it('claims milestones 1 to 4, the M5 viewer (5h3) and search (5i) as available, and everything else as planned', () => {
+  it('claims milestones 1 to 4 and the M5 viewer (5h3), search (5i) and privacy screen (5j) as available, and everything else as planned', () => {
     const available = CAPABILITIES.filter((c) => c.status === 'available').map((c) => c.id);
-    expect(available).toEqual(['shell', 'backup-import', 'extraction', 'archive-database', 'viewer', 'search']);
-    // The privacy screen flips in slice 5j; exports and later stay planned.
-    expect(capability('privacy-screen').status).toBe('planned');
+    expect(available).toEqual([
+      'shell',
+      'backup-import',
+      'extraction',
+      'archive-database',
+      'viewer',
+      'search',
+      'privacy-screen',
+    ]);
+    // It never claims to be a lock.
+    expect(capability('privacy-screen').summary).toContain('it is not a lock');
     for (const c of CAPABILITIES) {
       if (c.milestone >= 6) expect(c.status).toBe('planned');
     }

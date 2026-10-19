@@ -267,7 +267,7 @@ describe('SearchPanel', () => {
     expect(open.attributes('aria-describedby')).toBe('oma-hit-0-h oma-hit-0-t');
     await open.trigger('click');
     expect(w.emitted('openChat')).toEqual([[sid(4)]]);
-    expect(useViewer().pendingFocus).toEqual({ chatId: sid(4), message: sid(1) });
+    expect(useViewer().pendingFocus).toEqual({ chatId: sid(4), message: sid(1), focus: true });
   });
 
   it('loads more results on request', async () => {

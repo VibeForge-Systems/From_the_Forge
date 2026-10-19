@@ -14,6 +14,10 @@
 // - Reveals (D115) re-read this one message through the store; the page's
 //   own copy stays masked, and "Hide" drops the revealed copy.
 //
+// Since slice 5j a right click, the context-menu key or Shift+F10 on the
+// article opens the app's message menu (copy actions, details) instead of
+// the engine's, and the article cannot be dragged out.
+//
 // `aria-setsize="-1"`: the number of visible items is not known (the
 // chat's count includes folded reactions and goes stale during imports),
 // and `aria-posinset` is omitted because keyset pages give no exact
@@ -95,6 +99,23 @@ async function reveal(what: RevealInput): Promise<void> {
 async function hide(what: RevealInput): Promise<void> {
   error.value = await viewer.unreveal(props.message.id, what);
 }
+
+/**
+ * The message menu, at the pointer; from the keyboard (no pointer
+ * position), at the article's top left.
+ */
+function onContextMenu(event: MouseEvent): void {
+  event.preventDefault();
+  const article = event.currentTarget as HTMLElement;
+  let x = event.clientX;
+  let y = event.clientY;
+  if (x === 0 && y === 0) {
+    const r = article.getBoundingClientRect();
+    x = r.left + 16;
+    y = r.top + 16;
+  }
+  viewer.openMenu({ message: shown.value, handles: props.handles, x, y, returnTo: base.value });
+}
 </script>
 
 <template>
@@ -104,9 +125,11 @@ async function hide(what: RevealInput): Promise<void> {
     :id="base"
     :class="itemClass"
     tabindex="0"
+    draggable="false"
     aria-setsize="-1"
     :aria-labelledby="`${base}-h`"
     :aria-describedby="`${base}-b`"
+    @contextmenu="onContextMenu"
   >
     <header :id="`${base}-h`" class="oma-item-head">
       <span v-if="!system" :class="senderClass">

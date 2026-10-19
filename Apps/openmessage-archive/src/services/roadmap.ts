@@ -77,7 +77,7 @@ export const CAPABILITIES: readonly Capability[] = [
     id: 'privacy-screen',
     title: 'Privacy screen',
     milestone: 5,
-    status: 'planned',
+    status: 'available',
     summary:
       'Hide the viewer on request, when the window loses focus, or after a period of inactivity. It hides the screen only; it is not a lock.',
   },

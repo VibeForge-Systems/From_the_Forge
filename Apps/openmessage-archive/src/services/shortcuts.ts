@@ -7,8 +7,12 @@
 // `ThreadView` matches them on its articles only, never the global
 // handler, so a single key such as R or Enter is active only while a
 // message has focus (WCAG 2.1.4) and never steals Enter from a button.
+//
+// Slice 5j adds the privacy screen (Ctrl+Shift+H, also in text fields, so
+// it always works) and Shift+F10 for a focused message's menu (the
+// context-menu key opens the same menu natively).
 
-export type MessageShortcutId = 'viewer-details' | 'viewer-reply-thread';
+export type MessageShortcutId = 'viewer-details' | 'viewer-reply-thread' | 'viewer-message-menu';
 
 export type ShortcutId =
   | 'toggle-left-panel'
@@ -24,6 +28,7 @@ export type ShortcutId =
   | 'viewer-jump-date'
   | 'viewer-first'
   | 'viewer-last'
+  | 'viewer-privacy-screen'
   | 'zoom-in'
   | 'zoom-out'
   | 'zoom-reset'
@@ -80,6 +85,14 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: 'viewer-first', description: 'Viewer: jump to the first item', mod: true, key: 'Home' },
   { id: 'viewer-last', description: 'Viewer: jump to the newest item', mod: true, key: 'End' },
   {
+    id: 'viewer-privacy-screen',
+    description: 'Viewer: hide the screen (not a lock)',
+    mod: true,
+    shift: true,
+    key: 'h',
+    inInputs: true,
+  },
+  {
     id: 'viewer-details',
     description: 'Viewer: show the focused message’s details',
     mod: false,
@@ -93,6 +106,14 @@ export const SHORTCUTS: readonly Shortcut[] = [
     key: 'r',
     scope: 'message',
   },
+  {
+    id: 'viewer-message-menu',
+    description: 'Viewer: the focused message’s menu (copy, details)',
+    mod: false,
+    shift: true,
+    key: 'F10',
+    scope: 'message',
+  },
   { id: 'zoom-in', description: 'Zoom in', mod: true, key: '=', aliases: ['+'], anyShift: true, label: '+' },
   { id: 'zoom-out', description: 'Zoom out', mod: true, key: '-', label: '−' },
   { id: 'zoom-reset', description: 'Reset zoom', mod: true, key: '0' },
@@ -101,7 +122,8 @@ export const SHORTCUTS: readonly Shortcut[] = [
 export const isMac = (): boolean =>
   typeof navigator !== 'undefined' && /mac/i.test(navigator.userAgent);
 
-function isTextInput(target: EventTarget | null): boolean {
+/** A field that takes typed text (shortcuts and the viewer's guards leave it alone). */
+export function isTextInput(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
   const tag = target.tagName;
@@ -137,7 +159,7 @@ export function matchShortcut(
 }
 
 export function isMessageShortcut(id: ShortcutId): id is MessageShortcutId {
-  return id === 'viewer-details' || id === 'viewer-reply-thread';
+  return id === 'viewer-details' || id === 'viewer-reply-thread' || id === 'viewer-message-menu';
 }
 
 export function formatShortcut(s: Shortcut, mac = isMac()): string[] {

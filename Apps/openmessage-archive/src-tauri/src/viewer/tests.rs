@@ -1098,6 +1098,7 @@ fn the_archive_and_viewer_walks_are_disjoint() {
 const VIEWER_COMMANDS: &[&str] = &[
     "open_viewer",
     "close_viewer",
+    "hide_viewer",
     "list_conversations",
     "get_conversations",
     "get_thread_page",

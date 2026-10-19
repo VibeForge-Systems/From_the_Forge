@@ -4,8 +4,10 @@
 // on every change. The other preferences only affect the viewer, so they
 // were disabled, with the viewer's Planned badge, until the viewer shipped
 // (roadmap `viewer`, available since slice 5h3); the privacy-screen
-// preferences stay disabled until the privacy screen exists (slice 5j).
-// No control looks functional before it is.
+// preferences were disabled until the privacy screen shipped (roadmap
+// `privacy-screen`, slice 5j). No control looks functional before it is.
+// Capture protection exists only on Windows (tao has no Linux
+// implementation), so it is not shown elsewhere (M5 §9.2).
 import { computed, onMounted, ref } from 'vue';
 import PlannedBadge from '@/components/PlannedBadge.vue';
 import { ipc } from '@/services/ipc';
@@ -73,14 +75,13 @@ const idleLabel = (m: number) => (m === 0 ? 'Off' : m === 1 ? 'After 1 minute' :
             Enlarges the whole window, up to 400 %.
           </p>
         </div>
-        <div class="col-sm-6">
+        <div v-if="isWindows" class="col-sm-6">
           <div class="form-check mt-sm-4">
             <input
               id="viewer-capture"
               type="checkbox"
               class="form-check-input"
               :checked="prefs.captureProtection"
-              :disabled="!isWindows"
               aria-describedby="viewer-capture-hint"
               @change="settings.setViewer({ captureProtection: onCheck($event) })"
             />
@@ -89,8 +90,10 @@ const idleLabel = (m: number) => (m === 0 ? 'Off' : m === 1 ? 'After 1 minute' :
             </label>
           </div>
           <p id="viewer-capture-hint" class="form-text mb-0">
-            Windows only. Asks Windows to exclude this window from screen capture. Its effect
-            on screenshots, screen sharing and Windows Recall has not been tested yet.
+            Asks Windows to leave this window out of screenshots and screen capture. Microsoft
+            says this is not a security feature. It also blanks the window in screen sharing and
+            remote help. Its effect on screenshots, screen sharing and Windows Recall has not been
+            tested yet.
           </p>
         </div>
       </div>
@@ -254,8 +257,10 @@ const idleLabel = (m: number) => (m === 0 ? 'Off' : m === 1 ? 'After 1 minute' :
           </select>
         </div>
         <p class="form-text mb-0">
-          The privacy screen hides the window's contents. It is not a lock: the archive is not
-          encrypted.
+          The privacy screen (Ctrl+Shift+H, or "Hide screen" in the viewer) hides the
+          conversations. It is not a lock: anyone at this computer can show them again, and the
+          archive is not encrypted. Window previews may capture a frame before the screen is
+          hidden. Closing the viewer when idle loses nothing; "Show" opens it again.
         </p>
       </fieldset>
     </div>

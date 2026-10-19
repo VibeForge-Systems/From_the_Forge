@@ -404,6 +404,22 @@ describe('viewer store: reveals and full text (5h2)', () => {
     expect(store.takePendingFocus(sid(5))).toBe(30);
     expect(store.takePendingFocus(sid(5))).toBeNull();
   });
+
+  it('may ask only to show a pending message, and closes every viewer dialog for the privacy screen (5j)', async () => {
+    const store = await openSession();
+    store.focusOnOpen(sid(5), sid(30), false);
+    expect(store.takePending(sid(5))).toEqual({ chatId: 5, message: 30, focus: false });
+    store.openImage(attachment(4));
+    store.pendingPlay = attachment(5);
+    store.dateJumpOpen = true;
+    store.openMenu({ message: message(1), handles: new Map(), x: 1, y: 2, returnTo: 'oma-m-1' });
+    store.closeDialogs();
+    expect([store.media, store.pendingPlay, store.dateJumpOpen, store.menu, store.linkCopy]).toEqual([null, null, false, null, null]);
+    await store.hideContent();
+    expect(fake.calls.at(-1)?.[0]).toBe('hideViewer');
+    // The session and its windows stay: only the screen is hidden.
+    expect(store.session).not.toBeNull();
+  });
 });
 
 describe('viewer store: attachments, playback and the panel (5h3)', () => {

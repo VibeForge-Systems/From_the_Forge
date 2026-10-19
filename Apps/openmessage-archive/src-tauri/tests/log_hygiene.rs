@@ -650,6 +650,8 @@ fn exercise_viewer(
             &mut |_| {}
         )
         .is_err());
+        // The privacy screen (slice 5j).
+        viewer::hide(s)?;
         Ok(())
     })
     .expect("viewer operations");

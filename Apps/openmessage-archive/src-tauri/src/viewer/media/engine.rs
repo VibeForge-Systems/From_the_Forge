@@ -249,6 +249,21 @@ impl MediaEngine {
         self.decode.queued()
     }
 
+    /// The privacy screen (slice 5j): drop the cached renditions. The
+    /// failure cache, the tokens and the workers stay; the page asks for
+    /// renditions again once it is shown.
+    pub fn hide(&self) {
+        if let Ok(mut c) = self.shared.cache.lock() {
+            c.drop_renditions();
+        }
+    }
+
+    /// Cached renditions (tests).
+    #[cfg(test)]
+    pub fn cached_renditions(&self) -> usize {
+        self.shared.cache.lock().map(|c| c.len()).unwrap_or(0)
+    }
+
     /// End the session's media: waiting requests answer `503`, the
     /// workers stop after the job each holds (dropping their readers and
     /// helper processes), and the caches are cleared.

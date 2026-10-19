@@ -1,4 +1,5 @@
-//! The 14 viewer commands (M5 spec §7.2). Each validates its input, names
+//! The 15 viewer commands (M5 spec §7.2, plus `hide_viewer` from slice
+//! 5j, D120). Each validates its input, names
 //! its session by generation (a stale one is `viewerClosed`) and runs its
 //! reads on the blocking pool; the work itself is in `crate::viewer`,
 //! which has no Tauri types.
@@ -57,6 +58,13 @@ pub async fn open_viewer(
 #[tauri::command]
 pub fn close_viewer(state: State<'_, AppState>, request: ViewerRef) -> IpcResult<()> {
     state.viewer.close(request.viewer)
+}
+
+/// The privacy screen is up: drop the session's cached renditions (D120).
+#[tauri::command]
+pub fn hide_viewer(state: State<'_, AppState>, request: ViewerRef) -> IpcResult<()> {
+    let s = state.viewer.get(request.viewer)?;
+    viewer::hide(&s)
 }
 
 /// The conversation ids in order, optionally filtered by name.

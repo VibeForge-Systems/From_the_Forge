@@ -1141,6 +1141,41 @@ methods honour `spellcheck`, `autocomplete` and `autocapitalize`; the zoom
 shortcuts against Rust's `set_zoom`; a screen reader on the grid, the
 results or the live count; real exact-text scans at scale through the UI.
 
+**Slice 5j (the privacy screen, the copy actions, the page guards and the
+accessibility pass)** was tested in jsdom only (Vitest 4.1.12, synthetic
+DTOs, a hand-written `invoke` fake, a minimal `showModal`/`close`, since
+jsdom has none, and a stubbed `copyText`): hiding unmounts the viewer,
+pauses media and removes its source, leaves fullscreen (stubbed
+`document.fullscreenElement`), closes every viewer dialog, calls
+`hide_viewer`, opens the curtain and focuses "Show"; Escape does not
+dismiss it; "Show" reopens around the message that had focus and focuses
+it again; blur and `visibilitychange` hide it only with the setting on;
+idle hide (fake timers) resets on activity, calls `close_viewer`, clears
+the store, and "Show" reopens the archive at the same message; Ctrl+P,
+Ctrl+S, F5 and Ctrl+R are prevented, the engine's context menu and drag
+are prevented except in text fields; the message menu (right click and
+Shift+F10), its items and their order, the copied strings, the refused
+and the exact link; `ModalDialog` returns focus to its opener; the style
+sheets' reduced-motion, forced-colours, target-size and print rules. In
+Rust, a test shows that `hide_viewer` drops the cached renditions (a
+rendition is decoded again) and keeps the failure cache. **Not tested,
+so UNVERIFIED:** any of it on WebKitGTK or WebView2; whether either engine
+lets the page see Ctrl+P, Ctrl+S, F5, Ctrl+R and the context-menu key
+before acting on them, and whether it honours the print style sheet;
+whether `navigator.clipboard.writeText` works in WebKitGTK (the
+`execCommand('copy')` fallback is feature-detected, not tested on an
+engine); whether `-webkit-user-drag: none` and `draggable="false"` stop
+drags on both engines; whether `blur` and `visibilitychange` fire on
+Alt-Tab, minimise and workspace switches on each desktop, and whether a
+window preview captures a frame first; capture protection against the
+Snipping Tool, a Teams share, Magnifier and Recall; the curtain's
+`::backdrop` on each engine; whether clipboard history (Win+V) shows
+copied text; screen readers (NVDA and Narrator on WebView2, Orca on
+WebKitGTK) on the feed, the listbox, the menu and the curtain; Windows
+contrast themes (forced colours); zoom to 400 % at a 1280 px window, which
+gives 320 CSS px. Spike 5s is still **UNVERIFIED**; this slice does not
+depend on it.
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI

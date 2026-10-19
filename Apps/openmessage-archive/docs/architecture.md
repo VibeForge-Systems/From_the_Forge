@@ -2162,7 +2162,7 @@ rendition. No schema change; nothing is written.
 
 `src-tauri/src/viewer/` (no Tauri types, like `archives/`) and
 `src-tauri/src/commands/viewer.rs`: the viewer session, the 14 viewer
-commands, their DTOs and guards, the viewer settings and their window
+commands (a 15th, `hide_viewer`, came with slice 5j, D120), their DTOs and guards, the viewer settings and their window
 effects. No UI yet (PR B); the media protocol, the decode helper and the
 window built in Rust are slice 5f.
 
@@ -2810,6 +2810,109 @@ arithmetic is in `services/calendar.ts`.
   store (`dateJumpOpen`, `threadCommand`). Ctrl+Shift+H (the privacy
   screen) is slice 5j's.
 
+### Privacy controls and accessibility (M5 slice 5j)
+
+The roadmap's `privacy-screen` capability is `available`, and the
+Settings page's privacy-screen preferences are enabled. Every sentence
+about it says what it is: **it hides the screen; it is not a lock**
+(D108). The words are in `services/viewerText.ts` (`PRIVACY_TEXT`,
+`COPY_ACTION_TEXT`). None of this was run on WebKitGTK or WebView2, with a
+screen reader, in forced colours or at 400 % zoom; it is tested in jsdom
+only (`docs/compatibility.md`).
+
+- **The privacy screen** (`stores/privacy.ts`, `components/PrivacyCurtain.vue`;
+  "Hide screen" in the viewer's toolbar, or Ctrl+Shift+H, which also works
+  in text fields). Hiding pauses every `<audio>`/`<video>` and removes its
+  source, leaves fullscreen, closes every viewer dialog (the media viewer,
+  the play confirmation, the date dialog, the message menu and the link
+  confirmation), **unmounts** the viewer page's content (`v-if` in
+  `ViewerView`), calls `hide_viewer` so Rust drops its cached renditions
+  (D120), and then opens the curtain: an opaque modal `<dialog>` whose
+  backdrop is opaque too (never a CSS blur, which can be partly reversed),
+  opened after the other dialogs closed, so nothing sits above it in the
+  top layer. Focus moves to "Show". Escape does not dismiss it (`cancel`
+  is prevented, and an engine that closes it anyway gets it reopened), and
+  while it is up the global shortcuts do nothing. "Show" remounts the
+  viewer at the same place: the thread reports, through
+  `setPlaceProvider`, the focused message (focus returns to it) or the
+  first message in view (shown, not focused), and the conversation opens
+  around it. The window title does not change.
+- **Blur on focus loss** (`blurOnFocusLoss`, off by default): the window's
+  `blur`, or the document becoming hidden, hides the screen. The curtain
+  adds "Window previews may capture a frame before the screen is hidden."
+- **Hide on idle** (`idleHideMinutes`: off, 1, 5, 15 or 30): with no key,
+  pointer or wheel event for that long (checked every 5 s), the screen is
+  hidden **and the viewer session is closed** (readers, tokens, renditions,
+  search, helpers); the store forgets everything. "Show" opens the archive
+  again and returns to the same conversation and message. The user chose
+  it and loses nothing, so WCAG 2.2.1 is not engaged.
+- **Capture protection** (Windows only, off by default): applied by Rust
+  with `set_content_protected` since slice 5e. The setting is now shown
+  only on Windows (tao has no Linux implementation), and says that
+  Microsoft calls display affinity not a security feature, that it blanks
+  the window in screen sharing and remote help, and that its effect,
+  including on Recall, has not been tested.
+- **The message menu** (`components/viewer/MessageMenu.vue`, rules in
+  `services/copyText.ts`, D107). A right click, the context-menu key or
+  Shift+F10 on a message (a `scope: 'message'` shortcut) opens the app's
+  own menu instead of the engine's, which would offer "Save image as" and
+  "Copy link". It is an APG menu in a small modal `<dialog>` at the
+  pointer, kept inside the window: Up, Down, Home and End move, Escape and
+  Tab close, and focus returns to the message. Its items:
+  - "Copy text": the current body as shown. A masked one-time code is
+    copied as "[one-time code hidden]" unless that message was revealed;
+    withheld earlier or unsent text is never copied, since only the
+    current body is; a body cut at the page's cap ends with "[the rest of
+    this text was not loaded]"; the full text is used once it was read.
+  - "Copy text without invisible characters": the same without bidi
+    controls, invisible and control characters (D121). **It is the first,
+    default item when the body has `bidiControls` or `invisible`.**
+  - "Copy with sender and time": a first line with the sender as recorded
+    (or why there is none), the time and the zone it is shown in ("times
+    in UTC+01:00, this computer's zone", or "times in UTC"); then the
+    bubble's qualifiers in brackets ("Direction not recorded", "Unsent by
+    the sender", "Edited", the labels, "… (derived)"); then the text.
+  - "Copy link…" (one item per URL run, "Copy link N of M" when there are
+    several): a run with hidden characters (Rust's `urlHidden`, or any
+    character `SafeText` would show as a code) is **refused** ("This link
+    contains hidden characters and can't be copied as a link; use Copy
+    text"), and so is one with a masked or cut part. Otherwise the exact
+    string is shown first in identifier mode (hidden characters as visible
+    codes), with Copy and Cancel.
+  - "Details".
+
+  Copy uses `navigator.clipboard.writeText`, or `execCommand('copy')`
+  where it is missing (`services/features.ts`), only on a choice. The toast
+  says "Copied to the clipboard." or "The text could not be copied.",
+  never what. There is no automatic copy and no clearing timer.
+- **The page guards** (`services/guards.ts`, installed by `ViewerView`
+  while it is mounted; D106). Ctrl+P, Ctrl+S, F5 and Ctrl+R (with or
+  without Shift) get `preventDefault` in the capture phase, in text fields
+  too. The engine's context menu and any drag out of the viewer are
+  prevented except in text fields; articles, images and video are
+  `draggable="false"` with `-webkit-user-drag: none`. Whether the engines
+  let the page see Ctrl+P and F5 first is **UNVERIFIED**, so the print
+  style sheet shows only "Printing is not available in the conversation
+  viewer." while `<html>` has `oma-viewer-open`.
+- **Accessibility pass.** The feed (`aria-setsize="-1"`, no
+  `aria-posinset`, `aria-busy`) and the listbox (`aria-activedescendant`,
+  `aria-setsize`, `aria-posinset`, the active option kept mounted) are as
+  slice 5h1 built them, and the curtain and the menu move focus as above.
+  `ModalDialog` now gives focus back to what had it when it closes, on
+  engines that do not do it themselves (showModal already focuses its
+  first control). Motion: the system's `prefers-reduced-motion` and the
+  "Always reduce motion" setting apply the same reset, nothing scrolls
+  smoothly (`scroll-behavior: auto` on the feed and the list; jumps call
+  no smooth scroll), and GIFs stay first-frame renditions. Forced colours
+  keep bubble, chip, card, badge, code-token, menu and notice borders in
+  `CanvasText`, focus rings in `Highlight`, and search marks in
+  `Highlight`/`HighlightText`. Buttons in bubbles and menu items are at
+  least 24 × 24 CSS px. The day separators are not sticky, so focus is
+  never hidden under them. For 400 % zoom (`uiZoom`, D116), the side
+  panels already turn into overlays below 768 CSS px; the thread's tool
+  rows wrap and the menu keeps inside the window. `tests/frontend/accessibility.spec.ts`
+  checks the style sheets; the rest needs the manual checklist.
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`
@@ -2966,7 +3069,7 @@ are design decisions of the M4 spec.
 ### Milestone 5 decisions
 
 D89–D117 (M5 spec §18), as PR A (slices 5a–5f) implements them, and
-D118 and D119 from PR B (slices 5h3 and 5i). **The
+D118 to D121 from PR B (slices 5h3, 5i and 5j). **The
 owner answered the spec's four questions on 2026-10-18**: D97's and D99's
 playback wording, D100 and D110 (Q1), D101 (Q2, **which differs from the
 lean**), D105 and D115 (Q3) and D99's default (Q4) are **owner-confirmed**.
@@ -3005,6 +3108,8 @@ D104, D107–D109, D112's UI side) are implemented in PR B.
 | D116 | Zoom | `uiZoom` applied from Rust with `set_zoom`; no webview permission | `zoomHotkeysEnabled` | WCAG reflow without widening the capability |
 | D117 | M6 export source | `view/assemble.rs` is the uncapped layer M6 streams | Export from the paging APIs | Exports are complete |
 | D119 | Cancelling a running scan (slice 5i) | Each `ScanProgressDto` carries the running search's `searchId`, so `cancel_search` can stop an exact-text scan before it returns; a words search that has not answered cannot be named and runs out within its 5 s deadline, its answer dropped | `cancel_search` without an id stops whatever runs | The id still guards against cancelling a newer search; a Cancel button that only hid results would have left a 2,000,000-row scan running |
+| D120 | Dropping renditions under the privacy screen (slice 5j) | A 15th viewer command, `hide_viewer`, drops the session's cached renditions (keeping the failure cache, tokens and workers) when the curtain goes up; idle hide closes the session instead | No command: the renditions stay cached until the viewer closes | The spec's "clear the rendition LRU" (§9.2) needs Rust; one more command through the five steps, and a hostile image still decodes at most once per session |
+| D121 | Copy without invisible characters (slice 5j) | Bidi controls, invisible and control characters are dropped, but a zero-width joiner or non-joiner stays between two non-ASCII letters, marks or emoji, and tag characters stay inside a flag's tag sequence | Drop every character `SafeText` shows as a code | Emoji sequences, subdivision flags and joining scripts (Persian, Indic) keep their shape, while a joiner hidden between ASCII letters is still removed |
 | D118 | Play order (slice 5h3) | Rust's structural check and full hash run on the first Play, **before** the confirmation, so the confirmation's "It has checked the file's structure" is true and a refused file never asks | The spec's §2 order: confirm, then check | A full hash of a file the user may then cancel; no attachment byte reaches the engine before the confirmation either way |
 
 ## Logging

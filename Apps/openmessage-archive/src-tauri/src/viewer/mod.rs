@@ -1,7 +1,7 @@
 //! The viewer: the shell side of milestone 5 (spec §7).
 //!
 //! Nothing here depends on Tauri, so the session, the operations behind
-//! the 14 viewer commands, the DTOs and their guards are tested without a
+//! the 15 viewer commands, the DTOs and their guards are tested without a
 //! window. `commands::viewer` adds the blocking pool, the raw-request
 //! parsing and the progress `Channel`.
 //!
@@ -771,6 +771,17 @@ pub fn search_results(
         hits,
         skipped_rows: cx.skipped,
     })
+}
+
+/// `hide_viewer`: the privacy screen is up (slice 5j). The page has
+/// unmounted everything it showed; the cached renditions are dropped too,
+/// so nothing decoded stays in memory while the screen is hidden. The
+/// session, its tokens and the failure cache stay, so "Show" needs no
+/// reopen.
+pub fn hide(s: &ViewerSession) -> IpcResult<()> {
+    s.media().hide();
+    tracing::info!(outcome = "hidden", "viewer hidden");
+    Ok(())
 }
 
 /// `cancel_search`: stop the running search with that id (its token, then

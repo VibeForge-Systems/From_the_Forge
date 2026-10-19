@@ -49,9 +49,11 @@ slice 5h2 (message bubbles, system rows, reaction chips, reply quotes,
 per-part edits and unsends, and the reveals of codes and earlier text) and
 slice 5h3 (attachment cards, the media viewer, the play confirmation, the
 details panel and the reply thread) and slice 5i (the search panel, the
-date dialog and the viewer shortcuts) are in place. The viewer opens from
-the Archive page and the roadmap's `viewer` and `search` are available;
-the privacy screen (5j) is still planned.
+date dialog and the viewer shortcuts) and slice 5j (the privacy screen,
+the message menu's copy actions, the page guards and the accessibility
+pass) are in place. The viewer opens from the Archive page and the
+roadmap's `viewer`, `search` and `privacy-screen` are available; the
+documents and the manual checklist (5k) are next.
 The owner answered the M5 questions (`docs/architecture.md`, "Milestone 5
 decisions").
 
@@ -59,7 +61,7 @@ Read these before designing anything:
 
 | Doc | Read it for |
 |---|---|
-| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, the archive (layout, threat model, import data flow, one section per M4 slice), and the decision records (D1–D118; D43 is how "do not fabricate" is read for the check) |
+| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, the archive (layout, threat model, import data flow, one section per M4 slice), and the decision records (D1–D121; D43 is how "do not fabricate" is read for the check) |
 | [`docs/supported-formats.md`](docs/supported-formats.md) | Sourced research on the backup format, encryption, the sms.db schema (columns with sources, timestamps, codes, typedstream) and device tooling. Items marked **UNVERIFIED** are hypotheses, not facts. |
 | [`docs/privacy.md`](docs/privacy.md) | What is copied, where and for how long, including the plaintext copies of sms.db, and what an archive holds (plaintext at rest) |
 | [`docs/compatibility.md`](docs/compatibility.md) | What has actually been tested |
@@ -506,6 +508,20 @@ Never hand-edit generated files.
   `scope: 'message'` and matched only by `ThreadView` on the article;
   the global handler reaches the thread through the store
   (`dateJumpOpen`, `threadCommand`), never through the DOM.
+- **Privacy and the page guards (M5 slice 5j).** The privacy screen
+  (`stores/privacy.ts`, `components/PrivacyCurtain.vue`) **unmounts** the
+  viewer (`v-if` in `ViewerView`), never covers it with a blur: it stops
+  every medium, leaves fullscreen, closes the viewer's dialogs through
+  `useViewer().closeDialogs()` (a new viewer dialog must be closed there
+  too), calls `hide_viewer` (D120) and opens the curtain last. Never word
+  it as a lock. Idle hide closes the session; "Show" reopens at the place
+  the thread reports through `setPlaceProvider`. Copy only on an explicit
+  menu choice, through `services/copyText.ts` (masked codes stay masked,
+  withheld text is never copied, "Copy link" refuses hidden characters
+  and shows the exact string first) and `copyText`; toasts never carry
+  what was copied. `services/guards.ts` stops print, save, reload, the
+  engine's context menu and drag-out while the viewer is mounted; keep
+  media and bubbles `draggable="false"`.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush

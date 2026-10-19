@@ -103,7 +103,16 @@ impl RenditionCache {
         self.entries.is_empty()
     }
 
-    /// Forget everything (session close; the privacy screen in slice 5j).
+    /// Drop every cached rendition but remember the failures, so a
+    /// hostile image is still decoded at most once per session (the
+    /// privacy screen, slice 5j).
+    pub fn drop_renditions(&mut self) {
+        self.entries.clear();
+        self.order.clear();
+        self.bytes = 0;
+    }
+
+    /// Forget everything (session close).
     pub fn clear(&mut self) {
         self.entries.clear();
         self.order.clear();
@@ -142,5 +151,18 @@ mod tests {
         assert!(c.failed(k(9)) && !c.failed(k(1)));
         c.clear();
         assert!(c.is_empty() && !c.failed(k(9)) && c.bytes() == 0);
+    }
+
+    #[test]
+    fn dropping_renditions_keeps_the_failures() {
+        let mut c = RenditionCache::new(100);
+        let k = |i| (BlobId::new(i), Rendition::Thumb);
+        c.insert(k(1), img(40));
+        c.fail(k(2));
+        c.drop_renditions();
+        assert!(c.is_empty() && c.bytes() == 0 && c.get(k(1)).is_none());
+        assert!(c.failed(k(2)), "a refused image stays refused");
+        c.insert(k(1), img(40));
+        assert_eq!(c.bytes(), 40, "the byte count starts again from zero");
     }
 }

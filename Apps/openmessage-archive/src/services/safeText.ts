@@ -9,7 +9,7 @@
 /** One run of a rendered value: text, or a visible token for one character. */
 export type SafeRun = { kind: 'text'; text: string } | { kind: 'token'; label: string };
 
-function isBidiControl(cp: number): boolean {
+export function isBidiControl(cp: number): boolean {
   return (
     cp === 0x061c ||
     cp === 0x200e ||
@@ -19,7 +19,7 @@ function isBidiControl(cp: number): boolean {
   );
 }
 
-function isInvisible(cp: number): boolean {
+export function isInvisible(cp: number): boolean {
   return (
     (cp >= 0x200b && cp <= 0x200d) ||
     cp === 0x2060 ||
@@ -29,12 +29,12 @@ function isInvisible(cp: number): boolean {
   );
 }
 
-function isVariationSelector(cp: number): boolean {
+export function isVariationSelector(cp: number): boolean {
   return (cp >= 0xfe00 && cp <= 0xfe0f) || (cp >= 0xe0100 && cp <= 0xe01ef);
 }
 
 /** C0 and C1 controls; tab and line breaks are kept in bodies. */
-function isControl(cp: number, keepLayout: boolean): boolean {
+export function isControl(cp: number, keepLayout: boolean): boolean {
   if (keepLayout && (cp === 0x09 || cp === 0x0a || cp === 0x0d)) return false;
   return cp < 0x20 || (cp >= 0x7f && cp <= 0x9f);
 }
@@ -48,7 +48,7 @@ export function tokenLabel(cp: number): string {
  * Whether a run of variation selectors is long enough to be suspicious
  * (more than 4), as in the Rust classifier.
  */
-const VS_RUN_LIMIT = 4;
+export const VS_RUN_LIMIT = 4;
 
 /**
  * Split `text` into runs, turning every bidi control, invisible character,

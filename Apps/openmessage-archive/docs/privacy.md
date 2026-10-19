@@ -381,7 +381,7 @@ commands, the media protocol, the decode helper and the window's settings
 exist from M5 PR A (slices 5a–5f); PR B adds the screens (the threads,
 attachments, the media viewer, the play confirmation and the details panel
 since slice 5h3; search and the date dialog since slice 5i; the privacy
-screen is still to come). The
+screen, the copy actions and the page guards since slice 5j). The
 screens have been tested in jsdom only. Nothing here has been run in a
 window or on Windows yet; items marked
 **UNVERIFIED** depend on the web engine and are not yet tested: they are
@@ -470,8 +470,64 @@ attachment is M6.
   (`spellcheck="false"`, `autocomplete="off"`, `autocapitalize="off"`);
   whether each engine and the system's input methods honour that is
   **UNVERIFIED** (slice 5k's checklist).
-- The window title is always "OpenMessage Archive", never a conversation
-  name.
+- The window title is "Viewer — OpenMessage Archive" in the viewer, never
+  a conversation name.
+- Hiding the screen drops the image previews kept in memory as well; idle
+  hide closes the viewer, which drops everything it held.
+
+### The privacy screen
+
+"Hide screen" in the viewer, or Ctrl+Shift+H, hides the conversations:
+media stops and loses its source, fullscreen ends, the viewer's dialogs
+close, everything the viewer showed is removed from the window, the image
+previews kept in memory are dropped, and an opaque screen covers the
+window until you press "Show". **It hides the screen; it is not a lock.
+Anyone at this computer can show it again.** Archive passwords come with
+encryption in M8.
+
+- **Hide when the window loses focus** (off by default) hides it when you
+  switch away. Window previews (Alt-Tab, taskbar thumbnails) may capture a
+  frame before the screen is hidden.
+- **Close the viewer when idle** (off by default; 1, 5, 15 or 30 minutes
+  without a key press, click, pointer movement or scroll) hides the screen
+  and closes the viewer, so nothing it showed stays in the window's
+  memory. "Show" opens it again at the same conversation; nothing is lost.
+- **Hide this window from screen capture** (Windows only, off by default)
+  asks Windows to leave the window out of screenshots and screen capture.
+  Microsoft says this is not a security feature; it also blanks the window
+  in screen sharing and remote help, and its effect on Windows Recall is
+  **UNVERIFIED**. Linux has no such setting.
+
+### Copying text
+
+Text is copied only when you choose a copy action in a message's menu
+(right click, the context-menu key or Shift+F10): "Copy text", "Copy text
+without invisible characters", "Copy with sender and time", or "Copy link"
+for a link in the text. Nothing is copied automatically, and the app sets
+no timer to clear the clipboard (it would not reach clipboard managers
+anyway).
+
+- A hidden one-time code is copied as "[one-time code hidden]", and text
+  the sender withdrew is never copied unless you showed it.
+- "Copy link" first shows the exact link, with hidden characters made
+  visible, and refuses a link that contains hidden characters.
+- Attachments and images are never copied.
+- **Copied text leaves the app's control.** On Windows it can enter the
+  clipboard history (Win+V) and, if you turned it on, cloud clipboard
+  sync to your other devices. Windows offers clipboard formats that keep
+  an entry out of both, but a web page cannot set them, and the
+  Rust library that could (`arboard`) brings in a licence this project
+  does not allow, so M5 does not use it (D107). Clipboard managers on
+  Linux may keep a history too.
+
+### Printing, saving and dragging out
+
+The viewer stops Ctrl+P (print, which can save a PDF), Ctrl+S, F5 and
+Ctrl+R, the engine's own context menu ("Save image as") and dragging
+messages or images out of the window. This works only if the engine lets
+the app see the key or the action first, which is **UNVERIFIED** on both
+engines. If an engine prints anyway, the printout shows only "Printing is
+not available in the conversation viewer."
 
 ### Not prevented by the app
 
@@ -483,8 +539,10 @@ prevent them:
   the backup's keys;
 - swap and hibernation files;
 - print-to-PDF, if an engine handles Ctrl+P before the app can intercept
-  it (**UNVERIFIED** per engine);
+  it and ignores the app's print style sheet (**UNVERIFIED** per engine);
 - clipboard history and cloud clipboard, once you copy text;
+- a frame captured by window previews before "Hide when the window loses
+  focus" has covered the screen;
 - window previews (Alt-Tab, taskbar thumbnails) and screen capture,
   including Windows Recall (capture protection is an opt-in setting on
   Windows only; its effect on Recall is **UNVERIFIED**);

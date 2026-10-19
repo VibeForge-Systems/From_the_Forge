@@ -345,7 +345,7 @@ describe('ThreadView', () => {
     const button = w.get('#oma-m-200').findAll('button').find((b) => b.text() === 'Open that conversation at the message')!;
     await button.trigger('click');
     expect(w.emitted('openChat')).toEqual([[9]]);
-    expect(useViewer().pendingFocus).toEqual({ chatId: 9, message: 8 });
+    expect(useViewer().pendingFocus).toEqual({ chatId: 9, message: 8, focus: true });
     fake.calls.length = 0;
     const other = mount(ThreadView, { attachTo: document.body, props: { chatId: sid(9) } });
     await flushPromises();

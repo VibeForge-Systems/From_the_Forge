@@ -26,6 +26,7 @@
     "allow-verify-archive",
     "allow-open-viewer",
     "allow-close-viewer",
+    "allow-hide-viewer",
     "allow-list-conversations",
     "allow-get-conversations",
     "allow-get-thread-page",

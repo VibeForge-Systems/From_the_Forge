@@ -28,7 +28,12 @@
 //   or newest page and focus its end. On a focused article, Enter shows
 //   its details and R its reply thread (`scope: 'message'` shortcuts,
 //   matched here only).
-import { computed, nextTick, ref, watch } from 'vue';
+// - Privacy (5j): Shift+F10 on a focused article opens its message menu
+//   (as the context menu does). While mounted, the thread tells the privacy
+//   screen where it is (the focused message, or the first in view), so
+//   "Show" returns there; an open asked with `focus: false` shows the
+//   message without moving keyboard focus.
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { AnchorInput, MessageDto, SafeId } from '@/types';
 import type { FeedHandle } from '@/services/feedModel';
 import VirtualFeed from './VirtualFeed.vue';
@@ -48,6 +53,7 @@ import {
   VIEWER_STATE_TEXT,
   fill,
 } from '@/services/viewerText';
+import { usePrivacy, type ThreadPlace } from '@/stores/privacy';
 import { useSettings } from '@/stores/settings';
 import { useViewer } from '@/stores/viewer';
 
@@ -55,6 +61,7 @@ const props = defineProps<{ chatId: SafeId }>();
 const emit = defineEmits<{ openChat: [chatId: SafeId] }>();
 const viewer = useViewer();
 const settings = useSettings();
+const privacy = usePrivacy();
 
 const ITEM_ESTIMATE = 72;
 const ARTICLE_ID_PREFIX = 'oma-m-';
@@ -175,8 +182,8 @@ watch(
   (id) => {
     focusedId.value = null;
     if (!viewer.rows.has(id)) void viewer.loadRows([id]);
-    const target = viewer.takePendingFocus(id);
-    if (target !== null) open({ kind: 'message', message: target, include: true }, 'end', true);
+    const target = viewer.takePending(id);
+    if (target !== null) open({ kind: 'message', message: target.message, include: true }, 'end', target.focus);
     else open({ kind: 'newest' }, 'end');
   },
   { immediate: true },
@@ -265,10 +272,21 @@ watch(
   () => viewer.pendingFocus,
   (p) => {
     if (!p || p.chatId !== props.chatId) return;
-    const target = viewer.takePendingFocus(props.chatId);
-    if (target !== null) open({ kind: 'message', message: target, include: true }, 'end', true);
+    const target = viewer.takePending(props.chatId);
+    if (target !== null) open({ kind: 'message', message: target.message, include: true }, 'end', target.focus);
   },
 );
+
+/** Where the privacy screen returns to: the focused article, or the first in view. */
+function place(): ThreadPlace | null {
+  const active = document.activeElement;
+  const inFeed = active instanceof Element && active.closest('.oma-thread-feed') !== null;
+  const focused = inFeed ? articleId(active) : null;
+  if (focused !== null) return { chatId: props.chatId, message: focused, focus: true };
+  return { chatId: props.chatId, message: feed.value?.firstVisibleKey() ?? focusedId.value, focus: false };
+}
+onMounted(() => privacy.setPlaceProvider(place));
+onBeforeUnmount(() => privacy.setPlaceProvider(null, place));
 
 // Ctrl+Home and Ctrl+End, asked through the store by the global handler.
 watch(
@@ -305,6 +323,8 @@ function onFeedKeydown(event: KeyboardEvent): void {
       event.preventDefault();
       if (shortcut.id === 'viewer-details') viewer.openDetails(id);
       else if (shortcut.id === 'viewer-reply-thread') viewer.openReplies(id);
+      // The same path as the context menu: the article opens its menu.
+      else event.target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       return;
     }
   }

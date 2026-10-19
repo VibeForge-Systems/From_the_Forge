@@ -52,34 +52,42 @@ describe('viewer settings', () => {
     expect(fake.updates).toEqual([{ viewer: { ...snapshot().settings.viewer, showSeconds: true, uiZoom: 250 } }]);
   });
 
-  it('enable the viewer preferences now that the viewer ships, and keep the privacy-screen ones disabled (5j)', async () => {
+  it('enable the viewer and privacy-screen preferences now that both ship (5h3, 5j)', async () => {
     const w = mountWith();
     await flushPromises();
-    for (const id of ['viewer-time-format', 'viewer-seconds', 'viewer-reveal-earlier', 'viewer-playback-confirm']) {
+    for (const id of [
+      'viewer-time-format',
+      'viewer-seconds',
+      'viewer-reveal-earlier',
+      'viewer-playback-confirm',
+      'viewer-blur',
+      'viewer-idle',
+    ]) {
       const el = w.find(`#${id}`).element as HTMLInputElement;
       expect(el.matches(':disabled'), id).toBe(false);
     }
-    for (const id of ['viewer-blur', 'viewer-idle']) {
-      const el = w.find(`#${id}`).element as HTMLInputElement;
-      expect(el.matches(':disabled'), id).toBe(true);
-    }
     expect(w.text()).toContain('Always play without asking');
-    expect(w.findAll('.oma-planned').map((b) => b.attributes('title'))).toEqual([
-      expect.stringContaining('Privacy screen is planned for milestone 5'),
-    ]);
+    expect(w.findAll('.oma-planned')).toHaveLength(0);
+    await w.find('#viewer-blur').setValue(true);
+    expect(fake.updates.at(-1)).toMatchObject({ viewer: { blurOnFocusLoss: true } });
+    await w.find('#viewer-idle').setValue('5');
+    expect(fake.updates.at(-1)).toMatchObject({ viewer: { idleHideMinutes: 5 } });
     expect(w.find('#viewer-zoom').element.matches(':disabled')).toBe(false);
     await w.find('#viewer-playback-off').setValue(true);
     expect(fake.updates.at(-1)).toMatchObject({ viewer: { mediaPlayback: 'off' } });
   });
 
-  it('offer capture protection only on Windows', async () => {
+  it('show capture protection only on Windows, and say it is not a security feature', async () => {
     const linux = mountWith();
     await flushPromises();
-    expect(linux.find('#viewer-capture').attributes('disabled')).toBeDefined();
+    expect(linux.find('#viewer-capture').exists()).toBe(false);
     fake.os = 'windows';
     const windows = mountWith();
     await flushPromises();
     expect(windows.find('#viewer-capture').attributes('disabled')).toBeUndefined();
+    expect(windows.text()).toContain('not a security feature');
+    expect(windows.text()).toContain('screen sharing');
+    expect(windows.text()).toContain('has not been tested');
     await windows.find('#viewer-capture').setValue(true);
     expect(fake.updates.at(-1)).toMatchObject({ viewer: { captureProtection: true } });
   });
