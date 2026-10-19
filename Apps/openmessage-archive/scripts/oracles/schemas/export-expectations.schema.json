@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openmessage-archive:oracle:export-expectations:1",
+  "title": "Export catalogue expectations (tests/fixtures/export/*/export.json)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "formatVersion", "sentinels", "visible", "unsentAttachments", "hostile",
+               "formulaCases", "fileCases", "membership", "patches", "corruptStoreFiles"],
+  "properties": {
+    "format": {"const": "oma-export-expectations"},
+    "formatVersion": {"const": 1},
+    "sentinels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["oneTimeCodes", "earlierText", "editText", "alternativeText", "subjectHistory",
+                   "unsentAttachmentFiles"],
+      "patternProperties": {
+        "^[A-Za-z]+$": {"type": "array", "uniqueItems": true,
+                        "items": {"type": "string", "pattern": "^SYNTH", "minLength": 12}}
+      }
+    },
+    "visible": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^SYNTH"}},
+    "unsentAttachments": {
+      "type": "array",
+      "items": {"type": "object", "additionalProperties": false, "required": ["attachment", "sha256"],
+                "properties": {"attachment": {"type": "string"}, "sha256": {"$ref": "#/$defs/sha256"}}}
+    },
+    "hostile": {"type": "array", "items": {"$ref": "#/$defs/case"}},
+    "formulaCases": {"type": "array", "items": {"$ref": "#/$defs/case"}},
+    "fileCases": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "attachment", "note", "transferName", "sha256", "bytes"],
+        "properties": {
+          "id": {"type": "string"}, "attachment": {"type": "string"}, "note": {"type": "string"},
+          "transferName": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/text"}]},
+          "sha256": {"$ref": "#/$defs/sha256"}, "bytes": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "membership": {
+      "type": "object", "additionalProperties": false, "required": ["chats", "noConversation"],
+      "properties": {
+        "chats": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object", "additionalProperties": false, "required": ["items", "messages"],
+            "properties": {"items": {"type": "integer", "minimum": 0},
+                           "messages": {"type": "array", "items": {"type": "string"}}}
+          }
+        },
+        "noConversation": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "patches": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["table", "guid", "set", "why"],
+        "properties": {
+          "table": {"const": "message"}, "guid": {"type": "string"}, "why": {"type": "string"},
+          "set": {"type": "object", "minProperties": 1,
+                  "additionalProperties": {"type": ["integer", "null"]}}
+        }
+      }
+    },
+    "corruptStoreFiles": {
+      "type": "array",
+      "items": {"type": "object", "additionalProperties": false, "required": ["attachment", "sha256", "why"],
+                "properties": {"attachment": {"type": "string"}, "sha256": {"$ref": "#/$defs/sha256"},
+                               "why": {"type": "string"}}}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "text": {
+      "type": "object", "required": ["utf16Units", "utf8Bytes"],
+      "properties": {
+        "utf16Units": {"type": "integer", "minimum": 0}, "utf8Bytes": {"type": "integer", "minimum": 0},
+        "text": {"type": "string"}, "sha256": {"$ref": "#/$defs/sha256"}, "prefix": {"type": "string"}
+      },
+      "oneOf": [{"required": ["text"]}, {"required": ["sha256", "prefix"]}]
+    },
+    "case": {
+      "allOf": [{"$ref": "#/$defs/text"}],
+      "required": ["id", "where"],
+      "properties": {
+        "id": {"type": "string"},
+        "where": {"enum": ["body", "address", "chatName", "fileName", "associationEmoji"]},
+        "leading": {"type": "string", "minLength": 1, "maxLength": 1},
+        "after": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

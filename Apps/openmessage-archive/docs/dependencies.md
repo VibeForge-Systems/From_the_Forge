@@ -133,11 +133,14 @@ correct because Bootstrap's JavaScript is not used.
 ### Dev-only Python tooling
 
 Used only to generate and check the synthetic test fixtures in
-`tests/fixtures/backups/`, `tests/fixtures/messages/` and
-`tests/fixtures/typedstream/`. Nothing here is shipped, and CI runs no
-Python: the generated files are committed and checked by `SHA256SUMS`.
-`make_synthetic_messages.py` needs only `requirements.txt`, and
-`make_synthetic_typedstream.py` only the standard library.
+`tests/fixtures/` and, from M6, the exports. Nothing here is shipped. The
+generated files are committed and checked by `SHA256SUMS`.
+`make_synthetic_messages.py`, `make_synthetic_imports.py`,
+`make_synthetic_viewer.py` and `make_synthetic_exports.py` need only
+`requirements.txt`, and `make_synthetic_typedstream.py` only the standard
+library. Until M6 CI ran no Python; from slice 6c the Linux `checks` job
+runs the export oracles (below), in a virtual environment, with
+`python3 -I`.
 
 | Package | Version | License | Use |
 |---|---|---|---|
@@ -149,6 +152,30 @@ Python: the generated files are committed and checked by `SHA256SUMS`.
 Oracle runs 3 and 4 (M3) also use the imessage-exporter 4.3.0 release
 binary (GPL-3.0) as a black box from a scratch directory. It is not a
 dependency of anything here, and no wrapper for it is committed.
+
+**Export oracles (M6 spec §14.4)**, pinned with their wheel hashes in
+`scripts/oracles/requirements.txt` and installed only with
+`pip install --require-hashes --only-binary :all: --no-deps` into a
+virtual environment (CI: `$RUNNER_TEMP/venv-oracles`; never system-wide).
+Every one is a pure-Python wheel except `rpds-py`, which is pinned by two
+hashes: its CPython 3.10 manylinux wheel (the `ubuntu-22.04` runner's
+Python) and its CPython 3.13 wheel (the reference fixture environment).
+Versions were chosen on 2026-10-19 as the newest releases at least 14 days
+old that still support Python 3.10. They are used as black boxes by
+`scripts/oracles/run_oracles.py`; no code from them is copied, and none is
+shipped. `openpyxl` and `pypdf` arrive with the XLSX and PDF slices (PR B).
+
+| Package | Version | License | Use |
+|---|---|---|---|
+| jsonschema | 4.26.0 | MIT | Validates projections, `export.json` and `hidden-vectors.json` against `scripts/oracles/schemas/` (from slice 6f also every JSON export, strict and open schemas) |
+| jsonschema-specifications | 2025.9.1 | MIT | jsonschema's bundled meta-schemas |
+| referencing | 0.37.0 | MIT | jsonschema's `$ref` resolution |
+| rpds-py | 0.30.0 | MIT | referencing's persistent maps (compiled; the last release with CPython 3.10 wheels, as 2026 releases need 3.11) |
+| attrs | 26.1.0 | MIT | jsonschema and referencing |
+| typing-extensions | 4.16.0 | PSF-2.0 | referencing on Python below 3.13 |
+| html5lib | 1.1 | MIT | The HTML5 tree oracle of slice 6g; installed (and its version printed) from 6c |
+| six | 1.17.0 | MIT | html5lib |
+| webencodings | 0.5.1 | BSD-3-Clause | html5lib |
 
 ## System and platform components
 
@@ -235,3 +262,4 @@ changed no dependency.
 | on merge (M5, slice 5g) | Added the npm package virtua 0.53.1 (exact pin, a runtime dependency) | Spike 5s(1): virtualised lists with prepend support (`shift`) for the thread feed (spec §8.4, §15, D109). MIT, no dependencies; Vue (≥ 3.2) and the other frameworks are optional peers, and only `virtua/vue` would be imported. Chosen by the spec's rule, the newest release at least 14 days old when the spike ran on 2026-10-19: 0.53.1 (2026-10-05; 0.53.2 to 0.53.5 were younger). Pre-1.0 with frequent releases, so the `VirtualFeed` wrapper keeps it swappable. **Nothing under `src/` imports it yet**, so it is not in the bundle. The spike on WebKitGTK 2.52.6 (`compatibility.md`) passed except for prepends at scrollTop 0; slice 5h1 decides between a mitigation and the in-house feed (5h0), and removes this package if 5h0 replaces it. `npm run licenses` passes (42 runtime packages) |
 | on merge (M5, slice 5h1) | Removed the npm package virtua 0.53.1 | It failed spike 5s(1) on WebKitGTK 2.52.6 (prepends at scrollTop 0), so slice 5h0 replaced it with the in-house `VirtualFeed` (`src/components/viewer/VirtualFeed.vue` over `src/services/feedModel.ts`, written without reference to any library's code). It was never imported, so the bundle is unchanged by the removal. `package.json` and `package-lock.json` lose its entry and nothing else. `npm run licenses` passes (41 runtime packages) |
 | on merge (M5, slice 5k) | No dependency change. Two ignored test files in `oma-archive` (`perf_viewer.rs`, `smoke_library.rs`) use only its existing dev-dependencies | The viewer's performance numbers and the smoke-test library. `Cargo.lock`, `package.json` and `package-lock.json` are unchanged; `cargo deny check` and `npm run licenses` (41 runtime packages) pass |
+| on merge (M6, slice 6c) | Dev-only Python tooling: the export oracles' packages above, pinned with hashes in the new `scripts/oracles/requirements.txt` (jsonschema 4.26.0, jsonschema-specifications 2025.9.1, referencing 0.37.0, rpds-py 0.30.0, attrs 26.1.0, typing-extensions 4.16.0, html5lib 1.1, six 1.17.0, webencodings 0.5.1); `make_synthetic_exports.py` needs only the existing `requirements.txt` (`cryptography`) | The independent oracles of M6 spec §14.4, run in CI's Linux `checks` job (a new step) and by hand. All are permissive (MIT, PSF-2.0, BSD-3-Clause). Installing the file into a fresh Python 3.13 virtual environment and resolving it for CPython 3.10 on `manylinux_2_17_x86_64` with `pip download` both succeeded with hashes enforced; the CI run itself is **UNVERIFIED** until the PR's CI runs. No Rust crate and no npm package changed: `Cargo.lock`, `package.json` and `package-lock.json` are unchanged, and `deny.toml` is unchanged |

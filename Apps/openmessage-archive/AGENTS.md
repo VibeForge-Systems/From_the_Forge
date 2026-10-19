@@ -571,6 +571,20 @@ Never hand-edit generated files.
   `ExportMessage`; do not add a path that hands a writer a blob id
   without its access. `tests/export_memory.rs` measures the child's
   `VmHWM` (Linux only); keep its versions above the bound's size.
+- **Export fixtures and oracles (M6 slice 6c).** `tests/fixtures/export/`
+  is written only by `scripts/fixtures/make_synthetic_exports.py` (SQLite
+  3.45.1 only) and has two pins in `tests/export_fixtures.rs`: the inputs
+  (backups and `hidden-vectors.json`) are frozen; `*.expected/` and
+  `scenarios/` (`content.json`, `export.json`) may be re-pinned when a
+  slice settles a rule. A new export case goes into the generator with an
+  `export.json` statement of where it was planted, never into a hand-built
+  archive alone; codes an import cannot write are `patches`. The Python
+  oracles (`scripts/oracles/`) use the standard library plus the
+  hash-pinned `requirements.txt`, always in a virtual environment and with
+  `python3 -I`; `project_archive.py` must stay independent of the Rust
+  export code (written from `v1.sql` and the spec). A writer slice adds its
+  oracle to `run_oracles.py`, which CI runs on Linux only. The bulk
+  generator's `BulkSpec::blobs` gives attachments real store files.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush

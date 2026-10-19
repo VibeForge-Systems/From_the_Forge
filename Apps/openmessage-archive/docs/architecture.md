@@ -3266,6 +3266,51 @@ slice 6h.
   each is a primary-key or index seek and none sorts in a temporary
   B-tree.
 
+### Export fixtures and the oracle scaffold (M6 slice 6c)
+
+Slice 6c adds test inputs and independent checks; no shipped code changes.
+
+- **The export catalogue** (`tests/fixtures/export/`, spec §15), written
+  only by `scripts/fixtures/make_synthetic_exports.py`: six plain backups
+  and one two-backup scenario (`history`), with the viewer catalogue's
+  `content.json` (the M4 import model and the M5 viewer model) and the
+  generator's own `export.json`. Two pins, as for the viewer catalogue:
+  the inputs (backups and `hidden-vectors.json`) are frozen; the
+  expectations may be regenerated when a slice settles a rule. The cases
+  are those §15 lists, except that volume is generated at test time and the
+  1 MiB body stays in the viewer catalogue. Codes an import cannot write
+  (an unknown `_st`, unit or item kind) are `patches` applied by tests to
+  a copy of the imported archive; the corrupted store file is likewise
+  made by the test.
+- **The archive-side masking oracle** now also covers this catalogue, by
+  sentinel kind: one-time codes, earlier text, decoded edit text beside an
+  unsent part, the subject history of an unsent message, the alternative
+  text (with a code, with an unsent part) and the file of an unsent part,
+  in a single import and across two imports. The strings `export.json`
+  marks `visible` must be read with no reveal.
+- **The hidden-character vectors** (`hidden-vectors.json`, spec §4.7):
+  strings split into classed pieces (`keep`, `bidi`, `invisible`,
+  `joiner`, `tag`, `vsRun`, `control`, `cr`). "Copy text without invisible
+  characters" keeps exactly the `keep` and `cr` pieces of all 31 vectors
+  (`tests/frontend/hidden-vectors.spec.ts`); the export's classifier
+  (`hidden.rs`, slice 6d) is to be checked against the same file. `cr` is
+  the one class the two treat differently: the copy keeps a carriage
+  return as layout, the export's text formats mark it as a control.
+- **The independent projection** (`scripts/oracles/project_archive.py`,
+  spec §14.4) reads a read-only copy of an archive with the standard
+  library's `sqlite3`, written from `v1.sql` and the spec rather than from
+  the Rust export code, and `run_oracles.py` compares it with the
+  generators' models for every archive of both catalogues, and with
+  `golden-v1`'s logical snapshot. CI's Linux `checks` job runs it in a
+  virtual environment with hashes enforced. Agreement with the models
+  shows that the import and the models agree as seen through an
+  independent reader; it is not a check of any export format yet.
+- **The bulk generator's blob option** (`BulkSpec::blobs`): each attachment
+  gets its own store file, placed by the test-only
+  `BulkWriter::put_blob` through the import's own partial-and-placer path,
+  so the attachment copy and its performance can be tested at scale (slice
+  6e).
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`

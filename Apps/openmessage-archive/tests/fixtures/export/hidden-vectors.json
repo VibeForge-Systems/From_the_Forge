@@ -1,0 +1,658 @@
+{
+ "format": "oma-hidden-vectors",
+ "formatVersion": 1,
+ "rule": "Classes: keep (not marked, kept by the copy), bidi, invisible, joiner, tag and vsRun (hidden characters: marked by the export, dropped by \"Copy text without invisible characters\"), control (C0 and C1 other than TAB, LF and CR, and DEL: marked as a control, dropped by the copy) and cr (kept by the copy, marked as a control by the export's text formats). A ZWJ or ZWNJ is kept only between two non-ASCII letters, marks or emoji; tag characters only inside a flag's tag sequence; variation-selector runs of up to 4. U+FFFC is marked here because no segment resolved it.",
+ "vectors": [
+  {
+   "markedCodePoints": [],
+   "name": "plain",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "SYNTH plain text"
+    }
+   ],
+   "text": "SYNTH plain text",
+   "withoutHiddenCharacters": "SYNTH plain text"
+  },
+  {
+   "markedCodePoints": [
+    "U+202C",
+    "U+202E"
+   ],
+   "name": "rlo",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "pay"
+    },
+    {
+     "class": "bidi",
+     "text": "\u202e"
+    },
+    {
+     "class": "keep",
+     "text": "gnp.exe"
+    },
+    {
+     "class": "bidi",
+     "text": "\u202c"
+    }
+   ],
+   "text": "pay\u202egnp.exe\u202c",
+   "withoutHiddenCharacters": "paygnp.exe"
+  },
+  {
+   "markedCodePoints": [
+    "U+2066",
+    "U+2067",
+    "U+2068",
+    "U+2069"
+   ],
+   "name": "isolates",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "a"
+    },
+    {
+     "class": "bidi",
+     "text": "\u2066"
+    },
+    {
+     "class": "keep",
+     "text": "b"
+    },
+    {
+     "class": "bidi",
+     "text": "\u2069"
+    },
+    {
+     "class": "keep",
+     "text": "c"
+    },
+    {
+     "class": "bidi",
+     "text": "\u2067"
+    },
+    {
+     "class": "keep",
+     "text": "d"
+    },
+    {
+     "class": "bidi",
+     "text": "\u2068"
+    },
+    {
+     "class": "keep",
+     "text": "e"
+    }
+   ],
+   "text": "a\u2066b\u2069c\u2067d\u2068e",
+   "withoutHiddenCharacters": "abcde"
+  },
+  {
+   "markedCodePoints": [
+    "U+061C",
+    "U+200E",
+    "U+200F"
+   ],
+   "name": "marks",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "x"
+    },
+    {
+     "class": "bidi",
+     "text": "\u200e"
+    },
+    {
+     "class": "keep",
+     "text": "y"
+    },
+    {
+     "class": "bidi",
+     "text": "\u200f"
+    },
+    {
+     "class": "keep",
+     "text": "z"
+    },
+    {
+     "class": "bidi",
+     "text": "\u061c"
+    }
+   ],
+   "text": "x\u200ey\u200fz\u061c",
+   "withoutHiddenCharacters": "xyz"
+  },
+  {
+   "markedCodePoints": [
+    "U+202A",
+    "U+202B",
+    "U+202D"
+   ],
+   "name": "embeddings",
+   "pieces": [
+    {
+     "class": "bidi",
+     "text": "\u202a"
+    },
+    {
+     "class": "bidi",
+     "text": "\u202b"
+    },
+    {
+     "class": "bidi",
+     "text": "\u202d"
+    },
+    {
+     "class": "keep",
+     "text": "q"
+    }
+   ],
+   "text": "\u202a\u202b\u202dq",
+   "withoutHiddenCharacters": "q"
+  },
+  {
+   "markedCodePoints": [
+    "U+200B",
+    "U+2060",
+    "U+FEFF"
+   ],
+   "name": "zwsp-wj-bom",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "pay"
+    },
+    {
+     "class": "invisible",
+     "text": "\u200b"
+    },
+    {
+     "class": "keep",
+     "text": "pal"
+    },
+    {
+     "class": "invisible",
+     "text": "\u2060"
+    },
+    {
+     "class": "keep",
+     "text": "!"
+    },
+    {
+     "class": "invisible",
+     "text": "\ufeff"
+    }
+   ],
+   "text": "pay\u200bpal\u2060!\ufeff",
+   "withoutHiddenCharacters": "paypal!"
+  },
+  {
+   "markedCodePoints": [
+    "U+FFFC"
+   ],
+   "name": "object-replacement-unresolved",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "see "
+    },
+    {
+     "class": "invisible",
+     "text": "\ufffc"
+    },
+    {
+     "class": "keep",
+     "text": " here"
+    }
+   ],
+   "text": "see \ufffc here",
+   "withoutHiddenCharacters": "see  here"
+  },
+  {
+   "markedCodePoints": [],
+   "name": "zwj-in-emoji",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "\ud83d\udc69\u200d\ud83d\udc69\u200d\ud83d\udc67"
+    }
+   ],
+   "text": "\ud83d\udc69\u200d\ud83d\udc69\u200d\ud83d\udc67",
+   "withoutHiddenCharacters": "\ud83d\udc69\u200d\ud83d\udc69\u200d\ud83d\udc67"
+  },
+  {
+   "markedCodePoints": [],
+   "name": "zwj-in-script",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "\u0915\u094d\u200d\u0937"
+    }
+   ],
+   "text": "\u0915\u094d\u200d\u0937",
+   "withoutHiddenCharacters": "\u0915\u094d\u200d\u0937"
+  },
+  {
+   "markedCodePoints": [],
+   "name": "zwnj-in-script",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645"
+    }
+   ],
+   "text": "\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645",
+   "withoutHiddenCharacters": "\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645"
+  },
+  {
+   "markedCodePoints": [
+    "U+200D"
+   ],
+   "name": "zwj-between-ascii",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "ab"
+    },
+    {
+     "class": "joiner",
+     "text": "\u200d"
+    },
+    {
+     "class": "keep",
+     "text": "cd"
+    }
+   ],
+   "text": "ab\u200dcd",
+   "withoutHiddenCharacters": "abcd"
+  },
+  {
+   "markedCodePoints": [
+    "U+200C"
+   ],
+   "name": "zwnj-at-start",
+   "pieces": [
+    {
+     "class": "joiner",
+     "text": "\u200c"
+    },
+    {
+     "class": "keep",
+     "text": "\u0645\u0646"
+    }
+   ],
+   "text": "\u200c\u0645\u0646",
+   "withoutHiddenCharacters": "\u0645\u0646"
+  },
+  {
+   "markedCodePoints": [
+    "U+200D"
+   ],
+   "name": "zwj-at-end",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "\u0645\u0646"
+    },
+    {
+     "class": "joiner",
+     "text": "\u200d"
+    }
+   ],
+   "text": "\u0645\u0646\u200d",
+   "withoutHiddenCharacters": "\u0645\u0646"
+  },
+  {
+   "markedCodePoints": [
+    "U+200D"
+   ],
+   "name": "zwj-before-ascii",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "\u00e9"
+    },
+    {
+     "class": "joiner",
+     "text": "\u200d"
+    },
+    {
+     "class": "keep",
+     "text": "x"
+    }
+   ],
+   "text": "\u00e9\u200dx",
+   "withoutHiddenCharacters": "\u00e9x"
+  },
+  {
+   "markedCodePoints": [],
+   "name": "flag-tags",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "\ud83c\udff4\udb40\udc67\udb40\udc62\udb40\udc73\udb40\udc63\udb40\udc74\udb40\udc7f"
+    }
+   ],
+   "text": "\ud83c\udff4\udb40\udc67\udb40\udc62\udb40\udc73\udb40\udc63\udb40\udc74\udb40\udc7f",
+   "withoutHiddenCharacters": "\ud83c\udff4\udb40\udc67\udb40\udc62\udb40\udc73\udb40\udc63\udb40\udc74\udb40\udc7f"
+  },
+  {
+   "markedCodePoints": [
+    "U+E0041",
+    "U+E0042",
+    "U+E007F"
+   ],
+   "name": "tags-alone",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "SYNTH"
+    },
+    {
+     "class": "tag",
+     "text": "\udb40\udc41"
+    },
+    {
+     "class": "tag",
+     "text": "\udb40\udc42"
+    },
+    {
+     "class": "tag",
+     "text": "\udb40\udc7f"
+    }
+   ],
+   "text": "SYNTH\udb40\udc41\udb40\udc42\udb40\udc7f",
+   "withoutHiddenCharacters": "SYNTH"
+  },
+  {
+   "markedCodePoints": [
+    "U+E0067"
+   ],
+   "name": "tags-after-letter",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "a"
+    },
+    {
+     "class": "tag",
+     "text": "\udb40\udc67"
+    },
+    {
+     "class": "keep",
+     "text": "b"
+    }
+   ],
+   "text": "a\udb40\udc67b",
+   "withoutHiddenCharacters": "ab"
+  },
+  {
+   "markedCodePoints": [],
+   "name": "vs16-single",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "\u263a\ufe0f"
+    }
+   ],
+   "text": "\u263a\ufe0f",
+   "withoutHiddenCharacters": "\u263a\ufe0f"
+  },
+  {
+   "markedCodePoints": [],
+   "name": "vs15-single",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "\u263a\ufe0e"
+    }
+   ],
+   "text": "\u263a\ufe0e",
+   "withoutHiddenCharacters": "\u263a\ufe0e"
+  },
+  {
+   "markedCodePoints": [],
+   "name": "vs-run-4",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "a\ufe0f\ufe0f\ufe0f\ufe0f"
+    }
+   ],
+   "text": "a\ufe0f\ufe0f\ufe0f\ufe0f",
+   "withoutHiddenCharacters": "a\ufe0f\ufe0f\ufe0f\ufe0f"
+  },
+  {
+   "markedCodePoints": [
+    "U+FE0F"
+   ],
+   "name": "vs-run-5",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "a"
+    },
+    {
+     "class": "vsRun",
+     "text": "\ufe0f\ufe0f\ufe0f\ufe0f\ufe0f"
+    },
+    {
+     "class": "keep",
+     "text": "b"
+    }
+   ],
+   "text": "a\ufe0f\ufe0f\ufe0f\ufe0f\ufe0fb",
+   "withoutHiddenCharacters": "ab"
+  },
+  {
+   "markedCodePoints": [
+    "U+E0100"
+   ],
+   "name": "vs-supplement-run",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "c"
+    },
+    {
+     "class": "vsRun",
+     "text": "\udb40\udd00\udb40\udd00\udb40\udd00\udb40\udd00\udb40\udd00\udb40\udd00"
+    }
+   ],
+   "text": "c\udb40\udd00\udb40\udd00\udb40\udd00\udb40\udd00\udb40\udd00\udb40\udd00",
+   "withoutHiddenCharacters": "c"
+  },
+  {
+   "markedCodePoints": [],
+   "name": "tab-lf-kept",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "a\tb\nc"
+    }
+   ],
+   "text": "a\tb\nc",
+   "withoutHiddenCharacters": "a\tb\nc"
+  },
+  {
+   "markedCodePoints": [
+    "U+000D"
+   ],
+   "name": "cr",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "a"
+    },
+    {
+     "class": "cr",
+     "text": "\r"
+    },
+    {
+     "class": "keep",
+     "text": "b"
+    }
+   ],
+   "text": "a\rb",
+   "withoutHiddenCharacters": "a\rb"
+  },
+  {
+   "markedCodePoints": [
+    "U+0000",
+    "U+0007",
+    "U+001B"
+   ],
+   "name": "c0",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "a"
+    },
+    {
+     "class": "control",
+     "text": "\u0000"
+    },
+    {
+     "class": "keep",
+     "text": "b"
+    },
+    {
+     "class": "control",
+     "text": "\u0007"
+    },
+    {
+     "class": "control",
+     "text": "\u001b"
+    },
+    {
+     "class": "keep",
+     "text": "[31m"
+    }
+   ],
+   "text": "a\u0000b\u0007\u001b[31m",
+   "withoutHiddenCharacters": "ab[31m"
+  },
+  {
+   "markedCodePoints": [
+    "U+007F",
+    "U+0085",
+    "U+009B"
+   ],
+   "name": "del-c1",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "d"
+    },
+    {
+     "class": "control",
+     "text": "\u007f"
+    },
+    {
+     "class": "control",
+     "text": "\u0085"
+    },
+    {
+     "class": "control",
+     "text": "\u009b"
+    },
+    {
+     "class": "keep",
+     "text": "e"
+    }
+   ],
+   "text": "d\u007f\u0085\u009be",
+   "withoutHiddenCharacters": "de"
+  },
+  {
+   "markedCodePoints": [],
+   "name": "line-separators",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "a\u2028b\u2029c"
+    }
+   ],
+   "text": "a\u2028b\u2029c",
+   "withoutHiddenCharacters": "a\u2028b\u2029c"
+  },
+  {
+   "markedCodePoints": [],
+   "name": "marker-literal",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "\u27e8U+202E\u27e9 \u27e8one-time code hidden\u27e9"
+    }
+   ],
+   "text": "\u27e8U+202E\u27e9 \u27e8one-time code hidden\u27e9",
+   "withoutHiddenCharacters": "\u27e8U+202E\u27e9 \u27e8one-time code hidden\u27e9"
+  },
+  {
+   "markedCodePoints": [],
+   "name": "combining-flood",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "a\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301"
+    }
+   ],
+   "text": "a\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301",
+   "withoutHiddenCharacters": "a\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301"
+  },
+  {
+   "markedCodePoints": [],
+   "name": "skin-tone",
+   "pieces": [
+    {
+     "class": "keep",
+     "text": "\ud83d\udc4d\ud83c\udffd"
+    }
+   ],
+   "text": "\ud83d\udc4d\ud83c\udffd",
+   "withoutHiddenCharacters": "\ud83d\udc4d\ud83c\udffd"
+  },
+  {
+   "markedCodePoints": [
+    "U+001B",
+    "U+200B",
+    "U+200D",
+    "U+202E"
+   ],
+   "name": "mixed",
+   "pieces": [
+    {
+     "class": "bidi",
+     "text": "\u202e"
+    },
+    {
+     "class": "keep",
+     "text": "SYNTH"
+    },
+    {
+     "class": "invisible",
+     "text": "\u200b"
+    },
+    {
+     "class": "control",
+     "text": "\u001b"
+    },
+    {
+     "class": "joiner",
+     "text": "\u200d"
+    },
+    {
+     "class": "keep",
+     "text": "end"
+    }
+   ],
+   "text": "\u202eSYNTH\u200b\u001b\u200dend",
+   "withoutHiddenCharacters": "SYNTHend"
+  }
+ ]
+}

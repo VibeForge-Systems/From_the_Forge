@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openmessage-archive:oracle:projection:1",
+  "title": "OpenMessage Archive projection (export oracle, M6 spec 14.4)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "formatVersion", "schemaVersion", "counts", "conversations", "messages",
+               "noConversation", "attachments", "blobs"],
+  "properties": {
+    "format": {"const": "oma-archive-projection"},
+    "formatVersion": {"const": 1},
+    "schemaVersion": {"type": "integer", "minimum": 1},
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["handle", "chat", "message", "chat_message", "message_body", "attachment",
+                   "message_attachment", "blob", "value_history"],
+      "patternProperties": {"^[a-z_]+$": {"type": "integer", "minimum": 0}}
+    },
+    "conversations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ref", "displayName", "displayNameState", "items"],
+        "properties": {
+          "ref": {"$ref": "#/$defs/ref"},
+          "displayName": {"$ref": "#/$defs/described"},
+          "displayNameState": {"$ref": "#/$defs/state"},
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["message", "dated", "tie"],
+              "properties": {
+                "message": {"$ref": "#/$defs/ref"},
+                "dated": {"type": "boolean"},
+                "tie": {"type": "boolean"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "messages": {"type": "object", "additionalProperties": {"$ref": "#/$defs/message"}},
+    "noConversation": {"type": "array", "items": {"$ref": "#/$defs/ref"}},
+    "attachments": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ref", "transferName", "transferNameState", "sha256"],
+        "properties": {
+          "ref": {"$ref": "#/$defs/ref"},
+          "transferName": {"$ref": "#/$defs/described"},
+          "transferNameState": {"$ref": "#/$defs/state"},
+          "sha256": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]}
+        }
+      }
+    },
+    "blobs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sha256", "byteLen", "storeFile"],
+        "properties": {
+          "sha256": {"$ref": "#/$defs/sha256"},
+          "byteLen": {"type": "integer", "minimum": 0},
+          "storeFile": {"enum": ["ok", "missing", "mismatch", "notChecked"]}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "ref": {"type": "string", "minLength": 1},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "state": {"type": "string", "pattern": "^(value|null|absent|oversized|unreadable|unknown:-?[0-9]+)$"},
+    "decimal": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^-?[0-9]+$"}]},
+    "described": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "object", "additionalProperties": false, "required": ["text"],
+         "properties": {"text": {"type": "string"}}},
+        {"type": "object", "additionalProperties": false, "required": ["sha256", "utf8Bytes"],
+         "properties": {"sha256": {"$ref": "#/$defs/sha256"}, "utf8Bytes": {"type": "integer"},
+                        "prefix": {"type": "string"}, "notUtf8": {"const": true}}}
+      ]
+    },
+    "parts": {"type": "array", "items": {"type": "integer"}},
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chats", "date", "direction", "sender", "itemKind", "itemType", "association",
+                   "display", "editLabel", "editedParts", "unsentParts", "bodyVersions", "attachments",
+                   "valueHistory"],
+      "properties": {
+        "chats": {"type": "array", "items": {"$ref": "#/$defs/ref"}},
+        "date": {
+          "type": "object", "additionalProperties": false,
+          "required": ["raw", "state", "unit", "utcNs"],
+          "properties": {
+            "raw": {"$ref": "#/$defs/decimal"},
+            "state": {"$ref": "#/$defs/state"},
+            "unit": {"oneOf": [{"type": "null"},
+                               {"type": "string", "pattern": "^(zero|negative|seconds|nanoseconds|ambiguous|unknown:-?[0-9]+)$"}]},
+            "utcNs": {"$ref": "#/$defs/decimal"}
+          }
+        },
+        "direction": {
+          "type": "object", "additionalProperties": false, "required": ["raw", "state"],
+          "properties": {"raw": {"type": ["integer", "null"]}, "state": {"$ref": "#/$defs/state"}}
+        },
+        "sender": {
+          "type": "object", "additionalProperties": false, "required": ["reason"],
+          "properties": {
+            "reason": {"enum": ["fromMe", "directionNotRecorded", "columnAbsent", "unreadable", "noSender",
+                                "notFound", "resolved"]},
+            "handle": {"$ref": "#/$defs/ref"}
+          }
+        },
+        "itemKind": {"type": "integer"},
+        "itemType": {
+          "type": "object", "additionalProperties": false, "required": ["raw", "state"],
+          "properties": {"raw": {"type": ["integer", "null"]}, "state": {"$ref": "#/$defs/state"}}
+        },
+        "association": {
+          "type": "object", "additionalProperties": false, "required": ["present", "kind"],
+          "properties": {"present": {"type": "integer"}, "kind": {"type": ["integer", "null"]}}
+        },
+        "display": {
+          "oneOf": [
+            {"type": "object", "additionalProperties": false, "required": ["noneReason"],
+             "properties": {"noneReason": {"type": ["integer", "null"]}}},
+            {"type": "object", "additionalProperties": false, "required": ["source", "text"],
+             "properties": {"source": {"type": "integer"}, "text": {"type": "string"}}},
+            {"type": "object", "additionalProperties": false, "required": ["source", "sha256", "utf8Bytes"],
+             "properties": {"source": {"type": "integer"}, "sha256": {"$ref": "#/$defs/sha256"},
+                            "utf8Bytes": {"type": "integer"}, "prefix": {"type": "string"},
+                            "notUtf8": {"const": true}}}
+          ]
+        },
+        "editLabel": {"type": ["integer", "null"]},
+        "editedParts": {"$ref": "#/$defs/parts"},
+        "unsentParts": {"$ref": "#/$defs/parts"},
+        "bodyVersions": {"type": "integer", "minimum": 0},
+        "attachments": {"type": "array", "items": {"$ref": "#/$defs/ref"}},
+        "valueHistory": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 1}}
+      }
+    }
+  }
+}

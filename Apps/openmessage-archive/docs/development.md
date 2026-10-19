@@ -328,6 +328,71 @@ code (`examples/make_viewer_media/media.rs`) and compares the bytes, so an
 Windows, run the example the same way from PowerShell (it writes plain
 files); the Python step is not run on Windows.
 
+### Synthetic export fixtures and the independent oracles (M6)
+
+`tests/fixtures/export/` (M6 spec §15) is written only by
+`scripts/fixtures/make_synthetic_exports.py`, in the reference environment
+(it refuses any SQLite but 3.45.1). It imports the viewer generator (and,
+through it, the M2–M4 generators) as modules and changes none of them. Each
+entry is a plain backup with the viewer catalogue's `content.json`, plus an
+`export.json` of the generator's own: the masking sentinels by kind, the
+strings that must stay visible, every hostile, formula and file-name case
+with where it was planted, each conversation's members, and the archive
+patches and store corruption a test applies after the import. The
+catalogue's generated `README.md` describes each file.
+
+```sh
+.venv-fixtures/bin/python -I scripts/fixtures/make_synthetic_exports.py /tmp/export --seed 1
+rm -rf tests/fixtures/export && cp -r /tmp/export tests/fixtures/export
+sha256sum tests/fixtures/export/SHA256SUMS tests/fixtures/export/EXPECTED.SHA256SUMS
+cargo test -p oma-archive --test export_fixtures --test export_scope
+npx vitest run tests/frontend/hidden-vectors.spec.ts
+```
+
+| File | Covers | Pinned |
+|---|---|---|
+| `SHA256SUMS` | Every file of every backup, and `hidden-vectors.json` (the inputs) | Its SHA-256 is pinned in `crates/oma-archive/tests/export_fixtures.rs`; the inputs are frozen |
+| `EXPECTED.SHA256SUMS` | Every file under `*.expected/` and `scenarios/` (`content.json`, `export.json`) | Its own hash is pinned in the same test and is re-pinned when a slice settles a rule (say which) |
+
+`export_fixtures.rs` imports every entry and the `history` scenario and
+compares the archive with the model, checks that every case is stored where
+`export.json` says, applies the patches (codes an import cannot write) and
+assembles every patched item, and checks that the corrupted store file
+fails its re-hash. `export_scope.rs`'s masking oracle reads every item of
+the catalogue under each reveal. The volume cases (over 10,000 reactions
+on one target, over 50 versions, 200 × 16 MiB versions) are generated at
+test time, not committed.
+
+**The independent oracles** (spec §14.4; `scripts/oracles/`) run in CI's
+Linux `checks` job and by hand. The Rust side writes one archive per entry
+and scenario of the viewer and export catalogues (an ignored test); the
+Python side projects each with the standard library's `sqlite3` on a
+read-only copy (`project_archive.py`, written from `v1.sql` and the spec,
+not from the Rust export code), validates it with `jsonschema` against
+`scripts/oracles/schemas/`, and compares it with the generators' models:
+members, display text, dates, attachments, the sender reason, unsent
+parts, blob digests (every store file re-hashed) and the completeness
+identities. It also projects a copy of `golden-v1`. Install the packages
+only into a virtual environment, never system-wide:
+
+```sh
+python3 -m venv .venv-oracles
+.venv-oracles/bin/pip install --require-hashes --only-binary :all: --no-deps \
+  -r scripts/oracles/requirements.txt
+OMA_ORACLE_OUT=/tmp/oma-oracle-archives \
+  cargo test -p oma-archive --test export_fixtures -- --ignored --exact write_oracle_archives
+.venv-oracles/bin/python -I scripts/oracles/run_oracles.py --archives /tmp/oma-oracle-archives
+```
+
+`OMA_ORACLE_OUT` must be empty or absent. `--keep DIR` also writes each
+projection. The output is counts and check names only. Run here (Python
+3.13.16, SQLite 3.45.1): 22 archives and `golden-v1`, 4,817 checks, none
+failed. Whether `ubuntu-22.04`'s Python 3.10 and its system SQLite open
+schema v1 (it uses `STRICT` tables, SQLite 3.37 or later) is
+**UNVERIFIED** until CI runs the step. The writers' oracles (TXT grammar,
+JSON schemas, CSV, HTML, and later XLSX and PDF) join `run_oracles.py` in
+their slices.
+
 ### The bulk generator (M5)
 
 `crates/oma-archive/tests/common/bulk.rs` writes a schema-valid v1 archive
@@ -335,7 +400,11 @@ of any size directly (M5 spec §14.2), through the test-only hook
 `oma_archive::hooks::bulk_writer` (the `fault-injection` feature, enabled
 only by the crate's own tests). It commits import-sized batches, runs the
 import's finalize statistics and FTS merge steps, and the result passes a
-quick verify (`tests/bulk.rs`). It replaces the import-based generator for
+quick verify (`tests/bulk.rs`). Attachments have no store files by
+default; `BulkSpec::blobs` (M6 slice 6c) gives each one its own file of
+`BulkSpec::blob_len` bytes, placed through
+`oma_archive::hooks::BulkWriter::put_blob` as the import places copies, and
+such an archive passes a full verify. It replaces the import-based generator for
 performance work; the calibration against an import-built archive is an
 ignored test:
 
@@ -573,15 +642,17 @@ Linux job, 6 on Windows), measured from slice 6a.** The baseline is `main`
 at `9883217` (milestones 1–5), run in a Linux container (4 CPUs, debug
 build, `CARGO_INCREMENTAL=0`, after compiling), then again with slice 6a:
 
-| What | Baseline (`9883217`) | Slice 6a | Slice 6b1 | Slice 6b2 |
-|---|---|---|---|---|
-| `cargo test --workspace`, wall clock | 2 min 8 s | 2 min 6 s | 2 min 26 s | 2 min 38 s |
-| Sum of all test binaries' run times | 124.2 s | 123.1 s | 142.9 s | 153.9 s |
-| Rust tests passed | 1,241 (12 ignored) | 1,251 (12 ignored) | 1,270 (12 ignored) | 1,284 (15 ignored) |
-| `oma-archive`'s `export_caps.rs` | — | 2.4 s (4 tests) | 3.0 s | 2.7 s |
-| `oma-archive`'s `export_reads.rs` | — | — | 5.4 s (12 tests) | 5.5 s |
-| `oma-archive`'s `export_scope.rs` | — | — | — | 2.0 s (7 tests) |
-| `oma-archive`'s `export_memory.rs` | — | — | — | 10.6 s (1 test; Linux only) |
+| What | Baseline (`9883217`) | Slice 6a | Slice 6b1 | Slice 6b2 | Slice 6c |
+|---|---|---|---|---|---|
+| `cargo test --workspace`, wall clock | 2 min 8 s | 2 min 6 s | 2 min 26 s | 2 min 38 s | 2 min 42 s |
+| Sum of all test binaries' run times | 124.2 s | 123.1 s | 142.9 s | 153.9 s | 158.5 s |
+| Rust tests passed | 1,241 (12 ignored) | 1,251 (12 ignored) | 1,270 (12 ignored) | 1,284 (15 ignored) | 1,290 (16 ignored) |
+| `oma-archive`'s `export_caps.rs` | — | 2.4 s (4 tests) | 3.0 s | 2.7 s | 3.3 s |
+| `oma-archive`'s `export_reads.rs` | — | — | 5.4 s (12 tests) | 5.5 s | 5.3 s |
+| `oma-archive`'s `export_scope.rs` | — | — | — | 2.0 s (7 tests) | 2.6 s (the oracle also reads the export catalogue) |
+| `oma-archive`'s `export_memory.rs` | — | — | — | 10.6 s (1 test; Linux only) | 9.8 s |
+| `oma-archive`'s `export_fixtures.rs` | — | — | — | — | 0.7 s (5 tests, 1 ignored) |
+| `oma-archive`'s `bulk.rs` | — | — | — | — | 0.9 s (2 tests; the blob option's test is new) |
 
 The difference between the two runs is inside the run-to-run noise: a
 first, cold run of the baseline in the same container took 3 min 58 s
@@ -592,8 +663,12 @@ six unit tests; the rest of its run's increase is inside the noise above
 6b2 adds `export_scope.rs` (2.0 s), `export_memory.rs` (10.6 s: it writes
 and reads back 336 MiB of version text), one plan test's new pins, six
 unit tests and three ignored tests (the memory test's child helper, its
-200-version variant and `perf_export.rs`). Windows has not been measured
-for M6. Slices 6h and 6l record the figures again, with CI's.
+200-version variant and `perf_export.rs`). Slice 6c adds
+`export_fixtures.rs` (0.7 s), the export catalogue in `export_scope.rs`'s
+oracle (about 0.6 s) and the bulk blob test, plus the Linux CI oracle step
+(about 2.5 s here: writing 22 archives, then the Python run, outside
+`cargo test`); the Vitest `hidden-vectors.spec.ts` adds 32 frontend tests.
+Windows has not been measured for M6. Slices 6h and 6l record the figures again, with CI's.
 
 **Export read measurements (slice 6b2; synthetic, one host, no timing
 asserted).** In the same container, debug test build with `oma-archive`

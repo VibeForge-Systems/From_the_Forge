@@ -6,7 +6,8 @@
 #
 #   checks   Linux: npm license audit, typecheck, unit tests, rustfmt,
 #            clippy (also with oma-archive's optional, never-shipped `heic`
-#            feature), Rust tests, IPC bindings drift, cargo-deny.
+#            feature), Rust tests, the independent Python oracles (M6),
+#            IPC bindings drift, cargo-deny.
 #   build    Linux + Windows: Rust and frontend tests on the target OS, then
 #            unsigned installers uploaded as workflow artifacts.
 #
@@ -91,6 +92,21 @@ jobs:
         run: cargo clippy -p oma-archive --all-targets --locked --features heic -- -D warnings
       - name: Rust tests (also regenerates IPC bindings)
         run: cargo test --workspace --locked
+      # M6 spec §14.4: the independent oracles, Linux only. The Rust import
+      # writes one archive per catalogue entry; Python (isolated mode, a
+      # virtual environment, hashes enforced, wheels only) projects each
+      # with stdlib sqlite3 and checks it against the generators' models.
+      - name: Independent oracles (Python)
+        run: |
+          python3 --version
+          python3 -I -c "import sqlite3; print('sqlite', sqlite3.sqlite_version)"
+          python3 -m venv "$RUNNER_TEMP/venv-oracles"
+          "$RUNNER_TEMP/venv-oracles/bin/pip" install --require-hashes --only-binary :all: --no-deps \
+            -r scripts/oracles/requirements.txt
+          out="$RUNNER_TEMP/oracle-archives"
+          OMA_ORACLE_OUT="$out" cargo test -p oma-archive --locked --test export_fixtures -- \
+            --ignored --exact write_oracle_archives
+          "$RUNNER_TEMP/venv-oracles/bin/python" -I scripts/oracles/run_oracles.py --archives "$out"
       - name: IPC bindings are up to date
         run: |
           if ! git diff --exit-code -- src/types/generated; then

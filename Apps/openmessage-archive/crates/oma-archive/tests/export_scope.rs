@@ -24,7 +24,11 @@
 //!   export_read_unless_revealed`): over the viewer catalogue and built
 //!   cases, no masked or withheld sentinel appears in anything an export
 //!   reads with no reveal, each appears with its own reveal, and a
-//!   withheld attachment's file is named nowhere.
+//!   withheld attachment's file is named nowhere. The export catalogue
+//!   (`tests/fixtures/export`, slice 6c) adds its sentinels by kind:
+//!   codes, earlier text, decoded edit text, subject history, the
+//!   alternative text and the files of unsent parts, plus strings that
+//!   must stay visible.
 #![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 mod common;
@@ -32,7 +36,9 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use common::bulk::{generate, BulkSpec};
-use common::viewer::{import_order, model_docs, Imported};
+use common::viewer::{
+    export_docs, export_root, import_order, import_order_in, model_docs, Imported,
+};
 use common::*;
 use oma_archive::{
     AltTextSource, AltTextWithheld, AlternativeText, ArchiveError, ArchiveId, ArchiveReader,
@@ -1221,6 +1227,88 @@ fn no_masked_text_reaches_any_export_read_unless_revealed() {
         }
     }
     assert!(checked >= 4);
+
+    // The export catalogue's sentinels, by kind (slice 6c).
+    let mut by_kind: BTreeMap<String, usize> = BTreeMap::new();
+    for (what, content, e) in export_docs() {
+        let i = import_order_in(&export_root(), &content["orders"][0], &what);
+        let r = i.lib.open_read(&i.id).expect("reader");
+        let ids = all_ids(&i);
+        let sent = |k: &str| strings(&e["sentinels"][k]);
+        let codes = sent("oneTimeCodes");
+        let earlier: Vec<String> = ["earlierText", "editText", "subjectHistory"]
+            .iter()
+            .flat_map(|k| sent(k))
+            .collect();
+        let alt = sent("alternativeText");
+        let visible = strings(&e["visible"]);
+        let c = common::import::read_only(&i.db());
+        let unsent_blobs: HashSet<BlobId> = e["unsentAttachments"]
+            .as_array()
+            .expect("unsent")
+            .iter()
+            .map(|a| {
+                BlobId::new(one(
+                    &c,
+                    "SELECT current_blob_id FROM attachment WHERE guid = ?1",
+                    &[&a["attachment"].as_str().expect("guid").as_bytes()],
+                ))
+            })
+            .collect();
+        let read =
+            |reveal: Reveal| snapshot(&r, &i.lib, &i.id, |s| Ok(everything(s, &ids, reveal)));
+        let (hidden, blobs) = read(Reveal::default());
+        for m in codes.iter().chain(&earlier).chain(&alt) {
+            assert!(!hidden.contains(m.as_str()), "{what}: {m} leaked");
+        }
+        for m in &visible {
+            assert!(hidden.contains(m.as_str()), "{what}: {m} not exported");
+        }
+        assert!(
+            blobs.is_disjoint(&unsent_blobs),
+            "{what}: an unsent part's file"
+        );
+        let (codes_only, blobs) = read(CODES);
+        for m in &earlier {
+            assert!(!codes_only.contains(m.as_str()), "{what}: {m} with codes");
+        }
+        for m in &codes {
+            assert!(codes_only.contains(m.as_str()), "{what}: {m} with codes");
+        }
+        assert!(blobs.is_disjoint(&unsent_blobs), "{what}: with codes");
+        let (earlier_only, blobs) = read(EARLIER);
+        for m in &codes {
+            assert!(
+                !earlier_only.contains(m.as_str()),
+                "{what}: {m} with earlier"
+            );
+        }
+        for m in &earlier {
+            assert!(
+                earlier_only.contains(m.as_str()),
+                "{what}: {m} with earlier"
+            );
+        }
+        assert!(unsent_blobs.is_subset(&blobs), "{what}: files with earlier");
+        let (shown, _) = read(REVEAL_ALL);
+        for m in codes.iter().chain(&earlier).chain(&alt) {
+            assert!(shown.contains(m.as_str()), "{what}: {m} revealed");
+        }
+        for (k, v) in e["sentinels"].as_object().expect("sentinels") {
+            *by_kind.entry(k.clone()).or_default() += v.as_array().expect("list").len();
+        }
+        *by_kind.entry("unsentFiles".to_owned()).or_default() += unsent_blobs.len();
+    }
+    for k in [
+        "oneTimeCodes",
+        "earlierText",
+        "editText",
+        "subjectHistory",
+        "alternativeText",
+        "unsentFiles",
+    ] {
+        assert!(by_kind.get(k).copied().unwrap_or(0) > 0, "no {k} checked");
+    }
 
     // Built cases on a bulk archive: alternative text, subject history and
     // the file of an unsent part, beside a code and earlier text.

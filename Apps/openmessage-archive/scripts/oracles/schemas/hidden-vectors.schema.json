@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openmessage-archive:oracle:hidden-vectors:1",
+  "title": "Hidden-character vectors (tests/fixtures/export/hidden-vectors.json, M6 spec 4.7)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "formatVersion", "rule", "vectors"],
+  "properties": {
+    "format": {"const": "oma-hidden-vectors"},
+    "formatVersion": {"const": 1},
+    "rule": {"type": "string"},
+    "vectors": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "pieces", "text", "withoutHiddenCharacters", "markedCodePoints"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[a-z0-9-]+$"},
+          "pieces": {
+            "type": "array", "minItems": 1,
+            "items": {
+              "type": "object", "additionalProperties": false, "required": ["text", "class"],
+              "properties": {
+                "text": {"type": "string", "minLength": 1},
+                "class": {"enum": ["keep", "bidi", "invisible", "joiner", "tag", "vsRun", "control", "cr"]}
+              }
+            }
+          },
+          "text": {"type": "string"},
+          "withoutHiddenCharacters": {"type": "string"},
+          "markedCodePoints": {"type": "array", "uniqueItems": true,
+                               "items": {"type": "string", "pattern": "^U\\+[0-9A-F]{4,6}$"}}
+        }
+      }
+    }
+  }
+}
