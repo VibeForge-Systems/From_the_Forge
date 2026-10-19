@@ -59,7 +59,7 @@ flowchart LR
     Shell --> Backup["oma-backup ✔"]
     Shell --> Messages["oma-messages ✔"]
     Shell --> Archive["oma-archive ✔"]
-    Shell -.-> Export["oma-export (M6)"]
+    Shell -.-> Export["oma-export (M6, record core)"]
     Shell -.-> Device["oma-device (M7)"]
     Backup --> FS
     Messages --> Backup
@@ -80,7 +80,7 @@ flowchart LR
 | `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them. From M4: `copy_file_to` streams one listed file's plaintext into a caller's writer, hashing it, under `Limits::attachment_bytes` and per-file stamps | ✔ M2, M3, M4 (slice 4b) |
 | `crates/oma-messages` | Scans and probes the sms.db schema by capability, streams typed records (handles, chats, the joins, messages, attachments, Recently Deleted links) as `Col<T>` values, decodes `attributedBody` with a clean-room typedstream decoder, and produces the aggregate `ExtractionReport`. Persists nothing. From M4: stable `KnownColumn` codes, raw values of unreadable cells (`raw_issues`), `payload_data` on request, the raw association columns, key-only passes and the storage class of text cells | ✔ M3, M4 (slice 4c) |
 | `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep; slices 4e–4j the import; slice 4k the report-only verifier and `open_blob`. Used by the shell since slice 4l. From M5: the viewer reads (`view/`, `sortkey.rs`, phased budgets), search (`search/`) and media sniffing, checks and rendering (`media/`, `blobs::open_range`) | ✔ M4 (slices 4d–4k), M5 (slices 5a–5d) |
-| `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX | planned, M6 |
+| `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX. Tauri-free and SQLite-free: it reads only through `oma-archive`'s export APIs. Slice 6d ships the record core: the validated plan, the code registry, the column ledger, the canonical record and its mapping, export-local ordinals, the Rust word tables, time zones and local-day bounds, and the hidden-character markers. No writer, file or shell command yet | M6 slice 6d (record core); writers 6e–6g |
 | `crates/oma-device` | Detects devices and creates backups behind a platform trait | planned, M7 |
 
 Each library crate can be built and tested without Tauri. The shell only
@@ -3293,9 +3293,10 @@ Slice 6c adds test inputs and independent checks; no shipped code changes.
   `joiner`, `tag`, `vsRun`, `control`, `cr`). "Copy text without invisible
   characters" keeps exactly the `keep` and `cr` pieces of all 31 vectors
   (`tests/frontend/hidden-vectors.spec.ts`); the export's classifier
-  (`hidden.rs`, slice 6d) is to be checked against the same file. `cr` is
-  the one class the two treat differently: the copy keeps a carriage
-  return as layout, the export's text formats mark it as a control.
+  (`hidden.rs`, slice 6d) is checked against the same file
+  (`crates/oma-export/tests/hidden_vectors.rs`). `cr` is the one class the
+  two treat differently: the copy keeps a carriage return as layout, the
+  export's text formats mark it as a control.
 - **The independent projection** (`scripts/oracles/project_archive.py`,
   spec §14.4) reads a read-only copy of an archive with the standard
   library's `sqlite3`, written from `v1.sql` and the spec rather than from
@@ -3310,6 +3311,112 @@ Slice 6c adds test inputs and independent checks; no shipped code changes.
   `BulkWriter::put_blob` through the import's own partial-and-placer path,
   so the attachment copy and its performance can be tested at scale (slice
   6e).
+
+### The export record core (M6 slice 6d)
+
+Slice 6d adds the new crate `crates/oma-export` (spec §4.1–§4.10). It
+writes no file yet: it turns the archive's export reads into records, and
+holds the rules every writer will share. It reads the archive only through
+`oma-archive`'s public export APIs and never names `rusqlite` or Tauri
+(`tests/source_rules.rs`).
+
+- **The plan** (`plan.rs`): formats, options, the two reveal opt-ins with
+  the count each was confirmed against, and the packaging (D126: a single
+  file for one conversation in one format other than CSV without copied
+  files, a bundle otherwise). Combinations that do not apply are refused,
+  never ignored. Owner Q3a's default (`default_attachments`): bundles with
+  HTML or JSON, and whole-archive exports, copy original files; a single
+  file carries names only; CSV, XLSX and TXT bundles copy only when
+  ticked. `check_confirmation` is the D147 comparison of the job's
+  pre-count with the confirmed N. "Save a copy" of one attachment is not
+  a plan; it arrives with the copy in slice 6e.
+- **The code registry** (`codes.rs`, spec §5.1): every enum a record
+  carries travels as `{token, code}`. Archive codes keep the stored
+  numbers; export codes (sender reasons, chip states, cards, segment
+  kinds, styles, attachment outcomes, exclusion reasons, …) have explicit
+  numbers written beside each variant. A number this build does not know
+  is kept with the token `unrecognisedCode`. `tests/codes.pin` pins all 39
+  tables (270 entries); a renumbered or removed code fails.
+- **The column ledger** (`ledger.rs`, D142): every `ArchiveColumn` of v1
+  has exactly one disposition (exported raw, exported derived with its
+  rule, or excluded for `d94`, `d115Raw`, `rawSourceBytes`,
+  `sourceIdentifierOptIn`, `sessionLocalRowid` or `storageInternal`), and
+  each exported one names its path in the record. A test fails on a gap,
+  another checks that every exported path really appears in the records
+  of both catalogues and that the opt-in identifiers appear only under
+  the opt-in. The manifest's `exclusions` come from `ledger::exclusions`.
+  To give every column a disposition, `oma-archive` now also reads the
+  message columns no viewer read carried (`ExportMessage::raw_columns`:
+  the raw `service`, `is_audio_message`, `cache_has_attachments`, the
+  share, association-range, part-count, schedule-state, filter and
+  downgrade columns, and `thread_originator_part`) and the chat flags
+  `is_blackholed`, `is_pending_review`, `is_recovered` and
+  `properties_bytes`.
+- **The record** (`record.rs`, spec §4.2): dedicated structs (never
+  serde-derived archive types) whose camelCase serde form is the JSON
+  format: `ItemRecord` with its per-file `ItemContext`, `AttachmentRecord`,
+  `ConversationRecord`, `HandleRecord` and `VersionRecord`. Absence is
+  tagged (`Included`: `notIncluded` by an option with counts;
+  `Determinable`: `notDeterminable` with a reason; a text's `missing`
+  state; the attachment outcome `notRequested`), never `null`. Raw
+  integers and archive ids are decimal strings (`Decimal`), content is
+  `Content`; both print only a length under `Debug`. References outside
+  the scope carry no id.
+- **The mapping** (`map.rs`): `Mapper::item` builds a record from an
+  `ExportMessage`, with release-mode checks: a cap marker is
+  `Limit(TruncatedUnderExport)`, missing extras `Limit(ExtrasNotLoaded)`,
+  and an `oma-archive` variant without an export code
+  `Limit(UnmappedVariant)` (those enums are `#[non_exhaustive]`, so a new
+  variant can never be written as something else). The reply count is
+  split into replies in the export and elsewhere through the new
+  `ExportSnapshot::reply_ids`; `inConversation` facts use the new
+  `ExportSnapshot::chats_of`. Whether a file is copied is the caller's
+  (`AttachmentFiles`, slice 6e); the mapper alone decides `notRequested`,
+  `withheldUnsent` and `noStoredFile`.
+- **Identifiers** (`ids.rs`, D141, owner Q5 **lean, awaiting
+  confirmation**): every id is an export-local ordinal by default
+  (messages by rank in the scope index, conversations by rank among the
+  exported ones, handles, attachment records, files, sessions and lineages
+  at first reference). Archive ids (decimal strings) and source
+  identifiers (message, chat and attachment GUIDs and the GUIDs a message
+  references, an attachment's `original_guid`, a chat's `room_name` and
+  `group_id`, a handle's `uncanonicalized_id` and `person_centric_id`)
+  are read only under the opt-in, through the new
+  `ExportSnapshot::source_identifiers`.
+- **Words** (`words.rs`, D129): an exhaustive `match` per table, worded
+  for a third-party reader (no "You": "Sent from the backed-up phone's
+  account"). `tests/words.rs` writes `src/types/generated/export-words.json`
+  (kept committed by the generated-files drift check) and the Vitest
+  `export-words.spec.ts` compares every entry that names a viewer key with
+  `viewerText.ts`.
+- **Time** (`time.rs`, D128, D145): the webview's zone table is validated
+  (name, 1–4,096 strictly increasing transitions, offsets within ±18 h,
+  a window that covers the export's span clamped to 1900-01-01 … now +
+  366 days). Instants outside the clamped window are written in UTC and
+  counted; one inside it that the table does not cover stops the export
+  (`ZoneTableStale`). Local-day bounds follow DST gaps (the day starts
+  where the gap ends) and repeats (the first midnight). The civil
+  arithmetic counts days over 400-year eras and is tested against fixed
+  vectors from year 1 to 9999. No time-zone crate is linked.
+- **Hidden characters** (`hidden.rs`, D121, D138): the classifier is
+  "Copy text without invisible characters" inverted and passes all 31
+  shared vectors; the `⟨…⟩` marker form, the escape of a literal U+27E8,
+  header fields that never break a line, and combining runs cut after 16
+  marks with `⟨+N combining marks⟩`. The joiner and mark properties come
+  from `src/unicode_tables.rs`, generated by
+  `scripts/make-export-unicode-tables.mjs` from Node's own regular
+  expression properties (Unicode 16.0 here), the same engine the copy
+  runs on.
+
+**Tests** (`crates/oma-export/tests/record_catalogue.rs`): every entry
+and scenario of the viewer and export catalogues is imported and mapped
+whole, history included. Ordinals are dense and one message has one
+intrinsic record in every conversation file; no D94 key exists and tagged
+absence is never `null`; the patched unknown item kind, `is_from_me`
+state and time unit keep their numbers; no masked or withheld sentinel
+reaches a record without a reveal and each appears with it; segment
+offsets are taken after masking; and every text the viewer's details show
+for a message is in its record, except the subject history §3.8 withholds.
 
 ### Status and qualifiers (D43)
 
@@ -3525,6 +3632,11 @@ owner: its lean is applied and awaits confirmation.
 | D124 | Reads, snapshot and lock (slices 6a, 6b1) | `Caps::EXPORT` with a check that runs in release builds; byte-sized batches; one closure-scoped read transaction per job; the archive lock held for the job; cursors materialised before nested calls | Per-batch transactions; trusting the job slot | A consistent snapshot that is a checked fact across instances; `conn.rs`'s contracts kept |
 | D125 | Masking in exports (**owner-confirmed, Q4**; slices 6b1, 6b2) | D115 applied in `oma-archive` before records exist, widened to the attachments of unsent parts, the subject history and the alternative text of such messages; two per-export opt-ins (codes, earlier content), off, reset on every open, never remembered, each confirmed against an exact count; the viewer's `revealEarlierText` is not inherited | Inherit the viewer setting | An export is bulk and outlives the app's control |
 | D137 | Search scope (slice 6b2) | The live set by default; "all matches" re-runs in the job with a cap of 1,000,000 and honest `capped` and coverage booleans; hits matched only in hidden content are excluded unless revealed, re-checked against the masked text the export writes; a multi-conversation hit is written under its lowest conversation | Always the shown 10,000; exporting membership as is | Faithful to what the user saw, with no disclosure through membership |
+| D128, D145 | Time zones and the window (slice 6d) | The webview's offset table, validated in Rust; a window clamped to 1900 … now + 366 days; outliers written in UTC and counted; a stale table refused; local-day bounds and formatting in Rust's own civil arithmetic | jiff with a bundled tzdb | One zone source (D104); nothing approximated |
+| D129 | Words (slice 6d) | Exhaustive Rust tables; `export-words.json` generated and checked against `viewerText.ts`; third-party wording | Codes only | Readable outputs without drift |
+| D138 | Readability safety, the classifier and markers (slice 6d; the writers apply it from 6e) | D121's rule inverted, checked against the shared vectors; the reserved `⟨` marker form; header fields always marked; combining runs limited in TXT and PDF | Raw everywhere | Prevents marker forgery, header forgery and bidi spoofing |
+| D141 | Identifiers (**owner Q5: lean applied, awaiting confirmation**; slice 6d) | Export-local ordinals by default; archive ids as decimal strings and source identifiers only under an opt-in for JSON, CSV and XLSX, off | Archive ids by default | No archive-size disclosure by default; joining exports is possible on request |
+| D142 | Record fidelity and the ledger (slice 6d) | Dedicated record structs; segments kept; unknown codes and states kept; tagged absence; every v1 column given a disposition, exported columns checked at their paths; `exclusions` generated; never less than the viewer, with the documented exceptions; `extras == false` refused | Flattened bodies; hand-picked fields | Rule 3 holds by construction, and drift fails a test |
 | D147 | Consent and drift (slice 6b2; the comparison is slice 6h's) | Exact, cancellable counts; the archive generation in the draft; a recount under the lock before writing; reveal counts that never understate | Budgeted "at least" counts | "N messages" is never an understatement |
 
 ## Logging

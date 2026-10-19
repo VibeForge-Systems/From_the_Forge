@@ -29,13 +29,14 @@
 //! and the scoped plan walk `message_sort` and `chat_message_timeline` by
 //! keyset; only the once-per-session unsearchable count scans `message`.
 //!
-//! The export reads (M6 slices 6b1 and 6b2, `hooks::export_statements`)
+//! The export reads (M6 slices 6b1, 6b2 and 6d, `hooks::export_statements`)
 //! are pinned too: the timeline batches stay on `chat_message_timeline`
 //! with the dated bound where they mean "dated", the unassigned batches
 //! walk `message_sort` and probe `chat_message_by_message`, the generation
 //! reads highest ids only, the dated span is four index seeks, the
 //! pre-count and the masking reads are primary-key or index seeks per
-//! message, and none sorts in a temporary B-tree.
+//! message, the reply ids of a message walk `message_reply` (already in
+//! id order), and none sorts in a temporary B-tree.
 #![allow(clippy::disallowed_methods)]
 
 mod common;
@@ -826,6 +827,33 @@ const PINNED: &[(&str, &[&str])] = &[
     (
         "export hit conversation",
         &["SEARCH chat_message USING COVERING INDEX chat_message_by_message (message_id=?)"],
+    ),
+    (
+        "export reply ids",
+        &[
+            "SEARCH m USING INTEGER PRIMARY KEY (rowid=?)",
+            "SEARCH r USING INDEX message_reply (thread_originator_guid=?)",
+        ],
+    ),
+    (
+        "export message raw columns",
+        &["SEARCH message USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export message source ids",
+        &["SEARCH message USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export chat source ids",
+        &["SEARCH chat USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export attachment source ids",
+        &["SEARCH attachment USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export handle source ids",
+        &["SEARCH handle USING INTEGER PRIMARY KEY (rowid=?)"],
     ),
 ];
 

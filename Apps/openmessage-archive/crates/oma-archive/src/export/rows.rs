@@ -182,6 +182,14 @@ pub struct ChatColumns {
     pub style: RawValue,
     pub is_filtered: RawValue,
     pub is_archived: RawValue,
+    /// `is_blackholed`, `is_pending_review` and `is_recovered`, raw
+    /// (meaning not claimed; slice 6d's ledger exports them raw).
+    pub is_blackholed: RawInt,
+    pub is_pending_review: RawInt,
+    pub is_recovered: RawInt,
+    /// `properties_bytes`: the size of the source's `properties` value
+    /// (the bytes themselves are not stored).
+    pub properties_bytes: RawInt,
     /// Every recorded participant (`chat_handle`), those who left
     /// included, by handle id.
     pub participants: Vec<HandleId>,
@@ -227,7 +235,9 @@ pub(crate) const SQL_ATTACHMENT_EXTRA: &str = "SELECT is_outgoing, is_outgoing_s
      FROM attachment WHERE id = ?1";
 pub(crate) const SQL_CHAT_COLUMNS: &str = "SELECT display_name, display_name_st, \
        chat_identifier, chat_identifier_st, service_name, service_name_st, service_class, \
-       style, style_st, is_filtered, is_filtered_st, is_archived, is_archived_st \
+       style, style_st, is_filtered, is_filtered_st, is_archived, is_archived_st, \
+       is_blackholed, is_blackholed_st, is_pending_review, is_pending_review_st, \
+       is_recovered, is_recovered_st, properties_bytes, properties_bytes_st \
      FROM chat WHERE id = ?1";
 pub(crate) const SQL_CHAT_PARTICIPANTS: &str =
     "SELECT handle_id FROM chat_handle WHERE chat_id = ?1 ORDER BY handle_id";
@@ -466,6 +476,7 @@ pub(crate) fn chat_columns(s: &StmtCache<'_>, id: ChatId) -> rusqlite::Result<Op
         RawValue,
         RawValue,
         RawValue,
+        [RawInt; 4],
     );
     let row: Option<Row> = s
         .prepare(SQL_CHAT_COLUMNS)?
@@ -478,13 +489,21 @@ pub(crate) fn chat_columns(s: &StmtCache<'_>, id: ChatId) -> rusqlite::Result<Op
                 RawValue::of(r.get(7)?, r.get(8)?),
                 RawValue::of(r.get(9)?, r.get(10)?),
                 RawValue::of(r.get(11)?, r.get(12)?),
+                [
+                    RawInt::of(r.get(13)?, r.get(14)?),
+                    RawInt::of(r.get(15)?, r.get(16)?),
+                    RawInt::of(r.get(17)?, r.get(18)?),
+                    RawInt::of(r.get(19)?, r.get(20)?),
+                ],
             ))
         })
         .optional()?;
-    let Some((display_name, chat_identifier, service_name, class, style, filtered, archived)) = row
+    let Some((display_name, chat_identifier, service_name, class, style, filtered, archived, more)) =
+        row
     else {
         return Ok(None);
     };
+    let [blackholed, pending, recovered, props] = more;
     let participants: Vec<HandleId> = {
         let mut st = s.prepare(SQL_CHAT_PARTICIPANTS)?;
         let rows = st.query_map([id.get()], |r| Ok(HandleId::new(r.get(0)?)))?;
@@ -501,6 +520,10 @@ pub(crate) fn chat_columns(s: &StmtCache<'_>, id: ChatId) -> rusqlite::Result<Op
         style,
         is_filtered: filtered,
         is_archived: archived,
+        is_blackholed: blackholed,
+        is_pending_review: pending,
+        is_recovered: recovered,
+        properties_bytes: props,
         participants,
         name_history,
     }))

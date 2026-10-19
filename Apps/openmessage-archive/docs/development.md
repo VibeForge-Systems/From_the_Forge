@@ -393,6 +393,30 @@ schema v1 (it uses `STRICT` tables, SQLite 3.37 or later) is
 JSON schemas, CSV, HTML, and later XLSX and PDF) join `run_oracles.py` in
 their slices.
 
+### The export record core (M6 slice 6d)
+
+`crates/oma-export` has three generated or pinned files; regenerate them
+only deliberately, and commit the result:
+
+```sh
+cargo test -p oma-export                                 # also rewrites src/types/generated/export-words.json
+OMA_REPIN_CODES=1 cargo test -p oma-export --test codes  # a new code: lines may only be added to tests/codes.pin
+node scripts/make-export-unicode-tables.mjs              # crates/oma-export/src/unicode_tables.rs
+```
+
+- `export-words.json` holds the sentence of every code; the Vitest
+  `tests/frontend/export-words.spec.ts` compares each entry that names a
+  viewer key with `src/services/viewerText.ts`, so run `npm test` after
+  changing either side.
+- `unicode_tables.rs` is computed from the regular-expression properties
+  of the Node that runs the script (Unicode 16.0 with Node 22.22.0 here;
+  the version is written into the file). The Rust classifier must keep
+  passing `tests/hidden_vectors.rs`, and the copy rule
+  `hidden-vectors.spec.ts`, after a regeneration.
+- `tests/record_catalogue.rs` imports every entry and scenario of the
+  viewer and export catalogues and maps them whole; it is the place for a
+  new record rule's test.
+
 ### The bulk generator (M5)
 
 `crates/oma-archive/tests/common/bulk.rs` writes a schema-valid v1 archive
@@ -642,17 +666,18 @@ Linux job, 6 on Windows), measured from slice 6a.** The baseline is `main`
 at `9883217` (milestones 1–5), run in a Linux container (4 CPUs, debug
 build, `CARGO_INCREMENTAL=0`, after compiling), then again with slice 6a:
 
-| What | Baseline (`9883217`) | Slice 6a | Slice 6b1 | Slice 6b2 | Slice 6c |
-|---|---|---|---|---|---|
-| `cargo test --workspace`, wall clock | 2 min 8 s | 2 min 6 s | 2 min 26 s | 2 min 38 s | 2 min 42 s |
-| Sum of all test binaries' run times | 124.2 s | 123.1 s | 142.9 s | 153.9 s | 158.5 s |
-| Rust tests passed | 1,241 (12 ignored) | 1,251 (12 ignored) | 1,270 (12 ignored) | 1,284 (15 ignored) | 1,290 (16 ignored) |
-| `oma-archive`'s `export_caps.rs` | — | 2.4 s (4 tests) | 3.0 s | 2.7 s | 3.3 s |
-| `oma-archive`'s `export_reads.rs` | — | — | 5.4 s (12 tests) | 5.5 s | 5.3 s |
-| `oma-archive`'s `export_scope.rs` | — | — | — | 2.0 s (7 tests) | 2.6 s (the oracle also reads the export catalogue) |
-| `oma-archive`'s `export_memory.rs` | — | — | — | 10.6 s (1 test; Linux only) | 9.8 s |
-| `oma-archive`'s `export_fixtures.rs` | — | — | — | — | 0.7 s (5 tests, 1 ignored) |
-| `oma-archive`'s `bulk.rs` | — | — | — | — | 0.9 s (2 tests; the blob option's test is new) |
+| What | Baseline (`9883217`) | Slice 6a | Slice 6b1 | Slice 6b2 | Slice 6c | Slice 6d |
+|---|---|---|---|---|---|---|
+| `cargo test --workspace`, wall clock | 2 min 8 s | 2 min 6 s | 2 min 26 s | 2 min 38 s | 2 min 42 s | 2 min 42 s |
+| Sum of all test binaries' run times | 124.2 s | 123.1 s | 142.9 s | 153.9 s | 158.5 s | 159.0 s |
+| Rust tests passed | 1,241 (12 ignored) | 1,251 (12 ignored) | 1,270 (12 ignored) | 1,284 (15 ignored) | 1,290 (16 ignored) | 1,332 (16 ignored) |
+| `oma-archive`'s `export_caps.rs` | — | 2.4 s (4 tests) | 3.0 s | 2.7 s | 3.3 s | 3.3 s |
+| `oma-archive`'s `export_reads.rs` | — | — | 5.4 s (12 tests) | 5.5 s | 5.3 s | 5.7 s |
+| `oma-archive`'s `export_scope.rs` | — | — | — | 2.0 s (7 tests) | 2.6 s (the oracle also reads the export catalogue) | 2.4 s |
+| `oma-archive`'s `export_memory.rs` | — | — | — | 10.6 s (1 test; Linux only) | 9.8 s | 10.1 s |
+| `oma-archive`'s `export_fixtures.rs` | — | — | — | — | 0.7 s (5 tests, 1 ignored) | 0.7 s |
+| `oma-archive`'s `bulk.rs` | — | — | — | — | 0.9 s (2 tests; the blob option's test is new) | 0.8 s |
+| `oma-export`'s `record_catalogue.rs` | — | — | — | — | — | 8.1 s (7 tests) |
 
 The difference between the two runs is inside the run-to-run noise: a
 first, cold run of the baseline in the same container took 3 min 58 s
@@ -667,7 +692,12 @@ unit tests and three ignored tests (the memory test's child helper, its
 `export_fixtures.rs` (0.7 s), the export catalogue in `export_scope.rs`'s
 oracle (about 0.6 s) and the bulk blob test, plus the Linux CI oracle step
 (about 2.5 s here: writing 22 archives, then the Python run, outside
-`cargo test`); the Vitest `hidden-vectors.spec.ts` adds 32 frontend tests.
+`cargo test`); the Vitest `hidden-vectors.spec.ts` adds 32 frontend tests. Slice 6d
+adds the crate `oma-export`: 42 tests, of which `record_catalogue.rs`
+(8.1 s: it imports all 21 entries and scenarios of the two catalogues for
+each of its 7 tests, in parallel) is the only one that takes measurable
+time; the rest of its run is inside the noise. The Vitest
+`export-words.spec.ts` adds 4 frontend tests.
 Windows has not been measured for M6. Slices 6h and 6l record the figures again, with CI's.
 
 **Export read measurements (slice 6b2; synthetic, one host, no timing

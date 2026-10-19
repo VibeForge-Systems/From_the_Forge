@@ -77,6 +77,7 @@ oma-fs = { path = "crates/oma-fs" }
 oma-backup = { path = "crates/oma-backup" }
 oma-messages = { path = "crates/oma-messages" }
 oma-archive = { path = "crates/oma-archive" }
+oma-export = { path = "crates/oma-export" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

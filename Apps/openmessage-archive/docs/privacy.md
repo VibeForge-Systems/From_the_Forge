@@ -589,6 +589,30 @@ What is already decided and enforced in the archive's export reads
   out of an export of search results unless the matching opt-in is on. How
   many were left out is shown to the user and written to no output.
 
+What the export's record core decides (`crates/oma-export`, slice 6d,
+tested there; no export file is written yet):
+
+- **No archive ids by default (owner question Q5: the lean is applied and
+  awaits the owner's confirmation).** Every id an export writes is an
+  export-local number: messages are numbered 1, 2, 3, … in the order of
+  their archive ids within the export, so the numbers have no gaps and say
+  nothing about the archive outside the export. Archive ids, the source
+  GUIDs (of messages, conversations and attachments, and those a message
+  refers to), a conversation's `room_name` and `group_id`, and a handle's
+  `uncanonicalized_id` and `person_centric_id` are written only under the
+  opt-in "Include archive and source identifiers" (JSON, CSV and XLSX;
+  off). **Archive ids reveal how many messages the archive holds and
+  roughly when they were imported**; GUIDs identify the messages and
+  conversations in the phone's own database. The opt-in and its Review
+  sentence are not built yet.
+- **Read, delivery and sent state is never exported** (D94): no record has
+  a field for it, and a test checks every record of the synthetic
+  catalogues for those keys.
+- **References outside the export carry no id.** A reply to, or a reaction
+  on, a message that is not in the export says "not in this export"
+  without naming it; the other conversations a message is in are counted,
+  not named, when they are not exported.
+
 ## Device identifiers (M2)
 
 The app never stores or keeps these fields from a backup: `Unique

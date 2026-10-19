@@ -1,0 +1,30 @@
+[package]
+name = "oma-export"
+description = "The export engine of OpenMessage Archive: the canonical export record, its code registry and column ledger, export-local identifiers, time zones, and text safety for every output format."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+# Tauri-free, and never names `rusqlite` in its own code (M6 spec §4.1,
+# D123): every archive read goes through `oma-archive`'s public export
+# APIs. `tests/source_rules.rs` enforces both.
+[dependencies]
+oma-archive.workspace = true
+serde.workspace = true
+serde_json.workspace = true # the record's serde form is the JSON format (§4.2)
+thiserror.workspace = true
+
+[dev-dependencies]
+dunce.workspace = true
+oma-backup.workspace = true # tests import the synthetic catalogues
+tempfile.workspace = true
+# Tests only: applying the export catalogue's `patches` (codes an import
+# cannot write) to a test's own archive copy, as oma-archive's tests do.
+rusqlite.workspace = true
+
+[lints]
+workspace = true

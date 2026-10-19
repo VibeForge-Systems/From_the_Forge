@@ -2643,6 +2643,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "oma-export"
+version = "0.1.0"
+dependencies = [
+ "dunce",
+ "oma-archive",
+ "oma-backup",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "oma-fs"
 version = "0.1.0"
 dependencies = [

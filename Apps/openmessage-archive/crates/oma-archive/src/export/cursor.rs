@@ -36,9 +36,11 @@ use sha2::{Digest, Sha256};
 use super::measure::{cut, measure_one, BatchLimits, ExportDepth};
 use super::ExportSnapshot;
 use crate::error::ArchiveError;
+use crate::schema::codes::{DisplayNoneReason, EditLabelCode};
 use crate::sortkey;
 use crate::view::assemble::{Caps, Reveal, WithheldReason};
 use crate::view::detail::{version_row, version_view, withheld_reason};
+use crate::view::raw::{coded, opt_coded, Coded};
 use crate::view::{folds_into, BodyVersion, BodyView, MessageId};
 
 /// Which messages an export covers in time.
@@ -481,6 +483,12 @@ impl<'a, 's> HistoryCursor<'a, 's> {
 
     /// The next version, or `None` after the last.
     pub fn next_version(&mut self) -> Result<Option<BodyVersion>, ArchiveError> {
+        Ok(self.next_coded()?.map(|(v, _)| v))
+    }
+
+    /// The next version with its stored codes (slice 6d), or `None` after
+    /// the last.
+    pub fn next_coded(&mut self) -> Result<Option<(BodyVersion, VersionCodes)>, ArchiveError> {
         self.snap.checkpoint()?;
         let Some(&id) = self.versions.get(self.next) else {
             return Ok(None);
@@ -496,6 +504,11 @@ impl<'a, 's> HistoryCursor<'a, 's> {
                     .optional()
             })?
             .ok_or(ArchiveError::Damaged(crate::error::DamageKind::Unreadable))?;
+        let (label, none) = row.codes();
+        let codes = VersionCodes {
+            edit_label: coded(label, EditLabelCode::from_code),
+            display_none_reason: opt_coded(none, DisplayNoneReason::from_code),
+        };
         let (mut v, shown) = snap.run(|| {
             version_view(
                 &snap.stmts,
@@ -513,8 +526,18 @@ impl<'a, 's> HistoryCursor<'a, 's> {
             .as_ref()
             .is_some_and(|p| p.is_some() && *p == digest);
         self.previous = Some(digest);
-        Ok(Some(v))
+        Ok(Some((v, codes)))
     }
+}
+
+/// A body version's codes as stored, which [`BodyVersion`] collapses (an
+/// unknown number is `None` there).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct VersionCodes {
+    pub edit_label: Coded<EditLabelCode>,
+    /// `None` when NULL (a version with text has none).
+    pub display_none_reason: Option<Coded<DisplayNoneReason>>,
 }
 
 #[cfg(test)]

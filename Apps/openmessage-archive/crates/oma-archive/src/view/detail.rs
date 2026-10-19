@@ -1065,6 +1065,14 @@ pub(crate) struct VersionRow {
     label: i64,
 }
 
+impl VersionRow {
+    /// The stored `edit_label` and `display_none_reason`, as recorded
+    /// (exports keep unknown numbers, M6 §3.9).
+    pub(crate) fn codes(&self) -> (i64, Option<i64>) {
+        (self.label, self.none)
+    }
+}
+
 /// A row of [`VERSION_COLUMNS`].
 pub(crate) fn version_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<VersionRow> {
     let text = match r.get_ref(4)? {

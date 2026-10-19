@@ -32,6 +32,9 @@
 //!   [`ExportSnapshot::search_scope`]) re-run a request with the export's
 //!   cap and keep only hits whose match lies in what the export writes
 //!   ([`search`]).
+//! - **References and identifiers** ([`refs`], slice 6d): the
+//!   conversations of any message, the ids of a message's replies, and
+//!   the source identifiers that only the D141 opt-in reads.
 //!
 //! Masking is D115's, applied before anything leaves the crate: one-time
 //! codes are masked and earlier text withheld unless the export's
@@ -47,6 +50,7 @@ pub mod cursor;
 pub mod mask;
 pub mod measure;
 pub mod preview;
+pub mod refs;
 pub mod rows;
 pub mod scope;
 pub mod search;
@@ -62,10 +66,11 @@ use crate::view::assemble::{Caps, Ctx, Reveal};
 use crate::view::uncapped::{checked, export_item};
 use crate::view::{ChatId, ExportItem, HandleId, MessageId};
 
-pub use cursor::{CursorBatch, HistoryCursor, IdCursor, TimeRange, TimelineCursor};
+pub use cursor::{CursorBatch, HistoryCursor, IdCursor, TimeRange, TimelineCursor, VersionCodes};
 pub use mask::{AltTextSource, AltTextWithheld, AlternativeText, AttachmentAccess};
 pub use measure::{BatchLimits, ExportDepth};
 pub use preview::{ArchiveGeneration, ExportPreview, PreviewOptions, PreviewProgress};
+pub use refs::{MessageRawColumns, SourceIdentifiers, SourceOf};
 pub use rows::{
     ChatColumns, ChatMembership, Derivation, DetailColumns, ExportAttachment, HandleColumns,
     HistoryState, ReactionRow, RecentlyDeletedRow, ValueHistoryEntry,
@@ -110,6 +115,8 @@ pub struct ExportMessage {
     /// The other stored text when the two differ, masked (§3.8).
     pub alternative_text: AlternativeText,
     pub detail: DetailColumns,
+    /// The message columns no viewer read carries, raw (slice 6d).
+    pub raw_columns: MessageRawColumns,
     /// Every add and remove row targeting it, sorted (D93 rule inputs).
     pub reaction_rows: Vec<ReactionRow>,
     pub history: HistoryState,
@@ -149,6 +156,7 @@ pub(crate) fn plan_statements() -> Vec<(&'static str, String)> {
     v.extend(mask::plan_statements());
     v.extend(measure::plan_statements());
     v.extend(preview::plan_statements());
+    v.extend(refs::plan_statements());
     v.extend(rows::plan_statements());
     v.extend(search::plan_statements());
     v
@@ -329,6 +337,9 @@ impl<'s> ExportSnapshot<'s> {
         let (detail, derivation) = self
             .run(|| rows::detail_columns(&self.stmts, id))?
             .ok_or(ArchiveError::AnchorNotFound)?;
+        let raw_columns = self
+            .run(|| refs::raw_columns(&self.stmts, id))?
+            .ok_or(ArchiveError::AnchorNotFound)?;
         let chats = self.run(|| rows::chats_of(&self.stmts, id))?;
         let reaction_rows = self.run(|| rows::reaction_rows(&self.stmts, id))?;
         self.checkpoint()?;
@@ -341,6 +352,7 @@ impl<'s> ExportSnapshot<'s> {
             attachment_access,
             alternative_text,
             detail,
+            raw_columns,
             reaction_rows,
             history,
             value_history,
@@ -385,6 +397,31 @@ impl<'s> ExportSnapshot<'s> {
             out.push(x);
         }
         Ok(out)
+    }
+
+    /// Every conversation message `id` is a timeline item of, ascending
+    /// (none for a message in no conversation or one that does not exist).
+    pub fn chats_of(&self, id: MessageId) -> Result<Vec<ChatId>, ArchiveError> {
+        self.checkpoint()?;
+        let rows = self.run(|| rows::chats_of(&self.stmts, id.get()))?;
+        Ok(rows.into_iter().map(|m| m.chat).collect())
+    }
+
+    /// The replies to message `id`, ascending: keyed plain messages whose
+    /// `thread_originator_guid` names it (the viewer's reply-count rule,
+    /// uncapped). None for an unkeyed message.
+    pub fn reply_ids(&self, id: MessageId) -> Result<Vec<MessageId>, ArchiveError> {
+        self.checkpoint()?;
+        self.run(|| refs::reply_ids(&self.stmts, id.get()))
+    }
+
+    /// The source identifiers of `of` (D141, owner Q5's lean): read only
+    /// when an export opts in to archive and source identifiers.
+    /// `AnchorNotFound` when the row does not exist.
+    pub fn source_identifiers(&self, of: SourceOf) -> Result<SourceIdentifiers, ArchiveError> {
+        self.checkpoint()?;
+        self.run(|| refs::source_identifiers(&self.stmts, of))?
+            .ok_or(ArchiveError::AnchorNotFound)
     }
 
     /// Conversation `chat`'s columns; `AnchorNotFound` when it does not
