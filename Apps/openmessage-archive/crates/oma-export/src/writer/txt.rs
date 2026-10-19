@@ -804,7 +804,7 @@ impl ExportWriter for TxtWriter {
                 let s = self.words.say("withheldReason", *reason);
                 self.label(&format!("{label} {s}"))?;
             }
-            VersionTextRecord::NoText { reason } => {
+            VersionTextRecord::NoText { reason, .. } => {
                 let s = self.words.say("noTextReason", *reason);
                 self.label(&format!("{label} {s}"))?;
             }

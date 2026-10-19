@@ -568,7 +568,8 @@ export reads, the `oma-export` crate (TXT, CSV, JSON and HTML), the
 export job, its five IPC commands and the decode-helper pool for HTML
 previews. **There is no Export dialog yet** (PR B, slice 6k), so no
 export can be made from the app's interface; PDF, XLSX, "Save a copy" of
-one attachment and leaving events out are refused, never faked. Every
+one attachment and leaving events out are refused, never faked ("Save a
+copy" and leaving events out are assigned to slice 6k). Every
 statement below was tested on Linux with synthetic data only; nothing
 was run on Windows, in a browser (pages were read back by parsers), or in
 a spreadsheet program. Owner decisions are those of 2026-10-19 (Q3, Q4);
@@ -599,8 +600,12 @@ Q5 is a lean awaiting the owner.*
 - Search results that matched only hidden content are left out unless
   you include that content.
 - **Read, delivery and sent status is never exported.** Raw source data
-  (`attributedBody`, `message_summary_info`, `payload_data`, the stored
-  raw text) is not exported.
+  (`attributedBody`, `message_summary_info`, `payload_data`) is not
+  exported. The stored plain `text` column is exported only as the
+  "alternative text", when it differs from the displayed text, and it is
+  withheld whole when the message has an unsent part or earlier text, or
+  a one-time code the phone marked (so it can still hold a code the phone
+  did not mark, like any plain text).
 - By default, numbers in the export are counters local to that export.
   Archive identifiers, which reveal how many messages the archive holds
   and roughly when they were imported, and the phone's GUIDs are
@@ -677,7 +682,17 @@ What is already decided and enforced in the archive's export reads
   before anything leaves the archive code. Two separate per-export
   opt-ins release them: one for one-time codes, one for earlier content.
   Both are off by default, reset each time the dialog opens, are never
-  remembered, and are each confirmed against an exact count of messages.
+  remembered, and are each confirmed against its own exact count of
+  messages: the export starts only when each confirmed count equals the
+  count the preview made (a number from the app's window is never
+  trusted), and stops before writing anything if a recount under the
+  archive's lock is higher. A message counts as having a one-time code
+  when any stored version has a marked code, and, when history is
+  included, also when a phone edit entry holds edit text (its codes are
+  found only when it is decoded, so it is counted without decoding: the
+  count may be higher than the codes written, never lower). A reaction
+  folded into its target is written whole, so it is counted like any
+  other message.
   The viewer's "Show earlier text by default" setting (`revealEarlierText`)
   does **not** carry over into exports. The dialog and the confirmation
   are not built yet.
@@ -686,7 +701,15 @@ What is already decided and enforced in the archive's export reads
 - **Search results do not reveal hidden content through membership.** A
   search hit whose match lies only in masked or withheld content is left
   out of an export of search results unless the matching opt-in is on. How
-  many were left out is shown to the user and written to no output.
+  many were left out is shown to the user and written to no output, and
+  no output carries anything that would give that number away: a capped
+  result set holds exactly its published cap (10,000, or 1,000,000 for
+  "all matches"), so the manifest does not say "capped". It carries one
+  `mayBeIncomplete` flag instead, true when the set was capped, when the
+  exact-text search stopped at its bound, or when any hit was left out.
+  **Accepted residual:** a `true` flag on an export with far fewer
+  matches than any cap suggests that some hit was left out, though never
+  how many.
 
 What the export's record core decides (`crates/oma-export`, slice 6d,
 tested there; no export file is written yet):
@@ -731,7 +754,11 @@ yet, and nothing here was run on Windows):
   folder or file stays where it was. The app finds it again only when the
   next export goes to the same folder (it keeps no list of past
   destinations); entries younger than five minutes, or held by a running
-  export, are never removed. On Windows a name starting with a dot is not
+  export, are never removed (a running export renews its marker's time
+  after every batch; on a network folder whose locks another computer
+  cannot see, a single batch that takes over five minutes is the
+  residual). If removing a cancelled export's own files fails, its marker
+  stays, so the folder is offered again by a later export to that folder. On Windows a name starting with a dot is not
   hidden.
 - **A published export never replaces anything** without the app's own
   confirmation, and then only a regular file of the same name; a bundle
@@ -816,9 +843,10 @@ browser in this slice, and nothing was run on Windows):
 - **Pages are static and hold no script.** Each page starts with a
   Content-Security-Policy that forbids loading anything except the
   images embedded in it, and every message, name and address is written
-  as escaped text. The policy is a second line of defence; whether
-  browsers other than WebKitGTK honour it from a local file is
-  **UNVERIFIED** (the M6 manual checklist).
+  as escaped text. The policy is a second line of defence; whether any
+  browser (WebKitGTK, WebView2, Firefox, Chrome) honours it for a page
+  opened from a local file is **UNVERIFIED**; it is on the M6 manual
+  checklist added in PR B (slice 6l).
 - **Images in HTML are previews the app re-encoded, never the original
   files**: thumbnails embedded in the page and, with "Larger previews",
   larger copies beside it under `html/previews/`. They come only from

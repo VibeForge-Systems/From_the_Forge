@@ -10,7 +10,8 @@
 //!   ([`ManifestCounts::check_identities`]); a manifest that fails them is
 //!   not written (`Limit(RowCountMismatch)`).
 //! - **Never written** (D135): the search query, the count of hits
-//!   excluded under §3.6, device facts (name, model, iOS version, the
+//!   excluded under §3.6 (nor anything that would give it with a public
+//!   cap: [`SearchFacts`] has no `capped`), device facts (name, model, iOS version, the
 //!   "untested iOS version" flag), the archive id or label, UDIDs, GUIDs
 //!   (outside D141), backup paths, the destination path, storage names of
 //!   files not exported, or the WebView engine. [`ManifestBody`] has no
@@ -47,9 +48,9 @@ use crate::words::readme;
 pub const MANIFEST_FORMAT: &str = "openmessage-archive-export-manifest";
 pub const MANIFEST_VERSION: &str = "1.0.0";
 /// The JSON record schema's version (spec §5.1).
-pub const SCHEMA_VERSION: &str = "1.0.0";
+pub const SCHEMA_VERSION: &str = "1.1.0";
 /// The CSV and XLSX column contract's version (spec §5.2).
-pub const TABULAR_COLUMNS_VERSION: &str = "1.0.0";
+pub const TABULAR_COLUMNS_VERSION: &str = "1.1.0";
 
 /// Export-level exclusions that are not archive columns.
 pub const EXPORT_NOTES: [&str; 2] = [
@@ -148,7 +149,9 @@ impl ScopeFacts {
 pub struct RevealFacts {
     pub one_time_codes: bool,
     pub earlier_content: bool,
-    pub confirmed_up_to: Option<u64>,
+    /// The N confirmed for each reveal that is on (D147, owner Q4).
+    pub one_time_codes_confirmed_up_to: Option<u64>,
+    pub earlier_content_confirmed_up_to: Option<u64>,
 }
 
 /// `options`.
@@ -189,7 +192,8 @@ impl OptionFacts {
             reveal: RevealFacts {
                 one_time_codes: o.reveal.one_time_codes,
                 earlier_content: o.reveal.earlier_content,
-                confirmed_up_to: o.reveal.confirmed_up_to,
+                one_time_codes_confirmed_up_to: o.reveal.codes_confirmed_up_to,
+                earlier_content_confirmed_up_to: o.reveal.earlier_confirmed_up_to,
             },
             clock: match o.clock {
                 Clock::H23 => "h23",
@@ -383,7 +387,22 @@ impl ManifestCounts {
 }
 
 /// `search`, for a search scope (D135, D137): never the query, never the
-/// count of hits excluded under §3.6.
+/// count of hits excluded under §3.6, and nothing that would give that
+/// count away.
+///
+/// A capped result set holds exactly its cap of messages (10,000 for the
+/// live set, 1,000,000 for "all matches", both published), so `capped`
+/// beside `matchesWritten` would give the excluded count as
+/// `cap − matchesWritten`. The facts therefore carry one non-invertible
+/// boolean, [`SearchFacts::may_be_incomplete`]: true when the set was
+/// capped, when the exact-text scan stopped at its bound, **or** when any
+/// hit was left out because it matched only content this export hides. A
+/// capped set and an uncapped one with hits left out read the same, so
+/// neither the excluded count nor the input's size can be derived. The
+/// residual, accepted and disclosed in `privacy.md`: a `true` with far
+/// fewer matches than any cap suggests that some hit was left out (never
+/// how many). The Review and result steps still show `capped`,
+/// `newestKept`, `coverageComplete` and the excluded count; no output does.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchFacts {
@@ -391,10 +410,16 @@ pub struct SearchFacts {
     pub filter_kinds: Vec<&'static str>,
     pub include_earlier_for_matching: bool,
     pub matches_written: u64,
-    pub capped: bool,
-    pub newest_kept: bool,
-    pub coverage_complete: bool,
+    /// Capped, a bounded exact-text scan, or hits left out (see above).
+    pub may_be_incomplete: bool,
     pub all_matches: bool,
+}
+
+impl SearchFacts {
+    /// The one completeness fact an output may carry (see the type).
+    pub fn may_be_incomplete(capped: bool, coverage_complete: bool, excluded: u64) -> bool {
+        capped || !coverage_complete || excluded > 0
+    }
 }
 
 /// One import session the export's labels or observations reference, by
@@ -686,6 +711,33 @@ mod tests {
         );
         assert_eq!(c.attachments.files_written, 2);
         assert!(c.check_identities().is_ok());
+    }
+
+    /// A capped set (exactly its published cap of hits, some left out)
+    /// and an uncapped one with hits left out write the same facts, so
+    /// `cap − matchesWritten` cannot be computed from any field (§3.6).
+    #[test]
+    fn search_facts_never_let_the_excluded_count_be_derived() {
+        let facts = |capped: bool, coverage: bool, excluded: u64| SearchFacts {
+            mode: "words",
+            filter_kinds: Vec::new(),
+            include_earlier_for_matching: false,
+            matches_written: 9_960,
+            may_be_incomplete: SearchFacts::may_be_incomplete(capped, coverage, excluded),
+            all_matches: false,
+        };
+        // 10,000 capped with 40 left out; 9,990 uncapped with 30 left out.
+        let capped = serde_json::to_value(facts(true, true, 40)).expect("json");
+        let uncapped = serde_json::to_value(facts(false, true, 30)).expect("json");
+        assert_eq!(capped, uncapped);
+        let keys: Vec<&String> = capped.as_object().expect("object").keys().collect();
+        for k in ["capped", "newestKept", "coverageComplete", "excluded"] {
+            assert!(!keys.iter().any(|x| x.as_str() == k), "{k}");
+        }
+        // Honest without exclusions too.
+        assert!(SearchFacts::may_be_incomplete(true, true, 0));
+        assert!(SearchFacts::may_be_incomplete(false, false, 0));
+        assert!(!SearchFacts::may_be_incomplete(false, true, 0));
     }
 
     #[test]

@@ -188,8 +188,9 @@ fn oracle(
     scope: &ExportScopeIds,
 ) -> BTreeMap<&'static str, i64> {
     let mut o = BTreeMap::new();
-    let items: Vec<i64> = rows.iter().filter(|r| !r.2).map(|r| r.1).collect();
-    let distinct: BTreeSet<i64> = items.iter().copied().collect();
+    // Every row's message, folded reactions included: the pipeline writes
+    // a folded row as a whole item, so it is counted like one.
+    let distinct: BTreeSet<i64> = rows.iter().map(|r| r.1).collect();
     o.insert("timeline_rows", rows.len() as i64);
     o.insert("folded", rows.iter().filter(|r| r.2).count() as i64);
     o.insert("distinct", distinct.len() as i64);
@@ -442,10 +443,10 @@ fn previews_are_exact_and_equal_the_job_precount() {
         .export_preview(&scopes[0], opts, &CancelToken::new(), &mut |_| {})
         .expect("preview");
     assert_eq!(all.unassigned, detached.len() as u64);
-    assert_eq!(
-        all.distinct_messages + all.folded_reaction_rows + 1,
-        all.timeline_rows
-    );
+    // Every row is a distinct message but the shared one's second row
+    // (folded reactions are messages written whole, not repeats).
+    assert!(all.folded_reaction_rows > 0);
+    assert_eq!(all.distinct_messages + 1, all.timeline_rows);
     assert!(all.distinct_blobs > 0 && all.distinct_blobs < all.attachments_with_file);
     let ranged = r
         .export_preview(&scopes[1], opts, &CancelToken::new(), &mut |_| {})
@@ -511,6 +512,134 @@ fn a_preview_stops_on_cancel_and_counts_codes_and_earlier_content() {
         .expect("preview");
     assert_eq!(whole.text_bytes + 20, shown.text_bytes);
     let _ = (m, m2);
+}
+
+/// A folded reaction is written whole by the pipeline, so the pre-count
+/// counts it like an item: its flagged code, its attachment and stored
+/// file, and one distinct message (a single conversation then has no
+/// cross-conversation row). With history, a phone edit entry holding edit
+/// text counts for the codes' N (its decoded text can hold a code).
+#[test]
+fn folded_reactions_and_edit_text_are_counted_like_what_the_job_writes() {
+    let (tmp, lib, id) = bulk(1_500);
+    let c = raw(&db_path(&tmp, &id));
+    add_blobs(&c);
+    let r = lib.open_read(&id).expect("reader");
+    // Two plain messages of one chat, nothing reacting to the second.
+    let (a, b, chat): (i64, i64, i64) = c
+        .query_row(
+            "SELECT ma.id, mb.id, x.chat_id FROM chat_message x \
+               JOIN chat_message y ON y.chat_id = x.chat_id AND y.message_id > x.message_id \
+               JOIN message ma ON ma.id = x.message_id JOIN message mb ON mb.id = y.message_id \
+             WHERE ma.assoc_present = 0 AND mb.assoc_present = 0 AND ma.key_kind = 1 \
+               AND ma.current_body_id IS NOT NULL AND mb.current_body_id IS NOT NULL \
+               AND NOT EXISTS (SELECT 1 FROM message_attachment WHERE message_id IN (ma.id, mb.id)) \
+               AND (SELECT count(*) FROM chat_message WHERE message_id IN (ma.id, mb.id)) = 2 \
+               AND NOT EXISTS (SELECT 1 FROM message WHERE assoc_target_guid = mb.guid) \
+             ORDER BY x.message_id LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .expect("two plain messages");
+    let scope = ExportScopeIds::Conversation {
+        chat: ChatId::new(chat),
+        range: TimeRange::All,
+    };
+    let opts = PreviewOptions::new(Reveal::default(), ExportDepth::Items);
+    let preview = |o: PreviewOptions| {
+        r.export_preview(&scope, o, &CancelToken::new(), &mut |_| {})
+            .expect("preview")
+    };
+    let before = preview(opts);
+    // `b` becomes a sticker reaction on `a` (kind 17 folds), with a code
+    // in its body and a sticker file of its own.
+    c.execute(
+        "UPDATE message SET assoc_present = 1, assoc_kind = 17, \
+           assoc_target_guid = (SELECT guid FROM message WHERE id = ?1) WHERE id = ?2",
+        [a, b],
+    )
+    .expect("reaction");
+    let body_b = one(
+        &c,
+        "SELECT current_body_id FROM message WHERE id = ?1",
+        &[&b],
+    );
+    c.execute(
+        "UPDATE message_body SET display_text = 'sticker 123456', display_source = 1 \
+         WHERE id = ?1",
+        [body_b],
+    )
+    .expect("text");
+    part(&c, body_b, 0, Some(0), (8, 14), CODE_FLAG, None);
+    c.execute(
+        "INSERT INTO message_attachment (message_id, attachment_id, ord_rank, ord_rowid, \
+           first_session_id, last_session_id, last_rank) \
+         SELECT ?1, attachment_id, ord_rank, ord_rowid, first_session_id, last_session_id, \
+           last_rank FROM message_attachment WHERE attachment_id = \
+           (SELECT id FROM attachment WHERE current_blob_id IS NOT NULL ORDER BY id LIMIT 1) \
+         LIMIT 1",
+        [b],
+    )
+    .expect("sticker file");
+    let after = preview(opts);
+    assert_eq!(after.folded_reaction_rows, before.folded_reaction_rows + 1);
+    assert_eq!(after.timeline_rows, before.timeline_rows);
+    assert_eq!(
+        after.distinct_messages, before.distinct_messages,
+        "still one message"
+    );
+    assert_eq!(
+        after.timeline_rows, after.distinct_messages,
+        "one conversation: no cross-conversation row"
+    );
+    assert_eq!(
+        after.messages_with_flagged_code,
+        before.messages_with_flagged_code + 1
+    );
+    assert_eq!(after.attachments, before.attachments + 1);
+    assert_eq!(
+        after.attachments_with_file,
+        before.attachments_with_file + 1
+    );
+    assert!(after.blob_bytes > 0 && after.distinct_blobs >= 1);
+    // The job's pre-count and the SQL oracle agree.
+    let (pre, rows) = snapshot(&r, &lib, &id, |s| {
+        Ok((s.precount(&scope, opts, &mut |_| {})?, rows_of(s, &scope)))
+    });
+    assert_eq!(pre, after);
+    assert!(rows.iter().any(|row| row.1 == b && row.2), "b is folded");
+    // (The oracle's text bytes do not mask codes; the planted one is.)
+    let (mut got, mut want) = (counts(&after), oracle(&c, &rows, &scope));
+    assert_eq!(
+        got.remove("text_bytes"),
+        want.remove("text_bytes").map(|n| n - 6)
+    );
+    assert_eq!(got, want);
+
+    // Edit text: counted for the codes' N only when history is written.
+    let all = ExportScopeIds::Archive {
+        range: TimeRange::All,
+    };
+    let count = |o: PreviewOptions| {
+        r.export_preview(&all, o, &CancelToken::new(), &mut |_| {})
+            .expect("preview")
+            .messages_with_flagged_code
+    };
+    let history = PreviewOptions::new(Reveal::default(), ExportDepth::WithHistory);
+    let (items0, hist0) = (count(opts), count(history));
+    let (_, body_e) = text_message(&c, 3);
+    c.execute(
+        "INSERT INTO message_edit_entry (body_id, part, ordinal, at_kind, at_raw, at_utc_ns, \
+           body_present) VALUES (?1, 0, 0, NULL, NULL, NULL, 1)",
+        [body_e],
+    )
+    .expect("edit entry");
+    assert_eq!(count(opts), items0, "no history: edit text is not written");
+    assert_eq!(
+        count(history),
+        hist0 + 1,
+        "history: edit text may hold a code"
+    );
 }
 
 // ---------------------------------------------------------------------------

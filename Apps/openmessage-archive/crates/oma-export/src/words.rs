@@ -599,7 +599,7 @@ words! {
 words! {
     exclusion_reason, "exclusionReason", ExclusionReason, viewer = "" {
         D94 => "Read, delivery and sent state are never exported",
-        D115Raw => "Raw stored text that can hold one-time codes or text from before an unsend or edit is not exported",
+        D115Raw => "The raw edit summary, which can hold one-time codes or text from before an unsend or edit, is not exported (its edit text is decoded and masked like the message text)",
         RawSourceBytes => "Raw source bytes are not exported",
         SourceIdentifierOptIn => "Source identifiers and archive ids are exported only when chosen",
         SessionLocalRowid => "Row numbers that only mean something inside one backup are not exported",

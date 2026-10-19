@@ -875,9 +875,20 @@ pub struct EditEntryRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "camelCase")]
 pub enum VersionTextRecord {
-    Text { pieces: Vec<PieceRecord> },
-    Withheld { reason: Code },
-    NoText { reason: Code },
+    Text {
+        pieces: Vec<PieceRecord>,
+    },
+    Withheld {
+        reason: Code,
+    },
+    NoText {
+        reason: Code,
+        /// The stored `display_none_reason` as recorded (§3.9, I5): its
+        /// code, or `unrecognisedCode` with the number this build does not
+        /// know; `None` when not recorded.
+        #[serde(rename = "displayNoneReason")]
+        display_none_reason: Option<Code>,
+    },
 }
 
 /// One stored body version of a message (history included).

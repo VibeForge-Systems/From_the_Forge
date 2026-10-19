@@ -167,17 +167,32 @@ pub enum ZoneChoice {
 
 /// The two per-export reveal opt-ins (owner Q4, D125): off by default,
 /// reset each time the dialog opens, never remembered, each confirmed
-/// against an exact count. The viewer's `revealEarlierText` never sets
-/// them.
+/// against its own exact count. The viewer's `revealEarlierText` never
+/// sets them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct RevealPlan {
     pub one_time_codes: bool,
     pub earlier_content: bool,
-    /// The N the user confirmed ("N messages"), when a reveal is on.
-    pub confirmed_up_to: Option<u64>,
+    /// The N the user confirmed for one-time codes ("N messages"),
+    /// exactly when that reveal is on.
+    pub codes_confirmed_up_to: Option<u64>,
+    /// The N the user confirmed for earlier content, exactly when that
+    /// reveal is on.
+    pub earlier_confirmed_up_to: Option<u64>,
 }
 
 impl RevealPlan {
+    /// The reveals whose counts are given, each confirmed against its own
+    /// N (`None`: that reveal off).
+    pub fn confirmed(codes: Option<u64>, earlier: Option<u64>) -> RevealPlan {
+        RevealPlan {
+            one_time_codes: codes.is_some(),
+            earlier_content: earlier.is_some(),
+            codes_confirmed_up_to: codes,
+            earlier_confirmed_up_to: earlier,
+        }
+    }
+
     /// The reveal the archive reads apply.
     pub fn reveal(self) -> Reveal {
         Reveal {
@@ -309,10 +324,15 @@ impl ExportPlan {
         {
             return refuse(PlanRefusal::IdentifiersWithoutTabularOrJson);
         }
-        match (o.reveal.any(), o.reveal.confirmed_up_to) {
-            (true, None) => return refuse(PlanRefusal::RevealNotConfirmed),
-            (false, Some(_)) => return refuse(PlanRefusal::ConfirmationWithoutReveal),
-            _ => {}
+        for (on, n) in [
+            (o.reveal.one_time_codes, o.reveal.codes_confirmed_up_to),
+            (o.reveal.earlier_content, o.reveal.earlier_confirmed_up_to),
+        ] {
+            match (on, n) {
+                (true, None) => return refuse(PlanRefusal::RevealNotConfirmed),
+                (false, Some(_)) => return refuse(PlanRefusal::ConfirmationWithoutReveal),
+                _ => {}
+            }
         }
         if has(Format::Csv) != o.csv_profile.is_some() {
             return refuse(PlanRefusal::CsvProfileMismatch);
@@ -385,19 +405,21 @@ impl ExportPlan {
     }
 
     /// Check the job's pre-count (under the lock) against the confirmed
-    /// N (D147): either reveal count above it stops the job before
-    /// anything is written.
+    /// counts (D147): a reveal's count above its own N stops the job
+    /// before anything is written.
     pub fn check_confirmation(
         &self,
         flagged_codes: u64,
         earlier_content: u64,
     ) -> Result<(), ExportError> {
         let r = self.options.reveal;
-        let Some(n) = r.confirmed_up_to else {
-            return Ok(());
-        };
-        let over =
-            (r.one_time_codes && flagged_codes > n) || (r.earlier_content && earlier_content > n);
+        let over = |on: bool, n: Option<u64>, count: u64| on && n.is_none_or(|n| count > n);
+        let over = over(r.one_time_codes, r.codes_confirmed_up_to, flagged_codes)
+            || over(
+                r.earlier_content,
+                r.earlier_confirmed_up_to,
+                earlier_content,
+            );
         if over {
             Err(ExportError::ConfirmationStale)
         } else {
@@ -510,7 +532,7 @@ mod tests {
         );
         assert_eq!(
             refusal(with(
-                &|o| o.reveal.confirmed_up_to = Some(3),
+                &|o| o.reveal.codes_confirmed_up_to = Some(3),
                 &[Format::Txt]
             )),
             PlanRefusal::ConfirmationWithoutReveal
@@ -539,17 +561,36 @@ mod tests {
         assert_eq!(p.reveal(), Reveal::default());
         assert!(p.check_confirmation(100, 100).is_ok());
         let mut o = ExportOptions::defaults(&conv(), &[Format::Txt]);
-        o.reveal = RevealPlan {
-            one_time_codes: true,
-            earlier_content: false,
-            confirmed_up_to: Some(3),
-        };
+        o.reveal = RevealPlan::confirmed(Some(3), None);
         let p = ExportPlan::new(conv(), vec![Format::Txt], o).expect("plan");
         assert!(p.reveal().one_time_code && !p.reveal().earlier_text);
         assert!(p.check_confirmation(3, 99).is_ok());
         assert!(matches!(
             p.check_confirmation(4, 0),
             Err(ExportError::ConfirmationStale)
+        ));
+        // Both reveals: each count against its own N, never the other's.
+        o.reveal = RevealPlan::confirmed(Some(2), Some(40));
+        let p = ExportPlan::new(conv(), vec![Format::Txt], o).expect("plan");
+        assert!(p.check_confirmation(2, 40).is_ok());
+        assert!(matches!(
+            p.check_confirmation(3, 40),
+            Err(ExportError::ConfirmationStale)
+        ));
+        assert!(matches!(
+            p.check_confirmation(2, 41),
+            Err(ExportError::ConfirmationStale)
+        ));
+        // One reveal on with only the other's count is refused.
+        o.reveal = RevealPlan {
+            one_time_codes: true,
+            earlier_content: true,
+            codes_confirmed_up_to: Some(2),
+            earlier_confirmed_up_to: None,
+        };
+        assert!(matches!(
+            ExportPlan::new(conv(), vec![Format::Txt], o),
+            Err(ExportError::Plan(PlanRefusal::RevealNotConfirmed))
         ));
         assert_eq!(format!("{:?}", p.scope()), "conversation");
     }

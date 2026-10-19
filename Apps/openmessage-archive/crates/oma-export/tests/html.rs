@@ -302,11 +302,7 @@ fn revealed_content_is_exported_only_with_the_reveal() {
         let d = files::dest();
         let reveal = |o: &mut ExportOptions| {
             o.history = true;
-            o.reveal = RevealPlan {
-                one_time_codes: true,
-                earlier_content: true,
-                confirmed_up_to: Some(u64::MAX),
-            };
+            o.reveal = RevealPlan::confirmed(Some(u64::MAX), Some(u64::MAX));
         };
         export_html(
             &i,
@@ -904,6 +900,37 @@ fn write_oracle_html() {
                 "bundle": format!("{}/{kind}/{BUNDLE}", doc.name),
             }));
         }
+        // The positive control: with history and both reveals, every
+        // masking sentinel must be found (the oracle checks only that).
+        if doc.export.is_some() {
+            let dest = out.join(&doc.name).join("revealed");
+            std::fs::create_dir_all(&dest).expect("dest");
+            let reveal = |o: &mut ExportOptions| {
+                o.history = true;
+                o.attachments = AttachmentMode::CopyOriginals;
+                o.reveal = RevealPlan::confirmed(Some(u64::MAX), Some(u64::MAX));
+            };
+            export_with(
+                &i,
+                &dest,
+                ScopePlan::Archive,
+                &[Format::Json, Format::Html],
+                &reveal,
+                BUNDLE,
+                None,
+                &ExportZone::Utc,
+                vec![
+                    Box::new(HtmlWriter::new()),
+                    Box::new(oma_export::writer::json::JsonWriter::new()),
+                ],
+            )
+            .unwrap_or_else(|e| panic!("{}: {e:?}", doc.name));
+            bundles.push(serde_json::json!({
+                "kind": "revealed",
+                "markers": true,
+                "bundle": format!("{}/revealed/{BUNDLE}", doc.name),
+            }));
+        }
         let export = doc.export.as_ref().map(|_| match doc.name.as_str() {
             "history" => "scenarios/history.export.json".to_owned(),
             n => format!("{n}.expected/export.json"),
@@ -1053,6 +1080,145 @@ fn the_feed_sends_verified_image_bytes_with_or_without_copies() {
         total += seen[0].len();
     }
     assert!(total >= 2, "{total}");
+}
+
+/// A folded reaction row (here a sticker tapback with an image file) is
+/// written whole but shows no image: nothing of it is read or sent to the
+/// helpers, so every image offered is one the writer embeds. The pre-count
+/// counts the folded message once, so one conversation has no
+/// cross-conversation row.
+#[test]
+fn a_folded_rows_image_is_never_sent_to_the_helpers() {
+    let doc = doc("view-media-plain");
+    let i = imported(&doc);
+    {
+        let c = rusqlite::Connection::open(i.db()).expect("raw open");
+        // A keyed message `a` and another `b` of the same chat; `b` becomes
+        // a sticker reaction (kind 17) on `a` and gets an image file.
+        let (a, b): (i64, i64) = c
+            .query_row(
+                "SELECT ma.id, mb.id FROM chat_message x \
+                   JOIN chat_message y ON y.chat_id = x.chat_id AND y.message_id > x.message_id \
+                   JOIN message ma ON ma.id = x.message_id JOIN message mb ON mb.id = y.message_id \
+                 WHERE ma.assoc_present = 0 AND mb.assoc_present = 0 AND ma.key_kind = 1 \
+                   AND NOT EXISTS (SELECT 1 FROM message WHERE assoc_target_guid = mb.guid) \
+                 ORDER BY x.message_id LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("two messages");
+        c.execute(
+            "UPDATE message SET assoc_present = 1, assoc_kind = 17, \
+               assoc_target_guid = (SELECT guid FROM message WHERE id = ?1) WHERE id = ?2",
+            [a, b],
+        )
+        .expect("reaction");
+        let n = c
+            .execute(
+                "INSERT OR IGNORE INTO message_attachment (message_id, attachment_id, ord_rank, \
+                   ord_rowid, first_session_id, last_session_id, last_rank) \
+                 SELECT ?1, ma.attachment_id, ma.ord_rank, ma.ord_rowid, ma.first_session_id, \
+                   ma.last_session_id, ma.last_rank FROM message_attachment ma \
+                   JOIN attachment t ON t.id = ma.attachment_id \
+                 WHERE t.current_blob_id IS NOT NULL AND t.mime_type LIKE 'image/%' \
+                 ORDER BY ma.attachment_id LIMIT 1",
+                [b],
+            )
+            .expect("sticker file");
+        assert_eq!(n, 1, "an image file");
+    }
+    let d = files::dest();
+    let pool = FakePool::new(Some(ready_png()));
+    let (r, feed) = export_fed(
+        &i,
+        &d.parent,
+        true,
+        false,
+        Arc::clone(&pool),
+        oma_archive::CancelToken::new(),
+    );
+    let report = r.expect("export");
+    let given = pool.given.lock().expect("lock").len() as u64;
+    assert!(given >= 1);
+    assert_eq!(report.writers[0].counts["previewsEmbedded"], given);
+    assert_eq!(feed.submitted(), given, "nothing sent that is not shown");
+    let m = json(&d.parent.join(BUNDLE).join("manifest.json"));
+    assert_eq!(m["counts"]["foldedReactionRows"], 1);
+    assert_eq!(m["counts"]["crossConversationRows"], 0);
+    assert_eq!(m["counts"]["distinctMessages"], m["counts"]["timelineRows"]);
+}
+
+/// An attachment revealed by the earlier-content opt-in gets its preview,
+/// like an included one (§3.8: revealed in copies and previews alike).
+#[test]
+fn a_revealed_attachment_gets_its_preview() {
+    let doc = doc("view-media-plain");
+    let i = imported(&doc);
+    {
+        // Every part of an image message's current body is unsent: its
+        // image is withheld, or revealed with earlier content.
+        let c = rusqlite::Connection::open(i.db()).expect("raw open");
+        let body: i64 = c
+            .query_row(
+                "SELECT m.current_body_id FROM message m                    JOIN message_attachment ma ON ma.message_id = m.id                    JOIN attachment t ON t.id = ma.attachment_id                  WHERE m.current_body_id IS NOT NULL AND t.current_blob_id IS NOT NULL                    AND t.mime_type LIKE 'image/%' ORDER BY m.id LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("an image message");
+        let mut parts: Vec<i64> = c
+            .prepare(
+                "SELECT DISTINCT part_index FROM message_body_part                  WHERE body_id = ?1 AND part_index IS NOT NULL",
+            )
+            .expect("prepare")
+            .query_map([body], |r| r.get(0))
+            .expect("parts")
+            .collect::<Result<_, _>>()
+            .expect("rows");
+        if parts.is_empty() {
+            parts.push(0);
+        }
+        for (n, part) in parts.iter().enumerate() {
+            c.execute(
+                "INSERT INTO message_unsent_part (body_id, ordinal, part) VALUES (?1, ?2, ?3)",
+                rusqlite::params![body, n as i64, part],
+            )
+            .expect("unsent part");
+        }
+    }
+    let mut offered = Vec::new();
+    for reveal in [false, true] {
+        let d = files::dest();
+        let pool = FakePool::new(Some(ready_png()));
+        let feed = oma_export::preview::PreviewFeed::new(
+            Arc::clone(&pool) as Arc<dyn oma_export::preview::RenditionPool>,
+            false,
+            oma_archive::CancelToken::new(),
+        );
+        let tweak = move |o: &mut ExportOptions| {
+            o.attachments = AttachmentMode::CopyOriginals;
+            o.previews = true;
+            if reveal {
+                o.reveal = RevealPlan::confirmed(None, Some(u64::MAX));
+            }
+        };
+        let report = export_with_previews(
+            &i,
+            &d.parent,
+            ScopePlan::Archive,
+            &[Format::Html],
+            &tweak,
+            BUNDLE,
+            None,
+            &ExportZone::Utc,
+            vec![Box::new(HtmlWriter::with_previews(feed.source())) as Box<dyn ExportWriter>],
+            Some(feed.clone()),
+        )
+        .expect("export");
+        let given = pool.given.lock().expect("lock").len() as u64;
+        assert_eq!(report.writers[0].counts["previewsEmbedded"], given);
+        offered.push(given);
+    }
+    assert!(offered[1] > offered[0], "{offered:?}");
 }
 
 /// After three helper crashes in a row previews are off: the rest are

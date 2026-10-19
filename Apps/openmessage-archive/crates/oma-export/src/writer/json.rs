@@ -490,7 +490,7 @@ mod tests {
     fn the_shipped_schemas_are_json_with_their_ids() {
         for (text, id) in [
             (EXPORT_SCHEMA, "urn:openmessage-archive:export:1"),
-            (STRICT_SCHEMA, "urn:openmessage-archive:export:1.0.0:strict"),
+            (STRICT_SCHEMA, "urn:openmessage-archive:export:1.1.0:strict"),
             (MANIFEST_SCHEMA, "urn:openmessage-archive:export-manifest:1"),
         ] {
             let v: serde_json::Value = serde_json::from_str(text).expect("schema");

@@ -718,7 +718,11 @@ impl HtmlWriter {
     fn pics(&mut self, it: &ItemRecord) -> Result<Vec<Pic>, ExportError> {
         let mut out = Vec::with_capacity(it.attachments.len());
         for a in &it.attachments {
-            let asked = self.previews && is(a.access, AttachmentAccessCode::Included);
+            // Included, or revealed by the earlier-content opt-in; never a
+            // withheld file.
+            let asked = self.previews
+                && (is(a.access, AttachmentAccessCode::Included)
+                    || is(a.access, AttachmentAccessCode::Revealed));
             let p = match (asked, self.source.as_mut()) {
                 (true, Some(src)) => src.renditions(a, self.larger)?,
                 _ => Preview::None,
@@ -1411,7 +1415,7 @@ impl HtmlWriter {
                 h,
                 &format!("{label} {}", self.words.say("withheldReason", *reason)),
             ),
-            VersionTextRecord::NoText { reason } => HtmlWriter::note(
+            VersionTextRecord::NoText { reason, .. } => HtmlWriter::note(
                 h,
                 &format!("{label} {}", self.words.say("noTextReason", *reason)),
             ),

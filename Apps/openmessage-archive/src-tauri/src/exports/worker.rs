@@ -95,12 +95,27 @@ fn invalid(sentence: &str) -> IpcError {
     IpcError::new(ErrorCode::InvalidInput, sentence)
 }
 
+/// One reveal's confirmation: required exactly when the reveal is on, and
+/// equal to the count the draft's preview made (never a number the
+/// webview chose): a different one is `exportConfirmationStale`.
+fn confirmed_count(on: bool, given: Option<u64>, counted: u64) -> IpcResult<Option<u64>> {
+    match (on, given) {
+        (false, None) => Ok(None),
+        (true, Some(n)) if n == counted => Ok(Some(n)),
+        (true, Some(_)) => Err(em::stale()),
+        _ => Err(invalid(em::REVEAL_NOT_CONFIRMED)),
+    }
+}
+
 /// Check `confirmations` against `draft` (taken from the slot): it must be
-/// counted, have its zone and a destination; a reveal needs its count, an
-/// unconfirmed reveal is refused; kept extensions must be confirmed;
-/// every destination warning that needs it must be confirmed; an existing
-/// single file is replaced only when confirmed.
+/// counted, have its zone and a destination; each reveal that is on needs
+/// its own count, equal to the draft's, and a reveal that is off none;
+/// kept extensions must be confirmed; every destination warning that
+/// needs it must be confirmed; an existing single file is replaced only
+/// when confirmed. The draft's preview count is stopped whatever happens
+/// (it is consumed here).
 pub fn prepare(draft: Draft, c: &ExportConfirmationsInput) -> IpcResult<Prepared> {
+    draft.count.cancel();
     let Draft {
         archive,
         spec,
@@ -113,15 +128,27 @@ pub fn prepare(draft: Draft, c: &ExportConfirmationsInput) -> IpcResult<Prepared
     let (Some(counted), Some(zone), Some(chosen)) = (counted, zone, chosen) else {
         return Err(invalid(em::NOT_PREPARED));
     };
-    let confirmed = match (spec.options.reveal.any(), c.reveal) {
-        (true, Some(r)) => Some(r.confirmed_up_to),
-        (false, None) => None,
+    let r = spec.options.reveal;
+    let (codes, earlier) = match (r.any(), c.reveal) {
+        (false, None) => (None, None),
+        (true, Some(given)) => (
+            confirmed_count(
+                r.one_time_codes,
+                given.one_time_codes,
+                counted.preview.messages_with_flagged_code,
+            )?,
+            confirmed_count(
+                r.earlier_content,
+                given.earlier_content,
+                counted.preview.messages_with_earlier_content,
+            )?,
+        ),
         _ => return Err(invalid(em::REVEAL_NOT_CONFIRMED)),
     };
     if c.keep_risky_extension != spec.options.keep_extensions {
         return Err(invalid(em::EXTENSIONS_NOT_CONFIRMED));
     }
-    let plan = spec.plan(confirmed).map_err(|e| em::to_ipc(&e))?;
+    let plan = spec.plan(codes, earlier).map_err(|e| em::to_ipc(&e))?;
     let unconfirmed = chosen
         .warnings
         .iter()
@@ -232,7 +259,8 @@ fn writers(
         .collect()
 }
 
-/// The manifest's facts of a search scope (never the query).
+/// The manifest's facts of a search scope (never the query, never the
+/// excluded count or anything that gives it: see [`SearchFacts`]).
 fn search_facts(s: &DraftSearch, sc: &oma_archive::SearchScope, ran: SearchRan) -> SearchFacts {
     let f = &s.request.filters;
     let mut kinds = Vec::new();
@@ -262,9 +290,11 @@ fn search_facts(s: &DraftSearch, sc: &oma_archive::SearchScope, ran: SearchRan) 
         filter_kinds: kinds,
         include_earlier_for_matching: s.request.include_earlier,
         matches_written: sc.kept,
-        capped: sc.capped,
-        newest_kept: sc.newest_kept,
-        coverage_complete: sc.coverage_complete,
+        may_be_incomplete: SearchFacts::may_be_incomplete(
+            sc.capped,
+            sc.coverage_complete,
+            sc.excluded.total(),
+        ),
         all_matches: s.all_matches,
     }
 }

@@ -33,7 +33,7 @@
       "const": "1.0.0"
     },
     "schemaVersion": {
-      "const": "1.0.0"
+      "const": "1.1.0"
     },
     "tabularColumnsVersion": {
       "type": "string"
@@ -167,7 +167,8 @@
           "required": [
             "oneTimeCodes",
             "earlierContent",
-            "confirmedUpTo"
+            "oneTimeCodesConfirmedUpTo",
+            "earlierContentConfirmedUpTo"
           ],
           "properties": {
             "oneTimeCodes": {
@@ -176,7 +177,18 @@
             "earlierContent": {
               "type": "boolean"
             },
-            "confirmedUpTo": {
+            "oneTimeCodesConfirmedUpTo": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "earlierContentConfirmedUpTo": {
               "anyOf": [
                 {
                   "type": "integer",
@@ -534,9 +546,7 @@
             "filterKinds",
             "includeEarlierForMatching",
             "matchesWritten",
-            "capped",
-            "newestKept",
-            "coverageComplete",
+            "mayBeIncomplete",
             "allMatches"
           ],
           "properties": {
@@ -556,13 +566,7 @@
               "type": "integer",
               "minimum": 0
             },
-            "capped": {
-              "type": "boolean"
-            },
-            "newestKept": {
-              "type": "boolean"
-            },
-            "coverageComplete": {
+            "mayBeIncomplete": {
               "type": "boolean"
             },
             "allMatches": {

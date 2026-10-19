@@ -56,6 +56,10 @@ sys.dont_write_bytecode = True
 import project_archive  # noqa: E402  (open_copy and rows only)
 
 FIXTURES = HERE.parent.parent / "tests" / "fixtures"
+# Floors of the masking scan (see `main`): the export catalogue's entries
+# with sentinels, and their distinct (kind, sentinel) pairs.
+MIN_EXPORT_ENTRIES = 7
+MIN_SENTINELS = 14
 
 FIRST = "OpenMessage Archive export — plaintext copy. See the end of this file for details."
 OPEN, CLOSE = "⟨", "⟩"
@@ -254,7 +258,7 @@ def normalise(t):
         .replace(" ", "\n").replace("\u0085", "\n")
 
 
-def check_export(root, entry, fails):
+def check_export(root, entry, fails, seen):
     name = entry["name"]
     ok = fails.check
     bundle = root / entry["bundle"]
@@ -343,7 +347,8 @@ def check_export(root, entry, fails):
                f"{name}: one file per conversation with rows, and one for the rest")
         finally:
             con.close()
-    # Masking: no sentinel anywhere, raw or unmarked.
+    # Masking: no sentinel anywhere, raw or unmarked; and the positive
+    # control, every sentinel in the bundle exported with both reveals.
     if entry.get("export"):
         doc = load(FIXTURES / entry["catalogue"] / entry["export"])
         blob = b"".join(p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file())
@@ -352,6 +357,20 @@ def check_export(root, entry, fails):
             for s in v:
                 bs = s.encode("utf-8")
                 ok(bs not in blob and bs not in unmarked, f"{name}: sentinel {k} not exported")
+                seen["masked"].add((k, s))
+        ok(entry.get("revealed") is not None, f"{name}: the revealed bundle (positive control)")
+        if entry.get("revealed"):
+            rb = root / entry["revealed"]
+            rblob = b"".join(p.read_bytes() for p in sorted(rb.rglob("*")) if p.is_file())
+            runmarked = unmark(rblob.decode("utf-8", "replace")).encode("utf-8")
+            for k, v in doc["sentinels"].items():
+                for s in v:
+                    bs = s.encode("utf-8")
+                    found = bs in rblob or bs in runmarked
+                    ok(found, f"{name}: sentinel {k} not found with both reveals")
+                    if found:
+                        seen["revealed"].add((k, s))
+        seen["entries"] += 1
     return texts_compared
 
 
@@ -364,9 +383,16 @@ def main():
     fails = Failures()
     fails.check(listing["format"] == "oma-oracle-txt", "txt-oracle.json format")
     compared = 0
+    seen = {"masked": set(), "revealed": set(), "entries": 0}
     for entry in listing["exports"]:
-        compared += check_export(root, entry, fails)
+        compared += check_export(root, entry, fails, seen)
     fails.check(len(listing["exports"]) >= 20, "every catalogue entry exported")
+    # Floors: a listing without its `export` statements cannot pass with no
+    # masking check (the export catalogue's entries and their sentinels).
+    fails.check(seen["entries"] >= MIN_EXPORT_ENTRIES, f"entries with masking sentinels: {seen['entries']}")
+    fails.check(len(seen["masked"]) >= MIN_SENTINELS, f"sentinels scanned for: {len(seen['masked'])}")
+    fails.check(len(seen["revealed"]) >= MIN_SENTINELS,
+                f"sentinels found with both reveals: {len(seen['revealed'])}")
     fails.check(compared >= 100, "item texts compared")
     print(f"txt: {len(listing['exports'])} exports, {compared} item texts compared; "
           f"{fails.checks} checks, {len(fails.items)} failed")

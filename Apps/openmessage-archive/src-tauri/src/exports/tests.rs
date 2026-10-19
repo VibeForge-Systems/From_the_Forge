@@ -591,6 +591,74 @@ fn a_draft_counts_exactly_replaces_the_last_and_expires() {
     assert!(!host.has_draft());
 }
 
+/// A draft that leaves the slot any way but a successful start stops its
+/// count: `take` of an expired draft, a stale destination token, and a
+/// `start_export` refused because the count is still running. A count
+/// whose draft is gone, but was not stopped, answers `failed` with
+/// `exportDraftExpired` instead of nothing; `take` never takes another
+/// draft than the one named.
+#[test]
+fn drafts_that_leave_the_slot_stop_their_count_and_counts_always_answer() {
+    let f = fx();
+    let clock = Arc::new(FakeClock::default());
+    let host = ExportHost::with_clock(clock.clone());
+    let viewer = crate::viewer::ViewerHost::default();
+    let req = preview_req(archive_scope(&f), json!(["txt"]), json!({})).expect("req");
+    // A start refused because the count has not finished: the draft is
+    // consumed and its count stopped.
+    let work = begin_preview(&host, &viewer, &req, NOW_MS).expect("draft");
+    let e = worker::prepare(
+        host.take(&work.draft).expect("draft"),
+        &confirmations(json!({})),
+    )
+    .expect_err("not counted");
+    assert_eq!(e.message, messages::NOT_PREPARED);
+    assert!(work.token.is_cancelled(), "the count was stopped");
+    // A stale token: stopped too.
+    let work = begin_preview(&host, &viewer, &req, NOW_MS).expect("draft");
+    let other = DestinationToken::random().expect("token");
+    assert_eq!(
+        host.take_for_start(&work.draft, &other)
+            .expect_err("no destination")
+            .code,
+        ErrorCode::ExportConfirmationStale
+    );
+    assert!(work.token.is_cancelled());
+    // `take` of a draft that is not in the slot takes nothing.
+    let a = begin_preview(&host, &viewer, &req, NOW_MS).expect("draft");
+    let b = begin_preview(&host, &viewer, &req, NOW_MS).expect("draft");
+    assert!(host.take(&a.draft).is_err());
+    assert!(host.has_draft(), "b is still there");
+    assert!(!b.token.is_cancelled());
+    // An expired draft: dropped by `take`, its count stopped.
+    clock.0.store(30 * 60 * 1000, Ordering::SeqCst);
+    assert_eq!(
+        host.take(&b.draft).expect_err("expired").code,
+        ErrorCode::ExportDraftExpired
+    );
+    assert!(b.token.is_cancelled() && !host.has_draft());
+    // A count that outlived its draft (here: the slot emptied without
+    // stopping it) still answers.
+    let work = begin_preview(&host, &viewer, &req, 30 * 60 * 1000).expect("draft");
+    let id = work.draft.clone();
+    let fresh = CancelToken::new();
+    let work = CountWork {
+        token: fresh,
+        ..work
+    };
+    host.discard(&id);
+    let mut events = Vec::new();
+    run_count(&host, &env(), &f.library, work, NOW_MS, &mut |e| {
+        events.push(e)
+    });
+    match events.last() {
+        Some(PreviewEvent::Failed { code, .. }) => {
+            assert_eq!(*code, ErrorCode::ExportDraftExpired)
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
 /// `close_viewer`, idle hide (which closes the viewer) and `hide_viewer`
 /// each discard the draft and stop its count (§9.2).
 #[test]
@@ -910,7 +978,7 @@ fn start_checks_every_confirmation() {
     assert_eq!(e.message, messages::NOT_PREPARED);
     let e = worker::prepare(
         take(&plain, true),
-        &confirmations(json!({ "reveal": { "confirmedUpTo": 1 } })),
+        &confirmations(json!({ "reveal": { "oneTimeCodes": 1 } })),
     )
     .expect_err("reveal off");
     assert_eq!(e.message, messages::REVEAL_NOT_CONFIRMED);
@@ -1124,10 +1192,12 @@ fn an_export_holds_the_lock_and_publishes() {
     assert_eq!(host.finished_folder("job-999"), None);
 }
 
-/// A recount under the lock over the confirmed N stops the job before any
-/// file exists; with the right N the code is written.
+/// The confirmed N must be the draft's own count, never a number the
+/// webview chose: a smaller, larger or huge one is refused as stale before
+/// any job starts or any file exists; with the counted N the code is
+/// written and the manifest records it.
 #[test]
-fn a_recount_over_the_confirmed_count_refuses_before_any_file() {
+fn a_confirmed_count_other_than_the_drafts_refuses_before_any_file() {
     let f = fx();
     let host = Arc::new(ExportHost::default());
     let jobs = Jobs::default();
@@ -1137,28 +1207,33 @@ fn a_recount_over_the_confirmed_count_refuses_before_any_file() {
         json!({ "revealOneTimeCodes": true }),
     )
     .expect("req");
-    let (id, preview) = chosen(&host, &f, &req);
+    let (_, preview) = chosen(&host, &f, &req);
     let n = preview.messages_with_flagged_code;
     assert!(n >= 1);
-    let events = run_job(
-        &host,
-        &jobs,
-        &f,
-        &id,
-        confirmations(json!({ "reveal": { "confirmedUpTo": n - 1 } })),
-        false,
-    )
-    .expect("ran");
-    match events.last() {
-        Some(JobEvent::Failed {
-            error,
-            staging_removed,
-            ..
-        }) => {
-            assert_eq!(error.code, ErrorCode::ExportConfirmationStale);
-            assert!(*staging_removed);
-        }
-        other => panic!("{other:?}"),
+    for wrong in [json!(n - 1), json!(n + 1), json!(u64::MAX)] {
+        let (id, _) = chosen(&host, &f, &req);
+        let e = run_job(
+            &host,
+            &jobs,
+            &f,
+            &id,
+            confirmations(json!({ "reveal": { "oneTimeCodes": wrong } })),
+            false,
+        )
+        .expect_err("stale");
+        assert_eq!(e.code, ErrorCode::ExportConfirmationStale, "{wrong}");
+        // The other reveal's count is not a confirmation of this one.
+        let (id, _) = chosen(&host, &f, &req);
+        let e = run_job(
+            &host,
+            &jobs,
+            &f,
+            &id,
+            confirmations(json!({ "reveal": { "earlierContent": n } })),
+            false,
+        )
+        .expect_err("the wrong reveal");
+        assert_eq!(e.message, messages::REVEAL_NOT_CONFIRMED);
     }
     assert!(entries(&f.dest).is_empty(), "nothing was written");
     let (id, _) = chosen(&host, &f, &req);
@@ -1167,7 +1242,7 @@ fn a_recount_over_the_confirmed_count_refuses_before_any_file() {
         &jobs,
         &f,
         &id,
-        confirmations(json!({ "reveal": { "confirmedUpTo": n } })),
+        confirmations(json!({ "reveal": { "oneTimeCodes": n } })),
         false,
     )
     .expect("ran");
@@ -1181,6 +1256,74 @@ fn a_recount_over_the_confirmed_count_refuses_before_any_file() {
         String::from_utf8_lossy(&bytes).contains("SYNTH-OTC-482913"),
         "revealed"
     );
+}
+
+/// Both reveals at once: each is confirmed against its own count (one N
+/// for both is stale unless the counts are equal), and the manifest
+/// records both.
+#[test]
+fn both_reveals_are_each_confirmed_against_their_own_count() {
+    let f = fx();
+    let host = Arc::new(ExportHost::default());
+    let jobs = Jobs::default();
+    let req = preview_req(
+        archive_scope(&f),
+        json!(["json"]),
+        json!({ "revealOneTimeCodes": true, "revealEarlierContent": true }),
+    )
+    .expect("req");
+    let (_, p) = chosen(&host, &f, &req);
+    let (nc, ne) = (
+        p.messages_with_flagged_code,
+        p.messages_with_earlier_content,
+    );
+    assert!(nc >= 1);
+    // The larger count stands for neither of them unless they are equal.
+    let one = nc.max(ne) + 1;
+    let (id, _) = chosen(&host, &f, &req);
+    let e = run_job(
+        &host,
+        &jobs,
+        &f,
+        &id,
+        confirmations(json!({ "reveal": { "oneTimeCodes": one, "earlierContent": one } })),
+        false,
+    )
+    .expect_err("one N for both");
+    assert_eq!(e.code, ErrorCode::ExportConfirmationStale);
+    // Only one of the two confirmed.
+    let (id, _) = chosen(&host, &f, &req);
+    let e = run_job(
+        &host,
+        &jobs,
+        &f,
+        &id,
+        confirmations(json!({ "reveal": { "oneTimeCodes": nc } })),
+        false,
+    )
+    .expect_err("earlier content unconfirmed");
+    assert_eq!(e.message, messages::REVEAL_NOT_CONFIRMED);
+    let (id, _) = chosen(&host, &f, &req);
+    let events = run_job(
+        &host,
+        &jobs,
+        &f,
+        &id,
+        confirmations(json!({ "reveal": { "oneTimeCodes": nc, "earlierContent": ne } })),
+        false,
+    )
+    .expect("ran");
+    assert!(
+        matches!(events.last(), Some(JobEvent::ExportFinished { .. })),
+        "{events:?}"
+    );
+    let names = entries(&f.dest);
+    let m: Value = serde_json::from_slice(
+        &std::fs::read(f.dest.join(&names[0]).join("manifest.json")).expect("manifest"),
+    )
+    .expect("json");
+    assert_eq!(m["options"]["reveal"]["oneTimeCodesConfirmedUpTo"], nc);
+    assert_eq!(m["options"]["reveal"]["earlierContentConfirmedUpTo"], ne);
 }
 
 /// A cancel while the messages are written: `removingPartial`, then
@@ -1330,6 +1473,15 @@ fn a_search_scope_exports_the_live_set() {
     )
     .expect("json");
     assert_eq!(manifest["search"]["mode"], "exact");
+    // Nothing that gives the excluded count away with a public cap (§3.6).
+    let facts = manifest["search"].as_object().expect("search");
+    for k in ["capped", "newestKept", "coverageComplete"] {
+        assert!(!facts.contains_key(k), "{k}");
+    }
+    assert_eq!(
+        manifest["search"]["mayBeIncomplete"],
+        s.capped || !s.coverage_complete || started.total > s.kept
+    );
     assert!(
         !manifest.to_string().contains("\"SYNTH\""),
         "no query in the manifest"

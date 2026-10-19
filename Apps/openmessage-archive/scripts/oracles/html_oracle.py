@@ -66,6 +66,12 @@ sys.dont_write_bytecode = True
 
 APP = HERE.parent.parent
 FIXTURES = APP / "tests" / "fixtures"
+SENTINEL_KINDS = ("oneTimeCodes", "earlierText", "editText", "subjectHistory", "alternativeText",
+                  "unsentAttachmentFiles")
+# Floors of the masking scan (see `main`): the export catalogue's entries
+# with sentinels, and their distinct (kind, sentinel) pairs.
+MIN_EXPORT_ENTRIES = 7
+MIN_SENTINELS = 14
 FFFC = "￼"
 
 ELEMENTS = {
@@ -97,6 +103,7 @@ class Failures:
         self.checks += 1
         if not ok:
             self.items.append(what)
+        return ok
 
 
 def load(path):
@@ -382,10 +389,30 @@ def check_bundle(name, b, csp, export, fails, counts):
     if export is not None:
         blob = b"\n".join((p.read_bytes() for p in bundle.rglob("*") if p.is_file()))
         text = "\n".join(decoded)
-        for k in ("oneTimeCodes", "earlierText", "editText", "subjectHistory", "alternativeText",
-                  "unsentAttachmentFiles"):
+        for k in SENTINEL_KINDS:
             for s in export["sentinels"][k]:
                 fails.check(s.encode("utf-8") not in blob and s not in text, f"{what}: a {k} sentinel leaked")
+                counts["masked"].add((k, s))
+
+
+def check_revealed(name, b, export, fails, counts):
+    """The positive control: the bundle exported with history and both
+    reveals holds every sentinel, in its bytes or its decoded text."""
+    import html5lib
+    bundle = b["root"]
+    verify_sums(bundle, f"{name}/revealed", fails)
+    blob = b"\n".join((p.read_bytes() for p in bundle.rglob("*") if p.is_file()))
+    texts = []
+    for page in sorted((bundle / "html").glob("*.html")):
+        doc = html5lib.parse(page.read_text(encoding="utf-8"), namespaceHTMLElements=False)
+        texts.append(text_of(doc))
+    text = "\n".join(texts)
+    for k in SENTINEL_KINDS:
+        for s in export["sentinels"][k]:
+            found = s.encode("utf-8") in blob or s in text
+            fails.check(found, f"{name}: a {k} sentinel not found with both reveals")
+            if found:
+                counts["revealed"].add((k, s))
 
 
 def main():
@@ -404,18 +431,34 @@ def main():
     fails.check(csp == "default-src 'none'; img-src data:; style-src 'sha256-"
                 + csp.split("'sha256-")[1].split("'")[0]
                 + "'; base-uri 'none'; form-action 'none'", "the policy's shape")
-    counts = {"pages": 0, "items": 0, "images": 0, "item_links": 0}
+    counts = {"pages": 0, "items": 0, "images": 0, "item_links": 0, "masked": set(), "revealed": set()}
     bundles = 0
+    with_export = 0
     for e in listing["exports"]:
         export = load(FIXTURES / e["catalogue"] / e["export"]) if e["export"] else None
+        if export is not None:
+            with_export += 1
+            fails.check(any(b["kind"] == "revealed" for b in e["bundles"]),
+                        f"{e['name']}: the revealed bundle (positive control)")
         for b in e["bundles"]:
             b = dict(b, root=root / b["bundle"])
+            if b["kind"] == "revealed":
+                if fails.check(export is not None, f"{e['name']}: a revealed bundle without sentinels"):
+                    check_revealed(e["name"], b, export, fails, counts)
+                continue
             check_bundle(e["name"], b, csp, export, fails, counts)
             bundles += 1
     fails.check(bundles >= 40, "every catalogue entry exported twice")
+    # Floors: a listing that lost its `export` statements cannot pass with
+    # no masking check.
+    fails.check(with_export >= MIN_EXPORT_ENTRIES, f"entries with masking sentinels: {with_export}")
+    fails.check(len(counts["masked"]) >= MIN_SENTINELS, f"sentinels scanned for: {len(counts['masked'])}")
+    fails.check(len(counts["revealed"]) >= MIN_SENTINELS,
+                f"sentinels found with both reveals: {len(counts['revealed'])}")
     fails.check(counts["images"] >= 2 and counts["item_links"] >= 1, "previews and reply links exercised")
     print(f"{bundles} bundles, {counts['pages']} pages, {counts['items']} items, {counts['images']} images, "
-          f"{counts['item_links']} item links; {fails.checks} checks, {len(fails.items)} failed")
+          f"{counts['item_links']} item links, {len(counts['masked'])} sentinels scanned for, "
+          f"{len(counts['revealed'])} found revealed; {fails.checks} checks, {len(fails.items)} failed")
     for f in fails.items[:50]:
         print(f"FAIL {f}")
     return 1 if fails.items else 0

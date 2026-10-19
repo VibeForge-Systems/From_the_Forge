@@ -268,6 +268,119 @@ fn cancel_removes_exactly_what_was_created_and_drop_cleans_up_too() {
     nothing_beside(&d);
 }
 
+/// A file of our own that cannot be removed keeps the marker (unlocked),
+/// so the folder stays a marked leftover the sweep offers and removes.
+#[test]
+fn a_failed_cleanup_keeps_the_marker_so_the_sweep_can_finish_it() {
+    let d = dest();
+    let mut s = Staging::bundle(&d.parent).expect("staging");
+    write(&mut s, &txt(1), b"plaintext");
+    write(&mut s, &txt(2), b"plaintext");
+    let staging = d.parent.join(s.entry().to_name());
+    // Our second file is now something its removal cannot take (as a
+    // handle held past the retries would leave it).
+    let stuck = staging.join(txt(2).to_slash());
+    std::fs::remove_file(&stuck).expect("rm");
+    std::fs::create_dir(&stuck).expect("mkdir");
+    std::fs::write(stuck.join("inner"), b"x").expect("inner");
+    assert!(!s.remove(), "not removed");
+    assert!(staging.join(MARKER).is_file(), "the marker stays");
+    // Unlocked and marked: offered by the sweep, which removes it all.
+    let scan = find_leftovers(&d.parent, Duration::ZERO).expect("scan");
+    assert_eq!(scan.found.len(), 1, "{scan:?}");
+    assert!(scan.found[0].has_marker);
+    let report = remove_leftovers(&d.parent, &scan.found);
+    assert_eq!((report.removed, report.failed), (1, 0));
+    assert!(tree(&d.parent).is_empty());
+    nothing_beside(&d);
+}
+
+/// The sweep's age rule tracks a running bundle: every batch moves the
+/// marker's modification time forward (for file systems without locks).
+#[cfg(unix)]
+#[test]
+fn every_batch_refreshes_the_marker_time() {
+    use std::time::SystemTime;
+    let d = dest();
+    let mut s = Staging::bundle(&d.parent).expect("staging");
+    let marker = d.parent.join(s.entry().to_name()).join(MARKER);
+    let hour_ago = SystemTime::now() - Duration::from_secs(3_600);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&marker)
+        .expect("open")
+        .set_modified(hour_ago)
+        .expect("set");
+    let age = |p: &Path| {
+        SystemTime::now()
+            .duration_since(std::fs::metadata(p).expect("meta").modified().expect("m"))
+            .unwrap_or_default()
+    };
+    assert!(age(&marker) >= Duration::from_secs(3_500));
+    write(&mut s, &txt(1), b"x");
+    s.sync_batch().expect("batch");
+    assert!(age(&marker) < SWEEP_MIN_AGE, "refreshed");
+    assert!(s.remove());
+}
+
+/// Closed files and subfolder handles stay bounded however many copies a
+/// batch makes (RLIMIT_NOFILE), and a folder whose handle was closed is
+/// reopened when a file goes into it again.
+#[test]
+fn held_handles_stay_bounded_in_a_large_batch() {
+    use oma_export::naming::attachment_name;
+    use oma_export::stage::{MAX_OPEN_SUBDIRS, MAX_UNSYNCED};
+    let d = dest();
+    let mut s = Staging::bundle(&d.parent).expect("staging");
+    let copy = |s: &mut Staging, ordinal: u64| {
+        let n = attachment_name(ordinal, Some("a.png"), None, 120, false);
+        let mut f = s.create(&BundlePath::attachment(&n)).expect("create");
+        f.write_all(b"x").expect("write");
+        s.close(f).expect("close");
+        // Below the caps, plus `attachments/` and the current shard.
+        assert!(
+            s.held_handles() < MAX_UNSYNCED + MAX_OPEN_SUBDIRS + 2,
+            "{}",
+            s.held_handles()
+        );
+    };
+    for k in 0..150u64 {
+        copy(&mut s, k * 1_000 + 1);
+        copy(&mut s, k * 1_000 + 2);
+    }
+    // Shard 000 again, long after its handle was closed.
+    copy(&mut s, 3);
+    let n = s.files().len();
+    assert_eq!(n, 301);
+    assert!(s.remove());
+    assert!(tree(&d.parent).is_empty());
+}
+
+/// The mark goes beside the file closed last only (a constant check, not
+/// a scan of every file closed so far).
+#[test]
+fn the_mark_of_the_web_goes_only_beside_the_file_closed_last() {
+    let d = dest();
+    let mut s = Staging::bundle(&d.parent).expect("staging");
+    let close = |s: &mut Staging, p: &BundlePath| {
+        let mut f = s.create(p).expect("create");
+        f.write_all(b"x").expect("write");
+        s.close(f).expect("close")
+    };
+    let first = close(&mut s, &txt(1));
+    let last = close(&mut s, &txt(2));
+    assert!(matches!(
+        s.write_mark_of_the_web(&first),
+        Err(ExportError::Limit(LimitKind::RowOrder))
+    ));
+    assert_eq!(
+        s.write_mark_of_the_web(&last).expect("the last file"),
+        cfg!(windows)
+    );
+    assert!(s.remove());
+    assert!(tree(&d.parent).is_empty());
+}
+
 #[test]
 fn files_must_be_closed_before_provenance_and_publish() {
     let d = dest();

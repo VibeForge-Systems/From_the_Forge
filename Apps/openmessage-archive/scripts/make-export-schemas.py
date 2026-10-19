@@ -34,7 +34,7 @@ APP = pathlib.Path(__file__).resolve().parent.parent
 CRATE = APP / "crates" / "oma-export"
 OUT = CRATE / "schema"
 DRAFT = "https://json-schema.org/draft/2020-12/schema"
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
 FORMAT = "openmessage-archive-export"
 UNRECOGNISED = "unrecognisedCode"
 
@@ -279,7 +279,8 @@ DEFS["version"] = obj({
     "type": const("version"), "message": ORD, "current": BOOL, "firstSession": ORD, "lastSession": ORD,
     "text": tagged("state", [
         ("text", {"pieces": array(piece)}), ("withheld", {"reason": code("withheldReason")}),
-        ("noText", {"reason": code("noTextReason")})]),
+        ("noText", {"reason": code("noTextReason"),
+                    "displayNoneReason": nullable(code("displayNoneReason"))})]),
     "textUnchanged": BOOL, "editLabel": nullable(code("editLabel")), "edits": array(edit_entry),
     "editTexts": code("editTextsOutcome")})
 
@@ -383,7 +384,9 @@ def manifest_schema():
         "options": o({
             "attachments": {"enum": ["namesOnly", "copyOriginals"]}, "keepExtensions": BOOL,
             "previews": BOOL, "largerPreviews": BOOL, "history": BOOL, "reactions": BOOL, "events": BOOL,
-            "reveal": o({"oneTimeCodes": BOOL, "earlierContent": BOOL, "confirmedUpTo": nullable(UINT)}),
+            "reveal": o({"oneTimeCodes": BOOL, "earlierContent": BOOL,
+                          "oneTimeCodesConfirmedUpTo": nullable(UINT),
+                          "earlierContentConfirmedUpTo": nullable(UINT)}),
             "clock": {"enum": ["h23", "h12"]}, "seconds": BOOL, "lineEndings": {"enum": ["lf", "crlf"]},
             "hiddenCharacterMarkers": BOOL, "csvProfile": nullable({"enum": ["spreadsheet", "dataTools"]}),
             "identifiers": {"enum": ["ordinals", "archiveAndSource"]},
@@ -397,8 +400,7 @@ def manifest_schema():
                      "attachments": o({**{k: UINT for k in att_keys}, "excluded": count_map})}),
         "search": nullable(o({
             "mode": STRING, "filterKinds": array(STRING), "includeEarlierForMatching": BOOL,
-            "matchesWritten": UINT, "capped": BOOL, "newestKept": BOOL, "coverageComplete": BOOL,
-            "allMatches": BOOL})),
+            "matchesWritten": UINT, "mayBeIncomplete": BOOL, "allMatches": BOOL})),
         "importSessions": array(o({"session": ORD, "backupDate": nullable(date), "dateSource": STRING,
                                    "completed": BOOL})),
         "exclusions": array(STRING),

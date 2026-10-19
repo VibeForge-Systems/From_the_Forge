@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:openmessage-archive:export:1.0.0:strict",
+  "$id": "urn:openmessage-archive:export:1.1.0:strict",
   "title": "OpenMessage Archive export records (strict, CI only)",
   "description": "Every JSON document of an export: a JSON Lines line (header, item or version), json/conversations.json, json/handles.json, or a single-file export. Strict: no unknown key, and only this build's (token, code) pairs or unrecognisedCode.",
   "oneOf": [
@@ -8496,7 +8496,8 @@
               "type": "object",
               "required": [
                 "state",
-                "reason"
+                "reason",
+                "displayNoneReason"
               ],
               "properties": {
                 "state": {
@@ -8504,6 +8505,16 @@
                 },
                 "reason": {
                   "$ref": "#/$defs/code-noTextReason"
+                },
+                "displayNoneReason": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/code-displayNoneReason"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "additionalProperties": false
@@ -8793,7 +8804,7 @@
           "const": "openmessage-archive-export"
         },
         "schemaVersion": {
-          "const": "1.0.0"
+          "const": "1.1.0"
         },
         "conversation": {
           "anyOf": [
@@ -8824,7 +8835,7 @@
           "const": "openmessage-archive-export"
         },
         "schemaVersion": {
-          "const": "1.0.0"
+          "const": "1.1.0"
         },
         "conversations": {
           "type": "array",
@@ -8851,7 +8862,7 @@
           "const": "openmessage-archive-export"
         },
         "schemaVersion": {
-          "const": "1.0.0"
+          "const": "1.1.0"
         },
         "handles": {
           "type": "array",
@@ -8891,7 +8902,7 @@
           "const": "openmessage-archive-export"
         },
         "schemaVersion": {
-          "const": "1.0.0"
+          "const": "1.1.0"
         },
         "conversation": {
           "anyOf": [

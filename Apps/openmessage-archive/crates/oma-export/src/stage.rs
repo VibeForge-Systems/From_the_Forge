@@ -37,6 +37,24 @@
 //! sweep's 5-minute rule still protects the folder). Whether an open
 //! handle under the folder blocks the rename at all is **UNVERIFIED**.
 //!
+//! **The age rule tracks liveness.** Where the marker's lock cannot be
+//! taken (a file system without locks) or is not seen by other machines
+//! (`flock` on some network mounts is local to each client), the sweep's
+//! 5-minute rule is the only protection, and it reads the folder's and the
+//! marker's modification times. A bundle's files land in subfolders, so
+//! neither time would move while the job runs: [`Staging::sync_batch`]
+//! therefore sets the marker's modification time to now once per batch
+//! (best effort). A live export's marker is then never older than its
+//! longest batch; a single batch that takes over 5 minutes (one very large
+//! copy to a slow network folder) is the residual, and is disclosed.
+//!
+//! **Open handles are bounded.** Closed files keep their handle until
+//! their `sync_all`; at [`MAX_UNSYNCED`] closed files the batch is flushed
+//! early, and on Linux at most [`MAX_OPEN_SUBDIRS`] subfolder handles stay
+//! open (older ones are flushed, closed and reopened through the staging
+//! handle if needed), so a photo-heavy batch stays far below a 1,024
+//! descriptor limit.
+//!
 //! **Attachment copies** (slice 6e2) are created with
 //! [`Staging::create_verified`] and closed with
 //! [`Staging::close_verified`]: their digest is the one the archive's
@@ -70,6 +88,13 @@ pub const MARKER_CONTENT: &[u8] =
 
 /// The buffer of each staged file.
 const WRITE_BUFFER: usize = 64 * 1024;
+
+/// Closed files whose `sync_all` may wait for the batch's end; one more
+/// flushes them all early (each holds a descriptor until then).
+pub const MAX_UNSYNCED: usize = 64;
+
+/// The most subfolder handles staging keeps open on Linux.
+pub const MAX_OPEN_SUBDIRS: usize = 32;
 
 /// A Mark of the Web's content (owner Q3c): the Internet zone.
 pub const MARK_OF_THE_WEB: &[u8] = b"[ZoneTransfer]\r\nZoneId=3\r\n";
@@ -384,6 +409,14 @@ impl Staging {
         self.open.len()
     }
 
+    /// Handles staging holds besides the open files, the folders and the
+    /// marker: closed files awaiting their `sync_all` (at most
+    /// [`MAX_UNSYNCED`] − 1) and, on Linux, subfolder handles (at most
+    /// [`MAX_OPEN_SUBDIRS`] plus the current folder's parents).
+    pub fn held_handles(&self) -> usize {
+        self.unsynced.len() + self.sys.open_subdirs()
+    }
+
     fn live(&self) -> Result<(), ExportError> {
         if self.state == State::Live {
             Ok(())
@@ -509,6 +542,9 @@ impl Staging {
         };
         self.files.push(entry.clone());
         self.unsynced.push(file);
+        if self.unsynced.len() >= MAX_UNSYNCED {
+            self.sync_batch()?;
+        }
         Ok(entry)
     }
 
@@ -546,9 +582,12 @@ impl Staging {
     /// or exFAT, for example): the caller counts it (`motwNotWritten`) and
     /// carries on. What Windows does with the mark (SmartScreen, Office
     /// Protected View) is **UNVERIFIED**.
+    ///
+    /// `e` must be the file closed last (the copy just made): a constant
+    /// check, never a scan of every file.
     pub fn write_mark_of_the_web(&mut self, e: &FileEntry) -> Result<bool, ExportError> {
         self.live()?;
-        if self.packaging != Packaging::Bundle || !self.files.iter().any(|f| f == e) {
+        if self.packaging != Packaging::Bundle || self.files.last() != Some(e) {
             return Err(limit(LimitKind::RowOrder));
         }
         #[cfg(windows)]
@@ -556,6 +595,9 @@ impl Staging {
             let mut f = self.sys.create_zone_identifier(e.path()).map_err(io_err)?;
             f.write_all(MARK_OF_THE_WEB).map_err(io_err)?;
             self.unsynced.push(f);
+            if self.unsynced.len() >= MAX_UNSYNCED {
+                self.sync_batch()?;
+            }
             Ok(true)
         }
         #[cfg(not(windows))]
@@ -565,10 +607,15 @@ impl Staging {
     }
 
     /// `sync_all` every file closed since the last call, then close their
-    /// handles (§8.3 step 3: one pass per batch).
+    /// handles (§8.3 step 3: one pass per batch). A bundle's marker gets
+    /// the current time as its modification time (best effort), so the
+    /// sweep's age rule sees a running export as young (module docs).
     pub fn sync_batch(&mut self) -> Result<(), ExportError> {
         for f in self.unsynced.drain(..) {
             f.sync_all().map_err(io_err)?;
+        }
+        if let Some(m) = &self.marker {
+            let _ = m.set_modified(SystemTime::now());
         }
         Ok(())
     }
@@ -754,6 +801,12 @@ impl Staging {
     /// still the export's own), or the `.partial-file`. Returns
     /// `stagingRemoved`. Removal retries per §8.6 and is otherwise best
     /// effort; anything it did not create keeps the folder in place.
+    ///
+    /// The marker goes only after every file and subfolder this export
+    /// made is gone: when one of them could not be removed (a handle held
+    /// past the retries, a permission changed), the marker stays on disk,
+    /// unlocked, so the folder remains a marked leftover that a later
+    /// sweep offers to remove (D144).
     pub fn remove(&mut self) -> bool {
         if self.state != State::Live {
             return self.state == State::Removed;
@@ -772,7 +825,14 @@ impl Staging {
                     .is_ok();
                 }
                 ok &= self.sys.remove_subdirs(&self.parent, &self.entry.to_name());
+                // Close (and so unlock) the marker either way.
                 self.marker = None;
+                if !ok {
+                    // Some of our own files are still there: keep the
+                    // marker so the sweep can finish the job later.
+                    let _ = self.sys.sync_parent(&self.parent);
+                    return false;
+                }
                 ok &= with_retries(|| self.sys.remove_marker(&self.parent, &self.entry.to_name()))
                     .is_ok();
                 let same = self
@@ -1227,26 +1287,81 @@ mod sys {
             let mut parent_key = String::new();
             for depth in 1..=path.dirs().len() {
                 let key = path.dir_key(depth);
-                if !self.by_key.contains_key(&key) {
-                    let name = path
-                        .dirs()
-                        .get(depth - 1)
-                        .cloned()
-                        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
-                    let fd = {
-                        let pfd = self.dir_fd(&parent_key)?;
-                        mkdirat(pfd, name.as_str(), Mode::from_raw_mode(0o700))?;
-                        open_dir_at(pfd, &name)?
-                    };
-                    self.by_key.insert(key.clone(), self.subdirs.len());
-                    self.subdirs.push(SubDir {
-                        comps: path.dirs().iter().take(depth).cloned().collect(),
-                        fd: Some(fd),
-                    });
+                match self.by_key.get(&key).copied() {
+                    Some(i) => {
+                        // A folder whose handle was closed (see
+                        // `trim_subdirs`): reopen it through the chain.
+                        let closed = self.subdirs.get(i).is_some_and(|d| d.fd.is_none());
+                        if closed {
+                            let comps = self
+                                .subdirs
+                                .get(i)
+                                .map(|d| d.comps.clone())
+                                .unwrap_or_default();
+                            let fd = self.open_chain(&comps)?;
+                            if let Some(d) = self.subdirs.get_mut(i) {
+                                d.fd = Some(fd);
+                            }
+                        }
+                    }
+                    None => {
+                        let name = path
+                            .dirs()
+                            .get(depth - 1)
+                            .cloned()
+                            .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+                        let fd = {
+                            let pfd = self.dir_fd(&parent_key)?;
+                            mkdirat(pfd, name.as_str(), Mode::from_raw_mode(0o700))?;
+                            match open_dir_at(pfd, &name) {
+                                Ok(fd) => fd,
+                                Err(e) => {
+                                    // Never leave a folder this export made
+                                    // unregistered (later creates in it
+                                    // would fail, and the removal would
+                                    // not know it): take it back.
+                                    let _ = unlinkat(pfd, name.as_str(), AtFlags::REMOVEDIR);
+                                    return Err(e);
+                                }
+                            }
+                        };
+                        self.by_key.insert(key.clone(), self.subdirs.len());
+                        self.subdirs.push(SubDir {
+                            comps: path.dirs().iter().take(depth).cloned().collect(),
+                            fd: Some(fd),
+                        });
+                    }
                 }
                 parent_key = key;
             }
+            self.trim_subdirs(path.dirs())?;
             Ok(parent_key)
+        }
+
+        /// Keep at most [`super::MAX_OPEN_SUBDIRS`] subfolder handles: past
+        /// that, flush and close every open one that is not the folder
+        /// `keep` (its components) or one of its parents. A closed folder is
+        /// reopened by `ensure_dirs` when a file goes into it again, and was
+        /// flushed when it was closed.
+        fn trim_subdirs(&mut self, keep: &[String]) -> io::Result<()> {
+            let open = self.subdirs.iter().filter(|d| d.fd.is_some()).count();
+            if open <= super::MAX_OPEN_SUBDIRS {
+                return Ok(());
+            }
+            for d in &mut self.subdirs {
+                if keep.starts_with(&d.comps) {
+                    continue;
+                }
+                if let Some(fd) = d.fd.take() {
+                    fsync(&fd)?;
+                }
+            }
+            Ok(())
+        }
+
+        /// Subfolder handles open now.
+        pub(super) fn open_subdirs(&self) -> usize {
+            self.subdirs.iter().filter(|d| d.fd.is_some()).count()
         }
 
         pub(super) fn create_file(&mut self, path: &BundlePath) -> io::Result<File> {
@@ -1630,6 +1745,11 @@ mod sys {
         }
 
         pub(super) fn close_subdirs(&mut self) {}
+
+        /// No subfolder handles are kept here (paths only).
+        pub(super) fn open_subdirs(&self) -> usize {
+            0
+        }
 
         pub(super) fn sync_staging(&self) -> io::Result<()> {
             oma_fs::fsync_dir(self.staging()?).map(|_| ())

@@ -213,11 +213,7 @@ fn revealed_content_is_exported_only_with_the_reveal() {
         let d = files::dest();
         let reveal = |o: &mut ExportOptions| {
             o.history = true;
-            o.reveal = RevealPlan {
-                one_time_codes: true,
-                earlier_content: true,
-                confirmed_up_to: Some(u64::MAX),
-            };
+            o.reveal = RevealPlan::confirmed(Some(u64::MAX), Some(u64::MAX));
         };
         export_into(&i, &d.parent, ScopePlan::Archive, &reveal, BUNDLE).expect("export");
         let bundle = d.parent.join(BUNDLE);
@@ -502,7 +498,8 @@ fn a_cancelled_export_leaves_nothing() {
 /// Linux CI), one library per entry and scenario of both catalogues below
 /// `OMA_ORACLE_TXT_OUT` (empty or absent), each with its archive and a
 /// TXT bundle of the whole archive (files copied), plus `txt-oracle.json`
-/// listing them.
+/// listing them. An entry with masking sentinels also gets a `revealed`
+/// bundle (history and both reveals), the oracle's positive control.
 #[test]
 #[ignore = "writes the TXT oracle's inputs; run by CI's oracle step"]
 fn write_oracle_txt() {
@@ -533,6 +530,16 @@ fn write_oracle_txt() {
             id,
         };
         export_into(&i, &dest, ScopePlan::Archive, &|_| {}, BUNDLE).expect("export");
+        let revealed = doc.export.as_ref().map(|_| {
+            let dest = out.join(&doc.name).join("revealed");
+            std::fs::create_dir_all(&dest).expect("revealed dir");
+            let reveal = |o: &mut ExportOptions| {
+                o.history = true;
+                o.reveal = RevealPlan::confirmed(Some(u64::MAX), Some(u64::MAX));
+            };
+            export_into(&i, &dest, ScopePlan::Archive, &reveal, BUNDLE).expect("export");
+            format!("{}/revealed/{BUNDLE}", doc.name)
+        });
         let export = doc.export.as_ref().map(|_| match doc.name.as_str() {
             "history" => "scenarios/history.export.json".to_owned(),
             n => format!("{n}.expected/export.json"),
@@ -542,6 +549,7 @@ fn write_oracle_txt() {
             "catalogue": doc.catalogue,
             "archive": format!("{}/library/{}", doc.name, i.id.as_str()),
             "bundle": format!("{}/export/{BUNDLE}", doc.name),
+            "revealed": revealed,
             "export": export,
         }));
     }

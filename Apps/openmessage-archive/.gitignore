@@ -11,3 +11,8 @@ target/
 !tests/fixtures/**
 # Python virtual environment for the fixture generator and oracle check.
 .venv-fixtures/
+# Python virtual environment for the independent export oracles.
+.venv-oracles/
+# ts-rs's default output folder: IPC types are generated only into
+# src/types/generated/ (TS_RS_EXPORT_DIR in .cargo/config.toml).
+/bindings/

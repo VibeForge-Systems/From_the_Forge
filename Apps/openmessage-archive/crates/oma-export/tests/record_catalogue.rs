@@ -202,6 +202,49 @@ fn unknown_codes_keep_their_numbers() {
     assert!(unit["date"]["utc"].is_null() && unit["date"]["raw"].is_string());
 }
 
+/// A stored version without text keeps its `display_none_reason` as
+/// recorded, an unknown number included (§3.9, I5), beside the derived
+/// reason.
+#[test]
+fn a_version_without_text_keeps_its_unknown_reason_number() {
+    let doc = docs()
+        .into_iter()
+        .find(|d| d.name == "history")
+        .expect("doc");
+    let i = imported(&doc);
+    {
+        let c = rusqlite::Connection::open(i.db()).expect("raw open");
+        let body: i64 = c
+            .query_row(
+                "SELECT b.id FROM message_body b JOIN message m ON m.id = b.message_id \
+                 WHERE b.id <> m.current_body_id ORDER BY b.id LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("an earlier version");
+        c.execute(
+            "UPDATE message_body SET display_text = NULL, display_source = NULL, \
+               display_none_reason = 99 WHERE id = ?1",
+            [body],
+        )
+        .expect("no text, an unknown reason");
+    }
+    let w = walk(&i, REVEAL_ALL, IdentifierMode::Ordinals);
+    let texts: Vec<Value> = w
+        .versions
+        .iter()
+        .map(|v| serde_json::to_value(v).expect("json")["text"].clone())
+        .filter(|t| t["state"] == "noText")
+        .collect();
+    let kept = texts
+        .iter()
+        .find(|t| {
+            t["displayNoneReason"] == serde_json::json!({"token": "unrecognisedCode", "code": 99})
+        })
+        .unwrap_or_else(|| panic!("{texts:?}"));
+    assert_eq!(kept["reason"]["token"], "reasonUnrecognised");
+}
+
 #[test]
 fn nothing_masked_reaches_a_record_unless_revealed() {
     let mut checked = 0;

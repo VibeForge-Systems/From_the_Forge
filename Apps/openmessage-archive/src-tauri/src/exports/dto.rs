@@ -359,12 +359,22 @@ pub struct ChooseExportDestinationRequest {
     pub zone: Option<ZoneTableInputDto>,
 }
 
-/// The confirmed reveal count ("N messages", D147).
+/// The confirmed reveal counts ("N messages", D147, owner Q4): each
+/// reveal that is on is confirmed against its own exact count, the one
+/// the draft's preview counted, and a reveal that is off has none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(export)]
 pub struct RevealConfirmationInput {
-    pub confirmed_up_to: u64,
+    /// The preview's `messagesWithFlaggedCode`, when codes are revealed.
+    #[serde(default)]
+    #[ts(optional)]
+    pub one_time_codes: Option<u64>,
+    /// The preview's `messagesWithEarlierContent`, when earlier content
+    /// is revealed.
+    #[serde(default)]
+    #[ts(optional)]
+    pub earlier_content: Option<u64>,
 }
 
 /// What the user confirmed in Review (spec §9.2).

@@ -2622,7 +2622,8 @@
               "type": "object",
               "required": [
                 "state",
-                "reason"
+                "reason",
+                "displayNoneReason"
               ],
               "properties": {
                 "state": {
@@ -2630,6 +2631,16 @@
                 },
                 "reason": {
                   "$ref": "#/$defs/code-noTextReason"
+                },
+                "displayNoneReason": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/code-displayNoneReason"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               }
             }
@@ -2907,7 +2918,7 @@
           "const": "openmessage-archive-export"
         },
         "schemaVersion": {
-          "const": "1.0.0"
+          "const": "1.1.0"
         },
         "conversation": {
           "anyOf": [
@@ -2937,7 +2948,7 @@
           "const": "openmessage-archive-export"
         },
         "schemaVersion": {
-          "const": "1.0.0"
+          "const": "1.1.0"
         },
         "conversations": {
           "type": "array",
@@ -2963,7 +2974,7 @@
           "const": "openmessage-archive-export"
         },
         "schemaVersion": {
-          "const": "1.0.0"
+          "const": "1.1.0"
         },
         "handles": {
           "type": "array",
@@ -3002,7 +3013,7 @@
           "const": "openmessage-archive-export"
         },
         "schemaVersion": {
-          "const": "1.0.0"
+          "const": "1.1.0"
         },
         "conversation": {
           "anyOf": [

@@ -202,20 +202,41 @@ impl ExportHost {
         }
     }
 
-    /// Take draft `id` out of the slot.
+    /// Take draft `id` out of the slot: the id and age are checked and the
+    /// draft taken under one guard, so a draft installed meanwhile (a new
+    /// preview on another thread) is never the one taken. An expired draft
+    /// is dropped with its count stopped.
     pub fn take(&self, id: &DraftId) -> IpcResult<Draft> {
-        self.with_draft(id, |_| Ok(()))?;
-        self.lock()?.take().ok_or_else(em::expired)
+        let now = self.clock.now();
+        let taken = {
+            let mut slot = self.lock()?;
+            match slot.as_ref() {
+                Some(d) if d.id == *id => slot.take(),
+                _ => None,
+            }
+        };
+        let Some(d) = taken else {
+            return Err(em::expired());
+        };
+        if now.saturating_sub(d.created) >= DRAFT_TTL {
+            d.count.cancel();
+            return Err(em::expired());
+        }
+        Ok(d)
     }
 
     /// `start_export`: take draft `id` (consumed whatever follows) and
     /// check that `token` is its latest destination's. A token of an
-    /// earlier choice, or none chosen, is `exportConfirmationStale`.
+    /// earlier choice, or none chosen, is `exportConfirmationStale`, and
+    /// the draft's count is stopped.
     pub fn take_for_start(&self, id: &DraftId, token: &dto::DestinationToken) -> IpcResult<Draft> {
         let draft = self.take(id)?;
         match &draft.destination {
             Some(c) if c.token == *token => Ok(draft),
-            _ => Err(em::stale()),
+            _ => {
+                draft.count.cancel();
+                Err(em::stale())
+            }
         }
     }
 
@@ -430,7 +451,10 @@ const PROGRESS_ROWS: u64 = 4_096;
 
 /// Count a draft's scope exactly (spec §3.7) and send the outcome:
 /// `ready` (stored in the draft first), `needsZoneTable` or `failed`. A
-/// count stopped by a discard sends nothing.
+/// count stopped by a discard or a replacement sends nothing; a count that
+/// finished after its draft expired (or was taken by `start_export`, which
+/// stops it) sends `failed` with `exportDraftExpired`, so the webview never
+/// waits for an answer that cannot come.
 pub fn run_count(
     host: &ExportHost,
     env: &ArchiveEnv,
@@ -475,11 +499,21 @@ pub fn run_count(
         Ok((preview, search)) => {
             let span = preview.span_utc_ms;
             let counted = Counted { preview, search };
+            // A discard or a new draft stopped this count first: nobody
+            // waits for it.
+            let stopped = token.is_cancelled();
             let stored = host.with_draft(&draft, |d| {
                 d.counted = Some(counted);
                 Ok(())
             });
-            if stored.is_err() {
+            if let Err(e) = stored {
+                if !stopped {
+                    tracing::info!(outcome = ?e.code, "export preview");
+                    emit(PreviewEvent::Failed {
+                        draft_id: draft,
+                        code: e.code,
+                    });
+                }
                 return;
             }
             let window = (!zone_set).then(|| span_window(span, now_ms));

@@ -108,6 +108,11 @@ them first:
 6. `cargo test --workspace`
 7. Confirm `src/types/generated/` has no uncommitted changes.
 8. `cargo deny check`
+9. The independent oracles (Linux, in the oracle virtual environment):
+   the "Independent oracles (Python)" step's commands, listed in
+   `docs/development.md` ("Synthetic export fixtures and the independent
+   oracles", then the TXT, data and HTML oracle commands of slices 6e2,
+   6f and 6g).
 
 Then run the root gate. Note that the root gate does **not** build this app.
 
@@ -600,8 +605,14 @@ Never hand-edit generated files.
   oracles (`scripts/oracles/`) use the standard library plus the
   hash-pinned `requirements.txt`, always in a virtual environment and with
   `python3 -I`; `project_archive.py` must stay independent of the Rust
-  export code (written from `v1.sql` and the spec). A writer slice adds its
-  oracle to `run_oracles.py`, which CI runs on Linux only. The bulk
+  export code (written from `v1.sql` and the spec). Each writer's oracle
+  (`txt_grammar.py`, `data_oracle.py`, `html_oracle.py`, later XLSX and
+  PDF) is its own command in the workflow's "Independent oracles
+  (Python)" step, which runs on Linux only, after `run_oracles.py`; a new
+  one is added there and in `docs/development.md`, never only to
+  `run_oracles.py`. Each scans its bundles for the masking sentinels, has
+  a floor on how many it scanned for, and a positive control (a bundle
+  exported with both reveals must hold every sentinel). The bulk
   generator's `BulkSpec::blobs` gives attachments real store files.
 - **The export record core (M6 slice 6d, `crates/oma-export`).** The crate
   never names `rusqlite` or Tauri and never logs (`tests/source_rules.rs`);

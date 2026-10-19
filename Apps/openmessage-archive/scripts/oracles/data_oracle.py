@@ -81,6 +81,16 @@ COLUMNS_PIN = APP / "crates" / "oma-export" / "tests" / "csv_columns.pin"
 MARKER = re.compile("⟨U\\+([0-9A-F]{4,6})⟩")
 FFFC = "￼"
 LONG_TEXT = 4096
+# The masking sentinels' kinds (`export.json` of the export catalogue).
+SENTINEL_KINDS = ("oneTimeCodes", "earlierText", "editText", "subjectHistory", "alternativeText",
+                  "unsentAttachmentFiles")
+# Floors, so a listing that lost its `export` statements (or sentinels)
+# cannot pass with no masking check at all: the entries that carry one, and
+# the distinct (kind, sentinel) pairs they plant.
+MIN_EXPORT_ENTRIES = 7
+MIN_SENTINELS = 14
+# Stands in for NUL while the csv module parses (see `read_csv`).
+NUL_STAND_IN = "\uf8ff"
 UNITS = {0: "zero", 1: "negative", 2: "seconds", 3: "nanoseconds", 4: "ambiguous"}
 STATES = {1: "null", 2: "absent", 3: "oversized", 4: "unreadable"}
 
@@ -94,6 +104,7 @@ class Failures:
         self.checks += 1
         if not ok:
             self.items.append(what)
+        return ok
 
 
 def load(path):
@@ -212,7 +223,14 @@ def read_csv(path, bom):
     raw = path.read_bytes()
     has = raw.startswith(b"\xef\xbb\xbf")
     text = raw[3:].decode("utf-8") if has else raw.decode("utf-8")
-    rows = list(csv.reader(io.StringIO(text, newline="")))
+    # CPython 3.10's csv reader refuses NUL ("line contains NUL"; 3.11 and
+    # later accept it), and the "data tools" profile writes it raw. Swap it
+    # for a private-use stand-in the file does not hold, and back in every
+    # cell, so the result does not depend on the interpreter's version.
+    if NUL_STAND_IN in text:
+        raise ValueError(f"{path.name}: holds the NUL stand-in U+{ord(NUL_STAND_IN):04X}")
+    rows = [[c.replace(NUL_STAND_IN, "\0") for c in r]
+            for r in csv.reader(io.StringIO(text.replace("\0", NUL_STAND_IN), newline=""))]
     return has == bom, rows[0], rows[1:]
 
 
@@ -641,6 +659,18 @@ def csv_against_json(name, bundle, spreadsheet, fails, kinds, counts):
     header, rows = tables["attachments.csv"]
     want = sum(len(x["attachments"]) for x in first.values())
     fails.check(len(rows) == want, f"{name}: attachments.csv rows")
+    # edit_versions.csv: one row per version (then its entries); a version
+    # without text keeps the stored reason's number (tabular columns 1.1.0).
+    header, rows = tables["edit_versions.csv"]
+    col = {h: i for i, h in enumerate(header)}
+    versions = [x for _, lines, _ in jsonl_files(bundle) for x in lines[1:] if x["type"] == "version"]
+    vrows = [r for r in rows if r[col["entry"]] == ""]
+    fails.check(len(vrows) == len(versions), f"{name}: edit_versions.csv one row per version")
+    for r, x in zip(vrows, versions):
+        t = x["text"]
+        reason = t.get("displayNoneReason") if t["state"] == "noText" else None
+        fails.check(r[col["display_none_reason"]] == ("" if reason is None else tok(reason)),
+                    f"{name}: version of item {x['message']}: display_none_reason")
 
 
 # ---------------------------------------------------------------------------
@@ -678,15 +708,35 @@ def zone_check(name, bundle, zone, fails, counts):
             counts["zoned"] += 1
 
 
-def masking(name, bundle, export, fails):
+def bundle_text(bundle):
+    blob = b"".join(p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file())
+    return blob, unmark(blob.decode("utf-8", "replace"))
+
+
+def masking(name, bundle, export, fails, seen):
+    """No sentinel in any byte or unmarked text of a bundle exported
+    without reveals; each pair checked is added to `seen`."""
     if export is None:
         return
-    blob = b"".join(p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file())
-    text = unmark(blob.decode("utf-8", "replace"))
-    for k in ("oneTimeCodes", "earlierText", "editText", "subjectHistory", "alternativeText",
-              "unsentAttachmentFiles"):
+    blob, text = bundle_text(bundle)
+    for k in SENTINEL_KINDS:
         for s in export["sentinels"][k]:
             fails.check(s.encode("utf-8") not in blob and s not in text, f"{name}: a {k} sentinel leaked")
+            seen.add((k, s))
+
+
+def revealed(name, bundle, export, fails, seen):
+    """The positive control: with history and both reveals every sentinel
+    is found (raw, unmarked, or JSON-escaped), so the masking scan above is
+    known to look where the content would be."""
+    blob, text = bundle_text(bundle)
+    for k in SENTINEL_KINDS:
+        for s in export["sentinels"][k]:
+            escaped = json.dumps(s, ensure_ascii=False)[1:-1]
+            found = s.encode("utf-8") in blob or s in text or escaped in text
+            fails.check(found, f"{name}: a {k} sentinel not found with both reveals")
+            if found:
+                seen.add((k, s))
 
 
 def main():
@@ -706,13 +756,22 @@ def main():
     fails.check(listing["format"] == "oma-oracle-data", "data-oracle.json format")
     counts = {k: 0 for k in ("lines", "items", "texts", "masked", "unkeyed", "files", "versions", "rows",
                              "cells", "neutralised", "zoned")}
+    masked_seen, revealed_seen = set(), set()
+    with_export = 0
     for e in listing["exports"]:
         name = e["name"]
         export = load(FIXTURES / e["catalogue"] / e["export"]) if e["export"] else None
         bundles = {x["kind"]: (root / x["bundle"], x["zone"]) for x in e["bundles"]}
+        if export is not None:
+            with_export += 1
+            fails.check("revealed" in bundles, f"{name}: the revealed bundle (positive control)")
         for kind, (bundle, zone) in bundles.items():
             verify_sums(bundle, f"{name} {kind}", fails)
-            masking(f"{name} {kind}", bundle, export, fails)
+            if kind == "revealed":
+                if fails.check(export is not None, f"{name}: a revealed bundle without sentinels"):
+                    revealed(f"{name} {kind}", bundle, export, fails, revealed_seen)
+            else:
+                masking(f"{name} {kind}", bundle, export, fails, masked_seen)
         ids, _ = bundles["ids"]
         ords, _ = bundles["ordinals"]
         json_against_projection(name, ids, root / e["archive"], fails, v, counts)
@@ -725,6 +784,11 @@ def main():
                 for _, lines, _ in jsonl_files(bundle):
                     for line in lines:
                         valid(v["strict"], line, f"{name}: {kind} strict", fails)
+    fails.check(with_export >= MIN_EXPORT_ENTRIES, f"entries with masking sentinels: {with_export}")
+    fails.check(len(masked_seen) >= MIN_SENTINELS, f"sentinels scanned for: {len(masked_seen)}")
+    fails.check(len(revealed_seen) >= MIN_SENTINELS, f"sentinels found with both reveals: {len(revealed_seen)}")
+    counts["sentinels"] = len(masked_seen)
+    counts["revealed"] = len(revealed_seen)
     print(f"{len(listing['exports'])} exports; " + ", ".join(f"{k} {n}" for k, n in counts.items())
           + f"; {fails.checks} checks, {len(fails.items)} failed")
     for f in fails.items[:50]:

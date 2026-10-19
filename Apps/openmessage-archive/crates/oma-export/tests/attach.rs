@@ -327,11 +327,7 @@ fn the_reveal_copies_the_attachments_of_unsent_parts() {
     let i = import(&doc);
     let d = files::dest();
     let reveal = |o: &mut ExportOptions| {
-        o.reveal = RevealPlan {
-            one_time_codes: false,
-            earlier_content: true,
-            confirmed_up_to: Some(u64::MAX),
-        };
+        o.reveal = RevealPlan::confirmed(None, Some(u64::MAX));
     };
     export_txt(&i, &d.parent, ScopePlan::Archive, &reveal, BUNDLE, None).expect("export");
     let bundle = d.parent.join(BUNDLE);

@@ -101,7 +101,8 @@ pub enum Preview {
 pub trait PreviewSource: Send {
     /// The renditions of attachment record `a`'s file. The writer asks
     /// only when previews are on, once per placement, and only for an
-    /// attachment whose access is `included`; `display` asks for the
+    /// attachment whose access is `included` or `revealed` (never
+    /// `withheld`); `display` asks for the
     /// larger rendition as well (bundles with "Larger previews" on).
     fn renditions(&mut self, a: &AttachmentRecord, display: bool) -> Result<Preview, ExportError>;
 }

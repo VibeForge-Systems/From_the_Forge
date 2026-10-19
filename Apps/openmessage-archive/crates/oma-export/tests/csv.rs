@@ -268,7 +268,7 @@ fn every_catalogue_entry_exports_to_csv_that_reads_back_and_is_neutralised() {
         let prefixed = check_neutralisation(&tables, true);
         let m = json(&bundle.join("manifest.json"));
         assert_eq!(m["counts"]["neutralisedCells"], prefixed, "{what}");
-        assert_eq!(m["tabularColumnsVersion"], "1.0.0");
+        assert_eq!(m["tabularColumnsVersion"], "1.1.0");
         let rows = tables["messages.csv"].rows.len() as u64;
         let c = &m["counts"];
         assert_eq!(

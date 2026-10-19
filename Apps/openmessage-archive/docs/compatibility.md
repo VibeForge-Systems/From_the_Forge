@@ -1433,6 +1433,23 @@ or LibreOffice; the 500,000-message targets; preview throughput (§12's
 folders; real archives. The M6 manual checklist (spec §21) is added
 with PR B (slice 6l).
 
+**After the review fixes** (one further commit on the same branch, the
+same container, 2026-10-19; `architecture.md`, "Review fixes (M6 PR A)"):
+`cargo test --workspace` 1,514 passed, 22 ignored, 0 failed (273 s wall
+clock, compiling included); `cargo clippy --workspace --all-targets -- -D
+warnings`, `cargo fmt --all --check` and `cargo deny check` pass; `npm run
+typecheck` and `npm test` (51 files, 687 tests) pass. The oracles were
+re-run because the goldens and the manifest changed: projection 4,817
+checks; TXT 21 exports, 9,801 checks; data 133 bundles, 320,983 checks;
+HTML 42 bundles plus 7 revealed bundles, 116,113 checks; each 0 failed
+under Python 3.13.16, and the TXT, data and HTML oracles also 0 failed
+under a local CPython 3.10.20 virtual environment (not CI; the
+projection oracle was not re-run there). Setting every listing's
+`export` to `null` by hand made the three writer oracles fail on their
+sentinel floors. The staging, naming and attachment modules compile
+clippy-clean for `x86_64-pc-windows-msvc` through the scratch harness;
+nothing ran on Windows.
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI

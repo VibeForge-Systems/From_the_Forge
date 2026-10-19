@@ -4,7 +4,7 @@
 # only (no build step runs):
 #
 #   python3 -m venv .venv-oracles
-#   .venv-oracles/bin/pip install --require-hashes --only-binary :all: \
+#   .venv-oracles/bin/pip install --require-hashes --only-binary :all: --no-deps \
 #       -r scripts/oracles/requirements.txt
 #
 # CI (ubuntu-22.04) runs Python 3.10, so rpds-py is held at 0.30.0, the last

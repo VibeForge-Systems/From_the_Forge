@@ -48,22 +48,29 @@ pub struct DraftSpec {
 }
 
 impl DraftSpec {
-    /// The plan with `confirmed_up_to` as the reveal's confirmed count.
+    /// The plan with each reveal's confirmed count (`codes` for one-time
+    /// codes, `earlier` for earlier content; `None` for a reveal that is
+    /// off).
     pub fn plan(
         &self,
-        confirmed_up_to: Option<u64>,
+        codes: Option<u64>,
+        earlier: Option<u64>,
     ) -> Result<ExportPlan, oma_export::ExportError> {
         let mut o = self.options;
-        o.reveal.confirmed_up_to = confirmed_up_to;
+        o.reveal.codes_confirmed_up_to = codes;
+        o.reveal.earlier_confirmed_up_to = earlier;
         ExportPlan::new(self.scope.clone(), self.formats.clone(), o)
     }
 
     /// The plan as the preview counts it: a reveal is checked with a
     /// placeholder count (the counts are what the user will confirm).
     pub fn probe_plan(&self) -> IpcResult<ExportPlan> {
-        let placeholder = self.options.reveal.any().then_some(u64::MAX);
-        self.plan(placeholder)
-            .map_err(|_| IpcError::new(ErrorCode::InvalidInput, em::OPTIONS_DO_NOT_APPLY))
+        let r = self.options.reveal;
+        self.plan(
+            r.one_time_codes.then_some(u64::MAX),
+            r.earlier_content.then_some(u64::MAX),
+        )
+        .map_err(|_| IpcError::new(ErrorCode::InvalidInput, em::OPTIONS_DO_NOT_APPLY))
     }
 
     /// The local dates of a date range.
@@ -173,7 +180,8 @@ fn options(o: &ExportOptionsInput) -> IpcResult<ExportOptions> {
         reveal: RevealPlan {
             one_time_codes: o.reveal_one_time_codes,
             earlier_content: o.reveal_earlier_content,
-            confirmed_up_to: None,
+            codes_confirmed_up_to: None,
+            earlier_confirmed_up_to: None,
         },
         hidden_character_markers: o.hidden_character_markers,
         seconds: o.seconds,

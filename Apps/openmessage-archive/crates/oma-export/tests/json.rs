@@ -45,8 +45,8 @@ use serde_json::Value;
 /// [`SCHEMA_VERSION`]. A schema change must bump the version (spec §5.1)
 /// and re-pin here.
 const STRICT_SCHEMA_SHA256: (&str, &str) = (
-    "1.0.0",
-    "84956f777e053e97d04a9631a29cea3c53d56fd0f00b09b41961a6df2567e807",
+    "1.1.0",
+    "881dd3f89a9cde95958ead151403c408aa3a3f484c09efe01e959c43becc1786",
 );
 
 const BUNDLE: &str = "JSON export";
@@ -471,11 +471,7 @@ fn revealed_and_masked_content_follow_the_plan_in_json() {
                 o.history = true;
                 o.attachments = AttachmentMode::None;
                 if reveal {
-                    o.reveal = RevealPlan {
-                        one_time_codes: true,
-                        earlier_content: true,
-                        confirmed_up_to: Some(u64::MAX),
-                    };
+                    o.reveal = RevealPlan::confirmed(Some(u64::MAX), Some(u64::MAX));
                 }
             };
             export_json(&i, &d.parent, ScopePlan::Archive, &tweak, BUNDLE);
@@ -614,8 +610,10 @@ fn the_schemas_agree_with_the_registry_and_each_other() {
 /// JSON + CSV with files copied, history and the identifier opt-in, in
 /// UTC (`ids`); the same with ordinals, names only and the "data tools"
 /// CSV profile (`ordinals`); and JSON in each fixed test zone
-/// (`zone-<n>`, from `tests/fixtures/export/zones/`). Plus
-/// `data-oracle.json` listing them.
+/// (`zone-<n>`, from `tests/fixtures/export/zones/`). An entry with masking
+/// sentinels also gets `revealed`: JSON + CSV with files copied, history
+/// and both reveals, the oracle's positive control (every sentinel must be
+/// found there). Plus `data-oracle.json` listing them.
 #[test]
 #[ignore = "writes the JSON and CSV oracles' inputs; run by CI's oracle step"]
 fn write_oracle_data() {
@@ -657,10 +655,17 @@ fn write_oracle_data() {
             o.attachments = AttachmentMode::None;
             o.csv_profile = Some(CsvProfile::DataTools);
         };
-        for (name, tweak) in [
-            ("ids", &ids as &dyn Fn(&mut oma_export::plan::ExportOptions)),
-            ("ordinals", &ordinals),
-        ] {
+        let revealed = |o: &mut oma_export::plan::ExportOptions| {
+            o.history = true;
+            o.attachments = AttachmentMode::CopyOriginals;
+            o.reveal = RevealPlan::confirmed(Some(u64::MAX), Some(u64::MAX));
+        };
+        type Tweak<'a> = &'a dyn Fn(&mut oma_export::plan::ExportOptions);
+        let mut kinds: Vec<(&str, Tweak<'_>)> = vec![("ids", &ids), ("ordinals", &ordinals)];
+        if doc.export.is_some() {
+            kinds.push(("revealed", &revealed));
+        }
+        for (name, tweak) in kinds {
             let dest = out.join(&doc.name).join(name);
             std::fs::create_dir_all(&dest).expect("dest");
             export_formats(

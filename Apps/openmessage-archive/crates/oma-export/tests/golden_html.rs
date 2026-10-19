@@ -32,7 +32,7 @@ use common::*;
 use oma_export::plan::{AttachmentMode, Format, ScopePlan};
 
 /// The SHA-256 of `tests/fixtures/export/expected-html/SHA256SUMS`.
-const GOLDEN_SUMS_SHA256: &str = "984c23b7e1ba3a7907aceefaa12b0fe4082c71ae49453b15213838eb7f41da70";
+const GOLDEN_SUMS_SHA256: &str = "79eab484eb1d98338f8ee7694ab9efa9d8e0ec289115d459693c01c264c01656";
 
 const BUNDLE: &str = "Golden HTML export";
 

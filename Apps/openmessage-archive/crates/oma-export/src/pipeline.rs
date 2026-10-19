@@ -362,9 +362,20 @@ impl Job<'_, '_, '_> {
             .ok_or(ExportError::Limit(LimitKind::RowOrder))
     }
 
+    /// Send the handles numbered since the last call (only the new tail:
+    /// nothing is copied when no handle is new, the common case).
     fn flush_handles(&mut self) -> Result<(), ExportError> {
-        let all: Vec<oma_archive::HandleId> = self.mapper.ordinals().handles.in_order().to_vec();
-        for h in all.iter().skip(self.handles_sent) {
+        let new: Vec<oma_archive::HandleId> = match self
+            .mapper
+            .ordinals()
+            .handles
+            .in_order()
+            .get(self.handles_sent..)
+        {
+            None | Some([]) => return Ok(()),
+            Some(tail) => tail.to_vec(),
+        };
+        for h in &new {
             let rec = self.mapper.handle(self.snap, *h)?;
             let fan = self
                 .fan
@@ -372,7 +383,7 @@ impl Job<'_, '_, '_> {
                 .ok_or(ExportError::Limit(LimitKind::RowOrder))?;
             fan.handle(&rec, &mut self.staging)?;
         }
-        self.handles_sent = all.len();
+        self.handles_sent += new.len();
         Ok(())
     }
 
@@ -412,9 +423,23 @@ impl Job<'_, '_, '_> {
         Ok(())
     }
 
+    /// Drop the previews the mapper wanted for an item no writer shows
+    /// images for (a folded reaction row: the HTML writer writes none), so
+    /// nothing is read or sent to the helpers for it.
+    fn skip_previews(&mut self) {
+        let _ = self.mapper.take_preview_wants();
+        if let Some(a) = self.attacher.as_mut() {
+            a.clear_preview_bytes();
+        }
+    }
+
     fn emit(&mut self, m: &ExportMessage, at: Placement) -> Result<(), ExportError> {
         let rec = self.map(m, at)?;
-        self.offer_previews()?;
+        if at.folded_into.is_none() {
+            self.offer_previews()?;
+        } else {
+            self.skip_previews();
+        }
         self.flush_handles()?;
         let fan = self
             .fan

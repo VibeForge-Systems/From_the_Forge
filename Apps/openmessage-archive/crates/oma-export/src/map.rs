@@ -1124,8 +1124,10 @@ impl Mapper {
                 _ => return Err(unmapped()),
             };
             let card = self.card(f.card)?;
-            if let (Some(w), AttachmentAccess::Included, Some(b)) =
-                (self.preview_wants.as_mut(), &x.access, f.blob)
+            // Included, or revealed by the earlier-content opt-in (Q4,
+            // §3.8: then in copies and previews alike); never withheld.
+            if let (Some(w), false, Some(b)) =
+                (self.preview_wants.as_mut(), x.access.is_withheld(), f.blob)
             {
                 w.push((n, b.id));
             }
@@ -1550,6 +1552,8 @@ impl Mapper {
                     Some(Ok(r)) => no_text_reason(r),
                     Some(Err(_)) => NoTextReason::ReasonUnrecognised,
                 }),
+                // The raw value, so an unknown number survives (I5).
+                display_none_reason: codes.display_none_reason.map(Code::coded),
             },
             _ => return Err(unmapped()),
         };

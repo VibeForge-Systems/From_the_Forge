@@ -1,8 +1,8 @@
 {
   "format": "openmessage-archive-export-manifest",
   "manifestVersion": "1.0.0",
-  "schemaVersion": "1.0.0",
-  "tabularColumnsVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
+  "tabularColumnsVersion": "1.1.0",
   "appVersion": "0.0.0-test",
   "archiveSchemaVersion": 1,
   "exportId": "09090909090909090909090909090909",
@@ -29,7 +29,8 @@
     "reveal": {
       "oneTimeCodes": false,
       "earlierContent": false,
-      "confirmedUpTo": null
+      "oneTimeCodesConfirmedUpTo": null,
+      "earlierContentConfirmedUpTo": null
     },
     "clock": "h23",
     "seconds": true,
@@ -129,8 +130,8 @@
     },
     {
       "path": "html/index.html",
-      "bytes": 9640,
-      "sha256": "c0016695623bc7f924f0323b3c395a0511f30054c84d276c92232dc001a4ce44"
+      "bytes": 9732,
+      "sha256": "bcac3c72b180d147bb0185c668aa1fd562bcded6b467d4b5ee9c6b66027de9da"
     }
   ]
 }

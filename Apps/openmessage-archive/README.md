@@ -465,7 +465,8 @@ and message bodies.
 
 Known limitations of PR A: **no export can be made from the app** (the
 dialog is PR B); PDF, XLSX, "Save a copy" of one attachment and leaving
-events out are refused; nothing has run on CI, on Windows, in a browser
+events out are refused (the last two are assigned to slice 6k, with the
+dialog); nothing has run on CI, on Windows, in a browser
 or in a spreadsheet program. PR B adds the export-render helper (XLSX,
 then PDF with krilla and the Noto fonts, owner-confirmed), the Export
 dialog, and the M6 manual checklist. The milestone after M6 is milestone

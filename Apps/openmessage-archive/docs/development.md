@@ -389,9 +389,18 @@ projection. The output is counts and check names only. Run here (Python
 3.13.16, SQLite 3.45.1): 22 archives and `golden-v1`, 4,817 checks, none
 failed. Whether `ubuntu-22.04`'s Python 3.10 and its system SQLite open
 schema v1 (it uses `STRICT` tables, SQLite 3.37 or later) is
-**UNVERIFIED** until CI runs the step. The writers' oracles (TXT grammar,
-JSON schemas, CSV, HTML, and later XLSX and PDF) join `run_oracles.py` in
-their slices.
+**UNVERIFIED** until CI runs the step. Each writer's oracle
+(`txt_grammar.py`, `data_oracle.py`, `html_oracle.py`, and later the XLSX
+and PDF ones) is **its own command** in the workflow's "Independent
+oracles (Python)" step, after `run_oracles.py`, not part of it; their
+commands are in the slice sections below. Each also scans for the export
+catalogue's masking sentinels with two guards: a floor (at least 7
+entries with sentinels and 14 distinct sentinels scanned for, so a
+listing that lost its `export` statements fails instead of passing with
+no check), and a positive control (a bundle of each such entry exported
+with history and both reveals must hold every sentinel). Setting every
+`export` to `null` in each listing by hand made all three fail on the
+floors.
 
 ### The export record core (M6 slice 6d)
 
@@ -463,7 +472,9 @@ OMA_PERF_ATTACH_FILES=1000 OMA_PERF_ATTACH_BYTES=262144 \
   (membership, order, times, text, senders) and checks `SHA256SUMS`.
   Both must change with the grammar. Run here (Python 3.13.16): 21
   exports, 9,777 checks, 0 failed; with the header escaping turned off by
-  hand, both it and four Rust tests failed.
+  hand, both it and four Rust tests failed. After the review fixes
+  (sentinel floors and the revealed bundle): 9,801 checks, 0 failed, under
+  Python 3.13.16 and under a local CPython 3.10.20 (not CI).
 - The goldens are regenerated only when a TXT, manifest or README rule
   changes on purpose; name the rule in the commit. Files over 64 KiB are
   pinned by digest in `expected/SHA256SUMS` and not committed.
@@ -510,8 +521,18 @@ cargo test -p oma-export --test perf_smoke -- --ignored --exact \
   local times against `zoneinfo`, masking and `SHA256SUMS`. Run here
   (Python 3.13.16): 21 entries, 126 bundles, 317,916 checks, 0 failed, in
   about 50 s; the export step took about 10 s. With the neutralisation
-  turned off by hand it reported 119 failures. Its run on CI's Python
-  3.10 is **UNVERIFIED** until the PR's CI runs.
+  turned off by hand it reported 119 failures.
+- CPython 3.10's `csv` reader refuses NUL (`line contains NUL`; 3.11 and
+  later accept it), and the "data tools" profile writes NUL raw, so the
+  first version of this oracle failed on 3.10 (found in review on a local
+  3.10.20). `read_csv` now swaps NUL for a private-use stand-in the file
+  does not hold (checked) before parsing and back in every cell. After the
+  review fixes (the revealed bundles, the sentinel floors and the
+  `edit_versions.csv` reason column): 21 entries, 133 bundles, 320,983
+  checks, 0 failed, both under Python 3.13.16 and under a local CPython
+  3.10.20 with the pinned jsonschema 4.26.0 (a virtual environment, not
+  CI). The run on CI's `ubuntu-22.04` is **UNVERIFIED** until the PR's CI
+  runs.
 - The perf smoke, run here (debug test build, `oma-export`, `csv` and
   `csv-core` at `opt-level = 3`): 20,000 bulk messages (18,996 items and
   1,004 folded reaction rows) exported to TXT, CSV and JSON in 4.8 s, 102
@@ -540,8 +561,11 @@ python3 -I scripts/oracles/html_oracle.py --exports /tmp/oma-html
   Run here (Python 3.13.16, html5lib 1.1): 42 bundles, 106 pages, 968
   articles, 71 images, 115,719 checks, 0 failed; the export step took
   3.4 s and the Python run 2.7 s. With `<` left unescaped by hand it
-  reported failures. Its run on CI's Python 3.10 is **UNVERIFIED** until
-  the PR's CI runs.
+  reported failures. After the review fixes (7 revealed bundles checked
+  for the positive control only, the sentinel floors): 116,113 checks, 0
+  failed, 14 sentinels scanned for and 14 found revealed, under Python
+  3.13.16 and under a local CPython 3.10.20 (not CI). Its run on CI's
+  Python 3.10 is **UNVERIFIED** until the PR's CI runs.
 - A change to the stylesheet changes its hash: re-pin `STYLE_SHA256` in
   `writer/html.rs` (the unit test prints the new value) and regenerate
   the goldens. The previews in `html.rs`'s writer tests come from a

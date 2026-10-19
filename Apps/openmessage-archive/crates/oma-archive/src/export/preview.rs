@@ -15,11 +15,24 @@
 //! ranges, whether an unsent part is listed, its attachments), never the
 //! assembly.
 //!
+//! Every distinct message the export writes is counted once, whether it
+//! is a timeline item or a reaction row folded into its target: the
+//! pipeline writes a folded row as a whole item too (body, attachments
+//! and copies, history), so its reveal flags, attachments and stored
+//! files are in every count below, and `distinct_messages` includes it
+//! (the manifest's `crossConversationRows` is `timeline_rows −
+//! distinct_messages`).
+//!
 //! The two reveal counts are the confirmation's "N messages" and are
 //! never understated (D147): a message counts for
 //!
 //! - **one-time codes** when any of its body versions has a part flagged
-//!   as a code (whether or not that version would be written);
+//!   as a code (whether or not that version would be written), or, when
+//!   history is written ([`ExportDepth::WithHistory`]), when a phone edit
+//!   entry holds edit text (`body_present = 1`): that text is decoded at
+//!   read time, its codes come from the summary (masked whole when its
+//!   runs are incomplete), and the reveal lifts both, so every such
+//!   message is counted without decoding it;
 //! - **earlier content** when its current body lists an unsent part (its
 //!   earlier text, decoded edit text, alternative text, subject history and
 //!   the attachments of unsent parts are withheld), or when its current
@@ -200,8 +213,9 @@ pub struct ExportPreview {
     /// Timeline rows in scope: every conversation's rows (items and folded
     /// reactions) plus each message in no conversation.
     pub timeline_rows: u64,
-    /// Distinct messages among the timeline items (a message in two
-    /// exported conversations counts once).
+    /// Distinct messages among the timeline rows, items and folded
+    /// reactions alike (a message in two exported conversations counts
+    /// once).
     pub distinct_messages: u64,
     /// Reaction rows folded into a target (rows, per conversation).
     pub folded_reaction_rows: u64,
@@ -366,6 +380,15 @@ fn count_message(
             flagged = true;
             break;
         }
+    }
+    if !flagged && opts.depth == ExportDepth::WithHistory {
+        // Decoded edit text (history only) can hold a code the summary
+        // flags, or be masked whole: counted without decoding (D147).
+        flagged = s
+            .prepare(SQL_PRE_EDIT_TEXT)?
+            .query_row([id], |_| Ok(()))
+            .optional()?
+            .is_some();
     }
     let reveal = opts.reveal;
     let mut text_bytes = 0u64;
@@ -548,10 +571,10 @@ pub(crate) fn precount(
             t.chats.insert(row.chat);
         }
         if row.folded_into.is_some() {
+            // Counted as a row here; as a message below, once, like any
+            // item (the pipeline writes it whole).
             p.folded_reaction_rows += 1;
-            return Ok(());
-        }
-        if row.chat.is_none() {
+        } else if row.chat.is_none() {
             p.unassigned += 1;
         }
         if !t.seen.insert(row.id) {

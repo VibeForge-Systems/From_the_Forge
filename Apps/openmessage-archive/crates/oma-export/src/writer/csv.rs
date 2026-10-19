@@ -545,6 +545,8 @@ const EDIT_VERSIONS: &[(&str, Kind)] = &[
     ("at_raw_type", K),
     ("at_raw", Kind::Real),
     (NEUTRALISED, K),
+    // 1.1.0: the stored `display_none_reason` of a version without text.
+    ("display_none_reason", K),
 ];
 
 const VALUE_HISTORY: &[(&str, Kind)] = &[
@@ -1528,8 +1530,12 @@ impl CsvWriter {
             VersionTextRecord::Withheld { reason } => {
                 row.set("text_state", format!("withheld:{}", tok(*reason)))?;
             }
-            VersionTextRecord::NoText { reason } => {
+            VersionTextRecord::NoText {
+                reason,
+                display_none_reason,
+            } => {
                 row.set("text_state", format!("noText:{}", tok(*reason)))?;
+                row.set("display_none_reason", otok(*display_none_reason))?;
             }
         }
         row.set("text_unchanged", b(v.text_unchanged))?;

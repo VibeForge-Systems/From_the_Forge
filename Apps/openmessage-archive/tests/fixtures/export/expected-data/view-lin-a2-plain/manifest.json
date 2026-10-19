@@ -1,8 +1,8 @@
 {
   "format": "openmessage-archive-export-manifest",
   "manifestVersion": "1.0.0",
-  "schemaVersion": "1.0.0",
-  "tabularColumnsVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
+  "tabularColumnsVersion": "1.1.0",
   "appVersion": "0.0.0-test",
   "archiveSchemaVersion": 1,
   "exportId": "09090909090909090909090909090909",
@@ -30,7 +30,8 @@
     "reveal": {
       "oneTimeCodes": false,
       "earlierContent": false,
-      "confirmedUpTo": null
+      "oneTimeCodesConfirmedUpTo": null,
+      "earlierContentConfirmedUpTo": null
     },
     "clock": "h23",
     "seconds": true,
@@ -135,8 +136,8 @@
     },
     {
       "path": "csv/edit_versions.csv",
-      "bytes": 1328,
-      "sha256": "042b45822f560f689880de1054daad82441522525ebaf6f6dadf31854d57834d"
+      "bytes": 1397,
+      "sha256": "341a08eb796f807bdf578fd7263de5af6d43eddcdd0fe31e625742b1b0744b09"
     },
     {
       "path": "csv/handles.csv",
@@ -165,28 +166,28 @@
     },
     {
       "path": "json/c0001.jsonl",
-      "bytes": 35867,
-      "sha256": "0508d3c3d0fbf03ca1a3493f33cd6a77ed7ad666be8c49b614f4880139b8de1a"
+      "bytes": 35968,
+      "sha256": "f01d8944015fabaf8e5d6cf0877c8e81f1ba42d2f943a71d9f6548d58ac4405b"
     },
     {
       "path": "json/conversations.json",
       "bytes": 956,
-      "sha256": "7a6e34422b140e4e523a3e5eb3130e8e720b2f6a0bc1846945cb14d0ba41e78e"
+      "sha256": "12f797cf177cb79870d60136c365173033e42598c9f87c29d26ce234cde93310"
     },
     {
       "path": "json/handles.json",
       "bytes": 594,
-      "sha256": "43e094fc21f092be1080c7aba6bca92cdb4f1782b68a7df6ea7008499c24443c"
+      "sha256": "b82da7f5e53e5ae24e0515848d4ff3d875a2e1729ff4b902f4f2b0f22a69e5b4"
     },
     {
       "path": "schema/export-v1.schema.json",
-      "bytes": 66400,
-      "sha256": "d1719b9429b3fefd8f369356600cd838807c0db0e663c9bce093f4b1aec262fc"
+      "bytes": 66733,
+      "sha256": "df1c662dceb5ba8256186dad08fe61b1f7ac07489a6030c6fc3387374fc8cde7"
     },
     {
       "path": "schema/manifest-v1.schema.json",
-      "bytes": 14819,
-      "sha256": "f564b2a5c924a6810383a7b762faa00f976aeb16adc00f7612254ed558ccf035"
+      "bytes": 14965,
+      "sha256": "dfd1c763069314d1e3cb8f6862d1a525026be1cfe24faf20b9772345c5f5626d"
     }
   ]
 }

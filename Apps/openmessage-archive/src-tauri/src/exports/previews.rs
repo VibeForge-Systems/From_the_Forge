@@ -147,8 +147,26 @@ impl HelperPool {
                 workers.push(h);
             }
         }
+        HelperPool::assemble(tx, shared, workers)
+    }
+
+    /// The pool over `workers`. With none (every thread failed to spawn)
+    /// the queue is closed at once: nobody would ever answer a request, so
+    /// each submit is a crash, and after three the feed turns previews off
+    /// rather than the export waiting forever.
+    fn assemble(
+        tx: Sender<Request>,
+        shared: Arc<Shared>,
+        workers: Vec<JoinHandle<()>>,
+    ) -> HelperPool {
+        let sender = if workers.is_empty() {
+            drop(tx);
+            None
+        } else {
+            Some(tx)
+        };
         HelperPool {
-            sender: Mutex::new(Some(tx)),
+            sender: Mutex::new(sender),
             shared,
             workers,
         }
@@ -216,5 +234,31 @@ impl RenditionPool for HelperPool {
             // No worker will answer: a crash (counted by the feed).
             _ => RenditionTicket::ready(PoolOutcome::Crashed),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A pool whose threads all failed to start answers every request at
+    /// once as a crash, never with a ticket that waits forever.
+    #[test]
+    fn a_pool_without_workers_answers_every_request_as_a_crash() {
+        let (tx, rx) = mpsc::channel::<Request>();
+        let shared = Arc::new(Shared {
+            queue: Mutex::new(rx),
+            stopping: AtomicBool::new(false),
+            stderr: AtomicU64::new(0),
+            switches: Mutex::new(Vec::new()),
+        });
+        let pool = HelperPool::assemble(tx, shared, Vec::new());
+        assert_eq!(pool.workers(), 0);
+        let cancel = oma_archive::CancelToken::new();
+        for _ in 0..3 {
+            let t = pool.submit(vec![0u8; 8], false);
+            assert!(matches!(t.wait(&cancel), Ok(PoolOutcome::Crashed)));
+        }
+        assert_eq!(pool.shutdown(false), 0);
     }
 }

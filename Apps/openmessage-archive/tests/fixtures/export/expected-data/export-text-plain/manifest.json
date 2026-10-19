@@ -1,8 +1,8 @@
 {
   "format": "openmessage-archive-export-manifest",
   "manifestVersion": "1.0.0",
-  "schemaVersion": "1.0.0",
-  "tabularColumnsVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
+  "tabularColumnsVersion": "1.1.0",
   "appVersion": "0.0.0-test",
   "archiveSchemaVersion": 1,
   "exportId": "09090909090909090909090909090909",
@@ -30,7 +30,8 @@
     "reveal": {
       "oneTimeCodes": false,
       "earlierContent": false,
-      "confirmedUpTo": null
+      "oneTimeCodesConfirmedUpTo": null,
+      "earlierContentConfirmedUpTo": null
     },
     "clock": "h23",
     "seconds": true,
@@ -57,8 +58,8 @@
   "counts": {
     "conversations": 4,
     "timelineRows": 92,
-    "distinctMessages": 91,
-    "crossConversationRows": 1,
+    "distinctMessages": 92,
+    "crossConversationRows": 0,
     "foldedReactionRows": 1,
     "items": 91,
     "undatedExcluded": 0,
@@ -135,8 +136,8 @@
     },
     {
       "path": "csv/edit_versions.csv",
-      "bytes": 201203,
-      "sha256": "ee3aad3645a63527b2ad0f8c51ba6ed3a03063ce5b5ce5cfc66926022cc959c7"
+      "bytes": 201509,
+      "sha256": "4ba81ecff7554f6dbf48a8a49e6c2bd6fb2ffb1af5dfc316c5ccaa7a8fc71002"
     },
     {
       "path": "csv/handles.csv",
@@ -165,43 +166,43 @@
     },
     {
       "path": "json/c0001.jsonl",
-      "bytes": 697683,
-      "sha256": "867b305401c3135ced873f100546fad8f8414ecdab544b2e4ff1303fedb48a72"
+      "bytes": 697733,
+      "sha256": "1e53dc60dfee75810df4cc39944f8f38fbf947885183cff4bfb422cc9fa980e7"
     },
     {
       "path": "json/c0002.jsonl",
       "bytes": 40041,
-      "sha256": "42fc9669e365c396ca8f1f1505a92daf8462ffe6cf1a067fe49bed0a070d0e12"
+      "sha256": "9bcd5bf9dbeaec7f2e4e912e561b2573fe574004a206d69376baba8d2d2e807b"
     },
     {
       "path": "json/c0003.jsonl",
       "bytes": 8107,
-      "sha256": "def5817ad58ba7480ce6a165cb5a772857df0e26fc12fcfcf26dd446c1547fbe"
+      "sha256": "01830571ab1715f92ca7fb36a771b3ef26622734645f9b40dfcb352371524018"
     },
     {
       "path": "json/c0004.jsonl",
       "bytes": 4103,
-      "sha256": "e96d65c1b798305cae28feb891b79bc15a0c4a62498a916cef352635c2ff7d15"
+      "sha256": "23e5e439df8f147e80ef747515aa3ca3ca04eed9196fbedc59500ce957267a42"
     },
     {
       "path": "json/conversations.json",
       "bytes": 3874,
-      "sha256": "dd177cc88200bda1fb5b79befaea89e7eebf7f0933eb4eae616dbad6af8442c7"
+      "sha256": "aa4418fa66dc4e7bf8c507fcc15fc6656cd90b82c1eb13797b2171ac7412dd80"
     },
     {
       "path": "json/handles.json",
       "bytes": 5378,
-      "sha256": "77c6ed4d1eb36477173e0eff299f720413bd96b91beae2a560a4a73be10f14cf"
+      "sha256": "9850550b6573a88766fb460564bd928eff24b379bcfdda645a2e90538165f7d9"
     },
     {
       "path": "schema/export-v1.schema.json",
-      "bytes": 66400,
-      "sha256": "d1719b9429b3fefd8f369356600cd838807c0db0e663c9bce093f4b1aec262fc"
+      "bytes": 66733,
+      "sha256": "df1c662dceb5ba8256186dad08fe61b1f7ac07489a6030c6fc3387374fc8cde7"
     },
     {
       "path": "schema/manifest-v1.schema.json",
-      "bytes": 14819,
-      "sha256": "f564b2a5c924a6810383a7b762faa00f976aeb16adc00f7612254ed558ccf035"
+      "bytes": 14965,
+      "sha256": "dfd1c763069314d1e3cb8f6862d1a525026be1cfe24faf20b9772345c5f5626d"
     }
   ]
 }

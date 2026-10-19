@@ -1882,7 +1882,7 @@
         {
           "token": "d115Raw",
           "code": 2,
-          "sentence": "Raw stored text that can hold one-time codes or text from before an unsend or edit is not exported",
+          "sentence": "The raw edit summary, which can hold one-time codes or text from before an unsend or edit, is not exported (its edit text is decoded and masked like the message text)",
           "viewer": null
         },
         {

@@ -687,8 +687,10 @@ impl AttachmentName {
 /// 2. hidden characters are removed (§4.7; `sanitize_filename` removes
 ///    only bidi controls);
 /// 3. `sanitize_filename_max` within the budget (less any prefix digits
-///    beyond six); below [`MIN_ATTACHMENT_NAME_BYTES`] the name is the
-///    ordinal only (`000045.heic`);
+///    beyond six, and any shard digits beyond three: from the
+///    1,000,000th file the shard is `1000` and up); below
+///    [`MIN_ATTACHMENT_NAME_BYTES`] the name is the ordinal only
+///    (`000045.heic`);
 /// 4. `.blocked` is appended unless the extension is allowed for the
 ///    sniffed kind, or `keep_extensions` (the confirmed opt-out) is on.
 pub fn attachment_name(
@@ -699,7 +701,11 @@ pub fn attachment_name(
     keep_extensions: bool,
 ) -> AttachmentName {
     let prefix = format!("{file:06}");
-    let budget = budget.saturating_sub(prefix.len().saturating_sub(6));
+    let shard = format!("{:03}", file / FILES_PER_SHARD);
+    // The budget reserved six prefix digits and a three-digit shard.
+    let budget = budget
+        .saturating_sub(prefix.len().saturating_sub(6))
+        .saturating_sub(shard.len().saturating_sub(3));
     let nameless = || match sniffed_extension(sniffed) {
         Some(e) => format!("attachment.{e}"),
         None => "attachment".to_owned(),
@@ -729,7 +735,7 @@ pub fn attachment_name(
         name.push_str(BLOCKED);
     }
     AttachmentName {
-        shard: format!("{:03}", file / FILES_PER_SHARD),
+        shard,
         file: name,
         shortened,
         blocked,
@@ -1045,13 +1051,24 @@ mod tests {
             MAX_ATTACHMENT_NAME_BYTES
         );
         let long = format!("{}.jpeg", "é".repeat(200));
-        for depth in [10usize, 60, 100, 130, 150, 200, 300] {
+        // Every depth, and ordinals whose prefix or shard outgrow six and
+        // three digits (the 1,000,000th file is in shard `1000`).
+        let cases = [10usize, 60, 100, 130, 150, 200, 300]
+            .into_iter()
+            .flat_map(|d| [999_999u64, 1_000_000, 10_000_000].map(|o| (d, o)));
+        for (depth, ordinal) in cases {
             let parent = PathBuf::from(format!("/{}", "d".repeat(depth)));
             let budget = attachment_name_budget(&parent, &bundle);
-            let n = attachment_name(999_999, Some(&long), Some(SniffedKind::Jpeg), budget, false);
-            assert_eq!(n.shortened, budget < MIN_ATTACHMENT_NAME_BYTES, "{depth}");
+            let n = attachment_name(ordinal, Some(&long), Some(SniffedKind::Jpeg), budget, false);
+            let extra =
+                format!("{ordinal:06}").len() - 6 + format!("{:03}", ordinal / 1_000).len() - 3;
+            assert_eq!(
+                n.shortened,
+                budget.saturating_sub(extra) < MIN_ATTACHMENT_NAME_BYTES,
+                "{depth}"
+            );
             if n.shortened {
-                assert_eq!(n.file(), "999999.jpg");
+                assert_eq!(n.file(), format!("{ordinal:06}.jpg"));
             }
             let rel = BundlePath::attachment(&n).to_slash();
             // The published path and the staging path, with `.blocked`

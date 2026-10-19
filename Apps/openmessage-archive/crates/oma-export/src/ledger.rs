@@ -174,9 +174,16 @@ pub const LEDGER: &[LedgerEntry] = &[
     raw(412, "attachment.created"),
     raw(413, "attachment.start"),
     raw(414, "attachment.emojiDescription"),
-    // message_body: the decoded text is exported (`item.body`, derived);
-    // the raw inputs are not.
-    excluded(501, D115Raw),
+    // message_body: the decoded text is exported (`item.body`, derived).
+    // The plain `text` column is exported as the alternative text when it
+    // differs from the displayed text, masked and withheld per §3.8
+    // (`export/mask.rs`: withheld whole with earlier content, or with a
+    // flagged code in the current body); the other raw inputs are not.
+    derived(
+        501,
+        "item.alternativeText.text",
+        "plainColumnWhenSourcesDiffer, masked per §3.8",
+    ),
     excluded(502, RawSourceBytes),
     excluded(503, D115Raw),
     // chat_message
