@@ -278,6 +278,8 @@ pub(crate) fn primary_code(e: &rusqlite::Error) -> Option<i32> {
     }
 }
 
+/// `SQLITE_ERROR`.
+pub(crate) const SQLITE_ERROR: i32 = 1;
 /// `SQLITE_INTERRUPT`.
 pub(crate) const SQLITE_INTERRUPT: i32 = 9;
 /// `SQLITE_NOTADB`.

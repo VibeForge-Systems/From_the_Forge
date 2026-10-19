@@ -36,7 +36,9 @@ use rusqlite::config::DbConfig;
 use rusqlite::limits::Limit;
 use rusqlite::{Connection, OpenFlags};
 
-use crate::error::{primary_code, ArchiveError, DamageKind, IoOp, Stage, SQLITE_INTERRUPT};
+use crate::error::{
+    primary_code, ArchiveError, DamageKind, IoOp, Stage, SQLITE_ERROR, SQLITE_INTERRUPT,
+};
 use crate::layout::ArchiveDir;
 
 /// The key to [`ArchiveDir::database`]. Only this module can make one.
@@ -253,9 +255,22 @@ impl Phase<'_> {
     /// A SQLite error of this phase as an archive error: an interrupt is
     /// `QueryTooBroad` or `Cancelled` (an interrupt from the handle, with
     /// neither flag set, is a cancel), never `Damaged`.
+    ///
+    /// SQLite does not always report an interrupt from the handle as
+    /// `SQLITE_INTERRUPT`. A virtual table (the FTS5 index) connects on
+    /// its first use on a connection, while the statement that uses it is
+    /// prepared, and its constructor parses the table's declaration
+    /// (`sqlite3_declare_vtab`); an interrupt that lands in that inner
+    /// parse fails it, and SQLite reports the constructor's failure as
+    /// `SQLITE_ERROR` ("vtable constructor failed"). The interrupt flag is
+    /// still set then (only a new statement or parse clears it), so a
+    /// `SQLITE_ERROR` with the flag set is the interrupt too.
     pub(crate) fn err(&self, e: &rusqlite::Error) -> ArchiveError {
         match primary_code(e) {
             Some(SQLITE_INTERRUPT) => self.budget.stop().unwrap_or(Stop::Cancelled).error(),
+            Some(SQLITE_ERROR) if self.conn.is_interrupted() => {
+                self.budget.stop().unwrap_or(Stop::Cancelled).error()
+            }
             Some(crate::error::SQLITE_NOTADB) => ArchiveError::NotAnArchive,
             _ => ArchiveError::sqlite(Stage::View, e),
         }
@@ -686,6 +701,7 @@ pub(crate) fn open_memory() -> Result<Connection, ArchiveError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::OptionalExtension;
 
     const LONG: &str =
         "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000000) \
@@ -908,6 +924,60 @@ mod tests {
             })
             .expect("works");
         assert_eq!(n, 7);
+    }
+
+    #[test]
+    fn an_interrupt_while_a_virtual_table_connects_is_a_cancel() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = ArchiveDir::at(tmp.path().to_path_buf());
+        create_database_file(&dir).expect("file");
+        let w = WriteConn::open_new(&dir).expect("writer");
+        w.conn()
+            .execute_batch("CREATE VIRTUAL TABLE v USING fts5(x)")
+            .expect("fts5 table");
+        drop(w);
+        let r = ReadConn::open(&dir).expect("reader");
+        // `v` connects on its first use, while the statement that uses it
+        // is prepared, and FTS5's constructor parses its declaration
+        // (`sqlite3_declare_vtab`). An interrupt that lands during that
+        // inner parse fails it, and SQLite reports the constructor's
+        // failure as `SQLITE_ERROR` ("vtable constructor failed"), not
+        // `SQLITE_INTERRUPT`, leaving the interrupt flag set. To land the
+        // interrupt there: set it from the authorizer, which runs after
+        // the outer parse's last interrupt check and before `v` connects,
+        // while another statement runs (a parse clears the flag at its
+        // start when no statement is running).
+        const USE_V: &str = "SELECT rowid FROM v";
+        let handle = r.interrupt_handle();
+        let e = r.viewing(ViewBudget::Search, None, soon(), |p| {
+            p.sql(|c| {
+                c.query_row("SELECT 1", [], |_| {
+                    c.authorizer(Some(move |a: AuthContext<'_>| {
+                        if matches!(a.action, AuthAction::Select) {
+                            handle.interrupt();
+                        }
+                        Authorization::Allow
+                    }))?;
+                    let used = c
+                        .query_row(USE_V, [], |row| row.get::<_, i64>(0))
+                        .optional();
+                    c.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)?;
+                    used
+                })
+            })
+        });
+        assert!(matches!(e, Err(ArchiveError::Cancelled)), "{e:?}");
+        // The table connects on its next use.
+        let none = r
+            .viewing(ViewBudget::Lookup, None, soon(), |p| {
+                p.sql(|c| {
+                    c.query_row(USE_V, [], |row| row.get::<_, i64>(0))
+                        .optional()
+                })
+            })
+            .expect("works");
+        assert_eq!(none, None);
     }
 
     #[test]

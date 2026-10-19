@@ -1228,7 +1228,12 @@ fn the_reply_thread_keeps_the_earliest_replies_by_date() {
 fn a_scan_that_used_up_the_deadline_still_assembles_its_items() {
     let (i, n) = main_entry();
     let r = i.lib.open_read(&i.id).expect("reader");
-    let chat = ChatId::new(*n.chats.keys().next().expect("a chat"));
+    // A named chat with dated messages: `Names.chats` is a `HashMap`, so
+    // its first key differs from run to run and may be a chat without any.
+    let chat = ChatId::new(by_name(
+        &n.chats,
+        "guid:iMessage;-;synthetic-viewer-1@example.invalid",
+    ));
     let normal = r
         .thread_page(
             chat,
@@ -1239,6 +1244,7 @@ fn a_scan_that_used_up_the_deadline_still_assembles_its_items() {
             Reveal::default(),
         )
         .expect("page");
+    assert!(!normal.items.is_empty(), "the chat has dated messages");
     let _f = install(Faults {
         page_window_ms: Some(50),
         pause_after_scan_ms: Some(120),
