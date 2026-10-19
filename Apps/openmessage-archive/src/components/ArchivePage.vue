@@ -3,6 +3,7 @@
 // the import and verify actions, progress, and the last import and verify.
 // Counts and states only; the label is the one free text (I7).
 import { computed, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import ArchiveStatusBadge from '@/components/ArchiveStatusBadge.vue';
 import ImportSummary from '@/components/ImportSummary.vue';
 import JobProgress from '@/components/JobProgress.vue';
@@ -58,6 +59,17 @@ const unheardProgress = computed<ProgressJob | null>(() => {
 
 const busy = computed(() => archives.jobRunning || backups.jobRunning);
 const ready = computed(() => entry.value?.status === 'ready' || (!entry.value && !!details.value));
+/** The viewer reads while an import or a verify runs (M5 §2); Rust refuses the rest. */
+const canBrowse = computed(
+  () =>
+    (!!entry.value && ['ready', 'importing', 'verifying'].includes(entry.value.status)) ||
+    (!entry.value && !!details.value),
+);
+const router = useRouter();
+
+function browse(): void {
+  void router.push({ name: 'viewer', params: { archiveId: id.value } });
+}
 const newerRules = computed(() => summary.value?.newerRules ?? false);
 const canImport = computed(() => ready.value && !newerRules.value && !busy.value);
 const canVerify = computed(() => ready.value && !busy.value);
@@ -234,12 +246,14 @@ function cancelUnheard(): void {
         <h2 id="archive-browse-title" class="h6 mb-0">Conversations</h2>
       </div>
       <div class="card-body">
-        <p class="small">This version shows counts only. Reading and searching messages comes next.</p>
+        <p class="small">
+          Read the conversations in this archive. The viewer only reads: it changes nothing in the
+          archive.
+        </p>
         <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
-          <button type="button" class="btn btn-outline-secondary" disabled aria-describedby="viewer-planned">
+          <button type="button" class="btn btn-outline-secondary" :disabled="!canBrowse" @click="browse">
             <i class="bi bi-chat-square-text me-1" aria-hidden="true"></i>Browse conversations
           </button>
-          <span id="viewer-planned"><PlannedBadge capability="viewer" /></span>
         </div>
         <label for="conversation-search" class="form-label small mb-1 d-flex justify-content-between">
           <span>Search messages</span>

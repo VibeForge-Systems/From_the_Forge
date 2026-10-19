@@ -52,18 +52,24 @@ describe('viewer settings', () => {
     expect(fake.updates).toEqual([{ viewer: { ...snapshot().settings.viewer, showSeconds: true, uiZoom: 250 } }]);
   });
 
-  it('keep the viewer-only preferences disabled with the Planned badge until the viewer ships', async () => {
+  it('enable the viewer preferences now that the viewer ships, and keep the privacy-screen ones disabled (5j)', async () => {
     const w = mountWith();
     await flushPromises();
-    const fieldsets = w.findAll('fieldset[disabled]');
-    expect(fieldsets.length).toBeGreaterThanOrEqual(2);
-    for (const id of ['viewer-time-format', 'viewer-seconds', 'viewer-reveal-earlier', 'viewer-playback-confirm', 'viewer-blur', 'viewer-idle']) {
+    for (const id of ['viewer-time-format', 'viewer-seconds', 'viewer-reveal-earlier', 'viewer-playback-confirm']) {
+      const el = w.find(`#${id}`).element as HTMLInputElement;
+      expect(el.matches(':disabled'), id).toBe(false);
+    }
+    for (const id of ['viewer-blur', 'viewer-idle']) {
       const el = w.find(`#${id}`).element as HTMLInputElement;
       expect(el.matches(':disabled'), id).toBe(true);
     }
-    expect(w.text()).toContain('Planned · M5');
-    // Zoom applies now, to the whole window.
+    expect(w.text()).toContain('Always play without asking');
+    expect(w.findAll('.oma-planned').map((b) => b.attributes('title'))).toEqual([
+      expect.stringContaining('Privacy screen is planned for milestone 5'),
+    ]);
     expect(w.find('#viewer-zoom').element.matches(':disabled')).toBe(false);
+    await w.find('#viewer-playback-off').setValue(true);
+    expect(fake.updates.at(-1)).toMatchObject({ viewer: { mediaPlayback: 'off' } });
   });
 
   it('offer capture protection only on Windows', async () => {

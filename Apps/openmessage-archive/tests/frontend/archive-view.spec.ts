@@ -40,6 +40,7 @@ import {
 } from './helpers';
 
 const api = vi.mocked(ipc);
+let lastRouter: ReturnType<typeof createRouter> | null = null;
 
 function mountView() {
   const router = createRouter({
@@ -48,8 +49,10 @@ function mountView() {
       { path: '/', component: ArchiveView },
       { path: '/settings', component: { template: '<div />' } },
       { path: '/backups', component: { template: '<div />' } },
+      { path: '/archive/:archiveId/viewer', name: 'viewer', component: { template: '<div />' } },
     ],
   });
+  lastRouter = router;
   return mount(ArchiveView, { global: { plugins: [router] } });
 }
 
@@ -82,7 +85,7 @@ function button(w: ReturnType<typeof mountView>, text: string) {
 }
 
 describe('ArchiveView', () => {
-  it('welcomes a new user with one working action and only the viewer marked planned', () => {
+  it('welcomes a new user with one working action and only search and exports marked planned', () => {
     const settings = useSettings();
     settings.loaded = true;
     settings.snapshot = snapshot();
@@ -91,7 +94,7 @@ describe('ArchiveView', () => {
     expect(wrapper.text()).toContain('Welcome to OpenMessage Archive');
     const choose = wrapper.findAll('button').find((b) => b.text().includes('Choose archive folder'));
     expect(choose?.attributes('disabled')).toBeUndefined();
-    expect(wrapper.findAll('.oma-planned').length).toBe(1);
+    expect(wrapper.findAll('.oma-planned').map((b) => b.text())).toEqual(['Planned · M5', 'Planned · M6']);
     expect(api.listArchives).not.toHaveBeenCalled();
     const steps = wrapper.findAll('.oma-steps li').map((li) => li.text());
     expect(steps).toHaveLength(4);
@@ -100,6 +103,7 @@ describe('ArchiveView', () => {
     expect(wrapper.find('.oma-steps a[href="/backups"]').exists()).toBe(true);
     expect(steps[2]).toContain('Import messages.');
     expect(steps[2]).not.toContain('Planned');
+    expect(steps[3]).toContain('Read your conversations in the viewer.');
     expect(steps[3]).toContain('Planned · M5');
   });
 
@@ -134,6 +138,22 @@ describe('ArchiveView', () => {
     expect(wrapper.find('.oma-archive-list').text()).toContain('Synthetic archive');
   });
 
+  it('opens the viewer from Browse conversations, and only for an archive the viewer can read (5h3)', async () => {
+    api.listArchives.mockResolvedValue(archiveListing([archiveEntry()]));
+    api.getArchiveDetails.mockResolvedValue(archiveDetails());
+    const wrapper = await mountReady();
+    const browse = button(wrapper, 'Browse conversations');
+    expect(browse?.attributes('disabled')).toBeUndefined();
+    await browse?.trigger('click');
+    await flushPromises();
+    expect(lastRouter?.currentRoute.value.name).toBe('viewer');
+    expect(lastRouter?.currentRoute.value.params.archiveId).toBe(ARCHIVE_ID);
+
+    api.listArchives.mockResolvedValue(archiveListing([archiveEntry({ status: 'needsUpgrade' })]));
+    const other = await mountReady();
+    expect(button(other, 'Browse conversations')?.attributes('disabled')).toBeDefined();
+  });
+
   it('shows a damaged archive with its reason and no enabled action', async () => {
     api.listArchives.mockResolvedValue(archiveListing([archiveEntry({ status: 'damaged', damage: 'schemaMismatch' })]));
     api.getArchiveDetails.mockRejectedValue(new (await import('@/services/ipc')).IpcError('get_archive_details', 'archiveDamaged', 'Damaged.'));
@@ -164,7 +184,9 @@ describe('ArchiveView', () => {
     expect(wrapper.text()).toContain('There was not enough free space.');
     expect(wrapper.text()).toContain('1 attachment file is missing.');
     expect(wrapper.text()).toContain('Counts: not recorded until the first import finishes.');
-    expect(wrapper.findAll('.oma-planned').map((b) => b.text())).toEqual(['Planned · M5', 'Planned · M5']);
+    // Only search is still planned (slice 5i); the viewer opens from here.
+    expect(wrapper.findAll('.oma-planned').map((b) => b.text())).toEqual(['Planned · M5']);
+    expect(button(wrapper, 'Browse conversations')?.attributes('disabled')).toBeUndefined();
 
     await button(wrapper, 'Verify archive (full)')?.trigger('click');
     await flushPromises();

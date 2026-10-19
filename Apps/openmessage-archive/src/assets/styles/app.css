@@ -45,6 +45,14 @@ body {
   }
 }
 
+/* The viewer's "Always reduce motion" setting (M5 §10). */
+.oma-reduce-motion *,
+.oma-reduce-motion *::before,
+.oma-reduce-motion *::after {
+  transition-duration: 0.01ms !important;
+  animation-duration: 0.01ms !important;
+}
+
 .oma-skip-link {
   position: absolute;
   z-index: 2000;

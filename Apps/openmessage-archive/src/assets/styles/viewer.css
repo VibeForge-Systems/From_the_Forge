@@ -469,11 +469,159 @@
   color: var(--bs-secondary-color);
 }
 
+/* Attachments (5h3): cards in a fixed box; nothing reflows when a
+ * preview arrives late. */
+.oma-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oma-space-2);
+  margin-top: var(--oma-space-1);
+}
+
+.oma-attachment {
+  max-width: 320px;
+  margin: 0;
+  contain: paint;
+}
+
+.oma-attachment-sticker {
+  max-width: 160px;
+}
+
+.oma-attachment-sticker .oma-media-box {
+  width: 160px;
+}
+
+.oma-media-btn {
+  display: block;
+  padding: 0;
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.oma-media-btn:focus-visible {
+  outline: 2px solid var(--bs-focus-ring-color);
+  outline-offset: 2px;
+}
+
+.oma-media-btn .oma-media-box {
+  display: block;
+}
+
+.oma-media-placeholder {
+  display: block;
+}
+
+.oma-file-card {
+  min-width: 200px;
+  padding: var(--oma-space-2);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  background: var(--bs-tertiary-bg);
+}
+
+.oma-file-kind {
+  font-weight: 600;
+}
+
+.oma-attachment-caption {
+  font-size: var(--oma-text-xs);
+  color: var(--bs-secondary-color);
+  overflow-wrap: anywhere;
+}
+
+.oma-attachment-size {
+  display: block;
+}
+
+/* The media viewer shows the display rendition (at most 2048 px) inside
+ * the dialog, scaled down to fit. */
+.oma-media-viewer {
+  margin: 0;
+}
+
+.oma-media-full {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  margin-inline: auto;
+  object-fit: contain;
+  background: var(--bs-tertiary-bg);
+}
+
+audio.oma-media-full,
+.oma-media-viewer audio {
+  width: 100%;
+  background: transparent;
+}
+
+.oma-item-actions {
+  margin: 0;
+  font-size: var(--oma-text-xs);
+}
+
+.oma-system-item .oma-item-actions {
+  text-align: center;
+}
+
+.oma-dir-you .oma-item-actions {
+  text-align: end;
+}
+
+/* The details panel, "As recorded". */
+.oma-details-heading {
+  margin: var(--oma-space-3) 0 var(--oma-space-1);
+  font-size: var(--oma-text-sm);
+  font-weight: 600;
+}
+
+.oma-details-list {
+  margin-bottom: var(--oma-space-2);
+}
+
+.oma-details-list dt {
+  font-family: var(--bs-font-monospace);
+  font-weight: 400;
+  font-size: var(--oma-text-xs);
+  color: var(--bs-secondary-color);
+}
+
+.oma-details-list dd {
+  margin-bottom: var(--oma-space-1);
+  overflow-wrap: anywhere;
+}
+
+.oma-details-versions,
+.oma-details-edits,
+.oma-details-observations,
+.oma-details-reactions {
+  padding-inline-start: 1.25em;
+}
+
+.oma-details-attachment {
+  padding-top: var(--oma-space-1);
+  border-top: 1px solid var(--bs-border-color);
+}
+
+.oma-raw {
+  font-family: var(--bs-font-monospace);
+  font-size: var(--oma-text-xs);
+  color: var(--bs-secondary-color);
+}
+
+.oma-reply-list .oma-thread-item {
+  margin-bottom: var(--oma-space-2);
+}
+
 @media (forced-colors: active) {
   .oma-bubble,
   .oma-chip,
   .oma-placeholder,
-  .oma-earlier-shown {
+  .oma-earlier-shown,
+  .oma-file-card,
+  .oma-media-btn {
     border-color: CanvasText;
   }
 }

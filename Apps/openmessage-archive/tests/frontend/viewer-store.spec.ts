@@ -34,6 +34,7 @@ import {
 } from '@/stores/viewer';
 import { useSettings } from '@/stores/settings';
 import type {
+  InspectAttachmentRequest,
   GetMessageDetailRequest,
   GetMessageTextRequest,
   GetThreadPageRequest,
@@ -41,7 +42,18 @@ import type {
   SearchMessagesRequest,
   TextChunkDto,
 } from '@/types';
-import { ARCHIVE_ID, message, sid, snapshot, textPiece, threadPage, viewerSession } from './helpers';
+import {
+  ARCHIVE_ID,
+  attachment,
+  inspection,
+  message,
+  messageDetail,
+  sid,
+  snapshot,
+  textPiece,
+  threadPage,
+  viewerSession,
+} from './helpers';
 
 const range = (from: number, count: number) => Array.from({ length: count }, (_, i) => from + i);
 
@@ -391,5 +403,61 @@ describe('viewer store: reveals and full text (5h2)', () => {
     expect(store.takePendingFocus(sid(6))).toBeNull();
     expect(store.takePendingFocus(sid(5))).toBe(30);
     expect(store.takePendingFocus(sid(5))).toBeNull();
+  });
+});
+
+describe('viewer store: attachments, playback and the panel (5h3)', () => {
+  function playable(id: number, forPlayback: boolean) {
+    return inspection(id, {
+      content: { kind: 'sniffed', sniffed: 'mp4', class: { kind: 'playable', structureChecked: true }, storedBytes: 9 },
+      playback: forPlayback ? { kind: 'allowed', structureChecked: true } : null,
+    });
+  }
+
+  it('keeps a playback verdict when a plain inspection is asked again', async () => {
+    const store = await openSession();
+    fake.handlers.inspectAttachment = (arg) => {
+      const r = arg as InspectAttachmentRequest;
+      return Promise.resolve(playable(r.attachmentId, r.forPlayback));
+    };
+    await store.inspect(sid(3), true);
+    await store.inspect(sid(3), false, true);
+    expect(store.inspections.get(sid(3))?.playback).toEqual({ kind: 'allowed', structureChecked: true });
+  });
+
+  it('asks for confirmation once per file per session, and again after the session closes', async () => {
+    useSettings().snapshot = snapshot();
+    const store = await openSession();
+    fake.handlers.inspectAttachment = (arg) => {
+      const r = arg as InspectAttachmentRequest;
+      return Promise.resolve(playable(r.attachmentId, r.forPlayback));
+    };
+    await store.requestPlay(attachment(3));
+    expect(store.pendingPlay?.id).toBe(3);
+    await store.answerPlay('play');
+    expect(store.media).toEqual({ attachment: attachment(3), mode: 'play' });
+    store.closeMedia();
+    await store.requestPlay(attachment(3));
+    expect(store.pendingPlay).toBeNull();
+    expect(store.media?.mode).toBe('play');
+
+    store.openDetails(sid(3));
+    expect(store.panel).toEqual({ kind: 'details', message: 3, reactions: false });
+    await store.close();
+    expect(store.panel).toBeNull();
+    expect(store.media).toBeNull();
+    await store.open(ARCHIVE_ID);
+    await store.requestPlay(attachment(3));
+    expect(store.pendingPlay?.id).toBe(3);
+  });
+
+  it('repeats only the reveals the user asked for when reading details', async () => {
+    const store = await openSession();
+    fake.handlers.getMessageDetail = () => Promise.resolve(messageDetail(message(5)));
+    await store.loadDetail(sid(5));
+    expect(fake.calls.at(-1)?.[1]).toEqual({ viewer: 7, messageId: 5 });
+    await store.revealMessage(sid(5), { oneTimeCode: true });
+    await store.loadDetail(sid(5), null);
+    expect(fake.calls.at(-1)?.[1]).toEqual({ viewer: 7, messageId: 5, reveal: { oneTimeCode: true }, reactionPage: {} });
   });
 });

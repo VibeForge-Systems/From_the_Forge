@@ -13,10 +13,13 @@
 // - A long body is collapsed with "Show more". A body cut at the page's
 //   cap shows "Show the full text", which reads it with `get_message_text`
 //   chunk by chunk, still masked.
+// - An attachment placed in the text is named by its number in the list
+//   below the text ("Attachment 2 (shown below)", slice 5h3).
 import { computed, ref } from 'vue';
-import type { MessageDto, SegmentDto } from '@/types';
+import type { MessageDto, SafeId, SegmentDto } from '@/types';
 import SafeText from './SafeText.vue';
 import {
+  ATTACHMENT_TEXT,
   ATTRIBUTED_OUTCOME_TEXT,
   BUBBLE_TEXT,
   CONTENT_BADGE_TEXT,
@@ -27,7 +30,6 @@ import {
   PREVIEW_BODY_TEXT,
   SEGMENT_TEXT,
   SOURCES_DIFFER_TEXT,
-  THREAD_TEXT,
   TS_ERROR_TEXT,
   VALUE_STATE_TEXT,
   WITHHELD_TEXT,
@@ -123,6 +125,12 @@ function segmentClass(seg: SegmentDto): string {
   return c.join(' ');
 }
 
+/** An attachment placed in the text: its number in the list below. */
+function placedText(id: SafeId): string {
+  const i = props.message.attachments.findIndex((a) => a.id === id);
+  return i < 0 ? ATTACHMENT_TEXT.inTextUnlisted : fill(ATTACHMENT_TEXT.inText, { n: i + 1 });
+}
+
 function readMore(): void {
   const t = text.value;
   if (t) void viewer.loadFullText(t.body, props.message.id);
@@ -142,7 +150,7 @@ function readMore(): void {
             ><SafeText :value="seg.piece.value" :show-hidden="settings.viewer.showHiddenCharacters" quiet /></span
           ><span v-else-if="seg.piece.kind === 'withheld'" class="oma-masked">{{ MASK_TEXT[seg.piece.mask] }}</span
           ><span v-else-if="seg.piece.kind === 'inlineEmoji'" class="oma-missing">{{ SEGMENT_TEXT.inlineEmoji }}</span
-          ><span v-else-if="seg.piece.kind === 'attachment'" class="oma-placeholder">{{ THREAD_TEXT.attachmentInText }}</span
+          ><span v-else-if="seg.piece.kind === 'attachment'" class="oma-placeholder">{{ placedText(seg.piece.attachment) }}</span
           ><span v-else class="oma-placeholder">{{ SEGMENT_TEXT.unmatchedPlaceholder }}</span></template
         >
       </template>

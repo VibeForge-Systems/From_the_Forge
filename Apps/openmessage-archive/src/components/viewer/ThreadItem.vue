@@ -4,7 +4,8 @@
 // separator and a service divider above it when they change. Since slice
 // 5h2 its content is a MessageBubble (aligned by direction) or a centred
 // SystemRow (events, unrecognised items, association rows that stay
-// items); attachments are counted until slice 5h3 draws them.
+// items). Since slice 5h3 each item has a Details button that shows the
+// "As recorded" panel on the right, and its attachments are drawn.
 //
 // - A sender label shows above each run of messages when the conversation
 //   has more than one recorded address (`showSender`); otherwise it stays
@@ -38,8 +39,12 @@ const props = withDefaults(
     showSender?: boolean;
     /** The service this item changes to; `undefined` when it does not change. */
     serviceChange?: ServiceClassDto | null | undefined;
+    /** The id prefix of the article (the reply panel uses its own, so ids stay unique). */
+    idPrefix?: string;
+    /** Shown in the reply panel: the quote of the originator is left out. */
+    inPanel?: boolean;
   }>(),
-  { showSender: false },
+  { showSender: false, idPrefix: 'oma-m-', inPanel: false },
 );
 const emit = defineEmits<{ jump: [originator: SafeId, chat: SafeId | null] }>();
 
@@ -52,7 +57,7 @@ const error = ref<string | null>(null);
 
 const shape = computed(() => itemShape(shown.value));
 const system = computed(() => shape.value !== 'bubble');
-const base = computed(() => `oma-m-${props.message.id}`);
+const base = computed(() => `${props.idPrefix}${props.message.id}`);
 const time = computed(() => timeText(shown.value.date, settings.viewer));
 
 const sender = computed<{ handle: HandleDto } | { text: string }>(() => {
@@ -78,6 +83,10 @@ const serviceText = computed(() => {
     ? BUBBLE_TEXT.serviceNotRecognised
     : fill(BUBBLE_TEXT.serviceChanged, { service: SERVICE_TEXT[props.serviceChange] });
 });
+
+function openDetails(): void {
+  viewer.openDetails(props.message.id);
+}
 
 async function reveal(what: RevealInput): Promise<void> {
   error.value = await viewer.revealMessage(props.message.id, what);
@@ -118,6 +127,7 @@ async function hide(what: RevealInput): Promise<void> {
         :message="shown"
         :handles="handles"
         :revealed="revealed"
+        :id-base="base"
         @reveal="reveal"
         @hide="hide"
       />
@@ -127,11 +137,23 @@ async function hide(what: RevealInput): Promise<void> {
         :handles="handles"
         :revealed="revealed"
         :error="error"
+        :id-base="base"
+        :in-panel="inPanel"
         @reveal="reveal"
         @hide="hide"
         @jump="(o, c) => emit('jump', o, c)"
       />
       <p v-if="system && error" class="oma-body-note" role="alert">{{ BUBBLE_TEXT.revealFailed }} {{ error }}</p>
     </div>
+    <p class="oma-item-actions">
+      <button
+        type="button"
+        class="btn btn-link btn-sm oma-inline-btn"
+        :aria-describedby="`${base}-h`"
+        @click="openDetails"
+      >
+        {{ BUBBLE_TEXT.details }}
+      </button>
+    </p>
   </article>
 </template>

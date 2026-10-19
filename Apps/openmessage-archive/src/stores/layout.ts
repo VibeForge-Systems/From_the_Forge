@@ -48,6 +48,17 @@ export const useLayout = defineStore('layout', () => {
     }
   }
 
+  /** Show the right panel (the viewer's details), docked or as an overlay. */
+  async function openRight(): Promise<void> {
+    if (rightVisible.value) return;
+    if (canDockRight.value) {
+      await settings.setLayout({ ...settings.layout, rightPanelOpen: true });
+    } else {
+      rightOverlay.value = true;
+      leftOverlay.value = false;
+    }
+  }
+
   function closeOverlays(): void {
     leftOverlay.value = false;
     rightOverlay.value = false;
@@ -64,6 +75,7 @@ export const useLayout = defineStore('layout', () => {
     rightOverlay,
     toggleLeft,
     toggleRight,
+    openRight,
     closeOverlays,
   };
 });

@@ -2535,8 +2535,8 @@ and `…/viewer/c/:chatId`) opens a viewer session for the archive and shows
 the conversation list beside the thread. Leaving those routes closes the
 session (`router/index.ts`, `closeViewerOnLeave`, D114); the window title
 stays "Viewer" (D112); a chat id from the URL is parsed with the `SafeId`
-rule (`services/ids.ts`), and message ids never enter a URL. Nothing links
-to the page until slice 5h3.
+rule (`services/ids.ts`), and message ids never enter a URL. Since slice
+5h3 the Archive page's "Browse conversations" opens it.
 
 - **`VirtualFeed`** (D109, revised) renders only the rows near the
   viewport (at most 200) and the rows in `keepMounted`; gaps sized from
@@ -2628,8 +2628,8 @@ are spec §3.6's, applied to the DTOs' closed codes:
   originator in another conversation, the view opens that conversation
   and the store hands it the originator (`focusOnOpen`), so the message id
   never enters the URL. An unresolved reference is a sentence, not a
-  control. "N replies across conversations" is shown as a count (the reply
-  thread opens in the right panel in slice 5h3).
+  control. "N replies across conversations" is shown as a count (since
+  slice 5h3 it is a button that opens the reply thread in the right panel).
 - **System rows.** Events read from closed sentences and list the
   addresses recorded with them; **no actor or target role is asserted**,
   so the row's own sender is not shown. A renamed conversation shows the
@@ -2640,7 +2640,89 @@ are spec §3.6's, applied to the DTOs' closed codes:
 - **Labels and dividers.** Message labels and Recently Deleted lines (with
   the date of the import that read each backup) are text badges and
   sentences; a divider marks each place where the service changes between
-  loaded items. Attachments are counted until slice 5h3 draws them.
+  loaded items. Attachments were counted until slice 5h3 drew them
+  (below).
+
+### Attachments, the details panel and the media viewer (M5 slice 5h3)
+
+The viewer opens from the Archive page ("Browse conversations", enabled
+for an archive that is ready, importing or verifying; Rust refuses the
+rest), and the roadmap's `viewer` capability is `available`. Search (5i)
+and the privacy screen (5j, a new roadmap entry `privacy-screen`) are
+still planned, and their controls stay disabled with their badges. The
+pure rules are in `services/attachmentView.ts`; the words in
+`services/viewerText.ts` (`ATTACHMENT_TEXT`, `DETAILS_TEXT`,
+`PLAY_CONFIRM_TEXT`).
+
+- **Cards** (`AttachmentList`, `AttachmentView`, spec §5.9). A card is
+  decided from Rust's card state first (the lookup and copy codes of the
+  highest-ranked observation), then from the stored file's sniffed
+  content, never from the declared type. Each card asks
+  `inspect_attachment` when it first comes into view
+  (`IntersectionObserver` where the engine has it; otherwise a mounted
+  card counts as in view, since the feed mounts only rows near the
+  viewport); the store runs at most four inspections at once and caches
+  each answer for the session. An image shows the `thumb` rendition in a
+  fixed 320 × 240 box (160 for stickers), with `alt=""` and the caption
+  ("Image, <file name>", or the recorded emoji description) as its
+  accessible name; its `src` comes only from `mediaUrl` with the token of
+  that inspection, is set only while the card is in view, and a failed
+  load is retried in view after 0.5 s, 1 s and 2 s before "Preview could
+  not be loaded" with Retry. GIFs are marked "first frame only". HEIC,
+  PDF, vCard and other kinds are file cards with their sniffed kind and
+  "Type recorded: X; content: Y"; a missing, unreadable or mismatched file
+  is a sentence. Every card shows the stored size beside the declared
+  one. An attachment placed in the text is named there by its number
+  ("Attachment 2 (shown below)") and drawn in the list below the text;
+  drawing it inside the text run is not done.
+- **Play** (§5.6, owner Q4, D118). A Play card appears only when
+  `mediaPlayback` is not `off` and `canPlayType` does not answer `""` for
+  the sniffed container ("This format can't be played in the app"
+  otherwise). Play first runs `inspect_attachment { forPlayback }`
+  ("Checking the file…": the structural check and the full hash, in
+  Rust); a refusal is shown on the card. Under `confirm` the first Play
+  of each file in a viewer session then opens `PlayConfirmDialog` with
+  the §5.6 sentence and "Play", "Cancel" and "Always play without asking"
+  (which sets `clickToPlay`); `clickToPlay` skips it. Only then does the
+  media viewer create the `<video>` or `<audio>` element, with native
+  controls, `preload="metadata"`, no `autoplay`, `controlslist="nodownload
+  noremoteplayback"`, `disablepictureinpicture` and
+  `disableremoteplayback`; under `off` no element is ever created. While
+  anything plays, the media session's title is "OpenMessage Archive",
+  where the engine has `MediaMetadata`. Confirmations are forgotten when
+  the session closes.
+- **The media viewer** (`MediaViewer`, a `ModalDialog` mounted once in
+  the viewer page) shows the `display` rendition, labelled "Preview,
+  re-encoded and reduced to 2048 px; original W×H; N stored (M declared)";
+  the original size is asked from Rust once the preview has loaded. It has
+  no download, open or share action. Closing it unmounts the element,
+  which stops playback.
+- **The details panel** (`MessageDetails`, "As recorded", in the right
+  panel; each item has a "Details" button). It reads `get_message_detail`
+  and lists the values under their source column names: direction,
+  sender, service and item kind; the raw values of `date`, `date_edited`
+  and `date_retracted` with their unit and a UTC ISO form at the unit's
+  precision; the account (`destination_caller_id`, meaning unverified) and
+  `subject`; the versions this archive captured, each with the import
+  that first kept it, and per version the edit entries recorded on the
+  phone in stored order, with their time as recorded (unit assumed) and
+  their text decoded at read time (owner Q3a); values other backups
+  recorded; the conversations' raw `style`, `is_filtered` and
+  `is_archived` (meaning unverified); each attachment's declared facts,
+  stored file, card, full-verify result and observations by backup rank
+  (lookup, copy and location codes with their raw values); the identifier
+  checks; and the reaction rows, paged by 200 on request ("Show the
+  recorded reaction rows" on a bubble opens the panel with the first
+  page), with the rule that derives the chips. Earlier text stays
+  withheld until "Show earlier text", which re-reads through the store's
+  reveal overlay as the bubble does (D115); the details then repeat that
+  reveal, and only that one.
+- **The reply thread** (`ReplyThread`) lists `get_reply_thread`'s replies
+  as `ThreadItem`s with their own id prefix (`oma-r-`), so ids stay
+  unique beside the thread; the originator's quote is left out.
+- **Settings.** The viewer's preferences are enabled now that the viewer
+  ships. "Always reduce motion" applies the same reset as the system's
+  reduced-motion preference (`oma-reduce-motion` on `<html>`).
 
 ### Status and qualifiers (D43)
 
@@ -2797,7 +2879,8 @@ are design decisions of the M4 spec.
 
 ### Milestone 5 decisions
 
-D89–D117 (M5 spec §18), as PR A (slices 5a–5f) implements them. **The
+D89–D117 (M5 spec §18), as PR A (slices 5a–5f) implements them, and
+D118 from PR B (slice 5h3). **The
 owner answered the spec's four questions on 2026-10-18**: D97's and D99's
 playback wording, D100 and D110 (Q1), D101 (Q2, **which differs from the
 lean**), D105 and D115 (Q3) and D99's default (Q4) are **owner-confirmed**.
@@ -2835,6 +2918,7 @@ D104, D107–D109, D112's UI side) are implemented in PR B.
 | D115 | Masking and retraction (**owner-confirmed, Q3b**) | Enforced in Rust on every content path, released only by `reveal` after a click; revealing by default is a setting, off | Mask in the bubble only | A one-time code or withdrawn text never reaches the webview unasked |
 | D116 | Zoom | `uiZoom` applied from Rust with `set_zoom`; no webview permission | `zoomHotkeysEnabled` | WCAG reflow without widening the capability |
 | D117 | M6 export source | `view/assemble.rs` is the uncapped layer M6 streams | Export from the paging APIs | Exports are complete |
+| D118 | Play order (slice 5h3) | Rust's structural check and full hash run on the first Play, **before** the confirmation, so the confirmation's "It has checked the file's structure" is true and a refused file never asks | The spec's §2 order: confirm, then check | A full hash of a file the user may then cancel; no attachment byte reaches the engine before the confirmation either way |
 
 ## Logging
 

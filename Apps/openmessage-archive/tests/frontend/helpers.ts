@@ -20,8 +20,12 @@ import type {
   Settings,
   SettingsSnapshot,
   ValidationReportDto,
+  AttachmentDto,
+  AttachmentFactsDto,
+  AttachmentInspectionDto,
   ContentTextDto,
   ConversationRowDto,
+  MessageDetailDto,
   DecimalString,
   MediaBase,
   MediaToken,
@@ -712,6 +716,103 @@ export function conversationRow(id: number, overrides: Partial<ConversationRowDt
     undated: { n: 0, capped: false },
     empty: false,
     preview: null,
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------- 5h3
+
+/** A stored attachment as a page lists it. */
+export function attachment(id: number, overrides: Partial<AttachmentDto> = {}): AttachmentDto {
+  return {
+    id: sid(id),
+    declaredType: text('image/jpeg'),
+    name: text(`IMG_${id}.JPG`),
+    sticker: false,
+    declaredBytes: '20480' as DecimalString,
+    stored: true,
+    storedBytes: 20480,
+    placedInline: false,
+    token: TOKEN,
+    ...overrides,
+  };
+}
+
+/** An attachment's facts, with a stored file and one observation. */
+export function attachmentFacts(id: number, overrides: Partial<AttachmentFactsDto> = {}): AttachmentFactsDto {
+  return {
+    id: sid(id),
+    declaredType: text('image/jpeg'),
+    uti: text('public.jpeg'),
+    name: text(`IMG_${id}.JPG`),
+    declaredBytes: { value: '20480' as DecimalString, state: null },
+    sticker: { value: '0' as DecimalString, state: null },
+    hideAttachment: { value: '0' as DecimalString, state: null },
+    emojiDescription: missing('null'),
+    file: { storedBytes: 20480, heldBy: sid(1) },
+    observations: [
+      {
+        session: sid(1),
+        lookup: 'present',
+        lookupRaw: '9' as DecimalString,
+        copy: 'copied',
+        copyRaw: '1' as DecimalString,
+        pathClass: 'smsAttachments',
+        stored: true,
+        sizeMatchedManifest: true,
+      },
+    ],
+    card: { kind: 'file', olderBackup: null },
+    verify: null,
+    history: [],
+    ...overrides,
+  };
+}
+
+/** `inspect_attachment`'s answer for a sniffed JPEG with a token. */
+export function inspection(id: number, overrides: Partial<AttachmentInspectionDto> = {}): AttachmentInspectionDto {
+  return {
+    facts: attachmentFacts(id),
+    content: { kind: 'sniffed', sniffed: 'jpeg', class: { kind: 'image' }, storedBytes: 20480 },
+    playback: null,
+    token: TOKEN,
+    originalSize: null,
+    previewsOff: false,
+    ...overrides,
+  };
+}
+
+/** `get_message_detail` for a message, with one current version. */
+export function messageDetail(m: MessageDto, overrides: Partial<MessageDetailDto> = {}): MessageDetailDto {
+  const t = { ms: null, raw: null, unit: null, state: 'null' as const, before2007: false };
+  return {
+    message: m,
+    versions: [
+      {
+        body: sid(m.id),
+        current: true,
+        firstSession: sid(1),
+        lastSession: sid(1),
+        text: { kind: 'text', pieces: [textPiece('Synthetic text')] },
+        textUnchanged: false,
+        editLabel: null,
+        edits: [],
+        moreEdits: 0,
+        editTexts: 'notNeeded',
+      },
+    ],
+    moreVersions: 0,
+    times: { date: m.date, edited: t, retracted: t },
+    account: missing('null'),
+    subject: missing('absent'),
+    history: [],
+    chats: [],
+    attachments: [],
+    replyProbe: null,
+    reactionTargetProbe: null,
+    reactions: null,
+    cutForSize: false,
+    skippedRows: 0,
     ...overrides,
   };
 }

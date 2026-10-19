@@ -17,13 +17,16 @@ import { computed } from 'vue';
 import type { HandleDto, MessageDto, RevealInput, SafeId } from '@/types';
 import SafeText from './SafeText.vue';
 import MessageBody from './MessageBody.vue';
+import AttachmentList from './AttachmentList.vue';
 import { associationEmoji, associationSentences, eventSentence, itemShape } from '@/services/messageView';
-import { BUBBLE_TEXT, SENDER_TEXT, THREAD_TEXT, fill } from '@/services/viewerText';
+import { BUBBLE_TEXT, SENDER_TEXT } from '@/services/viewerText';
 
 const props = defineProps<{
   message: MessageDto;
   handles: ReadonlyMap<SafeId, HandleDto>;
   revealed: RevealInput | null;
+  /** The article's id prefix, for the attachments' captions. */
+  idBase: string;
 }>();
 const emit = defineEmits<{ reveal: [what: RevealInput]; hide: [what: RevealInput] }>();
 
@@ -50,12 +53,6 @@ const eventHandles = computed(() =>
   (event.value?.handles ?? []).map((id) => ({ id, handle: props.handles.get(id) ?? null })),
 );
 const showBody = computed(() => props.message.body.kind === 'text');
-
-const attachments = computed(() => {
-  const n = props.message.attachments.length + props.message.moreAttachments;
-  if (n === 0) return null;
-  return n === 1 ? THREAD_TEXT.oneAttachment : fill(THREAD_TEXT.attachments, { n });
-});
 </script>
 
 <template>
@@ -99,6 +96,6 @@ const attachments = computed(() => {
         @hide-code="emit('hide', { oneTimeCode: true })"
       />
     </div>
-    <p v-if="attachments" class="oma-body-note">{{ attachments }}</p>
+    <AttachmentList :message="message" :id-base="idBase" />
   </div>
 </template>

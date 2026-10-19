@@ -15,18 +15,30 @@
 // itself; "Hide" drops the overlay. Page requests carry a reveal only when
 // the `revealEarlierText` setting is on. The full text of a truncated body
 // is read with `get_message_text`, chunk by chunk, on request only.
+//
+// Attachments and the side panel (slice 5h3): `inspect` runs at most
+// `MAX_INSPECTING` inspections at once (cards ask when they come into
+// view) and caches each answer for the session. Play is gated in three
+// steps (§5.6, privacy.md): `inspect_attachment { forPlayback }` (the
+// structural check and the full hash, in Rust), then, under `confirm`, the
+// user's confirmation for that file in this session, then the media
+// viewer. With `off` nothing is asked and Rust refuses anyway. The right
+// panel shows the message details, the reply thread or the archive facts.
 import { defineStore } from 'pinia';
 import { computed, markRaw, ref, shallowRef } from 'vue';
 import { IpcError, ipc } from '@/services/ipc';
 import { devNote } from '@/services/devlog';
+import { playGate } from '@/services/media';
 import { VIEWER_ERROR_TEXT } from '@/services/viewerText';
 import type {
   AnchorInput,
+  AttachmentDto,
   AttachmentInspectionDto,
   ConversationRowDto,
   ConversationSortInput,
   ErrorCode,
   HandleDto,
+  MessageDetailDto,
   MessageDto,
   PageRangeDto,
   RevealInput,
@@ -60,6 +72,19 @@ export const HITS_PER_REQUEST = 50;
 export const MAX_REVEALED = 100;
 /** Bodies whose full text is kept loaded. */
 export const MAX_FULL_TEXTS = 20;
+/** Inspections in flight at once (§8.4). */
+export const MAX_INSPECTING = 4;
+
+/** What the right panel shows. */
+export type SidePanel =
+  | { kind: 'details'; message: SafeId; reactions: boolean }
+  | { kind: 'replies'; message: SafeId };
+
+/** The attachment the media viewer shows, and how. */
+export interface MediaOpen {
+  attachment: AttachmentDto;
+  mode: 'image' | 'play';
+}
 
 /** A message re-read with a reveal, shown over the page's copy. */
 export interface RevealedMessage {
@@ -208,6 +233,17 @@ export const useViewer = defineStore('viewer', () => {
   const fullTexts = shallowRef(new Map<SafeId, FullText>());
   const pendingFocus = ref<PendingFocus | null>(null);
 
+  const panel = shallowRef<SidePanel | null>(null);
+  const media = shallowRef<MediaOpen | null>(null);
+  /** The attachment waiting for the play confirmation (`confirm`). */
+  const pendingPlay = shallowRef<AttachmentDto | null>(null);
+  /** Attachments whose Play check is running. */
+  const checking = shallowRef(new Set<SafeId>());
+  /** Attachments the user confirmed for playback in this session. */
+  let confirmed = new Set<SafeId>();
+  let inspecting = 0;
+  const waiting: (() => void)[] = [];
+
   let epochs = 0;
   let searchSeq = 0;
 
@@ -235,6 +271,11 @@ export const useViewer = defineStore('viewer', () => {
     revealed.value = new Map();
     fullTexts.value = new Map();
     pendingFocus.value = null;
+    panel.value = null;
+    media.value = null;
+    pendingPlay.value = null;
+    checking.value = new Set();
+    confirmed = new Set();
   }
 
   /** A `viewerClosed` rejection means the session is gone: forget it all. */
@@ -479,24 +520,153 @@ export const useViewer = defineStore('viewer', () => {
     }
   }
 
-  /** Inspect a surfaced attachment, cached per session. */
-  async function inspect(attachmentId: SafeId, forPlayback = false): Promise<AttachmentInspectionDto | null> {
+  async function slot(): Promise<void> {
+    if (inspecting < MAX_INSPECTING) {
+      inspecting += 1;
+      return;
+    }
+    await new Promise<void>((resolve) => waiting.push(resolve));
+  }
+
+  function release(): void {
+    const next = waiting.shift();
+    if (next) next();
+    else inspecting = Math.max(0, inspecting - 1);
+  }
+
+  /**
+   * Inspect a surfaced attachment, cached per session. `fresh` asks again
+   * (the original size is known only after a preview was made). At most
+   * `MAX_INSPECTING` run at once.
+   */
+  async function inspect(
+    attachmentId: SafeId,
+    forPlayback = false,
+    fresh = false,
+  ): Promise<AttachmentInspectionDto | null> {
     const v = viewer.value;
     if (v === null) return null;
     const cached = inspections.value.get(attachmentId);
-    if (cached && (!forPlayback || cached.playback !== null)) return cached;
+    if (!fresh && cached && (!forPlayback || cached.playback !== null)) return cached;
+    await slot();
     try {
+      if (viewer.value !== v) return null;
       const got = await ipc.inspectAttachment({ viewer: v, attachmentId, forPlayback });
       if (viewer.value !== v) return null;
       const next = new Map(inspections.value);
+      // A plain inspection never forgets a playback verdict already given.
+      const before = next.get(attachmentId);
+      const kept = !forPlayback && before?.playback ? { ...got, playback: before.playback } : got;
       next.delete(attachmentId);
-      next.set(attachmentId, got);
+      next.set(attachmentId, kept);
       while (next.size > MAX_INSPECTIONS) next.delete(next.keys().next().value!);
       inspections.value = next;
-      return got;
+      return kept;
     } catch (e) {
       error.value = failed(e);
       return null;
+    } finally {
+      release();
+    }
+  }
+
+  /** Open the media viewer on an image's preview. */
+  function openImage(attachment: AttachmentDto): void {
+    media.value = { attachment, mode: 'image' };
+  }
+
+  function closeMedia(): void {
+    media.value = null;
+  }
+
+  /**
+   * Play: Rust's checks first (the structural check and the full hash),
+   * then the confirmation under `confirm`, then the media viewer.
+   */
+  async function requestPlay(attachment: AttachmentDto): Promise<void> {
+    const setting = useSettings().viewer.mediaPlayback;
+    if (setting === 'off' || checking.value.has(attachment.id)) return;
+    const busy = new Set(checking.value);
+    busy.add(attachment.id);
+    checking.value = busy;
+    let got: AttachmentInspectionDto | null;
+    try {
+      got = await inspect(attachment.id, true);
+    } finally {
+      const done = new Set(checking.value);
+      done.delete(attachment.id);
+      checking.value = done;
+    }
+    if (!got || got.playback?.kind !== 'allowed') return;
+    const gate = playGate(useSettings().viewer.mediaPlayback, confirmed.has(attachment.id));
+    if (gate === 'none') return;
+    if (gate === 'confirm') {
+      pendingPlay.value = attachment;
+      return;
+    }
+    media.value = { attachment, mode: 'play' };
+  }
+
+  /** The answer to the play confirmation. */
+  async function answerPlay(answer: 'play' | 'cancel' | 'always'): Promise<void> {
+    const attachment = pendingPlay.value;
+    pendingPlay.value = null;
+    if (!attachment || answer === 'cancel') return;
+    if (answer === 'always') await useSettings().setViewer({ mediaPlayback: 'clickToPlay' });
+    confirmed.add(attachment.id);
+    media.value = { attachment, mode: 'play' };
+  }
+
+  /** Show a message's details (and its reaction rows) in the right panel. */
+  function openDetails(message: SafeId, reactions = false): void {
+    panel.value = { kind: 'details', message, reactions };
+  }
+
+  function openReplies(message: SafeId): void {
+    panel.value = { kind: 'replies', message };
+  }
+
+  function closePanel(): void {
+    panel.value = null;
+  }
+
+  /**
+   * Read one message's details. The reveal the user already asked for that
+   * message is repeated, never added; `reactionsAfter` adds a page of the
+   * reaction history (`null`: the first).
+   */
+  async function loadDetail(
+    messageId: SafeId,
+    reactionsAfter?: SafeId | null,
+  ): Promise<{ detail: MessageDetailDto } | { error: string } | null> {
+    const v = viewer.value;
+    if (v === null) return null;
+    const reveal = revealed.value.get(messageId)?.reveal;
+    try {
+      const detail = await ipc.getMessageDetail({
+        viewer: v,
+        messageId,
+        ...(reveal && (reveal.earlierText || reveal.oneTimeCode) ? { reveal } : {}),
+        ...(reactionsAfter === undefined ? {} : { reactionPage: reactionsAfter === null ? {} : { after: reactionsAfter } }),
+      });
+      if (viewer.value !== v) return null;
+      return { detail: markRaw(detail) };
+    } catch (e) {
+      return { error: failed(e) };
+    }
+  }
+
+  /** Read the reply thread of an originator. */
+  async function loadReplies(messageId: SafeId): Promise<{ page: ThreadPageDto } | { error: string } | null> {
+    const v = viewer.value;
+    if (v === null) return null;
+    const r = reveal();
+    try {
+      const page = await ipc.getReplyThread({ viewer: v, messageId, ...(r ? { reveal: r } : {}) });
+      if (viewer.value !== v) return null;
+      return { page: markRaw(page) };
+    } catch (e) {
+      return { error: failed(e) };
     }
   }
 
@@ -634,6 +804,10 @@ export const useViewer = defineStore('viewer', () => {
     revealed,
     fullTexts,
     pendingFocus,
+    panel,
+    media,
+    pendingPlay,
+    checking,
     open,
     close,
     listConversations,
@@ -644,6 +818,15 @@ export const useViewer = defineStore('viewer', () => {
     loadHits,
     cancelSearch,
     inspect,
+    openImage,
+    closeMedia,
+    requestPlay,
+    answerPlay,
+    openDetails,
+    openReplies,
+    closePanel,
+    loadDetail,
+    loadReplies,
     shown,
     revealMessage,
     unreveal,

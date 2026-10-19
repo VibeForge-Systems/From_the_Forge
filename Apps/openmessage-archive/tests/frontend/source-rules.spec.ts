@@ -89,6 +89,19 @@ const ALLOWED_BINDINGS: Record<string, readonly string[]> = {
   'components/VerifySummary.vue': ['class="alertClass"'],
   'components/ViewerSettings.vue': ['id="`viewer-playback-${p}`"'],
   'components/viewer/SafeText.vue': ["class=\"mode === 'identifier' ? 'oma-safe-id' : 'oma-safe-body'\""],
+  // Captions are named `<idBase>-a<n>`: an app-made article prefix with a
+  // checked integer, and the attachment's position (5h3).
+  'components/viewer/AttachmentView.vue': [
+    'aria-describedby="captionId"',
+    'aria-labelledby="captionId"',
+    'class="boxClass"',
+    'id="captionId"',
+  ],
+  // Dialog titles and close labels are fixed words (5h3).
+  'components/viewer/MediaViewer.vue': ['title="title"'],
+  'components/viewer/MessageDetails.vue': ['aria-label="DETAILS_TEXT.close"'],
+  'components/viewer/PlayConfirmDialog.vue': ['title="PLAY_CONFIRM_TEXT.title"'],
+  'components/viewer/ReplyThread.vue': ['aria-label="DETAILS_TEXT.close"'],
   // Option ids come from the position in the id snapshot; aria values are
   // counts and booleans.
   'components/viewer/ConversationList.vue': [
@@ -109,6 +122,7 @@ const ALLOWED_BINDINGS: Record<string, readonly string[]> = {
   // the classes come from the item's shape and direction codes.
   'components/viewer/ThreadItem.vue': [
     'aria-describedby="`${base}-b`"',
+    'aria-describedby="`${base}-h`"',
     'aria-labelledby="`${base}-h`"',
     'class="itemClass"',
     'class="senderClass"',

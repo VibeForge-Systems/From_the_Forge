@@ -6,8 +6,10 @@
 // closes the session (the guard in `router/index.ts`, D114), and the
 // window title stays "Viewer", never a chat name (D112).
 //
-// Until slice 5h3 nothing links here: the Archive page keeps its Planned
-// badge, because bubbles, attachments and details are not shown yet.
+// Since slice 5h3 the Archive page links here ("Browse conversations").
+// The right panel shows a message's details ("As recorded") or its reply
+// thread when one is asked for, and the archive's facts otherwise. The
+// media viewer and the play confirmation are mounted once, here.
 import { computed, watch } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import type { SafeId } from '@/types';
@@ -15,8 +17,12 @@ import PanelLayout from '@/components/PanelLayout.vue';
 import EmptyState from '@/components/EmptyState.vue';
 import ConversationList from '@/components/viewer/ConversationList.vue';
 import ThreadView from '@/components/viewer/ThreadView.vue';
+import MessageDetails from '@/components/viewer/MessageDetails.vue';
+import ReplyThread from '@/components/viewer/ReplyThread.vue';
+import MediaViewer from '@/components/viewer/MediaViewer.vue';
+import PlayConfirmDialog from '@/components/viewer/PlayConfirmDialog.vue';
 import { parseSafeId } from '@/services/ids';
-import { THREAD_TEXT, fill } from '@/services/viewerText';
+import { DETAILS_TEXT, THREAD_TEXT, fill } from '@/services/viewerText';
 import { useLayout } from '@/stores/layout';
 import { useViewer } from '@/stores/viewer';
 
@@ -27,6 +33,20 @@ const router = useRouter();
 
 const chat = computed(() => (props.chatId === undefined ? null : parseSafeId(props.chatId)));
 const stats = computed(() => viewer.session?.stats ?? null);
+const panel = computed(() => viewer.panel);
+const handles = computed(() => viewer.openWindow?.handles ?? new Map());
+const rightLabel = computed(() =>
+  panel.value?.kind === 'details'
+    ? DETAILS_TEXT.title
+    : panel.value?.kind === 'replies'
+      ? DETAILS_TEXT.replies
+      : THREAD_TEXT.infoHeading,
+);
+
+// Asking for details or replies shows the right panel.
+watch(panel, (now) => {
+  if (now !== null) void layout.openRight();
+});
 
 watch(
   () => props.archiveId,
@@ -47,7 +67,7 @@ function closeViewer(): void {
 </script>
 
 <template>
-  <PanelLayout left-label="Conversations" right-label="Archive in the viewer">
+  <PanelLayout left-label="Conversations" :right-label="rightLabel">
     <template #left>
       <ConversationList v-if="viewer.session" :key="viewer.viewer ?? 0" :selected="chat" @open="openChat" />
     </template>
@@ -97,21 +117,37 @@ function closeViewer(): void {
     </div>
 
     <template #right>
-      <div class="oma-panel-header">
-        <h2 class="oma-panel-title">{{ THREAD_TEXT.infoHeading }}</h2>
-      </div>
-      <div v-if="viewer.session" class="oma-panel-body px-3 small">
-        <ul v-if="stats" class="list-unstyled">
-          <li>{{ fill(THREAD_TEXT.infoChats, { n: stats.chats }) }}</li>
-          <li>{{ fill(THREAD_TEXT.infoMessages, { n: stats.messages }) }}</li>
-          <li>{{ fill(THREAD_TEXT.infoAttachments, { n: stats.attachments }) }}</li>
-        </ul>
-        <p v-else>{{ THREAD_TEXT.infoNoStats }}</p>
-        <p v-if="viewer.session.provisional">{{ THREAD_TEXT.provisional }}</p>
-        <p v-if="(viewer.session.unsearchable ?? 0) > 0">
-          {{ fill(THREAD_TEXT.unsearchable, { n: viewer.session.unsearchable ?? 0 }) }}
-        </p>
-      </div>
+      <MessageDetails
+        v-if="viewer.session && panel?.kind === 'details'"
+        :message-id="panel.message"
+        :reactions="panel.reactions"
+        :handles="handles"
+        @close="viewer.closePanel()"
+      />
+      <ReplyThread
+        v-else-if="viewer.session && panel?.kind === 'replies'"
+        :message-id="panel.message"
+        @close="viewer.closePanel()"
+      />
+      <template v-else>
+        <div class="oma-panel-header">
+          <h2 class="oma-panel-title">{{ THREAD_TEXT.infoHeading }}</h2>
+        </div>
+        <div v-if="viewer.session" class="oma-panel-body px-3 small">
+          <ul v-if="stats" class="list-unstyled">
+            <li>{{ fill(THREAD_TEXT.infoChats, { n: stats.chats }) }}</li>
+            <li>{{ fill(THREAD_TEXT.infoMessages, { n: stats.messages }) }}</li>
+            <li>{{ fill(THREAD_TEXT.infoAttachments, { n: stats.attachments }) }}</li>
+          </ul>
+          <p v-else>{{ THREAD_TEXT.infoNoStats }}</p>
+          <p v-if="viewer.session.provisional">{{ THREAD_TEXT.provisional }}</p>
+          <p v-if="(viewer.session.unsearchable ?? 0) > 0">
+            {{ fill(THREAD_TEXT.unsearchable, { n: viewer.session.unsearchable ?? 0 }) }}
+          </p>
+        </div>
+      </template>
     </template>
   </PanelLayout>
+  <MediaViewer />
+  <PlayConfirmDialog />
 </template>

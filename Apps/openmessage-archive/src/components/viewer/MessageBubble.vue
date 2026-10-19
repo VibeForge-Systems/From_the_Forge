@@ -2,7 +2,9 @@
 // One message bubble (M5 §3.6, §8.4), slice 5h2: the reply quote, the
 // body, edits and unsends per part, "N stored versions", withheld earlier
 // text, labels as text badges, Recently Deleted lines, reaction chips and
-// the reply count. Attachments are counted here; slice 5h3 draws them.
+// the reply count. Since slice 5h3 it lists the attachments (cards,
+// thumbnails and Play cards), and the reply count and the reactions open
+// the reply thread and the reaction rows in the right panel.
 //
 // Never shown (I5, D94): read, delivery or sent state; "not edited"; a
 // whole-bubble "Unsent" unless every part is listed. Earlier text stays
@@ -15,13 +17,13 @@ import SafeText from './SafeText.vue';
 import MessageBody from './MessageBody.vue';
 import ReactionChips from './ReactionChips.vue';
 import ReplyQuote from './ReplyQuote.vue';
+import AttachmentList from './AttachmentList.vue';
 import { editView, hasReactions, replyCountText } from '@/services/messageView';
 import { formatInstant } from '@/services/time';
 import {
   BUBBLE_TEXT,
   MESSAGE_LABEL_TEXT,
   REVEALED_TEXT,
-  THREAD_TEXT,
   WITHHELD_TEXT,
   fill,
 } from '@/services/viewerText';
@@ -35,6 +37,10 @@ const props = defineProps<{
   revealed: RevealInput | null;
   /** The last reveal failed. */
   error: string | null;
+  /** The article's id prefix, for the attachments' captions. */
+  idBase: string;
+  /** In the reply panel, whose heading names the originator: no quote. */
+  inPanel?: boolean;
 }>();
 const emit = defineEmits<{
   reveal: [what: RevealInput];
@@ -86,12 +92,6 @@ const recordedBy = computed(() => {
   return r ? fill(BUBBLE_TEXT.directionRecordedBy, { lineage: r.lineage }) : null;
 });
 
-const attachments = computed(() => {
-  const n = props.message.attachments.length + props.message.moreAttachments;
-  if (n === 0) return null;
-  return n === 1 ? THREAD_TEXT.oneAttachment : fill(THREAD_TEXT.attachments, { n });
-});
-
 const replies = computed(() => replyCountText(props.message.replyCount));
 const reactions = computed(() => (hasReactions(props.message.reactions) ? props.message.reactions : null));
 const canHideEarlier = computed(() => earlier.value.kind === 'revealed' && props.revealed?.earlierText === true);
@@ -99,7 +99,7 @@ const canHideEarlier = computed(() => earlier.value.kind === 'revealed' && props
 
 <template>
   <div class="oma-bubble oma-contained">
-    <ReplyQuote v-if="message.reply" :reply="message.reply" @jump="(o, c) => emit('jump', o, c)" />
+    <ReplyQuote v-if="message.reply && !inPanel" :reply="message.reply" @jump="(o, c) => emit('jump', o, c)" />
 
     <MessageBody
       :message="message"
@@ -140,10 +140,19 @@ const canHideEarlier = computed(() => earlier.value.kind === 'revealed' && props
       {{ rd.text }}<template v-for="(l, i) in rd.later" :key="i">; {{ l }}</template>
     </p>
     <p v-if="recordedBy" class="oma-body-note">{{ recordedBy }}</p>
-    <p v-if="attachments" class="oma-body-note">{{ attachments }}</p>
+    <AttachmentList :message="message" :id-base="idBase" />
 
     <ReactionChips v-if="reactions" :reactions="reactions" :handles="handles" />
-    <p v-if="replies" class="oma-body-note">{{ replies }}</p>
+    <p v-if="reactions" class="mb-0">
+      <button type="button" class="btn btn-link btn-sm oma-inline-btn" @click="viewer.openDetails(message.id, true)">
+        {{ BUBBLE_TEXT.reactionRows }}
+      </button>
+    </p>
+    <p v-if="replies" class="mb-0">
+      <button type="button" class="btn btn-link btn-sm oma-inline-btn" @click="viewer.openReplies(message.id)">
+        {{ replies }}
+      </button>
+    </p>
     <p v-if="!message.extras" class="oma-body-note">{{ BUBBLE_TEXT.extrasMissing }}</p>
   </div>
 </template>

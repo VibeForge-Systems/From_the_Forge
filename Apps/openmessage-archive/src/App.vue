@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, toRef } from 'vue';
+import { onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import AppNavbar from '@/components/AppNavbar.vue';
 import ArchiveDialogs from '@/components/ArchiveDialogs.vue';
@@ -17,6 +17,14 @@ const showShortcuts = ref(false);
 const noticeDismissed = ref(false);
 
 useTheme(toRef(settings, 'theme'));
+
+// The viewer's motion setting (M5 §10): "Always reduce motion" applies the
+// same reset as the system's reduced-motion preference.
+watch(
+  () => settings.viewer.motion,
+  (motion) => document.documentElement.classList.toggle('oma-reduce-motion', motion === 'reduce'),
+  { immediate: true },
+);
 
 const hasPanels = () =>
   ['archive', 'backups', 'viewer', 'viewer-chat'].includes(String(router.currentRoute.value.name));

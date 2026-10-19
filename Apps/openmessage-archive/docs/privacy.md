@@ -378,8 +378,11 @@ a message from one yet. These settings are hygiene, not protection; see
 M5 is the first milestone that shows message content, addresses, chat
 names and attachment files in the window. *Status: the reading side, the
 commands, the media protocol, the decode helper and the window's settings
-exist from M5 PR A (slices 5a–5f); the screens that show them come in PR
-B. Nothing here has been run in a window or on Windows yet; items marked
+exist from M5 PR A (slices 5a–5f); PR B adds the screens (the threads,
+attachments, the media viewer, the play confirmation and the details panel
+since slice 5h3; search and the privacy screen are still to come). The
+screens have been tested in jsdom only. Nothing here has been run in a
+window or on Windows yet; items marked
 **UNVERIFIED** depend on the web engine and are not yet tested: they are
 listed as not tested in `compatibility.md` (slice 5f) and are to be
 recorded per engine on the M5 manual checklist (slice 5k).*

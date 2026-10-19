@@ -1091,6 +1091,33 @@ screen reader, in forced colours or at 400 % zoom (slice 5j), and the
 layout of long or mixed-direction bubbles on a real engine. Spike 5s(2)
 (playback) is still **UNVERIFIED**; this slice does not play media.
 
+**Slice 5h3 (attachment cards, the media viewer, the play confirmation,
+the details panel and the reply thread)** was tested in jsdom only
+(Vitest 4.1.12, synthetic DTOs, a hand-written `invoke` fake): cards
+inspect when they come into view, at most four at once; a thumbnail's
+`src` comes only from `mediaUrl` and is set only while in view (with a
+stubbed `IntersectionObserver`); retries after 0.5 s, 1 s and 2 s, then
+Retry; file and unavailable cards; Play runs Rust's check first, then the
+confirmation under `confirm`, none under `clickToPlay`, and no element and
+no check under `off`; a refused file never asks; the media elements carry
+`controls`, `preload="metadata"`, `controlslist`,
+`disablepictureinpicture` and `disableremoteplayback` and no `autoplay`;
+the media session's neutral title (with stubbed `navigator.mediaSession`
+and `MediaMetadata`); the details panel's columns, raw times, versions,
+phone edits, observations and paged reaction rows; the reply thread's
+ids. jsdom's `canPlayType` answers `""`, so the tests stub it.
+**Not tested:** any of it on WebKitGTK or WebView2. Whether either engine
+loads `oma-media` images in `<img>`, plays from the scheme, requests
+ranges as the handler expects, honours `controlslist`,
+`disablepictureinpicture` and `disableremoteplayback`, publishes a "now
+playing" entry, or answers `canPlayType` usefully for the sniffed
+containers is **UNVERIFIED**: spike 5s(2) (playback, which needs a desktop
+with audio and Windows) could not run here, so playback stays behind
+`canPlayType` feature detection and the "can't be played in the app"
+card. `IntersectionObserver` is feature-detected; without it a mounted
+card counts as in view. Screen readers, forced colours and 400 % zoom are
+slice 5j's.
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI

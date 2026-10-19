@@ -2,10 +2,10 @@
 // The Viewer section of Settings (M5 §7.6). Zoom applies to the whole
 // window now, and capture protection on Windows; both are applied by Rust
 // on every change. The other preferences only affect the viewer, so they
-// stay disabled, with the viewer's Planned badge, until the viewer ships
-// (roadmap `viewer`); the privacy-screen preferences stay disabled until
-// the privacy screen exists (slice 5j). No control looks functional
-// before it is.
+// were disabled, with the viewer's Planned badge, until the viewer shipped
+// (roadmap `viewer`, available since slice 5h3); the privacy-screen
+// preferences stay disabled until the privacy screen exists (slice 5j).
+// No control looks functional before it is.
 import { computed, onMounted, ref } from 'vue';
 import PlannedBadge from '@/components/PlannedBadge.vue';
 import { ipc } from '@/services/ipc';
@@ -24,8 +24,8 @@ const prefs = computed(() => settings.viewer);
 
 /** The viewer is not available yet: its preferences cannot take effect. */
 const viewerReady = computed(() => capability('viewer').status === 'available');
-/** The privacy screen (blur, idle hide) arrives in slice 5j. */
-const privacyReady = false;
+/** The privacy screen (blur, idle hide) arrives in slice 5j (roadmap `privacy-screen`). */
+const privacyReady = capability('privacy-screen').status === 'available';
 
 const os = ref<string | null>(null);
 onMounted(async () => {
@@ -216,7 +216,8 @@ const idleLabel = (m: number) => (m === 0 ? 'Off' : m === 1 ? 'After 1 minute' :
           <p id="viewer-playback-hint" class="form-text mb-0">
             Audio and video are played by your system's media codecs from the original file,
             after a check of the file's structure. A file crafted by its sender could exploit a
-            flaw in those codecs; the app cannot prevent that.
+            flaw in those codecs; the app cannot prevent that. "Always play without asking" in
+            the confirmation switches this to "Play when I click Play, without asking".
           </p>
         </fieldset>
       </fieldset>
@@ -224,7 +225,8 @@ const idleLabel = (m: number) => (m === 0 ? 'Off' : m === 1 ? 'After 1 minute' :
       <fieldset :disabled="!viewerReady || !privacyReady" class="mt-3">
         <legend class="small fw-semibold d-flex align-items-center gap-2 mb-2">
           Privacy screen
-          <PlannedBadge v-if="!viewerReady || !privacyReady" capability="viewer" />
+          <PlannedBadge v-if="!viewerReady" capability="viewer" />
+          <PlannedBadge v-else-if="!privacyReady" capability="privacy-screen" />
         </legend>
         <div class="form-check">
           <input

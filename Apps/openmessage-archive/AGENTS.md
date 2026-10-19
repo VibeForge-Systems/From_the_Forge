@@ -46,8 +46,11 @@ including the Windows-only tests); the UI is PR B, whose slice 5g (frontend foun
 and the Viewer settings section) and slice 5h1 (the in-house `VirtualFeed`
 of slice 5h0, the conversation list and the thread, the viewer routes) and
 slice 5h2 (message bubbles, system rows, reaction chips, reply quotes,
-per-part edits and unsends, and the reveals of codes and earlier text) are
-in place; nothing links to the viewer until slice 5h3.
+per-part edits and unsends, and the reveals of codes and earlier text) and
+slice 5h3 (attachment cards, the media viewer, the play confirmation, the
+details panel and the reply thread) are in place. The viewer opens from
+the Archive page and the roadmap's `viewer` is available; search (5i) and
+the privacy screen (5j) are still planned.
 The owner answered the M5 questions (`docs/architecture.md`, "Milestone 5
 decisions").
 
@@ -55,7 +58,7 @@ Read these before designing anything:
 
 | Doc | Read it for |
 |---|---|
-| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, the archive (layout, threat model, import data flow, one section per M4 slice), and the decision records (D1–D117; D43 is how "do not fabricate" is read for the check) |
+| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, the archive (layout, threat model, import data flow, one section per M4 slice), and the decision records (D1–D118; D43 is how "do not fabricate" is read for the check) |
 | [`docs/supported-formats.md`](docs/supported-formats.md) | Sourced research on the backup format, encryption, the sms.db schema (columns with sources, timestamps, codes, typedstream) and device tooling. Items marked **UNVERIFIED** are hypotheses, not facts. |
 | [`docs/privacy.md`](docs/privacy.md) | What is copied, where and for how long, including the plaintext copies of sms.db, and what an archive holds (plaintext at rest) |
 | [`docs/compatibility.md`](docs/compatibility.md) | What has actually been tested |
@@ -474,6 +477,20 @@ Never hand-edit generated files.
   (`shown(m)`, at most 100); "Hide" drops it. Put explicit `{{ ' ' }}`
   separators between inline elements whose text forms an accessible name
   (Vue's whitespace condensing removes them otherwise).
+- **Attachments, details and media (M5 slice 5h3).** Card rules live in
+  `services/attachmentView.ts` (tests in `attachment-view.spec.ts`): Rust's
+  card state first, then the sniffed content, never the declared type.
+  Cards inspect when they come into view through `useViewer().inspect`,
+  which runs at most four at once; take a `src` only from `mediaUrl` with
+  the inspection's token, and only while the card is in view. Play goes
+  through `requestPlay` (Rust's check, then `PlayConfirmDialog` under
+  `confirm`, D118) and plays only in `MediaViewer`; never create an
+  `<audio>`/`<video>` elsewhere, never autoplay, and keep `controlslist`,
+  `disablepictureinpicture` and `disableremoteplayback`. Under `off` no
+  element exists. `MediaViewer` and `PlayConfirmDialog` are mounted once in
+  `ViewerView`; the right panel (`viewer.panel`) shows `MessageDetails` or
+  `ReplyThread`. A `ThreadItem` outside the feed needs its own `idPrefix`,
+  so ids stay unique. Details repeat only the reveal the user asked for.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush
