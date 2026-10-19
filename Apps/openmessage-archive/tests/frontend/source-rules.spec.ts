@@ -89,6 +89,28 @@ const ALLOWED_BINDINGS: Record<string, readonly string[]> = {
   'components/VerifySummary.vue': ['class="alertClass"'],
   'components/ViewerSettings.vue': ['id="`viewer-playback-${p}`"'],
   'components/viewer/SafeText.vue': ["class=\"mode === 'identifier' ? 'oma-safe-id' : 'oma-safe-body'\""],
+  // Option ids come from the position in the id snapshot; aria values are
+  // counts and booleans.
+  'components/viewer/ConversationList.vue': [
+    'aria-activedescendant="activeOptionId"',
+    'aria-posinset="index + 1"',
+    'aria-selected="item === selected"',
+    'aria-setsize="ids.length"',
+    "class=\"{ 'oma-active': index === active, 'oma-selected': item === selected }\"",
+    'id="optionId(index)"',
+  ],
+  // `base` is `oma-m-<SafeId>`: an app-made prefix and a checked integer.
+  'components/viewer/ThreadItem.vue': [
+    'aria-describedby="`${base}-b`"',
+    'aria-labelledby="`${base}-h`"',
+    'class="directionClass"',
+    'id="base"',
+    'id="`${base}-b`"',
+    'id="`${base}-h`"',
+  ],
+  'components/viewer/ThreadView.vue': ['aria-busy="loading !== null"'],
+  // A gap's height in pixels, set through the CSSOM (allowed by `style-src 'self'`).
+  'components/viewer/VirtualFeed.vue': ['style="{ height: `${p.height}px` }"'],
   'views/ArchiveView.vue': [
     'aria-pressed="layout.leftVisible"',
     'aria-pressed="layout.rightVisible"',
@@ -105,6 +127,11 @@ const ALLOWED_BINDINGS: Record<string, readonly string[]> = {
     "title=\"`Show or hide the backup list (${keysFor('toggle-left-panel')})`\"",
   ],
   'views/SettingsView.vue': ['class="t.icon"', 'id="`theme-${t.value}`"'],
+  'views/ViewerView.vue': [
+    'aria-pressed="layout.leftVisible"',
+    'aria-pressed="layout.rightVisible"',
+    'title="THREAD_TEXT.chooseConversation"',
+  ],
 };
 
 /** Files allowed to call render functions (none yet). */

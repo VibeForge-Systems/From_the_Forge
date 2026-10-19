@@ -39,11 +39,15 @@ D82 (D51, D59, D60 and D61 are owner-confirmed). **Milestone 5 (the rich
 viewer) is in progress:** PR A (slices 5a–5f: the viewer catalogue, the
 viewer reads and search in `oma-archive`, media sniffing and checks, the 14
 viewer commands, the `oma-media` protocol, the image decode helper and the
-main window built in Rust) is implemented and tested in a Linux container
-without a window; the UI is PR B, whose slice 5g (frontend foundations:
+main window built in Rust) is merged into `main` (`eabb759`) after CI
+passed on `ubuntu-22.04` and `windows-2022` ([run 39205163013](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39205163013),
+including the Windows-only tests); the UI is PR B, whose slice 5g (frontend foundations:
 `SafeText`, the viewer words, time, media URLs, the store, the source rule
-and the Viewer settings section) is in place, with no viewer page yet. The owner answered the M5 questions
-(`docs/architecture.md`, "Milestone 5 decisions").
+and the Viewer settings section) and slice 5h1 (the in-house `VirtualFeed`
+of slice 5h0, the conversation list and the thread in their plain form, the
+viewer routes) are in place; nothing links to the viewer until slice 5h3.
+The owner answered the M5 questions (`docs/architecture.md`, "Milestone 5
+decisions").
 
 Read these before designing anything:
 
@@ -437,6 +441,23 @@ Never hand-edit generated files.
   per `TZ` as separate Vitest projects (`vite.config.ts`), and each run
   first checks that its zone took effect. `stores/viewer.ts` keeps at most
   1,500 items per chat and windows for three chats, and persists nothing.
+- **The list and the thread (M5 slices 5h0, 5h1).** `virtua` failed spike
+  5s(1) (prepends at scrollTop 0 on WebKitGTK), so `VirtualFeed` is our own
+  (`components/viewer/VirtualFeed.vue` over `services/feedModel.ts`). It
+  keeps an anchor (a row and its offset) and rewrites `scrollTop` from it
+  after every patch and every `ResizeObserver` height, so prepends,
+  evictions and re-measured rows never move what is on screen. Keep
+  `overflow-anchor: none` on `.oma-feed` (Chromium would compensate a
+  second time), keep rows `display: flow-root` (margins inside the measured
+  box), pass a **new** `items` array on every change (the watch is
+  shallow), and put the focused article, the active option and any playing
+  medium in `keepMounted`. `ConversationList` is a listbox with
+  `aria-activedescendant` (option ids from the snapshot position, never
+  content); `ThreadView` is the APG feed (`aria-setsize="-1"`, no
+  `aria-posinset`) and blocks edge loads until its open is aligned and
+  after a failed page (Retry). Leaving the `viewer`/`viewer-chat` routes
+  closes the session (`closeViewerOnLeave`, D114); chat ids from the URL
+  go through `services/ids.ts`, and message ids never enter a URL.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush

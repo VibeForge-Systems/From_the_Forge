@@ -2528,6 +2528,49 @@ The review of PR A changed these rules; each has a regression test
   replaced and the request retried once without counting a crash; a
   helper the watchdog killed is never reused.
 
+### The conversation list and the thread (M5 slices 5h0, 5h1)
+
+The viewer page (`views/ViewerView.vue`, routes `archive/:archiveId/viewer`
+and `…/viewer/c/:chatId`) opens a viewer session for the archive and shows
+the conversation list beside the thread. Leaving those routes closes the
+session (`router/index.ts`, `closeViewerOnLeave`, D114); the window title
+stays "Viewer" (D112); a chat id from the URL is parsed with the `SafeId`
+rule (`services/ids.ts`), and message ids never enter a URL. Nothing links
+to the page until slice 5h3.
+
+- **`VirtualFeed`** (D109, revised) renders only the rows near the
+  viewport (at most 200) and the rows in `keepMounted`; gaps sized from
+  the prefix sums of the rows' heights stand for the rest
+  (`services/feedModel.ts`). Heights come from a `ResizeObserver` on each
+  `display: flow-root` row, and from an estimate until then. The feed
+  keeps an anchor, the row at the top of the viewport and its offset (or,
+  after "jump to newest", the last row's bottom edge), and after every
+  patch and every height change it sets `scrollTop` from that anchor
+  before the frame is painted. A prepend, an eviction at either end or a
+  re-measured row therefore never moves what is on screen, including at
+  scrollTop 0, where virtua failed. `overflow-anchor: none` keeps
+  Chromium's own anchoring out of it.
+- **`ConversationList`** is a `listbox` over the id snapshot of
+  `list_conversations`, with the active option named by
+  `aria-activedescendant` and kept mounted, `aria-posinset` and
+  `aria-setsize`, and keyboard movement (arrows, Page Up/Down, Home, End;
+  Enter or Space opens). It asks `get_conversations` for the visible
+  window plus 20 rows each side. Labels follow the precedence of spec §8.4
+  (`ConversationLabel`), previews obey `listPreviews`, and the name filter
+  is debounced 250 ms and sent to Rust as the request's filter.
+- **`ThreadView`** shows the recorded facts of the conversation (addresses,
+  service, items recorded, first and last dates), opens at the newest dated
+  item, and offers "Jump to first", "Jump to newest" and "Undated items
+  (N)" (read forwards in source order). Its feed is the APG feed pattern:
+  articles labelled by sender and time and described by their text,
+  `aria-setsize="-1"`, no `aria-posinset`, `aria-busy` while loading. Older
+  and newer pages load within 800 px of an end, never before the open has
+  been aligned and never after a failed page until Retry. Each item is
+  rendered plainly (`ThreadItem`: sender, time, text segments, sentences
+  for events, reactions and missing text, a count of attachments) until
+  slice 5h2's bubbles; local-day separators come from `dayKey` in the
+  chosen zone.
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`
@@ -2712,7 +2755,7 @@ D104, D107–D109, D112's UI side) are implemented in PR B.
 | D106 | Webview profile | `incognito: true`, `no-store`, the navigation hook; context-menu, drag, print and reload guards in PR B | A persistent profile | No web cache of media |
 | D107 | Clipboard | Web copy on explicit action only (PR B) | `arboard` (BSL-1.0 transitively) | No new licence class |
 | D108 | Privacy screen | A curtain that unmounts content; idle hide closes the session (PR B) | CSS blur | Honest about not being a lock |
-| D109 | Virtualisation | `virtua` behind `VirtualFeed`, pending spike 5s (PR B) | TanStack; hand-written | Prepend anchoring ready-made if the spike passes |
+| D109 | Virtualisation | **Revised in slice 5h1:** an in-house `VirtualFeed` (slice 5h0), because `virtua` 0.53.1 failed spike 5s(1) on WebKitGTK when rows were prepended at scrollTop 0. Rows are measured with `ResizeObserver`, unrendered rows are gaps sized from prefix sums, and the scroll position is recomputed from an anchor (a row and its offset in the viewport) after every patch and height change; `overflow-anchor: none` on the scroller | `virtua` with older pages requested from 200 px above the top; TanStack | We own the hardest part (prepend anchoring) and its tests, at the cost of code to maintain; no runtime dependency |
 | D110 | Search history (**owner-confirmed, Q1c**) | Nothing persisted | A v2 table | The reader stays read-only |
 | D111 | Handles | Shown as recorded, with the service when one address has two | Phone formatting | No misleading grouping |
 | D112 | Window title | Never a chat name | Show the chat name | Nothing leaks to taskbars or screen shares |

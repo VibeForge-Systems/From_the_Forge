@@ -11,6 +11,7 @@
 // - A derived label says it is derived; an undeterminable value says so.
 // - Nothing is called "not edited", "deleted on the phone" or "group".
 import type {
+  ConversationSortInput,
   AssocKindDto,
   AssocTargetShapeDto,
   AssocVisibilityDto,
@@ -683,6 +684,74 @@ export const VIEWER_STATE_TEXT = {
   pageFailed: 'This page could not be loaded.',
   locationBusy: 'Close the viewer to change the archive location',
   showingWindow: 'Showing items around {from} – {to}',
+} as const;
+
+// ------------------------------------------------------------- list and thread (5h1)
+
+/** The conversation list. `{n}` and `{total}` are counts. */
+export const LIST_TEXT = {
+  label: 'Conversations',
+  filterLabel: 'Filter conversations by name or address',
+  filterHint: 'Names and addresses only; message text is searched with Search.',
+  sortLabel: 'Order',
+  loadingRow: 'Loading…',
+  itemsRecorded: '{n} items recorded',
+  itemsRecordedCapped: '{n}+ items recorded',
+  statsStale: 'count may be out of date',
+  noStats: 'Item count not available',
+  lastDated: 'Last dated item {date}',
+  noDated: 'No dated items',
+  undated: '{n} undated',
+  undatedCapped: '{n}+ undated',
+  group: 'Group',
+  empty: 'No messages in the archive',
+  truncated: 'Showing the first {n} of {total} conversations. Narrow the filter to see the rest.',
+  noMatch: 'No conversation matches this filter',
+  previewYou: 'You:',
+  unnamedId: 'Conversation without a name or participants (#{id})',
+  moreParticipants: '+{n}',
+} as const;
+
+export const SORT_TEXT: Record<ConversationSortInput, string> = {
+  recent: 'Most recent dated activity',
+  name: 'Name',
+  count: 'Most items',
+};
+
+/** The thread. `{n}` is a count, `{date}` a formatted date. */
+export const THREAD_TEXT = {
+  addresses: '{n} addresses recorded in this conversation',
+  oneAddress: '1 address recorded in this conversation',
+  itemsRecorded: '{n} items recorded',
+  dateRange: '{first} – {last}',
+  jumpFirst: 'Jump to first',
+  jumpNewest: 'Jump to newest',
+  undatedButton: 'Undated items ({n})',
+  undatedButtonCapped: 'Undated items ({n}+)',
+  undatedHeading: 'Undated items, in source order',
+  backToDated: 'Back to dated items',
+  loadingOlder: 'Loading earlier items…',
+  loadingNewer: 'Loading later items…',
+  loadingFirst: 'Loading…',
+  retry: 'Retry',
+  cutForSize: 'This page was cut short to stay within its size limit; scroll to load the rest',
+  chooseConversation: 'Choose a conversation',
+  chooseHint: 'Pick one from the list to read it here.',
+  senderNotLoaded: 'Sender (address not loaded with this page)',
+  attachments: '{n} attachments',
+  oneAttachment: '1 attachment',
+  attachmentInText: 'Attachment',
+  feedLabel: 'Messages',
+  closeViewer: 'Close viewer',
+  opening: 'Opening the archive…',
+  infoHeading: 'This archive in the viewer',
+  infoChats: '{n} conversations',
+  infoMessages: '{n} messages',
+  infoAttachments: '{n} attachments',
+  infoNoStats: 'Totals are not available until an import completes',
+  provisional: 'The newest import is not complete; derived values are provisional',
+  unsearchable: '{n} messages have no searchable text',
+  sessionClosed: 'The viewer is closed.',
 } as const;
 
 // ------------------------------------------------------------- settings

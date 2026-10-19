@@ -170,6 +170,30 @@ describe('viewer store', () => {
     expect(store.windows.map((w) => w.chatId)).toEqual([2, 4, 3]);
   });
 
+  it('re-reads the newest page when the kept window does not reach it', async () => {
+    const store = await openSession();
+    serveChat(100);
+    fake.handlers.getThreadPage = (arg) => {
+      const r = arg as GetThreadPageRequest;
+      return Promise.resolve(
+        r.anchor.kind === 'oldest' ? threadPage(range(1, 50), { hasOlder: false, hasNewer: true }) : threadPage(range(51, 50)),
+      );
+    };
+    await store.openChat(sid(4), { kind: 'oldest' });
+    fake.calls.length = 0;
+    await store.openChat(sid(4));
+    expect(fake.calls.map(([n]) => n)).toEqual(['getThreadPage']);
+    expect(store.openWindow!.pages[0]!.items[0]!.id).toBe(51);
+  });
+
+  it('reads the undated section forwards from its start', async () => {
+    const store = await openSession();
+    serveChat(100);
+    await store.openChat(sid(4), { kind: 'undated' });
+    const req = fake.calls.find(([n]) => n === 'getThreadPage')![1] as GetThreadPageRequest;
+    expect(req).toMatchObject({ anchor: { kind: 'undated' }, direction: 'newer' });
+  });
+
   it('loads conversation rows 200 at a time, only the missing ones', async () => {
     const store = await openSession();
     fake.handlers.getConversations = (arg) => {

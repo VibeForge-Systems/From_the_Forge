@@ -282,15 +282,31 @@ export const useViewer = defineStore('viewer', () => {
 
   /**
    * Open a chat at an anchor (newest dated message by default). A chat that
-   * still has a window is shown from it without a request.
+   * still has a dated window reaching its newest item is shown from that
+   * window without a request.
    */
   async function openChat(chatId: SafeId, anchor: AnchorInput = { kind: 'newest' }): Promise<void> {
     const v = viewer.value;
     if (v === null) return;
     openChatId.value = chatId;
     const kept = touchWindow(chatId);
-    if (kept && anchor.kind === 'newest' && kept.pages.length > 0) return;
-    const direction = anchor.kind === 'message' ? 'around' : anchor.kind === 'oldest' ? 'newer' : 'older';
+    if (
+      kept &&
+      anchor.kind === 'newest' &&
+      kept.range === 'dated' &&
+      kept.pages.length > 0 &&
+      !kept.error &&
+      !kept.pages[kept.pages.length - 1]!.hasNewer
+    ) {
+      return;
+    }
+    // The undated section is read in source order from its start.
+    const direction =
+      anchor.kind === 'message'
+        ? 'around'
+        : anchor.kind === 'oldest' || anchor.kind === 'undated'
+          ? 'newer'
+          : 'older';
     const w: ChatWindow = {
       chatId,
       range: anchor.kind === 'undated' ? 'undated' : 'dated',
@@ -338,6 +354,7 @@ export const useViewer = defineStore('viewer', () => {
     if (!more || anchor === null) return;
     const epoch = w.epoch;
     w.loading = edge;
+    w.error = null;
     try {
       const r = reveal();
       const page = await ipc.getThreadPage({

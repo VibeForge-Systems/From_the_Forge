@@ -21,6 +21,7 @@ import type {
   SettingsSnapshot,
   ValidationReportDto,
   ContentTextDto,
+  ConversationRowDto,
   DecimalString,
   MediaBase,
   MediaToken,
@@ -691,6 +692,26 @@ export function threadPage(ids: number[], overrides: Partial<ThreadPageDto> = {}
     focus: null,
     cutForSize: false,
     skippedRows: 0,
+    ...overrides,
+  };
+}
+
+/** A conversation row with a recorded name. */
+export function conversationRow(id: number, overrides: Partial<ConversationRowDto> = {}): ConversationRowDto {
+  return {
+    id: sid(id),
+    label: { kind: 'name', value: content(`Synthetic chat ${id}`) },
+    service: 'iMessage',
+    addresses: 2,
+    group: false,
+    stats: { itemsRecorded: 12, undated: 0, firstMs: Date.UTC(2025, 0, 1), lastMs: Date.UTC(2026, 0, 1) },
+    statsStale: false,
+    lastDatedMs: Date.UTC(2026, 0, 1),
+    firstDated2007Ms: Date.UTC(2025, 0, 1),
+    earlierDated: { n: 0, capped: false },
+    undated: { n: 0, capped: false },
+    empty: false,
+    preview: null,
     ...overrides,
   };
 }

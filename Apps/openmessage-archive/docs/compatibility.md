@@ -967,9 +967,11 @@ a regression test that ran there:
   copy) is refused by `inspect_blob`, `verify_blob`, `open_range` and
   `read_blob_verified`, and a file symlink where the runner allows one
   (`store_readers_refuse_a_junctioned_fan_out_directory_on_windows`), was
-  added for `windows-2022` CI. **It has not run yet** (no Windows host
-  here); until a CI run records its `RECORD` lines, the junction refusal of
-  the M5 readers on Windows is untested.
+  added for `windows-2022` CI. It **passed on `windows-2022`** in CI
+  [run 39205163013](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39205163013) (PR A, merged into `main` as `eabb759`), with
+  the other Windows-only tests. Its `RECORD` lines are captured by the
+  harness and were not read, so which of the file-symlink cases the runner
+  allowed is not recorded here.
 
 ### Milestone 5 spike 5s(1): virtua on WebKitGTK (slice 5g)
 
@@ -1009,7 +1011,9 @@ older pages before the scroller reaches 0 (for example at 200 px or more
 from the top, where all 6 batches compensated exactly) and keep a spacer
 so it cannot reach 0 while older pages exist; otherwise slice 5h0 (the
 in-house feed) applies. Focus retention, the production CSP and
-`freezePrototype` passed.
+`freezePrototype` passed. **Outcome (slice 5h1):** slice 5h0 was implemented
+and virtua removed; the in-house feed passed the same scrollTop-0 batches
+(see "Milestone 5 conversation list and thread" below).
 
 **Not tested:** WebView2 (all of this is **UNVERIFIED** on Windows,
 including whether Chromium's own scroll anchoring interferes despite
@@ -1034,6 +1038,47 @@ change at local midnight (a day that starts at 01:00). Whether Node honours
 not here. Feature detection is tested with injected probes only: which
 features WebKitGTK and WebView2 actually report is on the slice 5k
 checklist, apart from `overflow-anchor` above.
+
+### Milestone 5 conversation list and thread (slices 5h0, 5h1)
+
+Because virtua failed spike 5s(1) at scrollTop 0 (above), slice 5h0
+replaced it with an in-house `VirtualFeed`, and virtua was removed. The
+same acceptance was then run against **the app's own `VirtualFeed`
+component** on 2026-10-19, in the same way as the spike: a release build
+made with `npx tauri build --no-bundle` (production CSP of
+`tauri.conf.json` merged with `tauri.linux.conf.json`,
+`freezePrototype: true`), under `Xvfb` with
+`WEBKIT_DISABLE_DMABUF_RENDERER=1`, **WebKitGTK 2.52.6**, with a scratch
+harness page (not committed) rendering 200 synthetic bubbles (fake
+`ContentText` through `SafeText`, 3–92 mixed-script words, 20 % with a
+320×240 media placeholder) and prepending batches of 50 such items. The
+first visible item's position was sampled in `requestAnimationFrame` for
+30 frames after each prepend. It was run twice (the second time after the
+last change to the component), with identical results.
+
+| Check | Result |
+|---|---|
+| `Object.isFrozen(Object.prototype)` | `true`; the feed worked under it |
+| CSP violations | 0 (gap heights are set through the CSSOM) |
+| `ResizeObserver` | present |
+| Prepends of 50 while reading the middle of the window, 6 batches | 6 of 6 held: 0 px on every sampled frame |
+| Prepends of 50 at **scrollTop 0**, 18 batches (after a 15-frame settle, a 60-frame settle, and none) | **18 of 18 held**: 0 px on every sampled frame; `scrollTop` grew by the height added above (for example 0 → 4,480) |
+| Prepends of 50 at scrollTop 200, 6 batches | 5 of 6 held on every frame; in one, one sampled frame showed the item 9 px off, and it was back at 0 px by the end. The sampler runs in `requestAnimationFrame`, before `ResizeObserver` delivers the new rows' heights in the same frame, so whether that frame was **painted** with the offset is not determined |
+| Stepped scrolling to the top (`scrollBy` −40 px per frame) followed by a prepend, 5 rounds | 5 of 5 held |
+| Node identity across a prepend at scrollTop 0 | The same DOM node was kept |
+| DOM size | 17 articles mounted for 1,750 items |
+| Focus retention with `keepMounted` | The focused article stayed connected and focused after scrolling ~1,000 items away and after a prepend; without `keepMounted` it was unmounted, as expected |
+
+**Not tested:** WebView2 (all of it **UNVERIFIED** on Windows, including
+whether Chromium's scroll anchoring stays off with `overflow-anchor: none`),
+real wheel, touchpad or keyboard scrolling (only `scrollTop` writes and
+`scrollBy`), momentum scrolling, a screen reader, any WebKitGTK other than
+2.52.6, and the conversation list and thread themselves on an engine: the
+viewer page is not linked from the app until slice 5h3, and these
+components were tested in jsdom only (Vitest 4.1.12): the listbox keyboard
+paths and its `aria-*` attributes, the feed's articles and `aria-busy`,
+paging at the edges, the undated section, the retry row, the day
+separators, and the route guard that closes the session.
 
 ## iOS versions and backup types
 

@@ -18,7 +18,8 @@ const noticeDismissed = ref(false);
 
 useTheme(toRef(settings, 'theme'));
 
-const hasPanels = () => ['archive', 'backups'].includes(String(router.currentRoute.value.name));
+const hasPanels = () =>
+  ['archive', 'backups', 'viewer', 'viewer-chat'].includes(String(router.currentRoute.value.name));
 
 const actions: Record<ShortcutId, () => unknown> = {
   'toggle-left-panel': () => hasPanels() && layout.toggleLeft(),

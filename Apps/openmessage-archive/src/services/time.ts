@@ -30,6 +30,21 @@ export function dayBoundaryFor(zone: TimeZoneChoice): DayBoundaryBuilder {
   return zone === 'utc' ? utcDayBoundary : systemDayBoundary;
 }
 
+/**
+ * The calendar day of an instant in the chosen zone, as `YYYY-MM-DD`: the
+ * key the thread's day separators group by (the label is `formatInstant`).
+ * It uses the same zone rules as the boundary builders.
+ */
+export function dayKey(ms: number, zone: TimeZoneChoice): string {
+  const d = new Date(ms);
+  if (!Number.isFinite(d.getTime())) return '';
+  const utc = zone === 'utc';
+  const y = utc ? d.getUTCFullYear() : d.getFullYear();
+  const m = (utc ? d.getUTCMonth() : d.getMonth()) + 1;
+  const day = utc ? d.getUTCDate() : d.getDate();
+  return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
 /** The most bounds `get_day_counts` takes: 42 days (a 6-week grid) and an end. */
 export const MAX_BOUNDS = 43;
 
