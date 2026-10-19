@@ -23,18 +23,33 @@
 //! - **Statements** prepared by this module are kept for the snapshot's
 //!   lifetime ([`stmt`]); each is pinned in `tests/query_plans.rs`.
 //!
+//! - **The preview** ([`ArchiveReader::export_preview`],
+//!   [`ExportSnapshot::precount`]) counts a scope ([`ExportScopeIds`])
+//!   exactly, with the dated span and the two reveal counts, and
+//!   [`ExportSnapshot::scope_index`] numbers its messages ([`preview`],
+//!   [`scope`]).
+//! - **Search scopes** ([`ExportSnapshot::search_ids`],
+//!   [`ExportSnapshot::search_scope`]) re-run a request with the export's
+//!   cap and keep only hits whose match lies in what the export writes
+//!   ([`search`]).
+//!
 //! Masking is D115's, applied before anything leaves the crate: one-time
 //! codes are masked and earlier text withheld unless the export's
-//! [`Reveal`] asks. Slice 6b2 adds the exact preview counts, the dated
-//! span, `search_ids` and the rest of the §3.8 widening (attachments of
-//! unsent parts, the plain-column alternative text).
+//! [`Reveal`] asks (two per-export opt-ins, owner Q4; the viewer's
+//! `revealEarlierText` setting never reaches this crate's export reads).
+//! An export also withholds the attachments of unsent parts, the
+//! plain-column alternative text and the subject history of such
+//! messages ([`mask`], spec §3.8).
 //!
 //! Nothing here logs; errors carry kinds only.
 
 pub mod cursor;
+pub mod mask;
 pub mod measure;
 pub mod preview;
 pub mod rows;
+pub mod scope;
+pub mod search;
 
 use crate::blobs::BlobReader;
 use crate::conn::{Phase, READ_OP_BUDGET};
@@ -45,15 +60,18 @@ use crate::progress::CancelToken;
 use crate::reader::{blob_row, open_blob_row, ArchiveReader, BlobId};
 use crate::view::assemble::{Caps, Ctx, Reveal};
 use crate::view::uncapped::{checked, export_item};
-use crate::view::{AttachmentId, ChatId, ExportItem, HandleId, MessageId};
+use crate::view::{ChatId, ExportItem, HandleId, MessageId};
 
 pub use cursor::{CursorBatch, HistoryCursor, IdCursor, TimeRange, TimelineCursor};
+pub use mask::{AltTextSource, AltTextWithheld, AlternativeText, AttachmentAccess};
 pub use measure::{BatchLimits, ExportDepth};
-pub use preview::ArchiveGeneration;
+pub use preview::{ArchiveGeneration, ExportPreview, PreviewOptions, PreviewProgress};
 pub use rows::{
     ChatColumns, ChatMembership, Derivation, DetailColumns, ExportAttachment, HandleColumns,
     HistoryState, ReactionRow, RecentlyDeletedRow, ValueHistoryEntry,
 };
+pub use scope::{ExportScopeIds, ScopeGroup, ScopeIndex};
+pub use search::{ExcludedHits, SearchScope, EXPORT_SEARCH_CAP};
 
 use crate::stmt::StmtCache;
 
@@ -86,6 +104,11 @@ pub struct ExportMessage {
     /// Assembled outside any conversation (its intrinsic part is the same
     /// in every conversation file), extras loaded, every cap lifted.
     pub item: ExportItem,
+    /// Per attachment of `item.message`, in order: whether the export may
+    /// copy its file. A withheld one has no `blob` in `item` (§3.8).
+    pub attachment_access: Vec<AttachmentAccess>,
+    /// The other stored text when the two differ, masked (§3.8).
+    pub alternative_text: AlternativeText,
     pub detail: DetailColumns,
     /// Every add and remove row targeting it, sorted (D93 rule inputs).
     pub reaction_rows: Vec<ReactionRow>,
@@ -123,9 +146,11 @@ pub(crate) fn plan_statements() -> Vec<(&'static str, String)> {
         ("export blob row", crate::reader::SQL_BLOB_ROW.to_owned()),
     ];
     v.extend(cursor::plan_statements());
+    v.extend(mask::plan_statements());
     v.extend(measure::plan_statements());
     v.extend(preview::plan_statements());
     v.extend(rows::plan_statements());
+    v.extend(search::plan_statements());
     v
 }
 
@@ -160,6 +185,32 @@ impl ArchiveReader {
         })
     }
 
+    /// The exact counts of `scope` under `opts` (M6 spec §3.7), in ONE read
+    /// transaction with no op budget and no deadline, stopped only by
+    /// `cancel` (`Cancelled`), pushing `progress` as it walks. It needs no
+    /// hold: a draft's numbers are checked again by the job's
+    /// [`ExportSnapshot::precount`], which runs the same code under the
+    /// lock. Like a snapshot, the reader refuses other reads meanwhile.
+    pub fn export_preview(
+        &self,
+        scope: &ExportScopeIds,
+        opts: PreviewOptions,
+        cancel: &CancelToken,
+        progress: &mut dyn FnMut(PreviewProgress),
+    ) -> Result<ExportPreview, ArchiveError> {
+        self.require_current()?;
+        self.conn().exporting(cancel, |phase| {
+            let ctx = phase.sql(Ctx::load)?;
+            let snap = ExportSnapshot {
+                reader: self,
+                phase,
+                stmts: StmtCache::new(phase.connection()),
+                ctx,
+            };
+            preview::precount(&snap, scope, opts, progress)
+        })
+    }
+
     /// The archive generation (M6 spec §3.7), in one read transaction
     /// under the reader's op budget.
     pub fn archive_generation(&self) -> Result<ArchiveGeneration, ArchiveError> {
@@ -180,6 +231,24 @@ impl<'s> ExportSnapshot<'s> {
     /// statements; inside one, the progress handler checks it).
     pub fn checkpoint(&self) -> Result<(), ArchiveError> {
         self.phase.checkpoint()
+    }
+
+    /// The exact counts of `scope` under `opts`, in this snapshot: the
+    /// job's pre-count (M6 spec §3.7, D147). Equal to
+    /// [`ArchiveReader::export_preview`] on an unchanged archive.
+    pub fn precount(
+        &self,
+        scope: &ExportScopeIds,
+        opts: PreviewOptions,
+        progress: &mut dyn FnMut(PreviewProgress),
+    ) -> Result<ExportPreview, ArchiveError> {
+        preview::precount(self, scope, opts, progress)
+    }
+
+    /// Every message id that is a timeline row of `scope`, sorted and
+    /// distinct (M6 spec §4.9).
+    pub fn scope_index(&self, scope: &ExportScopeIds) -> Result<ScopeIndex, ArchiveError> {
+        scope::index(self, scope)
     }
 
     /// The archive generation as this snapshot sees it.
@@ -250,7 +319,12 @@ impl<'s> ExportSnapshot<'s> {
         let item = self
             .run(|| export_item(&self.stmts, &self.ctx, None, id, &Caps::EXPORT, reveal))?
             .ok_or(ArchiveError::AnchorNotFound)?;
-        let item = checked(item)?;
+        let mut item = checked(item)?;
+        let attachment_access =
+            self.run(|| mask::attachment_access(&self.stmts, &item.message, reveal))?;
+        mask::withhold_files(&mut item, &attachment_access);
+        let alternative_text =
+            self.run(|| mask::alternative_text(&self.stmts, &item.message, reveal))?;
         self.checkpoint()?;
         let (detail, derivation) = self
             .run(|| rows::detail_columns(&self.stmts, id))?
@@ -264,6 +338,8 @@ impl<'s> ExportSnapshot<'s> {
             self.run(|| rows::history_state(&self.stmts, id, depth == ExportDepth::WithHistory))?;
         Ok(ExportMessage {
             item,
+            attachment_access,
+            alternative_text,
             detail,
             reaction_rows,
             history,
@@ -284,19 +360,29 @@ impl<'s> ExportSnapshot<'s> {
         HistoryCursor::new(self, &m.item.message, reveal)
     }
 
-    /// The facts of each of `ids` (uncapped, with the columns M5 leaves
-    /// out). An id that does not exist is `AnchorNotFound`.
+    /// The facts of each of `m`'s attachments, in order (uncapped, with
+    /// the columns M5 leaves out). A withheld attachment (§3.8) carries no
+    /// stored file: its `facts.blob` is `None`, so nothing that follows
+    /// the record can open it.
     pub fn attachment_facts(
         &self,
-        ids: &[AttachmentId],
+        m: &ExportMessage,
     ) -> Result<Vec<ExportAttachment>, ArchiveError> {
-        let mut out = Vec::with_capacity(ids.len());
-        for id in ids {
+        let mut out = Vec::with_capacity(m.item.message.attachments.len());
+        for (i, a) in m.item.message.attachments.iter().enumerate() {
             self.checkpoint()?;
-            out.push(
-                self.run(|| rows::attachment(&self.stmts, *id))?
-                    .ok_or(ArchiveError::AnchorNotFound)?,
-            );
+            let access = m
+                .attachment_access
+                .get(i)
+                .copied()
+                .ok_or(ArchiveError::Internal("attachment access"))?;
+            let mut x = self
+                .run(|| rows::attachment(&self.stmts, a.id, access))?
+                .ok_or(ArchiveError::AnchorNotFound)?;
+            if access.is_withheld() {
+                x.facts.blob = None;
+            }
+            out.push(x);
         }
         Ok(out)
     }

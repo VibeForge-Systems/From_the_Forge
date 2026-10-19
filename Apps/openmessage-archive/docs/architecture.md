@@ -3087,7 +3087,7 @@ on) never reaches SQLite.
   The rest of the §3.8 widening (attachments of unsent parts, the
   plain-column alternative text), the exact preview counts, the dated span,
   `search_ids` with membership classification, the masking oracle and the
-  hostile-history RSS test are slice 6b2's.
+  hostile-history RSS test are slice 6b2's (next section).
 - **The generation** (`archive_generation()`, `ExportSnapshot::generation`)
   is the newest session (id, state, resume count), the newest completed
   session and the highest row id of `message`, `message_body`,
@@ -3116,6 +3116,155 @@ on) never reaches SQLite.
   unassigned batches walk `message_sort` and probe
   `chat_message_by_message`, nothing sorts in a temporary B-tree, and only
   the chat id list (`SCAN chat`) and the newest session scan.
+
+### Export previews, search scopes and masking (M6 slice 6b2)
+
+Slice 6b2 completes the export reads in `crates/oma-archive/src/export/`
+(M6 spec §3.6, §3.7, §3.8; D125, D137, D147). Nothing outside
+`oma-archive` changed, so no IPC type changed; the shell's export job is
+slice 6h.
+
+- **Scopes as ids** (`export/scope.rs`). `ExportScopeIds` is
+  `Conversation { chat, range }`, `Archive { range }` (every conversation
+  in id order, then the messages in no conversation) or `Messages(groups)`
+  (a search scope: each `ScopeGroup` names the conversation its messages
+  are written under, `None` for no conversation). One walk visits every
+  timeline row of a scope (each conversation's rows in range, items and
+  folded reactions, and each message in no conversation) through the
+  cursors' unmeasured row batches (4,096 rows, read and reset before the
+  caller sees them). The preview, the job's pre-count and the scope index
+  all use it, so their numbers agree by construction. `Debug` of a scope
+  prints its kind and sizes only.
+- **Exact previews** (`export/preview.rs`). `ArchiveReader::export_preview
+  (scope, opts, cancel, progress)` runs that walk in one read transaction
+  in the export mode (no op budget, no deadline, `Cancelled` on the
+  token), needs no hold, and posts `PreviewProgress { rows }` every 1,024
+  rows and at the end. `ExportSnapshot::precount` runs the same code in
+  the job's snapshot. `ExportPreview` holds counts and sizes only:
+  conversations with a row, timeline rows, distinct messages (a message in
+  two exported conversations once), folded rows, messages in no
+  conversation, undated rows a dated range leaves out, attachment records
+  (one per message link), the records whose file would be copied and those
+  withheld as attachments of unsent parts, distinct blobs with their total
+  and largest size, the two reveal counts, `text_bytes` after masking (an
+  estimate's input: shown current text, revealed earlier text, and with
+  history every version that would be written; decoded edit text and the
+  alternative text are not counted), `image_previews` (declared image
+  types with a file, for the estimate only), the dated span and the
+  generation. Per distinct message the walk runs a few primary-key
+  statements, never the assembly.
+- **The reveal counts are never understated** (D147). A message counts for
+  one-time codes when **any** of its body versions has a flagged part, and
+  for earlier content when its current body lists an unsent part, or when
+  its current body has no text and another version holds text or a phone
+  edit entry holds edit text (D115's other withheld cases). The job's
+  pre-count recomputes both under the lock; comparing them with the
+  confirmed N is slice 6h's.
+- **The dated span** is four index seeks (first and last `sort_key <
+  X'01'` in range, on `chat_message_timeline` for a conversation and on
+  `message_sort` for the archive), or the walk's own minimum and maximum
+  for given messages; reported in Unix milliseconds, the first rounded
+  down and the last up.
+- **The scope index** (`ExportSnapshot::scope_index`) is every message id
+  that is a timeline row of the scope, sorted and distinct;
+  `ScopeIndex::ordinal(id)` is its rank from 1 (§4.9), so ordinals have no
+  gaps. Its `Debug` prints the length only.
+- **Search scopes** (`export/search.rs`). `ExportSnapshot::search_ids(req,
+  cap, progress)` runs a request again inside the snapshot with a cap of
+  up to `EXPORT_SEARCH_CAP` (1,000,000): the viewer's words plans and
+  exact-text scan, refactored so that their work runs in a phase the
+  caller sets up (`words::collect_in`, `scan::run_in`); the viewer still
+  wraps them in its budgeted phases, unchanged. The exact scan keeps its
+  2,000,000-messages-examined bound; a set still over the cap says
+  `capped`. `search_scope(req, set, opts)` classifies the live set or the
+  re-run's set:
+  - a hit is kept only when the request matches text the export writes
+    for it under the export's own reveal and depth (the current body's
+    shown segments, revealed earlier text, and with history every shown
+    version), each shown run checked on its own so a phrase never matches
+    across a withheld range;
+  - exact text matches with `str::contains`; words match term by term
+    (`query::term_expressions`, whose `AND` is the request's expression)
+    against a private in-memory FTS5 table with the archive's tokenizer
+    (`unicode61 remove_diacritics 2`, compared with `v1.sql` by a unit
+    test), one row per shown run;
+  - a hit on its current body with no flagged code is kept after one
+    primary-key probe (nothing in it is masked);
+  - `ExcludedHits` counts the others by the reveal that would include them
+    (codes, earlier content, both, or nothing written, such as an earlier
+    version when history is off); the counts are for Review and the result
+    step, never an output;
+  - kept hits are grouped by the lowest conversation id (M5's `hit.chat`),
+    conversations in id order and "no conversation" last, each group in
+    timeline order. `SearchScope` carries `capped`, `newest_kept` and
+    `coverage_complete` (`true` for words; for exact text, whether the scan
+    examined every message in range).
+
+  **Matching covers code text** (the spec's open question): the
+  full-text index and the exact scan both read the whole displayed text,
+  codes included, and `tests/export_scope.rs` finds a message by the text
+  of its flagged code in both modes. That is why the classification
+  exists. The grouping of 1,000,000 hits holds each hit's sort key in
+  memory (no temporary table); its peak was not measured at that size
+  (the perf baseline below has far fewer hits).
+- **Masking extensions** (`export/mask.rs`, owner Q4, D125), applied in
+  `ExportSnapshot::assemble` before anything leaves the crate and released
+  only by the export's `Reveal` (`earlier_text`, `one_time_code`); the
+  viewer's `revealEarlierText` setting never reaches these reads:
+  - **Attachments of unsent parts.** For a message whose current body
+    lists an unsent part, an attachment keeps its file only when a part of
+    the current body that is not listed as unsent names it (`attachment_guid`
+    equals the attachment's GUID and `part_index` is recorded; the GUID
+    equality is UNVERIFIED, as in M5, so the rule errs towards withholding).
+    `ExportMessage::attachment_access` is `Included`, `Withheld(Unsent)` or
+    `Revealed(Unsent)` per attachment; a withheld one loses `blob` and
+    `stored_bytes` in the item and its raw codes, and
+    `ExportSnapshot::attachment_facts(&ExportMessage)` (which replaces the
+    6b1 id-list form) returns it with `facts.blob = None` and its access,
+    so nothing that follows the record can open, preview or save the
+    file. The declared facts (name, type, sizes) stay, as the viewer shows
+    them. **Settled:** the archive keeps these links across imports, because
+    links are a union and a link once observed is never removed
+    (`import/links.rs`; `tests/links.rs`, `links_follow_rank_in_both_orders`:
+    a link of an older backup stays when a newer one lacks it). No new
+    fixture was needed for that; the export catalogue (slice 6c) adds an
+    import-built case.
+  - **The alternative text** (`ExportMessage::alternative_text`): with
+    `sources_differ = 1`, the plain `text` column when the shown text is the
+    decoded `attributedBody` (uncapped, decoded lossily and marked when it
+    is not UTF-8), or the empty decoded `attributedBody` when the shown text
+    came from the column (D58). Withheld whole, without being read, while
+    the message's earlier text is withheld (an unsent part, or no current
+    text) unless earlier content is revealed, and, separately, when the
+    current body has any flagged code unless codes are revealed.
+  - The subject history of a message with an unsent part (slice 6b1) and
+    D115's own masking are unchanged.
+- **The masking oracle, archive side** (`tests/export_scope.rs`,
+  `no_masked_text_reaches_any_export_read_unless_revealed`) collects every
+  text an export reads (items, revealed earlier text, events, emoji,
+  attachment and conversation values, the alternative text, detail
+  columns, value history, reaction rows, every history version and decoded
+  edit text, attachment facts) and every blob id it can reach. Over the
+  viewer catalogue's `view-main-plain` and `lineages`, no masked sentinel
+  appears without a reveal, the codes stay hidden with only earlier content
+  revealed and the earlier text with only codes revealed, and each appears
+  with both; on a built case it does the same for the alternative text,
+  the subject history and the file of an unsent part. Disabling the
+  attachment withholding, the alternative-text withholding and the
+  membership check together, by hand for this slice, made four of the
+  file's seven tests fail, the oracle among them; there is no permanent
+  mutation build on this side (the export side's `test_masking_off` is a
+  later slice's).
+- **Memory of a hostile history** (`tests/export_memory.rs`, Linux only).
+  The parent builds one message whose current body and earlier versions
+  hold 16 MiB of text each; a child process (this test binary again)
+  measures it, takes it in a batch of its own and walks its history, and
+  reports `VmHWM`. On every push, 21 versions (336 MiB of text): the child
+  peaked at 72.5 MiB here. The spec's 200 versions (3.2 GiB) are an
+  `#[ignore]` test; its run is recorded in `docs/development.md`.
+- **Plans.** The 16 new statements are pinned in `tests/query_plans.rs`;
+  each is a primary-key or index seek and none sorts in a temporary
+  B-tree.
 
 ### Status and qualifiers (D43)
 
@@ -3316,6 +3465,22 @@ D104, D107–D109, D112's UI side) are implemented in PR B.
 | D121 | Copy without invisible characters (slice 5j) | Bidi controls, invisible and control characters are dropped, but a zero-width joiner or non-joiner stays between two non-ASCII letters, marks or emoji, and tag characters stay inside a flag's tag sequence | Drop every character `SafeText` shows as a code | Emoji sequences, subdivision flags and joining scripts (Persian, Indic) keep their shape, while a joiner hidden between ASCII letters is still removed |
 | D122 | The right panel when another conversation opens (slice 5k) | Details and the reply thread close; search stays open | Keep the details open | They describe a message of the conversation that was open and resolve its addresses from that conversation's window; kept open, they showed "Sender" instead of the address (seen in the smoke test) |
 | D118 | Play order (slice 5h3) | Rust's structural check and full hash run on the first Play, **before** the confirmation, so the confirmation's "It has checked the file's structure" is true and a refused file never asks | The spec's §2 order: confirm, then check | A full hash of a file the user may then cancel; no attachment byte reaches the engine before the confirmation either way |
+
+### Milestone 6 decisions (so far)
+
+D123–D147 are the M6 spec's (§19). The rows below are the ones the
+slices implemented so far record; the rest are added by the slice that
+implements each. **The owner answered the spec's five questions on
+2026-10-19:** Q1 to Q4 confirm the leans (Q1 and Q2 apply to PR B; Q3 to
+slice 6e; Q4 is D125 below). Q5 (identifiers, D141) was not put to the
+owner: its lean is applied and awaits confirmation.
+
+| # | Topic | Choice | Main alternative | Trade-off |
+|---|---|---|---|---|
+| D124 | Reads, snapshot and lock (slices 6a, 6b1) | `Caps::EXPORT` with a check that runs in release builds; byte-sized batches; one closure-scoped read transaction per job; the archive lock held for the job; cursors materialised before nested calls | Per-batch transactions; trusting the job slot | A consistent snapshot that is a checked fact across instances; `conn.rs`'s contracts kept |
+| D125 | Masking in exports (**owner-confirmed, Q4**; slices 6b1, 6b2) | D115 applied in `oma-archive` before records exist, widened to the attachments of unsent parts, the subject history and the alternative text of such messages; two per-export opt-ins (codes, earlier content), off, reset on every open, never remembered, each confirmed against an exact count; the viewer's `revealEarlierText` is not inherited | Inherit the viewer setting | An export is bulk and outlives the app's control |
+| D137 | Search scope (slice 6b2) | The live set by default; "all matches" re-runs in the job with a cap of 1,000,000 and honest `capped` and coverage booleans; hits matched only in hidden content are excluded unless revealed, re-checked against the masked text the export writes; a multi-conversation hit is written under its lowest conversation | Always the shown 10,000; exporting membership as is | Faithful to what the user saw, with no disclosure through membership |
+| D147 | Consent and drift (slice 6b2; the comparison is slice 6h's) | Exact, cancellable counts; the archive generation in the draft; a recount under the lock before writing; reveal counts that never understate | Budgeted "at least" counts | "N messages" is never an understatement |
 
 ## Logging
 

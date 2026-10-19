@@ -555,6 +555,22 @@ Never hand-edit generated files.
   `&'static str` and shadows `Connection::prepare`, so a constant
   statement is reused; prepare dynamic SQL on the connection. A new export
   statement goes into `export::plan_statements` and `tests/query_plans.rs`.
+- **Export previews, search scopes and masking (M6 slice 6b2).** The
+  preview, the job's pre-count and the scope index share one walk
+  (`export/scope.rs`), so their numbers agree by construction; count a new
+  scope fact there, never in a second loop. The two reveal counts may
+  overstate, never understate (D147). An export's search re-run uses the
+  viewer's search work through `words::collect_in` and `scan::run_in` in
+  the snapshot's phase (never a `viewing` phase), and `search_scope` keeps
+  a hit only when the request matches the **masked** text the export
+  writes (matching does cover code text). Masking for exports
+  (`export/mask.rs`, owner Q4) is applied in `ExportSnapshot::assemble`
+  and released only by the export's own `Reveal`: never read the viewer's
+  `revealEarlierText` for an export. A withheld attachment loses its
+  `blob` in the item and in `attachment_facts`, which takes the
+  `ExportMessage`; do not add a path that hands a writer a blob id
+  without its access. `tests/export_memory.rs` measures the child's
+  `VmHWM` (Linux only); keep its versions above the bound's size.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush

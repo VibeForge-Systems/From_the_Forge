@@ -54,7 +54,7 @@ pub enum TimeRange {
 
 impl TimeRange {
     /// The dated sort-key bounds `[from, until)` of the range.
-    fn dated_bounds(self) -> (Vec<u8>, Vec<u8>) {
+    pub(crate) fn dated_bounds(self) -> (Vec<u8>, Vec<u8>) {
         match self {
             TimeRange::All => (vec![sortkey::DATED_TAG], sortkey::DATED_END.to_vec()),
             TimeRange::Dated { from_ns, until_ns } => (
@@ -123,6 +123,9 @@ pub(crate) fn plan_statements() -> Vec<(&'static str, String)> {
 // ---------------------------------------------------------------------------
 // Timeline and unassigned cursors
 // ---------------------------------------------------------------------------
+
+/// A timeline row and the target it folds into, if it folds.
+pub(crate) type FoldedRow = (i64, Option<i64>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Pass {
@@ -237,6 +240,35 @@ impl<'a, 's> TimelineCursor<'a, 's> {
         };
         self.after_key = sortkey::DATED_END.to_vec();
         self.after_id = i64::MIN;
+    }
+
+    /// The next rows in timeline order, each with the target it folds
+    /// into, or `None` at the end: the walk of the preview, the pre-count
+    /// and the scope index (no pre-measure, no byte cut). The statement is
+    /// reset before this returns.
+    pub(crate) fn next_batch_rows(&mut self) -> Result<Option<Vec<FoldedRow>>, ArchiveError> {
+        loop {
+            self.snap.checkpoint()?;
+            if self.pass == Pass::Done {
+                return Ok(None);
+            }
+            let rows = self.rows(self.limits.max_ids)?;
+            let Some((last_id, last_key)) = rows.last().map(|(i, k)| (*i, k.clone())) else {
+                self.end_pass();
+                continue;
+            };
+            let mut out = Vec::with_capacity(rows.len());
+            for (id, _) in &rows {
+                let fold = match self.chat {
+                    Some(chat) => self.snap.run(|| folds_into(&self.snap.stmts, chat, *id))?,
+                    None => None,
+                };
+                out.push((*id, fold));
+            }
+            self.after_key = last_key;
+            self.after_id = last_id;
+            return Ok(Some(out));
+        }
     }
 
     /// The next batch, or `None` at the end. A batch can hold folded rows

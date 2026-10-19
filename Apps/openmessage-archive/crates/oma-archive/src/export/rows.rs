@@ -155,6 +155,9 @@ pub struct Derivation {
 #[non_exhaustive]
 pub struct ExportAttachment {
     pub facts: AttachmentFacts,
+    /// Whether the export may copy its file (§3.8); a withheld one has
+    /// no `facts.blob`.
+    pub access: super::mask::AttachmentAccess,
     /// `is_outgoing`, raw.
     pub is_outgoing: RawInt,
     /// `transfer_state`, raw (meaning not claimed).
@@ -421,6 +424,7 @@ pub(crate) fn value_history(
 pub(crate) fn attachment(
     s: &StmtCache<'_>,
     id: AttachmentId,
+    access: super::mask::AttachmentAccess,
 ) -> rusqlite::Result<Option<ExportAttachment>> {
     let Some(facts) = attachment_facts(s, id.get(), &Caps::EXPORT)? else {
         return Ok(None);
@@ -439,6 +443,7 @@ pub(crate) fn attachment(
     Ok(extra.map(
         |(is_outgoing, transfer_state, created, start)| ExportAttachment {
             facts,
+            access,
             is_outgoing,
             transfer_state,
             created,

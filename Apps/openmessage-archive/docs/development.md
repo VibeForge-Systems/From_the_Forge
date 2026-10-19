@@ -573,22 +573,56 @@ Linux job, 6 on Windows), measured from slice 6a.** The baseline is `main`
 at `9883217` (milestones 1–5), run in a Linux container (4 CPUs, debug
 build, `CARGO_INCREMENTAL=0`, after compiling), then again with slice 6a:
 
-| What | Baseline (`9883217`) | Slice 6a | Slice 6b1 |
-|---|---|---|---|
-| `cargo test --workspace`, wall clock | 2 min 8 s | 2 min 6 s | 2 min 26 s |
-| Sum of all test binaries' run times | 124.2 s | 123.1 s | 142.9 s |
-| Rust tests passed | 1,241 (12 ignored) | 1,251 (12 ignored) | 1,270 (12 ignored) |
-| `oma-archive`'s `export_caps.rs` | — | 2.4 s (4 tests) | 3.0 s |
-| `oma-archive`'s `export_reads.rs` | — | — | 5.4 s (12 tests) |
+| What | Baseline (`9883217`) | Slice 6a | Slice 6b1 | Slice 6b2 |
+|---|---|---|---|---|
+| `cargo test --workspace`, wall clock | 2 min 8 s | 2 min 6 s | 2 min 26 s | 2 min 38 s |
+| Sum of all test binaries' run times | 124.2 s | 123.1 s | 142.9 s | 153.9 s |
+| Rust tests passed | 1,241 (12 ignored) | 1,251 (12 ignored) | 1,270 (12 ignored) | 1,284 (15 ignored) |
+| `oma-archive`'s `export_caps.rs` | — | 2.4 s (4 tests) | 3.0 s | 2.7 s |
+| `oma-archive`'s `export_reads.rs` | — | — | 5.4 s (12 tests) | 5.5 s |
+| `oma-archive`'s `export_scope.rs` | — | — | — | 2.0 s (7 tests) |
+| `oma-archive`'s `export_memory.rs` | — | — | — | 10.6 s (1 test; Linux only) |
 
 The difference between the two runs is inside the run-to-run noise: a
 first, cold run of the baseline in the same container took 3 min 58 s
 (148.4 s summed). Slice 6a's own cost is `export_caps.rs` plus six quick
 unit tests. Slice 6b1 adds `export_reads.rs` (5.4 s), one plan test and
 six unit tests; the rest of its run's increase is inside the noise above
-(the same binaries' times move by several seconds between runs). Windows
-has not been measured for M6. Slices 6h and 6l record
-the figures again, with CI's.
+(the same binaries' times move by several seconds between runs). Slice
+6b2 adds `export_scope.rs` (2.0 s), `export_memory.rs` (10.6 s: it writes
+and reads back 336 MiB of version text), one plan test's new pins, six
+unit tests and three ignored tests (the memory test's child helper, its
+200-version variant and `perf_export.rs`). Windows has not been measured
+for M6. Slices 6h and 6l record the figures again, with CI's.
+
+**Export read measurements (slice 6b2; synthetic, one host, no timing
+asserted).** In the same container, debug test build with `oma-archive`
+and SQLite at `opt-level = 3`, the archive and temporary files on a tmpfs:
+
+```sh
+TMPDIR=/dev/shm cargo test -p oma-archive --test perf_export -- --ignored --nocapture
+TMPDIR=/dev/shm cargo test -p oma-archive --test export_memory -- --ignored --exact \
+  history_of_two_hundred_16_mib_versions_streams_under_300_mib --nocapture
+```
+
+| Read (bulk archive: 500,000 messages, 2,000 chats, 412 MiB) | Time |
+|---|---|
+| `export_preview`, whole archive (500,000 rows, 474,991 distinct, 25,009 folded) | 7.0 s |
+| `export_preview`, the largest conversation (200,375 rows) | 1.5 s |
+| `scope_index`, whole archive | 1.9 s |
+| Cursors, pre-measure, byte batches and `assemble` at `Items`, every timeline item (474,991 items, 3,302 batches) | 77.8 s (6,107 items/s) |
+| `search_ids`, cap 1,000,000, words ("zephyr": 88,731 hits) / exact text (88,777 hits) | 0.26 s / 0.91 s |
+| `search_scope` over those sets (no code or withheld text in the bulk data, so every hit takes the fast path) | 0.33 s each |
+| Peak resident set of the whole test process (`VmHWM`) | 49 MiB |
+
+The hostile history (one message, a 16 MiB current body and 199 earlier
+versions of 16 MiB, 3.2 GiB of text) streamed in 64 s with the child's
+`VmHWM` at 74,248 KiB (72.5 MiB); the 21-version test that runs on every
+push peaked at 74,256 KiB. The 500,000-message targets of spec §12 (the
+formats, 5 minutes, 300 MiB) are slice 6f's; these figures are the read
+side only. The classification's cost for hits that need the slow path
+(masked or withheld content) and the grouping of 1,000,000 hits were not
+measured.
 
 **Optional oracles** (manual; nothing enters the repository or CI; each
 run is recorded in `docs/compatibility.md` with the checksum it tested):

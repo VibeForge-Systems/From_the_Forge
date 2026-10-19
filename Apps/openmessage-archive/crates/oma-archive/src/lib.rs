@@ -97,10 +97,12 @@ pub use error::{
     RefusalKind, Stage,
 };
 pub use export::{
-    ArchiveGeneration, BatchLimits, ChatColumns, ChatMembership, CursorBatch, Derivation,
-    DetailColumns, ExportAttachment, ExportDepth, ExportHold, ExportMessage, ExportSnapshot,
-    HandleColumns, HistoryCursor, HistoryState, IdCursor, ReactionRow, RecentlyDeletedRow,
-    TimeRange, TimelineCursor, ValueHistoryEntry,
+    AltTextSource, AltTextWithheld, AlternativeText, ArchiveGeneration, AttachmentAccess,
+    BatchLimits, ChatColumns, ChatMembership, CursorBatch, Derivation, DetailColumns, ExcludedHits,
+    ExportAttachment, ExportDepth, ExportHold, ExportMessage, ExportPreview, ExportScopeIds,
+    ExportSnapshot, HandleColumns, HistoryCursor, HistoryState, IdCursor, PreviewOptions,
+    PreviewProgress, ReactionRow, RecentlyDeletedRow, ScopeGroup, ScopeIndex, SearchScope,
+    TimeRange, TimelineCursor, ValueHistoryEntry, EXPORT_SEARCH_CAP,
 };
 pub use id::{ArchiveId, IdError, Label, LabelState, ARCHIVE_ID_LEN, LABEL_MAX_BYTES};
 pub use import::{

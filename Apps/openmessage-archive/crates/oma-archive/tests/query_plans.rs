@@ -29,11 +29,13 @@
 //! and the scoped plan walk `message_sort` and `chat_message_timeline` by
 //! keyset; only the once-per-session unsearchable count scans `message`.
 //!
-//! The export reads (M6 slice 6b1, `hooks::export_statements`) are pinned
-//! too: the timeline batches stay on `chat_message_timeline` with the
-//! dated bound where they mean "dated", the unassigned batches walk
-//! `message_sort` and probe `chat_message_by_message`, the generation reads
-//! highest ids only, and none sorts in a temporary B-tree.
+//! The export reads (M6 slices 6b1 and 6b2, `hooks::export_statements`)
+//! are pinned too: the timeline batches stay on `chat_message_timeline`
+//! with the dated bound where they mean "dated", the unassigned batches
+//! walk `message_sort` and probe `chat_message_by_message`, the generation
+//! reads highest ids only, the dated span is four index seeks, the
+//! pre-count and the masking reads are primary-key or index seeks per
+//! message, and none sorts in a temporary B-tree.
 #![allow(clippy::disallowed_methods)]
 
 mod common;
@@ -748,6 +750,82 @@ const PINNED: &[(&str, &[&str])] = &[
     (
         "export handle columns",
         &["SEARCH handle USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export attachment kept by a part",
+        &[
+            "SEARCH a USING INTEGER PRIMARY KEY (rowid=?)",
+            "SEARCH p USING PRIMARY KEY (body_id=?)",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SEARCH u USING PRIMARY KEY (body_id=?)",
+        ],
+    ),
+    (
+        "export alternative text facts",
+        &["SEARCH message_body USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export alternative text",
+        &["SEARCH message_body USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export any flagged code",
+        &["SEARCH message_body_part USING PRIMARY KEY (body_id=?)"],
+    ),
+    (
+        "export precount message",
+        &["SEARCH message USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export precount bodies",
+        &["SEARCH message_body USING INDEX sqlite_autoindex_message_body_1 (message_id=?)"],
+    ),
+    (
+        "export precount code ranges",
+        &["SEARCH message_body_part USING PRIMARY KEY (body_id=?)"],
+    ),
+    (
+        "export precount edit text",
+        &[
+            "SEARCH b USING COVERING INDEX sqlite_autoindex_message_body_1 (message_id=?)",
+            "SEARCH e USING PRIMARY KEY (body_id=?)",
+        ],
+    ),
+    (
+        "export precount attachments",
+        &[
+            "SEARCH ma USING PRIMARY KEY (message_id=?)",
+            "SEARCH a USING INTEGER PRIMARY KEY (rowid=?)",
+            "SEARCH bl USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN",
+        ],
+    ),
+    (
+        "export span chat first",
+        &["SEARCH chat_message USING COVERING INDEX chat_message_timeline (chat_id=? AND sort_key>? AND sort_key<?)"],
+    ),
+    (
+        "export span chat last",
+        &["SEARCH chat_message USING COVERING INDEX chat_message_timeline (chat_id=? AND sort_key>? AND sort_key<?)"],
+    ),
+    (
+        "export span all first",
+        &["SEARCH message USING COVERING INDEX message_sort (sort_key>? AND sort_key<?)"],
+    ),
+    (
+        "export span all last",
+        &["SEARCH message USING COVERING INDEX message_sort (sort_key>? AND sort_key<?)"],
+    ),
+    (
+        "export undated in chat",
+        &["SEARCH chat_message USING COVERING INDEX chat_message_timeline (chat_id=? AND sort_key>?)"],
+    ),
+    (
+        "export undated messages",
+        &["SEARCH message USING COVERING INDEX message_sort (sort_key>?)"],
+    ),
+    (
+        "export hit conversation",
+        &["SEARCH chat_message USING COVERING INDEX chat_message_by_message (message_id=?)"],
     ),
 ];
 

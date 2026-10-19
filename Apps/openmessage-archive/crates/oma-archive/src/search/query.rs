@@ -152,21 +152,29 @@ pub(crate) fn terms(raw: &str) -> Result<Vec<Term>, ArchiveError> {
 /// the last unquoted term a prefix when its last token is long enough.
 /// Also whether it has a prefix.
 pub(crate) fn fts_expression(terms: &[Term]) -> (String, bool) {
-    let mut out = String::new();
-    let mut prefix = false;
-    for (i, t) in terms.iter().enumerate() {
-        if i > 0 {
-            out.push_str(" AND ");
-        }
-        out.push('"');
-        out.push_str(&t.text.replace('"', "\"\""));
-        out.push('"');
-        if i + 1 == terms.len() && !t.quoted && last_token_chars(&t.text) >= PREFIX_MIN_CHARS {
-            out.push_str(" *");
-            prefix = true;
-        }
-    }
-    (out, prefix)
+    let parts = term_expressions(terms);
+    let prefix = parts.last().is_some_and(|p| p.ends_with(" *"));
+    (parts.join(" AND "), prefix)
+}
+
+/// Each term's own FTS5 expression, in order: [`fts_expression`] is these
+/// joined with ` AND `. An export re-checks a hit term by term against
+/// the text it writes (M6 spec §3.6).
+pub(crate) fn term_expressions(terms: &[Term]) -> Vec<String> {
+    terms
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            let mut out = String::with_capacity(t.text.len() + 4);
+            out.push('"');
+            out.push_str(&t.text.replace('"', "\"\""));
+            out.push('"');
+            if i + 1 == terms.len() && !t.quoted && last_token_chars(&t.text) >= PREFIX_MIN_CHARS {
+                out.push_str(" *");
+            }
+            out
+        })
+        .collect()
 }
 
 /// The exact-text needle of `raw`: the whole query, trimmed.

@@ -559,6 +559,36 @@ prevent them:
 - other programs running as you, which can read the archive and the
   screen.
 
+## Exports (M6, in progress)
+
+*Status: the export engine is being built (PR A). No export can be made
+from the app yet: there is no Export dialog and no export job, and
+nothing is written outside the archive. The full section, with what an
+export writes and where, comes with the export job and the dialog.*
+
+What is already decided and enforced in the archive's export reads
+(`crates/oma-archive/src/export/`, tested there):
+
+- **Masked and withheld by default (owner-confirmed 2026-10-19, Q4).**
+  One-time codes the phone marked, and content captured before an unsend
+  or an edit that the viewer also withholds (earlier text, decoded edit
+  text, the subject history of a message with an unsent part, the
+  plain-column alternative text of such a message, and the files of
+  attachments that belonged to unsent parts), are masked or withheld
+  before anything leaves the archive code. Two separate per-export
+  opt-ins release them: one for one-time codes, one for earlier content.
+  Both are off by default, reset each time the dialog opens, are never
+  remembered, and are each confirmed against an exact count of messages.
+  The viewer's "Show earlier text by default" setting (`revealEarlierText`)
+  does **not** carry over into exports. The dialog and the confirmation
+  are not built yet.
+- **Only codes the phone marked are masked.** A code in plain text without
+  the phone's marking is not detected, in exports as in the viewer.
+- **Search results do not reveal hidden content through membership.** A
+  search hit whose match lies only in masked or withheld content is left
+  out of an export of search results unless the matching opt-in is on. How
+  many were left out is shown to the user and written to no output.
+
 ## Device identifiers (M2)
 
 The app never stores or keeps these fields from a backup: `Unique

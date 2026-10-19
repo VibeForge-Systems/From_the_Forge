@@ -878,8 +878,12 @@ fn the_ledger_columns_are_read_raw_and_uncapped() {
         assert_eq!(rd.ck_sync_state.raw, Some(3));
         assert!(x[0].derivation.derived_by >= 1);
         assert!(x[0].derivation.decoder_version.is_some());
-        let atts = s.attachment_facts(&[oma_archive::AttachmentId::new(att)])?;
-        let a = &atts[0];
+        let atts = s.attachment_facts(&x[0])?;
+        let a = atts
+            .iter()
+            .find(|a| a.facts.id == oma_archive::AttachmentId::new(att))
+            .expect("the attachment");
+        assert_eq!(a.access, oma_archive::AttachmentAccess::Included);
         assert_eq!(
             (a.is_outgoing.raw, a.transfer_state.raw),
             (Some(1), Some(5))
@@ -993,8 +997,20 @@ fn parity(i: &Imported, what: &str) {
             let xs = s.assemble(&ids, reveal, ExportDepth::WithHistory)?;
             for x in &xs {
                 let mid = x.item.message.id;
-                let want =
+                let mut want =
                     export_item(&outside, None, mid, reveal, LowerCaps::default()).expect("item");
+                // The one difference (slice 6b2, §3.8): an attachment of an
+                // unsent part carries no file unless earlier content is
+                // revealed.
+                assert_eq!(x.attachment_access.len(), want.message.attachments.len());
+                for (i, acc) in x.attachment_access.iter().enumerate() {
+                    if acc.is_withheld() {
+                        assert!(!reveal.earlier_text);
+                        want.message.attachments[i].blob = None;
+                        want.message.attachments[i].stored_bytes = None;
+                        want.codes.attachments[i].stored_bytes = None;
+                    }
+                }
                 assert_eq!(x.item, want, "{what}: item {}", mid.get());
                 let d = export_detail(&outside, mid, reveal, LowerCaps::default()).expect("detail");
                 assert_eq!(x.detail.subject, d.subject, "{what}");
