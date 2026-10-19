@@ -111,6 +111,9 @@ impl SettingsStore {
         let raw = serde_json::from_slice::<serde_json::Value>(bytes).ok();
         let raw_folders = raw.as_ref().and_then(|v| v.get("backupFolders"));
         let mut notices = super::folders::structural_notices(raw_folders);
+        notices.extend(super::viewer::structural_notice(
+            raw.as_ref().and_then(|v| v.get("viewer")),
+        ));
         let entries = std::mem::take(&mut self.settings.backup_folders.0);
         let (kept, more) =
             super::folders::validate_loaded(entries, self.settings.archive_directory.as_deref());
@@ -373,6 +376,27 @@ mod tests {
             let notice = store.snapshot().persistence.notice.expect("notice");
             assert!(notice.contains("added backup folders"), "{notice}");
         }
+    }
+
+    #[test]
+    fn an_unreadable_viewer_preference_keeps_the_others_and_gives_a_notice() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = settings_path(tmp.path());
+        fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+        fs::write(
+            &path,
+            r#"{"schemaVersion":1,"archiveDirectory":"/data/lib",
+                "viewer":{"mediaPlayback":"off","captureProtection":true,"uiZoom":9000}}"#,
+        )
+        .expect("write");
+        let store = SettingsStore::load(path.clone());
+        let v = &store.settings().viewer;
+        assert_eq!(v.media_playback, super::super::MediaPlayback::Off);
+        assert!(v.capture_protection);
+        assert_eq!(v.ui_zoom.get(), 100);
+        assert!(path.exists(), "not set aside as corrupt");
+        let notice = store.snapshot().persistence.notice.expect("notice");
+        assert!(notice.contains("viewer preference"), "{notice}");
     }
 
     #[test]

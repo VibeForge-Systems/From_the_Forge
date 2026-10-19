@@ -286,7 +286,7 @@ fn logs_errors_and_debug_output_hold_no_label_id_or_path() {
             }
             shown.push(format!(
                 "{d:?} {d:#?} {:?}",
-                reader.reaction_history(m.id, 0).expect("history")
+                reader.reaction_history(m.id, None).expect("history")
             ));
         }
         shown.push(format!(

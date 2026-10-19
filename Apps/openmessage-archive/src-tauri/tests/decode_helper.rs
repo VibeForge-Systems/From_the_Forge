@@ -102,7 +102,35 @@ fn a_helper_killed_mid_request_is_restarted() {
     assert_eq!(h.spawned(), 4, "restarted after each crash");
 }
 
+/// A helper that died between requests (killed from outside) is stale:
+/// the next, valid image is decoded by a new helper, not reported as a
+/// crash of that image.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_helper_that_died_between_requests_does_not_fail_the_next_image() {
+    let mut h = helper();
+    let limits = RenderLimits::default();
+    let png = media("png-rgb-6x4.png");
+    image(h.render(&png, Rendition::Thumb, &limits));
+    let pid = h.helper_pid().expect("a running helper");
+    let killed = std::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .status()
+        .expect("kill");
+    assert!(killed.success());
+    // Wait until it is gone (a zombie until reaped).
+    let stat = format!("/proc/{pid}/stat");
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while std::fs::read_to_string(&stat).is_ok_and(|s| !s.contains(") Z ")) {
+        assert!(std::time::Instant::now() < until, "the helper died");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    image(h.render(&png, Rendition::Thumb, &limits));
+    assert_eq!(h.spawned(), 2, "replaced, and the image decoded");
+}
+
 /// A helper that does not answer in time is killed and counted as a
+/// crash./// A helper that does not answer in time is killed and counted as a
 /// crash. The test helper here is a process that reads and never answers.
 #[cfg(unix)]
 #[test]

@@ -146,8 +146,8 @@ pub use view::{
     AttachmentFacts, BlobFacts, BodyVersion, CardState, ChatFlags, ChunkText, DayCounts,
     DetailTimes, EditEntryText, EditEntryView, EditTextsOutcome, EditTime, HistoryColumn,
     HistoryValue, IdentifierProbe, MessageDetail, Observation, OlderBackup, RawNumber, RawValue,
-    ReactionHistory, ReactionRecord, SeekDir, TextChunk, VerifyFacts, VersionText, DAY_BOUNDS,
-    DETAIL_CHATS, DETAIL_EDIT_ENTRIES, DETAIL_VERSIONS, REACTION_HISTORY_LIMIT,
+    ReactionCursor, ReactionHistory, ReactionRecord, SeekDir, TextChunk, VerifyFacts, VersionText,
+    DAY_BOUNDS, DETAIL_CHATS, DETAIL_EDIT_ENTRIES, DETAIL_VERSIONS, REACTION_HISTORY_LIMIT,
     REACTION_HISTORY_PAGE, TEXT_CHUNK_UTF16,
 };
 

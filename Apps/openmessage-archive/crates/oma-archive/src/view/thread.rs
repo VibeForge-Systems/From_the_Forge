@@ -29,8 +29,8 @@
 //! also stops before a running upper bound of its serialised size passes
 //! [`PAGE_BYTES`](super::assemble::PAGE_BYTES).
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::time::Instant;
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
+use std::time::{Duration, Instant};
 
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OptionalExtension};
@@ -47,6 +47,18 @@ use crate::sortkey;
 pub const PAGE_ITEMS: u16 = 100;
 /// The most replies [`ArchiveReader::reply_thread`] lists.
 pub const REPLY_THREAD_LIMIT: usize = 500;
+/// The least time a page call's `Assembly` phase gets after its `Scan`,
+/// even when the `Scan` used up the call's deadline: a scan stopped by the
+/// deadline after it found items returns a partial page (§3.2), so the
+/// assembly of those items must not start already out of time. A call may
+/// therefore run this much past its 2 s window.
+const ASSEMBLY_MIN: Duration = Duration::from_millis(500);
+
+/// The deadline of a page call's `Assembly` phase: the call's own, or
+/// [`ASSEMBLY_MIN`] from now when less than that is left.
+fn assembly_deadline(deadline: Instant) -> Instant {
+    deadline.max(Instant::now() + ASSEMBLY_MIN)
+}
 /// The most handles one page carries.
 pub const PAGE_HANDLES: usize = 500;
 /// Rows scanned per visible item asked for, at most.
@@ -158,12 +170,24 @@ pub struct ThreadPage {
     /// The page stopped before its serialised-size bound.
     pub cut_for_size: bool,
     served: Vec<(MessageId, SortKeyHint)>,
+    /// The key of every item, for a caller that moves an anchor onto an
+    /// item (trimming a page for size) and must remember its key too.
+    item_keys: Vec<(MessageId, SortKeyHint)>,
 }
 
 impl ThreadPage {
     /// The keys served for the page's anchors and focus, to remember.
     pub fn served_keys(&self) -> &[(MessageId, SortKeyHint)] {
         &self.served
+    }
+
+    /// The key item `id` of this page was read at, to remember when the
+    /// caller makes it an anchor.
+    pub fn key_of(&self, id: MessageId) -> Option<&SortKeyHint> {
+        self.item_keys
+            .iter()
+            .find(|(m, _)| *m == id)
+            .map(|(_, k)| k)
     }
 }
 
@@ -186,7 +210,7 @@ const SQL_UNDATED_NEWER: &str = "SELECT message_id, sort_key FROM chat_message \
      ORDER BY sort_key, message_id LIMIT ?4";
 const SQL_ORIGINATOR: &str = "SELECT key_kind, guid, sort_key FROM message WHERE id = ?1";
 const SQL_REPLIES: &str = "SELECT id, sort_key FROM message \
-     WHERE thread_originator_guid = ?1 AND assoc_present = 0 AND item_kind = 1 LIMIT ?2";
+     WHERE thread_originator_guid = ?1 AND assoc_present = 0 AND item_kind = 1";
 
 #[cfg_attr(not(feature = "fault-injection"), allow(dead_code))]
 pub(crate) fn plan_statements() -> Vec<(&'static str, String)> {
@@ -808,6 +832,15 @@ fn assemble_page(
             served.push((MessageId::new(id), SortKeyHint(r.key.clone())));
         }
     }
+    let item_keys: Vec<(MessageId, SortKeyHint)> = items
+        .iter()
+        .filter_map(|m| {
+            s.rows
+                .iter()
+                .find(|r| r.id == m.id.get())
+                .map(|r| (m.id, SortKeyHint(r.key.clone())))
+        })
+        .collect();
     Ok(ThreadPage {
         items,
         handles: handles.into_values().collect(),
@@ -824,6 +857,7 @@ fn assemble_page(
         focus,
         cut_for_size,
         served,
+        item_keys,
     })
 }
 
@@ -850,14 +884,18 @@ impl ArchiveReader {
         self.require_current()?;
         let want = usize::from(want.clamp(1, PAGE_ITEMS));
         let conn = self.conn();
-        let deadline = Instant::now() + ViewBudget::Scan.window();
+        let deadline = Instant::now() + crate::fault::page_window(ViewBudget::Scan.window());
         conn.snapshot(|| {
             let scanned = conn.viewing(ViewBudget::Scan, None, deadline, |p| {
                 scan_page(p, chat.get(), anchor, dir, want, hint)
             })?;
-            conn.viewing(ViewBudget::Assembly, None, deadline, |p| {
-                assemble_page(p, Some(chat.get()), scanned, reveal)
-            })
+            crate::fault::pause_after_scan();
+            conn.viewing(
+                ViewBudget::Assembly,
+                None,
+                assembly_deadline(deadline),
+                |p| assemble_page(p, Some(chat.get()), scanned, reveal),
+            )
         })
     }
 
@@ -873,7 +911,7 @@ impl ArchiveReader {
     ) -> Result<ThreadPage, ArchiveError> {
         self.require_current()?;
         let conn = self.conn();
-        let deadline = Instant::now() + ViewBudget::Scan.window();
+        let deadline = Instant::now() + crate::fault::page_window(ViewBudget::Scan.window());
         conn.snapshot(|| {
             let scanned = conn.viewing(ViewBudget::Scan, None, deadline, |p| {
                 let row: Option<(i64, Option<Vec<u8>>, Vec<u8>)> = p.sql(|c| {
@@ -888,21 +926,33 @@ impl ArchiveReader {
                         .optional()
                 })?;
                 let (key_kind, guid, key) = row.ok_or(ArchiveError::AnchorNotFound)?;
-                let mut replies: Vec<(Vec<u8>, i64)> = Vec::new();
+                // Every reply is read (under the phase's op budget; a trip
+                // is `QueryTooBroad`) and the first REPLY_THREAD_LIMIT in
+                // timeline order, (sort_key, id), are kept in a bounded
+                // heap: the index returns rows in id order, so a `LIMIT`
+                // would keep the oldest imports, not the earliest replies,
+                // and `has_newer` would be false about the rest.
+                let mut kept: BinaryHeap<(Vec<u8>, i64)> = BinaryHeap::new();
+                let mut more = false;
                 if let Some(guid) = guid.filter(|g| key_kind == 1 && !g.is_empty()) {
-                    let limit = i64::try_from(REPLY_THREAD_LIMIT + 1).unwrap_or(i64::MAX);
-                    replies = p.sql(|c| {
+                    p.sql(|c| {
                         let mut st = c.prepare(SQL_REPLIES)?;
-                        let rows = st.query_map(rusqlite::params![guid, limit], |r| {
-                            Ok((bytes_of(r.get_ref(1)?), r.get(0)?))
-                        })?;
-                        rows.collect()
+                        let mut rows = st.query([guid])?;
+                        while let Some(r) = rows.next()? {
+                            let id: i64 = r.get(0)?;
+                            if id == originator.get() {
+                                continue;
+                            }
+                            kept.push((bytes_of(r.get_ref(1)?), id));
+                            if kept.len() > REPLY_THREAD_LIMIT {
+                                kept.pop();
+                                more = true;
+                            }
+                        }
+                        Ok(())
                     })?;
                 }
-                replies.retain(|(_, id)| *id != originator.get());
-                replies.sort();
-                let more = replies.len() > REPLY_THREAD_LIMIT;
-                replies.truncate(REPLY_THREAD_LIMIT);
+                let replies = kept.into_sorted_vec();
                 let mut rows = vec![Row {
                     id: originator.get(),
                     key,
@@ -928,9 +978,13 @@ impl ArchiveReader {
                     undated: None,
                 })
             })?;
-            conn.viewing(ViewBudget::Assembly, None, deadline, |p| {
-                assemble_page(p, None, scanned, reveal)
-            })
+            crate::fault::pause_after_scan();
+            conn.viewing(
+                ViewBudget::Assembly,
+                None,
+                assembly_deadline(deadline),
+                |p| assemble_page(p, None, scanned, reveal),
+            )
         })
     }
 }

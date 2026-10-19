@@ -46,10 +46,13 @@ use sha2::{Digest, Sha256};
 /// frozen: regenerating them invalidates every recorded run.
 const INPUT_SUMS_SHA256: &str = "ee33f1fde09cf332384f61595c9705a5b256fb12cf86a0cc8fa0e5483e9080d8";
 
-/// The SHA-256 of `tests/fixtures/viewer/EXPECTED.SHA256SUMS` (slice 5a:
-/// the first statement of the viewer rules).
+/// The SHA-256 of `tests/fixtures/viewer/EXPECTED.SHA256SUMS`. Re-pinned
+/// after the M5 PR A review: a message whose direction is not recorded
+/// has no sender (`directionNotRecorded`); the part set comes only from
+/// the runs and the `otr` count; a reaction whose target would fold
+/// itself stays visible. Only the main entry's expectations changed.
 const EXPECTED_SUMS_SHA256: &str =
-    "dca1842ac6f35752e75cfd28940fd6fc45e5e59a8f64e1c8c60e26604c9d3899";
+    "4d03c9747721e18dc4da5ab2e39226793bdaf16e0246d9f5a121c652cb4f9412";
 
 /// Text values over this many UTF-8 bytes are written as
 /// `sha256:<hex>:<bytes>` in the manifests (the generator's `LONG_TEXT`).
@@ -661,6 +664,7 @@ fn the_viewer_statement_is_self_consistent() {
         "columnAbsent",
         "unreadable",
         "notFound",
+        "directionNotRecorded",
     ] {
         assert!(senders.contains(s), "no {s} sender reason");
     }

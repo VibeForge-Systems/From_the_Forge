@@ -25179,8 +25179,7 @@
     "item": "message",
     "labels": [],
     "sender": {
-     "handle": "handle:synthetic-viewer-1@example.invalid|iMessage",
-     "reason": "resolved"
+     "reason": "directionNotRecorded"
     },
     "service": "imessage",
     "utcNs": 1768310080000000000

@@ -856,6 +856,180 @@ fn budgets_give_too_broad_or_partial_coverage_never_damaged() {
     }
 }
 
+/// A hit's version is read when it is served: a body that an import made
+/// earlier since the search (here, a newer body with an unsent part) sends
+/// no text unless the request included earlier versions (D115, Q3b).
+#[test]
+fn a_hit_whose_body_stopped_being_current_withholds_its_text() {
+    let (tmp, lib) = library();
+    let id = lib.create(None).expect("create");
+    {
+        let mut a = lib.open(&id).expect("open");
+        let mut spec = BulkSpec::new(50);
+        spec.reaction_permille = 0;
+        spec.undated_permille = 0;
+        generate(&mut a, &spec);
+    }
+    let db = db_path(&tmp, &id);
+    let (message, body, text): (i64, i64, String) = raw(&db)
+        .query_row(
+            "SELECT m.id, b.id, b.display_text FROM message m \
+             JOIN message_body b ON b.id = m.current_body_id \
+             WHERE b.display_text IS NOT NULL ORDER BY m.id LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .expect("body");
+    let r = lib.open_read(&id).expect("reader");
+    let q = exact(text.split_whitespace().next().expect("a word"));
+    let set = run(&r, &q);
+    let at = set
+        .entries
+        .iter()
+        .position(|e| e.message.get() == message)
+        .expect("the message matched");
+    assert!(set.entries[at].current);
+    let hit = |q: &SearchRequest| r.search_hits(&set, at..at + 1, q).expect("hits").remove(0);
+    assert_eq!(hit(&q).version, HitVersion::Current);
+    assert!(hit(&q).text.is_some());
+    // An import commits a newer body with an unsent part.
+    {
+        let c = raw(&db);
+        c.execute(
+            "INSERT INTO message_body (message_id, raw_hash, text_raw, text_raw_st, \
+                 attributed_raw, attributed_raw_st, summary_raw, summary_raw_st, \
+                 attributed_outcome, attributed_error, run_issue, unknown_attr_keys, \
+                 unknown_attr_classes, display_text, display_source, display_none_reason, \
+                 sources_differ, summary_outcome, otr, ec_state, rp_state, has_tmp, \
+                 summary_unknown_keys, edit_label, edit_label_a, edit_label_b, \
+                 decoder_version, first_session_id, first_rank, last_session_id, last_rank) \
+             SELECT message_id, randomblob(32), NULL, 1, NULL, 1, NULL, 1, \
+                 1, NULL, NULL, NULL, NULL, NULL, NULL, 1, NULL, 1, NULL, NULL, NULL, NULL, \
+                 NULL, edit_label, edit_label_a, edit_label_b, decoder_version, \
+                 first_session_id, first_rank, last_session_id, last_rank \
+             FROM message_body WHERE id = ?1",
+            [body],
+        )
+        .expect("newer body");
+        let newer = c.last_insert_rowid();
+        c.execute(
+            "INSERT INTO message_unsent_part (body_id, ordinal, part) VALUES (?1, 0, 0)",
+            [newer],
+        )
+        .expect("unsent");
+        c.execute(
+            "UPDATE message SET current_body_id = ?2 WHERE id = ?1",
+            [message, newer],
+        )
+        .expect("current");
+    }
+    let h = hit(&q);
+    assert_eq!(h.version, HitVersion::Unsent, "read when served");
+    assert!(h.text.is_none(), "earlier text withheld without the reveal");
+    let mut revealed = q.clone();
+    revealed.include_earlier = true;
+    let h = hit(&revealed);
+    assert_eq!(h.version, HitVersion::Unsent);
+    assert_eq!(pieces_text(&h.text.expect("revealed")), text);
+}
+
+/// The words cap counts messages, not body rows, in both plans; and a
+/// message the global plan admitted through an earlier body is labelled
+/// current when its current body matches too.
+#[test]
+fn the_words_cap_counts_messages_and_keeps_current_labels() {
+    let (tmp, lib) = library();
+    let id = lib.create(None).expect("create");
+    {
+        let mut a = lib.open(&id).expect("open");
+        let mut spec = BulkSpec::new(12);
+        spec.chats = 1;
+        spec.reaction_permille = 0;
+        spec.undated_permille = 0;
+        generate(&mut a, &spec);
+    }
+    let db = db_path(&tmp, &id);
+    let messages: i64 = {
+        let c = raw(&db);
+        // Every current body gets a marker word, and every message an
+        // earlier body with the same words, at a higher rowid than its
+        // current body: the global plan, newest rowid first, meets the
+        // earlier bodies first.
+        c.execute(
+            "UPDATE message_body SET display_text = display_text || ' zzmark' \
+             WHERE display_text IS NOT NULL",
+            [],
+        )
+        .expect("marker");
+        let n = c
+            .execute(
+                "INSERT INTO message_body (message_id, raw_hash, text_raw, text_raw_st, \
+                     attributed_raw, attributed_raw_st, summary_raw, summary_raw_st, \
+                     attributed_outcome, attributed_error, run_issue, unknown_attr_keys, \
+                     unknown_attr_classes, display_text, display_source, display_none_reason, \
+                     sources_differ, summary_outcome, otr, ec_state, rp_state, has_tmp, \
+                     summary_unknown_keys, edit_label, edit_label_a, edit_label_b, \
+                     decoder_version, first_session_id, first_rank, last_session_id, last_rank) \
+                 SELECT message_id, randomblob(32), NULL, 1, NULL, 1, NULL, 1, \
+                     1, NULL, NULL, NULL, NULL, display_text, 2, NULL, NULL, 1, \
+                     NULL, NULL, NULL, NULL, NULL, edit_label, edit_label_a, edit_label_b, \
+                     decoder_version, first_session_id, first_rank, last_session_id, last_rank \
+                 FROM message_body b WHERE b.display_text IS NOT NULL \
+                   AND b.id = (SELECT current_body_id FROM message WHERE id = b.message_id)",
+                [],
+            )
+            .expect("earlier bodies");
+        i64::try_from(n).expect("n")
+    };
+    assert!(messages >= 8, "{messages}");
+    let r = lib.open_read(&id).expect("reader");
+    let chat = ChatId::new(1);
+    // A prefix query takes the global plan; a quoted word in a small chat
+    // the scoped one.
+    for (prefix, scoped) in [("zzmark", None), ("\"zzmark\"", Some(chat))] {
+        let mut q = SearchRequest::new(prefix);
+        q.include_earlier = true;
+        q.filters.chat = scoped;
+        // Under the cap (in messages, though over it in body rows): not
+        // capped, every message once.
+        let cap = usize::try_from(messages).expect("n") + 1;
+        let set = {
+            let _f = install(Faults {
+                search_match_cap: Some(cap),
+                ..Faults::default()
+            });
+            run(&r, &q)
+        };
+        assert_eq!(
+            set.plan,
+            Some(if scoped.is_some() {
+                WordsPlan::Scoped
+            } else {
+                WordsPlan::Global
+            })
+        );
+        assert_eq!(set.entries.len(), usize::try_from(messages).expect("n"));
+        assert!(!set.capped, "{prefix}: messages, not bodies");
+        let ids: BTreeSet<i64> = set.entries.iter().map(|e| e.message.get()).collect();
+        assert_eq!(ids.len(), set.entries.len());
+        // Over the cap: exactly `cap` messages, each labelled current
+        // (its current body matches too).
+        let set = {
+            let _f = install(Faults {
+                search_match_cap: Some(5),
+                ..Faults::default()
+            });
+            run(&r, &q)
+        };
+        assert!(set.capped, "{prefix}");
+        assert_eq!(set.entries.len(), 5, "{prefix}");
+        assert!(
+            set.entries.iter().all(|e| e.current),
+            "{prefix}: never 'earlier' when the current text matches"
+        );
+    }
+}
+
 #[test]
 fn hit_pages_are_bounded_and_requests_are_checked() {
     let (_lib, r, _) = bulk_reader();

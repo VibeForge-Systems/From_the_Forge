@@ -488,6 +488,78 @@ fn open_range_refuses_a_new_inode_a_link_and_a_directory() {
     );
 }
 
+/// The Windows variant (M5 §13.9): a `<hh>` directory replaced by a
+/// junction to an identical copy of it is never read through by any of the
+/// M5 store readers (the sniff window included, the one read that needs no
+/// hash), although the `(len, mtime)` identity would match; and a file
+/// symlink in place of a store file is refused when the runner can make
+/// one. Each check prints a `RECORD` line.
+#[cfg(windows)]
+#[test]
+fn store_readers_refuse_a_junctioned_fan_out_directory_on_windows() {
+    let m = media_archive();
+    let r = reader(&m);
+    let cancel = CancelToken::new();
+    let (wav, path) = m.files["wav-minimal.wav"].clone();
+    let ident = r.verify_blob(wav, &cancel).expect("verify");
+    let hh = path.parent().expect("hh").to_path_buf();
+    let outside = tempfile::tempdir().expect("outside");
+    let copy = outside.path().join("hh-copy");
+    fs::create_dir(&copy).expect("copy dir");
+    for e in fs::read_dir(&hh).expect("hh") {
+        let e = e.expect("entry");
+        fs::copy(e.path(), copy.join(e.file_name())).expect("copy file");
+    }
+    let moved = outside.path().join("hh-moved");
+    fs::rename(&hh, &moved).expect("move hh away");
+    let ok = std::process::Command::new("cmd")
+        .arg("/C")
+        .arg("mklink")
+        .arg("/J")
+        .arg(hh.as_os_str())
+        .arg(copy.as_os_str())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    assert!(ok, "mklink /J failed");
+    let refused = [
+        ("inspect_blob", r.inspect_blob(wav).map(|_| ())),
+        ("verify_blob", r.verify_blob(wav, &cancel).map(|_| ())),
+        ("open_range", r.open_range(wav, &ident).map(|_| ())),
+        (
+            "read_blob_verified",
+            r.read_blob_verified(wav, MAX_INPUT_BYTES).map(|_| ()),
+        ),
+    ];
+    for (what, got) in refused {
+        let p = blob_err(got);
+        println!("RECORD M5 store reader through a junctioned <hh>: {what} -> {p:?}");
+        assert_eq!(p, BlobProblem::NotRegular, "{what}");
+    }
+    // Put the real directory back; then a file symlink in place of the
+    // store file, if the runner allows one.
+    fs::remove_dir(&hh).expect("remove the junction");
+    fs::rename(moved.as_path(), hh.as_path()).expect("restore hh");
+    let target = path.with_extension("target");
+    fs::rename(&path, &target).expect("move the file");
+    match std::os::windows::fs::symlink_file(target.as_path(), path.as_path()) {
+        Ok(()) => {
+            for (what, got) in [
+                ("inspect_blob", r.inspect_blob(wav).map(|_| ())),
+                ("open_range", r.open_range(wav, &ident).map(|_| ())),
+            ] {
+                let p = blob_err(got);
+                println!("RECORD M5 store reader through a file symlink: {what} -> {p:?}");
+                assert_eq!(p, BlobProblem::NotRegular, "{what}");
+            }
+        }
+        Err(e) => println!(
+            "RECORD M5 file symlink not created on this runner ({:?}); manual check",
+            e.kind()
+        ),
+    }
+}
+
 #[test]
 fn a_digest_mismatch_returns_nothing_but_the_sniff_window_still_reads() {
     let m = media_archive();

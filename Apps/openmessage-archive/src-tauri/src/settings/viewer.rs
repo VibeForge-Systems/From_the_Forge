@@ -177,15 +177,87 @@ impl Default for ViewerPreferences {
     }
 }
 
-/// Reading `settings.json`: a malformed `viewer` object falls back to the
-/// defaults instead of making the whole file count as corrupt (which would
-/// set it aside and lose `archiveDirectory`).
+impl ViewerPreferences {
+    /// The most private choice of every privacy preference, the defaults
+    /// for the rest: what an unreadable preference falls back to, so a
+    /// broken file never makes the viewer less private than the user chose.
+    pub fn most_private() -> Self {
+        Self {
+            list_previews: false,
+            reveal_earlier_text: false,
+            media_playback: MediaPlayback::Off,
+            blur_on_focus_loss: true,
+            capture_protection: true,
+            ..Self::default()
+        }
+    }
+}
+
+/// Read a stored `viewer` value field by field (never all or nothing):
+/// every field that parses keeps its stored value; a missing field (an
+/// older file) takes its default; an unreadable one takes its most private
+/// value ([`ViewerPreferences::most_private`]); unknown fields (a newer
+/// build's) are ignored. A value that is not an object gives the most
+/// private preferences. Returns the preferences and how many fields could
+/// not be read.
+pub(super) fn read_leniently(value: &serde_json::Value) -> (ViewerPreferences, usize) {
+    let private = ViewerPreferences::most_private();
+    let Some(obj) = value.as_object() else {
+        return (private, 1);
+    };
+    let mut p = ViewerPreferences::default();
+    let mut unreadable = 0usize;
+    macro_rules! field {
+        ($name:literal, $f:ident) => {
+            if let Some(v) = obj.get($name) {
+                match serde_json::from_value(v.clone()) {
+                    Ok(x) => p.$f = x,
+                    Err(_) => {
+                        p.$f = private.$f;
+                        unreadable += 1;
+                    }
+                }
+            }
+        };
+    }
+    field!("timeFormat", time_format);
+    field!("timeZone", time_zone);
+    field!("showSeconds", show_seconds);
+    field!("motion", motion);
+    field!("listPreviews", list_previews);
+    field!("revealEarlierText", reveal_earlier_text);
+    field!("mediaPlayback", media_playback);
+    field!("showHiddenCharacters", show_hidden_characters);
+    field!("blurOnFocusLoss", blur_on_focus_loss);
+    field!("idleHideMinutes", idle_hide_minutes);
+    field!("captureProtection", capture_protection);
+    field!("uiZoom", ui_zoom);
+    (p, unreadable)
+}
+
+/// The notice for a stored `viewer` value with unreadable preferences.
+pub(super) fn structural_notice(raw: Option<&serde_json::Value>) -> Option<String> {
+    let (_, n) = read_leniently(raw?);
+    (n > 0).then(|| {
+        format!(
+            "{n} viewer preference{} could not be read and {} set to the most private choice (playback off, no list previews, capture protection on). Check them in Settings.",
+            if n == 1 { "" } else { "s" },
+            if n == 1 { "was" } else { "were" }
+        )
+    })
+}
+
+/// Reading `settings.json`: a malformed `viewer` object never makes the
+/// whole file count as corrupt (which would set it aside and lose
+/// `archiveDirectory`), and never resets the preferences that can still
+/// be read ([`read_leniently`]); the store adds a notice.
 pub(super) fn lenient<'de, D: Deserializer<'de>>(d: D) -> Result<ViewerPreferences, D::Error> {
     let value = serde_json::Value::deserialize(d)?;
-    Ok(serde_json::from_value(value).unwrap_or_else(|_| {
-        tracing::warn!("viewer preferences unreadable; defaults in use");
-        ViewerPreferences::default()
-    }))
+    let (p, unreadable) = read_leniently(&value);
+    if unreadable > 0 {
+        tracing::warn!(unreadable, "viewer preferences partly unreadable");
+    }
+    Ok(p)
 }
 
 /// What the window must look like for some preferences (Tauri-free, so it
@@ -248,6 +320,39 @@ mod tests {
         let e = WindowEffects::of(&p);
         assert!((e.zoom - 2.0).abs() < f64::EPSILON);
         assert_eq!(e.content_protected, cfg!(windows));
+    }
+
+    #[test]
+    fn stored_preferences_are_read_field_by_field_and_fail_private() {
+        // One bad value and one unknown field: the rest are kept.
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{"mediaPlayback":"off","captureProtection":true,"listPreviews":false,
+                "uiZoom":9000,"fromANewerBuild":1}"#,
+        )
+        .expect("json");
+        let (p, n) = read_leniently(&v);
+        assert_eq!(n, 1);
+        assert_eq!(p.media_playback, MediaPlayback::Off);
+        assert!(p.capture_protection && !p.list_previews);
+        assert_eq!(p.ui_zoom.get(), 100);
+        // An unreadable privacy value takes its most private choice.
+        let v: serde_json::Value =
+            serde_json::from_str(r#"{"mediaPlayback":"always","listPreviews":"yes"}"#)
+                .expect("json");
+        let (p, n) = read_leniently(&v);
+        assert_eq!(n, 2);
+        assert_eq!(p.media_playback, MediaPlayback::Off);
+        assert!(!p.list_previews);
+        assert!(
+            !p.capture_protection,
+            "a readable-or-missing field keeps its default"
+        );
+        // Not an object: the most private preferences.
+        let (p, n) = read_leniently(&serde_json::json!(7));
+        assert_eq!((p, n), (ViewerPreferences::most_private(), 1));
+        assert!(structural_notice(Some(&serde_json::json!(7))).is_some());
+        assert!(structural_notice(Some(&serde_json::json!({"uiZoom":200}))).is_none());
+        assert!(structural_notice(None).is_none());
     }
 
     #[test]

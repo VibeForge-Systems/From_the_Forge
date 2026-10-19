@@ -4,4 +4,4 @@ import type { SafeId } from "./SafeId";
 /**
  * Why an association row is a timeline item, or what it folds into.
  */
-export type AssocVisibilityDto = { "kind": "undeterminable" } | { "kind": "noKind" } | { "kind": "notAReaction" } | { "kind": "targetUnreadable" } | { "kind": "targetNotUnique" } | { "kind": "targetInAnotherChat", target: SafeId, } | { "kind": "folded", target: SafeId, };
+export type AssocVisibilityDto = { "kind": "undeterminable" } | { "kind": "noKind" } | { "kind": "notAReaction" } | { "kind": "targetUnreadable" } | { "kind": "targetNotUnique" } | { "kind": "targetInAnotherChat", target: SafeId, } | { "kind": "folded", target: SafeId, } | { "kind": "targetFolds", target: SafeId, };

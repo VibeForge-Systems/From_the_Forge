@@ -46,7 +46,9 @@ Each `content.json` holds two statements by the generator's own model.
   - `threads`: per chat, the visible `dated` and `undated` items, oldest
     first, and the `folded` reactions with their targets. Only reactions
     (`assoc_kind` add or remove, `assoc_present = 1`) whose target resolves
-    to a keyed message that is a timeline item of the same chat are folded.
+    to a keyed message that is a timeline item of the same chat are folded;
+    a target that would fold itself (resolved once, at depth one) is not a
+    timeline item (`visible:targetFolds`).
   - `messages`: per message, the closed facts: item kind, direction (and,
     when more than one lineage saw it, the lineage and backup the value
     follows), the sender reason, the service class, the association and
@@ -71,8 +73,13 @@ Each `content.json` holds two statements by the generator's own model.
   as `unpaired`. Over 200 rows on a target derives no chip.
 - **The sender** of a reaction is `me` for `is_from_me = 1`, else the
   resolved handle.
-- **Parts** of a message are the `part` attributes of its decoded runs, or
-  part 0 when there are none; `unsentWhole` means every part is listed.
+- **Parts** of a message are the `part` attributes of its decoded runs and
+  `0..n` for an `otr` entry count `n`; with neither, the parts are unknown
+  (`unsentOf` is null and `unsentWhole` false). `unsentWhole` means every
+  known part is listed.
+- **The sender** of a message is `fromMe` for `is_from_me = 1`,
+  `directionNotRecorded` when `is_from_me` is not 0 or 1 (the handle may be
+  the other party), else from `handle_id`.
 - **Earlier text** is a non-current body version's display text that
   differs from the current one; it is withheld when the message has an
   unsent part or no current text.

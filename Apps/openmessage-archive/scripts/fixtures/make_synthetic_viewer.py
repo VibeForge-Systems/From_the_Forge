@@ -1159,7 +1159,17 @@ def build_viewer(vm, name_of):
     def target_ref(a):
         return by_guid.get(a[3]) if a[3] is not None else None
 
-    # Timelines and folding (3.5 step 3).
+    def raw_fold(r, chats):
+        """The target r would fold into if it were a timeline item of one
+        of `chats`: a reaction whose keyed target is in one of them."""
+        a = assoc(msgs[r])
+        t = target_ref(a) if is_reaction(a) else None
+        if t is not None and chats_of.get(t, set()) & chats:
+            return t
+        return None
+
+    # Timelines and folding (3.5 step 3). A folded row is not a timeline
+    # item, so a reaction whose target would fold itself stays visible.
     folded = {}
     threads = {}
     for c in sorted(arch.rows["chat"], key=lambda r: chat_order[r]):
@@ -1168,7 +1178,7 @@ def build_viewer(vm, name_of):
         for r in rows:
             a = assoc(msgs[r])
             t = target_ref(a) if is_reaction(a) else None
-            if t is not None and t in members.get(c, ()):
+            if t is not None and t in members.get(c, ()) and raw_fold(t, {c}) is None:
                 tl["folded"].append({"reaction": name_of(r), "target": name_of(t)})
                 folded.setdefault(c, set()).add(r)
                 continue
@@ -1311,9 +1321,12 @@ def build_viewer(vm, name_of):
         if len(lins) > 1:
             entry, lineage, _ = rank_session[row.last_rank]
             f["directionAsRecordedBy"] = {"lineage": lineage, "entry": entry}
-        # Sender (3.6).
+        # Sender (3.6). Without a recorded direction the row may be the
+        # owner's, whose handle_id is the other party: no sender.
         if fm == 1:
             f["sender"] = {"reason": "fromMe"}
+        elif fm != 0:
+            f["sender"] = {"reason": "directionNotRecorded"}
         else:
             h = col(row, "handle_id")
             if h[0] == ABSENT:
@@ -1339,6 +1352,8 @@ def build_viewer(vm, name_of):
                 vis = "visible:targetUnreadable"
             elif t is None:
                 vis = "visible:targetNotUnique"
+            elif chats_of.get(t, set()) & here and raw_fold(t, chats_of.get(t, set())) is not None:
+                vis = "visible:targetFolds"
             elif chats_of.get(t, set()) & here:
                 vis = "folded"
             else:
@@ -1382,7 +1397,7 @@ def build_viewer(vm, name_of):
             if ab_o[0] == VALUE and "error" in ab_public(ab_o):
                 f["body"]["attributedError"] = ab_public(ab_o)["error"]
         pub = ab_public(ab_o)
-        parts = [0] if disp_text is not None else []
+        parts = []
         if pub is not None and "ok" in pub:
             ok = pub["ok"]
             if text_o[0] == VALUE:
@@ -1397,7 +1412,7 @@ def build_viewer(vm, name_of):
             elif ok["run_issue"]:
                 f["formatting"] = "unreadable"
             ps = sorted({r["attrs"]["part"] for r in ok["runs"] if r["attrs"]["part"] is not None})
-            parts = ps or parts
+            parts = ps
             if f.get("formatting") == "applied":
                 otc, inline = [], []
                 att_guids = {}
@@ -1456,8 +1471,14 @@ def build_viewer(vm, name_of):
         if info and info["rp"] and info["rp"][0] == "value":
             unsent = sorted(info["rp"][1])
             e["unsentParts"] = unsent
-            e["unsentOf"] = len(set(parts) | set(unsent))
-            e["unsentWhole"] = set(parts) <= set(unsent)
+            # Parts are known only from the runs and the otr count; with
+            # neither, no part count and no whole-bubble label.
+            known = set(parts)
+            otr = info["otr"][1] if info.get("otr") and info["otr"][0] == "value" else None
+            if otr is not None and 1 <= otr <= 4096:
+                known |= set(range(otr))
+            e["unsentOf"] = len(known | set(unsent)) if known else None
+            e["unsentWhole"] = bool(known) and known <= set(unsent)
         versions = sorted(row.bodies.items(), key=lambda kv: vm_first_rank(vm, ref, kv[0]))
         e["storedVersions"] = len(versions)
         groups = []
@@ -1691,7 +1712,9 @@ Each `content.json` holds two statements by the generator's own model.
   - `threads`: per chat, the visible `dated` and `undated` items, oldest
     first, and the `folded` reactions with their targets. Only reactions
     (`assoc_kind` add or remove, `assoc_present = 1`) whose target resolves
-    to a keyed message that is a timeline item of the same chat are folded.
+    to a keyed message that is a timeline item of the same chat are folded;
+    a target that would fold itself (resolved once, at depth one) is not a
+    timeline item (`visible:targetFolds`).
   - `messages`: per message, the closed facts: item kind, direction (and,
     when more than one lineage saw it, the lineage and backup the value
     follows), the sender reason, the service class, the association and
@@ -1716,8 +1739,13 @@ Each `content.json` holds two statements by the generator's own model.
   as `unpaired`. Over 200 rows on a target derives no chip.
 - **The sender** of a reaction is `me` for `is_from_me = 1`, else the
   resolved handle.
-- **Parts** of a message are the `part` attributes of its decoded runs, or
-  part 0 when there are none; `unsentWhole` means every part is listed.
+- **Parts** of a message are the `part` attributes of its decoded runs and
+  `0..n` for an `otr` entry count `n`; with neither, the parts are unknown
+  (`unsentOf` is null and `unsentWhole` false). `unsentWhole` means every
+  known part is listed.
+- **The sender** of a message is `fromMe` for `is_from_me = 1`,
+  `directionNotRecorded` when `is_from_me` is not 0 or 1 (the handle may be
+  the other party), else from `handle_id`.
 - **Earlier text** is a non-current body version's display text that
   differs from the current one; it is withheld when the message has an
   unsent part or no current text.

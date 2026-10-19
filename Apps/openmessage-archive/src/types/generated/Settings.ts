@@ -20,7 +20,7 @@ archiveDirectory: string | null, theme: Theme, layout: LayoutPreferences,
  */
 backupFolders: Array<AddedFolderEntry>, 
 /**
- * The viewer's preferences (M5). Read leniently: a malformed object
- * falls back to the defaults.
+ * The viewer's preferences (M5). Read leniently, field by field: an
+ * unreadable field takes its most private value, with a notice.
  */
 viewer: ViewerPreferences, };

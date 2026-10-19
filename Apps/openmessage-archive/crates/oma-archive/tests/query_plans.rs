@@ -542,8 +542,13 @@ const PINNED: &[(&str, &[&str])] = &[
         &[
             "SEARCH cm USING COVERING INDEX chat_message_timeline (chat_id=? AND sort_key>? AND sort_key<?)",
             "SEARCH m USING INTEGER PRIMARY KEY (rowid=?)",
+            // Re-pinned after the PR A review: the target's own fold
+            // (depth one) is a nested subquery on the same indexes.
+            "CORRELATED SCALAR SUBQUERY 2",
+            "SEARCH t USING INDEX message_guid (guid=?)",
             "CORRELATED SCALAR SUBQUERY 1",
-            "SEARCH t USING COVERING INDEX message_guid (guid=?)",
+            "SEARCH u USING COVERING INDEX message_guid (guid=?)",
+            "SEARCH y USING COVERING INDEX chat_message_by_message (message_id=? AND chat_id=?)",
             "SEARCH x USING COVERING INDEX chat_message_by_message (message_id=? AND chat_id=?)",
         ],
     ),

@@ -525,9 +525,18 @@ impl ReadConn {
         &self,
         f: impl FnOnce() -> Result<T, ArchiveError>,
     ) -> Result<T, ArchiveError> {
+        // An interrupt (`SearchInterrupt`) that lands on `BEGIN` or
+        // `COMMIT` is a cancel, like one inside a phase.
+        let map = |e: &rusqlite::Error| {
+            if primary_code(e) == Some(SQLITE_INTERRUPT) {
+                ArchiveError::Cancelled
+            } else {
+                ArchiveError::sqlite(Stage::View, e)
+            }
+        };
         self.conn
             .execute_batch("BEGIN DEFERRED")
-            .map_err(|e| ArchiveError::sqlite(Stage::View, &e))?;
+            .map_err(|e| map(&e))?;
         let out = f();
         let end = if out.is_ok() { "COMMIT" } else { "ROLLBACK" };
         let ended = self.conn.execute_batch(end);
@@ -537,7 +546,7 @@ impl ReadConn {
         }
         match (out, ended) {
             (Ok(v), Ok(())) => Ok(v),
-            (Ok(_), Err(e)) => Err(ArchiveError::sqlite(Stage::View, &e)),
+            (Ok(_), Err(e)) => Err(map(&e)),
             (Err(e), _) => Err(e),
         }
     }

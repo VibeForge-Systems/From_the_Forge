@@ -58,7 +58,8 @@ rustix = { version = "=1.1.5", features = ["fs", "process"] }
 # Milestone 5: images. A dependency of oma-archive from slice 5d
 # (`media::render`, run only inside the decode helper process), and of its
 # fixture generator `make_viewer_media`. Only the four decoders/encoders M5 serves:
-# no AVIF (MPL-2.0 `mp4parse`, C `dav1d`), no TIFF, EXR or rayon.
+# no `avif` (an encoder through ravif, not needed) and no `avif-native`
+# (the decoder: MPL-2.0 `mp4parse` and C `dav1d`); no TIFF, EXR or rayon.
 image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 # Owner decision Q2 (M5): an optional HEIC decoder behind oma-archive's `heic`
 # feature, OFF by default and never enabled in official or CI release

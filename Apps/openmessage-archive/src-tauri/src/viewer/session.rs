@@ -13,15 +13,16 @@
 //!   read transaction; nothing is held across calls, so checkpoints are
 //!   never held back.
 //! - Sort keys never cross IPC: they stay here, keyed by conversation and
-//!   message, at most [`SERVED_KEYS`] of them.
+//!   message, at most [`SERVED_KEYS`] of them; reaction-history positions
+//!   likewise, keyed by target and last row, at most [`REACTION_CURSORS`].
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use oma_archive::{
     ArchiveId, ArchiveReader, AttachmentId, BlobId, BlobIdentity, CancelToken, ChatId, MessageId,
-    SearchInterrupt, SearchRequest, SearchResultSet, SortKeyHint,
+    ReactionCursor, SearchInterrupt, SearchRequest, SearchResultSet, SortKeyHint,
 };
 
 use super::media::engine::MediaEngine;
@@ -29,7 +30,8 @@ use crate::error::{ErrorCode, IpcError, IpcResult};
 
 /// The most remembered anchor keys.
 pub const SERVED_KEYS: usize = 20_000;
-/// The most attachments a session remembers as surfaced.
+/// The most attachments a session remembers as surfaced; past it the
+/// least recently surfaced are forgotten, so a new one is always admitted.
 pub const SURFACED_LIMIT: usize = 200_000;
 /// Playback checks that may wait while one runs (§6.2: the verify
 /// executor has one worker and four queue entries).
@@ -71,6 +73,113 @@ impl SortKeyLru {
     }
 }
 
+/// The most remembered reaction-history positions.
+pub const REACTION_CURSORS: usize = 1_024;
+
+/// Reaction-history keyset positions served, by (target, last row),
+/// evicted oldest first.
+#[derive(Default)]
+pub struct ReactionCursors {
+    cursors: HashMap<(MessageId, MessageId), (ReactionCursor, u64)>,
+    order: BTreeMap<u64, (MessageId, MessageId)>,
+    tick: u64,
+}
+
+impl ReactionCursors {
+    pub fn remember(&mut self, target: MessageId, cursor: ReactionCursor) {
+        self.tick += 1;
+        let k = (target, cursor.after());
+        if let Some((_, old)) = self.cursors.insert(k, (cursor, self.tick)) {
+            self.order.remove(&old);
+        }
+        self.order.insert(self.tick, k);
+        while self.cursors.len() > REACTION_CURSORS {
+            let Some((_, k)) = self.order.pop_first() else {
+                break;
+            };
+            self.cursors.remove(&k);
+        }
+    }
+
+    pub fn get(&self, target: MessageId, last: MessageId) -> Option<&ReactionCursor> {
+        self.cursors.get(&(target, last)).map(|(c, _)| c)
+    }
+
+    pub fn len(&self) -> usize {
+        self.cursors.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.cursors.is_empty()
+    }
+}
+
+/// The attachments surfaced to the webview, evicted least recently
+/// surfaced first: a long session over a large archive keeps admitting
+/// new ones (an evicted one is surfaced again when a page shows it).
+#[derive(Default)]
+pub struct SurfacedSet {
+    ids: HashMap<AttachmentId, u64>,
+    order: BTreeMap<u64, AttachmentId>,
+    tick: u64,
+}
+
+impl SurfacedSet {
+    /// Admit `id` (or refresh it), keeping at most `limit`.
+    pub fn surface(&mut self, id: AttachmentId, limit: usize) {
+        self.tick += 1;
+        if let Some(old) = self.ids.insert(id, self.tick) {
+            self.order.remove(&old);
+        }
+        self.order.insert(self.tick, id);
+        while self.ids.len() > limit {
+            let Some((_, oldest)) = self.order.pop_first() else {
+                break;
+            };
+            self.ids.remove(&oldest);
+        }
+    }
+
+    pub fn contains(&self, id: AttachmentId) -> bool {
+        self.ids.contains_key(&id)
+    }
+
+    pub fn len(&self) -> usize {
+        self.ids.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty()
+    }
+}
+
+/// The search reader's interrupt handle, counted: the count lets a test
+/// see that a new search interrupts the old one **before** it waits for
+/// the search reader (§7.1).
+pub struct CountedInterrupt {
+    handle: SearchInterrupt,
+    count: AtomicU64,
+}
+
+impl CountedInterrupt {
+    pub fn new(handle: SearchInterrupt) -> CountedInterrupt {
+        CountedInterrupt {
+            handle,
+            count: AtomicU64::new(0),
+        }
+    }
+
+    pub fn interrupt(&self) {
+        self.count.fetch_add(1, Ordering::SeqCst);
+        self.handle.interrupt();
+    }
+
+    /// Interrupts sent so far.
+    pub fn count(&self) -> u64 {
+        self.count.load(Ordering::SeqCst)
+    }
+}
+
 /// The finished search the session keeps: its request (the query stays
 /// `Redacted`) and its result set (ids only).
 pub struct LiveSearch {
@@ -95,13 +204,13 @@ pub struct ViewerSession {
     pages: Mutex<ArchiveReader>,
     search: Mutex<ArchiveReader>,
     /// Outside the mutex: a cancel must reach a statement that holds it.
-    pub search_interrupt: SearchInterrupt,
+    pub search_interrupt: CountedInterrupt,
     verify: Mutex<ArchiveReader>,
     /// Playback checks running or waiting for `verify`.
     verify_pending: AtomicUsize,
     /// Set when the session closes: stops a running verification.
     pub closing: CancelToken,
-    surfaced: Mutex<HashSet<AttachmentId>>,
+    surfaced: Mutex<SurfacedSet>,
     /// Files whose full hash matched in this session (integrity only).
     verified: Mutex<HashMap<BlobId, BlobIdentity>>,
     /// Verified files whose structural check passed: `stream` is served
@@ -109,6 +218,7 @@ pub struct ViewerSession {
     playable: Mutex<HashSet<BlobId>>,
     media: MediaEngine,
     served_keys: Mutex<SortKeyLru>,
+    reaction_cursors: Mutex<ReactionCursors>,
     searches: Mutex<SearchSlot>,
 }
 
@@ -135,7 +245,7 @@ impl ViewerSession {
         verify: ArchiveReader,
         media: MediaEngine,
     ) -> ViewerSession {
-        let search_interrupt = search.search_interrupt();
+        let search_interrupt = CountedInterrupt::new(search.search_interrupt());
         ViewerSession {
             generation,
             archive,
@@ -145,11 +255,12 @@ impl ViewerSession {
             verify: Mutex::new(verify),
             verify_pending: AtomicUsize::new(0),
             closing: CancelToken::new(),
-            surfaced: Mutex::new(HashSet::new()),
+            surfaced: Mutex::new(SurfacedSet::default()),
             verified: Mutex::new(HashMap::new()),
             playable: Mutex::new(HashSet::new()),
             media,
             served_keys: Mutex::new(SortKeyLru::default()),
+            reaction_cursors: Mutex::new(ReactionCursors::default()),
             searches: Mutex::new(SearchSlot::default()),
         }
     }
@@ -206,16 +317,13 @@ impl ViewerSession {
     pub fn surface(&self, ids: impl IntoIterator<Item = AttachmentId>) -> IpcResult<()> {
         let mut s = self.surfaced.lock().map_err(|_| poisoned())?;
         for id in ids {
-            if s.len() >= SURFACED_LIMIT {
-                break;
-            }
-            s.insert(id);
+            s.surface(id, SURFACED_LIMIT);
         }
         Ok(())
     }
 
     pub fn is_surfaced(&self, id: AttachmentId) -> IpcResult<bool> {
-        Ok(self.surfaced.lock().map_err(|_| poisoned())?.contains(&id))
+        Ok(self.surfaced.lock().map_err(|_| poisoned())?.contains(id))
     }
 
     pub fn verified(&self, blob: BlobId) -> IpcResult<Option<BlobIdentity>> {
@@ -253,6 +361,33 @@ impl ViewerSession {
     pub fn served_keys(&self) -> IpcResult<MutexGuard<'_, SortKeyLru>> {
         self.served_keys.lock().map_err(|_| poisoned())
     }
+
+    /// The reaction-history position served after row `last` of
+    /// `target`'s history, if remembered.
+    pub fn reaction_cursor(
+        &self,
+        target: MessageId,
+        last: MessageId,
+    ) -> IpcResult<Option<ReactionCursor>> {
+        Ok(self
+            .reaction_cursors
+            .lock()
+            .map_err(|_| poisoned())?
+            .get(target, last)
+            .cloned())
+    }
+
+    pub fn remember_reaction_cursor(
+        &self,
+        target: MessageId,
+        cursor: ReactionCursor,
+    ) -> IpcResult<()> {
+        self.reaction_cursors
+            .lock()
+            .map_err(|_| poisoned())?
+            .remember(target, cursor);
+        Ok(())
+    }
 }
 
 /// A held place in the verify queue; released on drop.
@@ -267,6 +402,21 @@ impl Drop for VerifySlot<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_surfaced_set_always_admits_and_forgets_the_least_recent() {
+        let mut s = SurfacedSet::default();
+        for i in 1..=5 {
+            s.surface(AttachmentId::new(i), 3);
+        }
+        assert_eq!(s.len(), 3);
+        assert!(!s.contains(AttachmentId::new(1)) && !s.contains(AttachmentId::new(2)));
+        assert!(s.contains(AttachmentId::new(5)), "the newest is admitted");
+        // Surfacing again refreshes: 3 survives the next admission.
+        s.surface(AttachmentId::new(3), 3);
+        s.surface(AttachmentId::new(6), 3);
+        assert!(s.contains(AttachmentId::new(3)) && !s.contains(AttachmentId::new(4)));
+    }
 
     #[test]
     fn served_keys_are_bounded_and_evicted_oldest_first() {

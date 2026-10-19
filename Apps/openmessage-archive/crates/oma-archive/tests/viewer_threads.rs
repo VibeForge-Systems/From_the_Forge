@@ -40,6 +40,7 @@ use oma_archive::{
     ChipSender, ChipState, ConversationSort, Direction, DirectionCode, EarlierText, FocusReason,
     Formatting, MessageId, MessageLabel, PageRange, PreviewBody, ReactionKind, Recovery, ReplyRef,
     Reveal, SegmentKind, SenderReason, SortKeyHint, TextPiece, ThreadPage, WithheldReason,
+    REPLY_THREAD_LIMIT,
 };
 use serde_json::Value;
 
@@ -199,7 +200,11 @@ fn page_text(p: &ThreadPage) -> String {
             }
         }
         if let EarlierText::Revealed { text, .. } = &m.edit.earlier {
-            out.push_str(&shown(text));
+            for piece in text {
+                if let TextPiece::Text(t) = piece {
+                    out.push_str(&shown(t));
+                }
+            }
         }
         if let Some(
             ReplyRef::Resolved { quote, .. } | ReplyRef::InAnotherConversation { quote, .. },
@@ -297,6 +302,7 @@ fn compare(at: &str, m: &AssembledMessage, w: &Value, n: &Names, seen: &mut Seen
         SenderReason::ColumnAbsent => ("columnAbsent", None),
         SenderReason::Unreadable => ("unreadable", None),
         SenderReason::NotFound => ("notFound", None),
+        SenderReason::DirectionNotRecorded => ("directionNotRecorded", None),
         _ => ("?", None),
     };
     seen.senders.insert(reason.to_owned());
@@ -504,7 +510,11 @@ fn compare(at: &str, m: &AssembledMessage, w: &Value, n: &Names, seen: &mut Seen
         "{at}: unsent"
     );
     if let Some(of) = we.get("unsentOf") {
-        assert_eq!(i64::from(m.edit.part_count), *of, "{at}: unsent of");
+        assert_eq!(
+            m.edit.part_count.map(i64::from),
+            of.as_i64(),
+            "{at}: unsent of"
+        );
         assert_eq!(m.edit.unsent_whole, we["unsentWhole"] == true, "{at}");
     }
     let (state, reason) = match &m.edit.earlier {
@@ -548,6 +558,10 @@ fn compare(at: &str, m: &AssembledMessage, w: &Value, n: &Names, seen: &mut Seen
                     "visible:targetInAnotherChat".to_owned()
                 }
                 AssocVisibility::Folded(_) => panic!("{at}: a folded row on a page"),
+                AssocVisibility::TargetFolds(t) => {
+                    assert_eq!(n.messages[&t.get()], wa["target"], "{at}: target");
+                    "visible:targetFolds".to_owned()
+                }
                 _ => "?".to_owned(),
             };
             assert_eq!(class, wa["timeline"], "{at}: association");
@@ -821,6 +835,9 @@ fn pages_match_the_model_for_every_entry_and_scenario() {
                         panic!("{at}: {name}: revealed on request");
                     };
                     assert_eq!(reason, r2);
+                    let [TextPiece::Text(text)] = text.as_slice() else {
+                        panic!("{at}: {name}: codes revealed, so one text piece");
+                    };
                     assert!(masked.contains(&shown(text)), "{at}: {name}: earlier text");
                 }
                 for code in strings(&w["oneTimeCodes"]) {
@@ -890,11 +907,94 @@ fn pages_match_the_model_for_every_entry_and_scenario() {
         "columnAbsent",
         "unreadable",
         "notFound",
+        "directionNotRecorded",
     ] {
         assert!(seen.senders.contains(s), "no {s} sender");
     }
     assert!(seen.over200 > 0 && seen.unpaired > 0 && seen.inline > 0);
     assert!(seen.recently_deleted > 0 && seen.recorded_by > 0 && seen.folded > 200);
+}
+
+/// A folded row is not a timeline item (§3.5 step 3): a reaction to a
+/// reaction that folds, and a cycle of reactions, stay visible and are
+/// counted, so no recorded row disappears.
+#[test]
+fn a_reaction_to_a_folded_reaction_stays_visible() {
+    let (tmp, lib) = library();
+    let id = lib.create(None).expect("create");
+    {
+        let mut a = lib.open(&id).expect("open");
+        let mut spec = BulkSpec::new(40);
+        spec.chats = 1;
+        spec.reaction_permille = 0;
+        spec.undated_permille = 0;
+        generate(&mut a, &spec);
+    }
+    let rows: Vec<(i64, i64)> = {
+        let c = raw(&db_path(&tmp, &id));
+        let rows: Vec<(i64, i64)> = c
+            .prepare(
+                "SELECT cm.chat_id, cm.message_id FROM chat_message cm \
+                 JOIN message m ON m.id = cm.message_id \
+                 WHERE m.key_kind = 1 AND m.assoc_present = 0 AND cm.sort_key < X'01' \
+                 ORDER BY cm.sort_key, cm.message_id LIMIT 5",
+            )
+            .expect("prepare")
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect("query")
+            .collect::<Result<_, _>>()
+            .expect("rows");
+        assert_eq!(rows.len(), 5);
+        assert!(rows.iter().all(|r| r.0 == rows[0].0), "one chat");
+        let react = |from: i64, to: i64| {
+            c.execute(
+                "UPDATE message SET assoc_present = 1, assoc_kind = 10, assoc_target_shape = 2, \
+                   assoc_target_guid = (SELECT guid FROM message WHERE id = ?2) WHERE id = ?1",
+                [from, to],
+            )
+            .expect("react");
+        };
+        // R1 -> M folds; R2 -> R1 stays visible (R1 is not an item).
+        react(rows[1].1, rows[0].1);
+        react(rows[2].1, rows[1].1);
+        // A cycle: R3 -> R4 -> R3; neither is hidden.
+        react(rows[3].1, rows[4].1);
+        react(rows[4].1, rows[3].1);
+        rows
+    };
+    let chat = ChatId::new(rows[0].0);
+    let r = lib.open_read(&id).expect("reader");
+    let (items, _) = page_all(
+        &r,
+        chat,
+        Anchor::Oldest,
+        Direction::Newer,
+        50,
+        Reveal::default(),
+    );
+    let shown: BTreeSet<i64> = items.iter().map(|m| m.id.get()).collect();
+    assert!(shown.contains(&rows[0].1), "M");
+    assert!(!shown.contains(&rows[1].1), "R1 folds into M");
+    for (k, row) in rows.iter().enumerate().skip(2) {
+        assert!(shown.contains(&row.1), "row {k} stays visible");
+    }
+    let r2 = items.iter().find(|m| m.id.get() == rows[2].1).expect("R2");
+    assert_eq!(
+        r2.association.as_ref().map(|a| a.visibility),
+        Some(AssocVisibility::TargetFolds(MessageId::new(rows[1].1)))
+    );
+    // Every row of the chat but R1 is counted on its day.
+    let c = read_only(&db_path(&tmp, &id));
+    let total: i64 = c
+        .query_row(
+            "SELECT count(*) FROM chat_message WHERE chat_id = ?1 AND sort_key < X'01'",
+            [chat.get()],
+            |row| row.get(0),
+        )
+        .expect("count");
+    let counts = r.day_counts(chat, &[i64::MIN, i64::MAX]).expect("days");
+    assert_eq!(counts.counts, vec![u64::try_from(total - 1).expect("n")]);
+    assert_eq!(items.len(), usize::try_from(total - 1).expect("n"));
 }
 
 // ---------------------------------------------------------------------------
@@ -1046,6 +1146,123 @@ fn anchors_focus_and_the_reply_thread() {
         r.reply_thread(MessageId::new(9_999_999), none),
         Err(ArchiveError::AnchorNotFound)
     ));
+}
+
+/// The reply thread keeps the first replies in timeline order, not in id
+/// (import) order, and `has_newer` is true only of later replies.
+#[test]
+fn the_reply_thread_keeps_the_earliest_replies_by_date() {
+    let (tmp, lib) = library();
+    let id = lib.create(None).expect("create");
+    {
+        let mut a = lib.open(&id).expect("open");
+        let mut spec = BulkSpec::new(560);
+        spec.chats = 1;
+        spec.reaction_permille = 0;
+        spec.reply_permille = 0;
+        spec.undated_permille = 0;
+        generate(&mut a, &spec);
+    }
+    let db = db_path(&tmp, &id);
+    let (originator, want): (i64, Vec<i64>) = {
+        let c = raw(&db);
+        let originator: i64 = c
+            .query_row(
+                "SELECT min(id) FROM message WHERE key_kind = 1 AND assoc_present = 0 \
+                   AND item_kind = 1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("originator");
+        c.execute(
+            "UPDATE message SET thread_originator_guid = \
+               (SELECT guid FROM message WHERE id = ?1), thread_originator_guid_st = NULL \
+             WHERE id <> ?1 AND assoc_present = 0 AND item_kind = 1",
+            [originator],
+        )
+        .expect("replies");
+        let mut replies: Vec<i64> = c
+            .prepare(
+                "SELECT id FROM message WHERE id <> ?1 AND assoc_present = 0 \
+                   AND item_kind = 1 ORDER BY id",
+            )
+            .expect("prepare")
+            .query_map([originator], |r| r.get(0))
+            .expect("query")
+            .collect::<Result<_, _>>()
+            .expect("ids");
+        assert!(replies.len() > REPLY_THREAD_LIMIT + 30, "{}", replies.len());
+        // The 30 newest imports are dated before every other reply.
+        let late: Vec<i64> = replies.split_off(replies.len() - 30);
+        for (k, m) in late.iter().enumerate() {
+            let ns = 1_000 + i64::try_from(k).expect("k");
+            let mut key = vec![0u8];
+            key.extend_from_slice(
+                &(u64::from_be_bytes(ns.to_be_bytes()) ^ (1 << 63)).to_be_bytes(),
+            );
+            c.execute(
+                "UPDATE message SET sort_key = ?2 WHERE id = ?1",
+                rusqlite::params![m, key],
+            )
+            .expect("key");
+        }
+        let mut want = late;
+        want.extend(replies);
+        want.truncate(REPLY_THREAD_LIMIT);
+        (originator, want)
+    };
+    let r = lib.open_read(&id).expect("reader");
+    let t = r
+        .reply_thread(MessageId::new(originator), Reveal::default())
+        .expect("reply thread");
+    assert!(t.has_newer, "more replies, all later than these");
+    let got: Vec<i64> = t.items.iter().skip(1).map(|m| m.id.get()).collect();
+    assert!(!got.is_empty());
+    assert_eq!(got, want[..got.len()].to_vec(), "earliest replies first");
+}
+
+/// A `Scan` that used up the call's deadline (no op budget involved) still
+/// hands its items to an `Assembly` phase that has time of its own (§3.2),
+/// for a page and for the reply thread.
+#[test]
+fn a_scan_that_used_up_the_deadline_still_assembles_its_items() {
+    let (i, n) = main_entry();
+    let r = i.lib.open_read(&i.id).expect("reader");
+    let chat = ChatId::new(*n.chats.keys().next().expect("a chat"));
+    let normal = r
+        .thread_page(
+            chat,
+            Anchor::Newest,
+            Direction::Older,
+            5,
+            None,
+            Reveal::default(),
+        )
+        .expect("page");
+    let _f = install(Faults {
+        page_window_ms: Some(50),
+        pause_after_scan_ms: Some(120),
+        ..Faults::default()
+    });
+    let late = r
+        .thread_page(
+            chat,
+            Anchor::Newest,
+            Direction::Older,
+            5,
+            None,
+            Reveal::default(),
+        )
+        .expect("assembled after a late scan");
+    assert_eq!(
+        late.items.iter().map(|m| m.id).collect::<Vec<_>>(),
+        normal.items.iter().map(|m| m.id).collect::<Vec<_>>()
+    );
+    let first = normal.items[0].id;
+    let t = r
+        .reply_thread(first, Reveal::default())
+        .expect("reply thread after a late scan");
+    assert_eq!(t.items[0].id, first);
 }
 
 #[test]

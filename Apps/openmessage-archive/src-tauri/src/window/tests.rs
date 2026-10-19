@@ -159,8 +159,25 @@ fn the_media_base_matches_this_platforms_csp() {
     );
 }
 
+/// The host's target triple, from `rustc -vV`.
+fn host_triple() -> String {
+    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_owned());
+    let out = std::process::Command::new(rustc)
+        .arg("-vV")
+        .output()
+        .expect("rustc -vV");
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find_map(|l| l.strip_prefix("host: "))
+        .expect("a host line")
+        .trim()
+        .to_owned()
+}
+
 /// §13.7: `tauri` is built without `protocol-asset` (the asset protocol
-/// would let the webview name files by path; I4).
+/// would let the webview name files by path; I4). The resolve is filtered
+/// to the host, so the check needs only the crates a build of this host
+/// downloaded (offline, other platforms' crates may be missing).
 #[test]
 fn tauri_is_built_without_the_asset_protocol() {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
@@ -171,8 +188,10 @@ fn tauri_is_built_without_the_asset_protocol() {
             "--format-version",
             "1",
             "--offline",
-            "--manifest-path",
+            "--filter-platform",
         ])
+        .arg(host_triple())
+        .arg("--manifest-path")
         .arg(&manifest)
         .output()
         .expect("cargo metadata");

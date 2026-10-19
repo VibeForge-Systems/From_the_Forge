@@ -48,9 +48,10 @@ pub use conversations::{
 pub use detail::{
     AttachmentFacts, BlobFacts, BodyVersion, CardState, ChatFlags, ChunkText, DetailTimes,
     EditEntryText, EditEntryView, EditTextsOutcome, EditTime, HistoryColumn, HistoryValue,
-    IdentifierProbe, MessageDetail, Observation, OlderBackup, RawNumber, RawValue, ReactionHistory,
-    ReactionRecord, TextChunk, VerifyFacts, VersionText, DETAIL_CHATS, DETAIL_EDIT_ENTRIES,
-    DETAIL_VERSIONS, REACTION_HISTORY_LIMIT, REACTION_HISTORY_PAGE, TEXT_CHUNK_UTF16,
+    IdentifierProbe, MessageDetail, Observation, OlderBackup, RawNumber, RawValue, ReactionCursor,
+    ReactionHistory, ReactionRecord, TextChunk, VerifyFacts, VersionText, DETAIL_CHATS,
+    DETAIL_EDIT_ENTRIES, DETAIL_VERSIONS, REACTION_HISTORY_LIMIT, REACTION_HISTORY_PAGE,
+    TEXT_CHUNK_UTF16,
 };
 pub use text::{
     ContentText, MaskKind, OptContent, TextPiece, UrlRun, BODY_PAGE_UTF16, IDENTIFIER_UTF16,
@@ -203,9 +204,40 @@ const SQL_IN_CHAT: &str = "SELECT 1 FROM chat_message WHERE chat_id = ?1 AND mes
 /// The target of message `id` when it folds into chat `chat`'s timeline
 /// (§3.5 step 3): a reaction (`assoc_present = 1`, kind 10–17 or 20–27)
 /// whose target GUID resolves through `message_guid` (`key_kind = 1`) to a
-/// message that is a timeline item of the same chat. `None` when the row
+/// message that is a timeline item of the same chat. A folded row is not a
+/// timeline item, so a reaction whose target would itself fold stays
+/// visible (the target's own association is resolved once, at depth one:
+/// a chain or a cycle of reactions never hides a row). `None` when the row
 /// stays visible.
 pub(crate) fn folds_into(c: &Connection, chat: i64, id: i64) -> rusqlite::Result<Option<i64>> {
+    let Some(target) = fold_target(c, chat, id)? else {
+        return Ok(None);
+    };
+    if fold_target(c, chat, target)?.is_some() {
+        return Ok(None);
+    }
+    Ok(Some(target))
+}
+
+/// The target `id` would fold into in chat `chat` if its target were a
+/// timeline item: a reaction whose target resolves to a keyed message of
+/// the same chat, whether or not that message folds itself.
+pub(crate) fn fold_target(c: &Connection, chat: i64, id: i64) -> rusqlite::Result<Option<i64>> {
+    let Some(target) = reaction_target(c, id)? else {
+        return Ok(None);
+    };
+    let in_chat = c
+        .prepare(SQL_IN_CHAT)?
+        .query_row([chat, target], |_| Ok(()))
+        .optional()?
+        .is_some();
+    Ok(in_chat.then_some(target))
+}
+
+/// The keyed message reaction `id` targets: `None` when `id` is not a
+/// reaction (`assoc_present = 1`, kind 10–17 or 20–27) or its target GUID
+/// resolves to no keyed message.
+pub(crate) fn reaction_target(c: &Connection, id: i64) -> rusqlite::Result<Option<i64>> {
     let row: Option<(i64, Option<i64>, Option<Vec<u8>>)> = c
         .prepare(SQL_FOLD_ROW)?
         .query_row([id], |r| {
@@ -222,19 +254,9 @@ pub(crate) fn folds_into(c: &Connection, chat: i64, id: i64) -> rusqlite::Result
     if present != 1 || !is_reaction(kind) {
         return Ok(None);
     }
-    let target: Option<i64> = c
-        .prepare(SQL_KEYED_BY_GUID)?
+    c.prepare(SQL_KEYED_BY_GUID)?
         .query_row([guid], |r| r.get(0))
-        .optional()?;
-    let Some(target) = target else {
-        return Ok(None);
-    };
-    let in_chat = c
-        .prepare(SQL_IN_CHAT)?
-        .query_row([chat, target], |_| Ok(()))
-        .optional()?
-        .is_some();
-    Ok(in_chat.then_some(target))
+        .optional()
 }
 
 /// Every viewer statement whose plan depends on an index, by name, exactly

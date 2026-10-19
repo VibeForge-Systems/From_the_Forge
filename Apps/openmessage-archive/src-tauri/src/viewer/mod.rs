@@ -416,6 +416,27 @@ pub fn fit_page(p: &mut ThreadPageDto, newest_side: bool) -> IpcResult<()> {
     Ok(())
 }
 
+/// After [`fit_page`] moved an anchor onto an item, remember that item's
+/// key, so the next page from it is still checked for a moved anchor.
+fn remember_moved_anchors(
+    s: &ViewerSession,
+    chat: ChatId,
+    page: &oa::ThreadPage,
+    dto: &ThreadPageDto,
+) -> IpcResult<()> {
+    if !dto.cut_for_size {
+        return Ok(());
+    }
+    let mut keys = s.served_keys()?;
+    for anchor in [dto.older_anchor, dto.newer_anchor].into_iter().flatten() {
+        let id = MessageId::new(anchor.get());
+        if let Some(k) = page.key_of(id) {
+            keys.remember(chat, id, k.clone());
+        }
+    }
+    Ok(())
+}
+
 /// `get_thread_page`.
 pub fn thread_page(s: &ViewerSession, req: &GetThreadPageRequest) -> IpcResult<ThreadPageDto> {
     if !(1..=oa::PAGE_ITEMS).contains(&req.limit) {
@@ -474,6 +495,7 @@ pub fn thread_page(s: &ViewerSession, req: &GetThreadPageRequest) -> IpcResult<T
     };
     mint_tokens(s, &page.items, &mut dto.items);
     fit_page(&mut dto, newest_side)?;
+    remember_moved_anchors(s, chat, &page, &dto)?;
     tracing::debug!(
         items = bucket(dto.items.len()),
         partial = dto.partial,
@@ -516,10 +538,25 @@ pub fn message_detail(
             .map_err(|e| err(&e, NotFound::Message))?;
         let history = match req.reaction_page {
             None => None,
-            Some(page) => Some(
-                r.reaction_history(id, page)
-                    .map_err(|e| err(&e, NotFound::Message))?,
-            ),
+            Some(page) => {
+                // The keyset position of the previous page's last row,
+                // remembered when it was served; an unknown one (never
+                // served, or evicted) is refused rather than restarted.
+                let after = match page.after {
+                    None => None,
+                    Some(last) => Some(
+                        s.reaction_cursor(id, MessageId::new(last.get()?))?
+                            .ok_or_else(messages::invalid_input)?,
+                    ),
+                };
+                let h = r
+                    .reaction_history(id, after.as_ref())
+                    .map_err(|e| err(&e, NotFound::Message))?;
+                if let Some(next) = &h.next {
+                    s.remember_reaction_cursor(id, next.clone())?;
+                }
+                Some(h)
+            }
         };
         (detail, history)
     };
@@ -656,9 +693,12 @@ pub fn search(
         slot.next_id = slot.next_id.wrapping_add(1).max(1);
         let id = slot.next_id;
         slot.running = Some((id, token.clone()));
+        // Interrupt while the slot is held: a newer search can start a
+        // statement only after it takes this lock, so this interrupt can
+        // never land on it (with no statement running, it is a no-op).
+        s.search_interrupt.interrupt();
         id
     };
-    s.search_interrupt.interrupt();
     let started = Instant::now();
     let result = {
         let r = s.search_reader()?;
@@ -736,24 +776,18 @@ pub fn search_results(
 /// `cancel_search`: stop the running search with that id (its token, then
 /// its statement) and forget its set.
 pub fn cancel_search(s: &ViewerSession, search_id: u32) -> IpcResult<()> {
-    let interrupt = {
-        let mut slot = s.searches()?;
-        if slot.current.as_ref().is_some_and(|l| l.id == search_id) {
-            slot.current = None;
+    let mut slot = s.searches()?;
+    if slot.current.as_ref().is_some_and(|l| l.id == search_id) {
+        slot.current = None;
+    }
+    match slot.running.take() {
+        Some((id, token)) if id == search_id => {
+            token.cancel();
+            // Under the slot's lock, as in `search`: a later search's
+            // statement cannot have started yet.
+            s.search_interrupt.interrupt();
         }
-        match slot.running.take() {
-            Some((id, token)) if id == search_id => {
-                token.cancel();
-                true
-            }
-            other => {
-                slot.running = other;
-                false
-            }
-        }
-    };
-    if interrupt {
-        s.search_interrupt.interrupt();
+        other => slot.running = other,
     }
     Ok(())
 }

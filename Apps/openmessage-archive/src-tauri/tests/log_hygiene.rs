@@ -448,7 +448,12 @@ fn req<T: serde::de::DeserializeOwned>(v: serde_json::Value) -> T {
 /// Run every viewer operation on one archive, refusals included. Returns
 /// the DTOs as JSON (they carry content, so they are never added to the
 /// content-free texts).
-fn exercise_viewer(library: &Path, id: &str, tokens: &mut Vec<String>) -> Vec<String> {
+fn exercise_viewer(
+    library: &Path,
+    id: &str,
+    tokens: &mut Vec<String>,
+    sizes: &mut std::collections::BTreeSet<u64>,
+) -> Vec<String> {
     use openmessage_archive_lib::settings::MediaPlayback;
     use openmessage_archive_lib::viewer::media::engine::MediaConfig;
     use openmessage_archive_lib::viewer::media::helper::{
@@ -470,9 +475,27 @@ fn exercise_viewer(library: &Path, id: &str, tokens: &mut Vec<String>) -> Vec<St
         }),
         crash_cap: 5,
     });
-    let ask = |host: &ViewerHost, target: &str, ranges: &[&str]| -> u16 {
+    // Every exact size the protocol served: bodies, Content-Length and
+    // the totals of Content-Range.
+    let served_sizes = std::sync::Arc::new(Mutex::new(Vec::<u64>::new()));
+    let sink = std::sync::Arc::clone(&served_sizes);
+    let ask = move |host: &ViewerHost, target: &str, ranges: &[&str]| -> u16 {
         let (tx, rx) = std::sync::mpsc::channel();
+        let sink = std::sync::Arc::clone(&sink);
         let reply = Reply::new(Box::new(move |r: media::MediaResponse| {
+            if let Ok(mut v) = sink.lock() {
+                v.push(r.body.len() as u64);
+                if let Some(n) = r.header("Content-Length").and_then(|l| l.parse().ok()) {
+                    v.push(n);
+                }
+                if let Some(n) = r
+                    .header("Content-Range")
+                    .and_then(|c| c.rsplit('/').next())
+                    .and_then(|t| t.parse().ok())
+                {
+                    v.push(n);
+                }
+            }
             let _ = tx.send(r.status);
         }));
         media::dispatch(
@@ -528,7 +551,7 @@ fn exercise_viewer(library: &Path, id: &str, tokens: &mut Vec<String>) -> Vec<St
                 for m in page.items.iter().take(5) {
                     let d = viewer::message_detail(
                         s,
-                        &req(json!({ "viewer": v, "messageId": m.id.get(), "reveal": all, "reactionPage": 0 })),
+                        &req(json!({ "viewer": v, "messageId": m.id.get(), "reveal": all, "reactionPage": {} })),
                     )?;
                     for b in &d.versions {
                         push(
@@ -631,7 +654,13 @@ fn exercise_viewer(library: &Path, id: &str, tokens: &mut Vec<String>) -> Vec<St
     })
     .expect("viewer operations");
     host.close(v).expect("close");
+    sizes.extend(served_sizes.lock().expect("sizes").iter().copied());
     out
+}
+
+/// The `name=value` fields of a captured event line.
+fn fields_of(e: &str) -> Vec<(&str, &str)> {
+    e.split(' ').filter_map(|t| t.split_once('=')).collect()
 }
 
 #[test]
@@ -713,6 +742,11 @@ fn nothing_identifying_is_logged() {
     // M5: every viewer operation over the viewer catalogue.
     let mut viewer_outputs = Vec::new();
     let mut media_tokens = Vec::new();
+    let mut media_sizes = std::collections::BTreeSet::new();
+    for f in std::fs::read_dir(viewer_fixtures().join("media")).expect("media") {
+        media_sizes.insert(f.expect("entry").metadata().expect("meta").len());
+    }
+    let mut viewer_events = Vec::new();
     for name in [
         "view-main-plain",
         "view-hostile-text-plain",
@@ -721,7 +755,15 @@ fn nothing_identifying_is_logged() {
         let mut viewer_texts = Vec::new();
         let id = import_and_verify_from(&viewer_fixtures(), name, tmp.path(), &mut viewer_texts);
         let library = tmp.path().join(format!("implib-{name}"));
-        viewer_outputs.extend(exercise_viewer(&library, &id, &mut media_tokens));
+        let from = capture.0.lock().expect("lock").len();
+        viewer_outputs.extend(exercise_viewer(
+            &library,
+            &id,
+            &mut media_tokens,
+            &mut media_sizes,
+        ));
+        let to = capture.0.lock().expect("lock").len();
+        viewer_events.push(from..to);
         archive_ids.push(id);
         texts.extend(viewer_texts);
     }
@@ -805,6 +847,41 @@ fn nothing_identifying_is_logged() {
         assert!(!e.contains("bytes="), "a range was logged: {e}");
     }
     assert!(media_tokens.len() > 10, "the protocol was exercised");
+    // No exact size (§6.4 rule 5, §13.6): every `media` event carries the
+    // outcome, the status, a size bucket and the elapsed time only, and no
+    // viewer-time event carries a size the protocol served or a media
+    // fixture's size as a field value (statuses and elapsed times aside;
+    // values under 64 could be anything).
+    let buckets = ["<64KiB", "<1MiB", "<16MiB", ">=16MiB"];
+    let exact: Vec<u64> = media_sizes.iter().copied().filter(|n| *n >= 64).collect();
+    assert!(!exact.is_empty(), "sizes were served");
+    let mut media_events = 0;
+    for range in &viewer_events {
+        for e in &events[range.clone()] {
+            let fields = fields_of(e);
+            if fields.contains(&("message", "media")) {
+                media_events += 1;
+                for (k, v) in &fields {
+                    assert!(
+                        ["message", "outcome", "status", "size", "elapsed_ms"].contains(k),
+                        "a media event logged {k}: {e}"
+                    );
+                    if *k == "size" {
+                        assert!(buckets.contains(v), "an exact size was logged: {e}");
+                    }
+                }
+            }
+            for (k, v) in &fields {
+                if ["status", "elapsed_ms"].contains(k) {
+                    continue;
+                }
+                if let Ok(n) = v.parse::<u64>() {
+                    assert!(!exact.contains(&n), "an exact size was logged ({k}): {e}");
+                }
+            }
+        }
+    }
+    assert!(media_events > 10, "media events were checked");
     assert!(
         events
             .iter()

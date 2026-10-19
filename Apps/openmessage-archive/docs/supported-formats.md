@@ -739,9 +739,9 @@ version.
 | ChatExportKnowledge (S8) | CC BY 4.0 | Facts, restated in our own words, with attribution; no text copied |
 | iLEAPP (S10) | MIT | Facts; could be ported with attribution, but nothing was |
 | plaso `imessage_chat.db` (S12) | Repository Apache-2.0; file terms UNVERIFIED | Observed in scratch and used as an oracle sample; never committed |
-| libheif / libde265 | LGPL-3.0 | Avoid static linking |
+| libheif / libde265 | LGPL-3.0 | Not allowed (owner decision Q2, M5), in any form of linking, including through the MIT `libheif-rs`/`libheif-sys` wrappers (which link the system LGPL libheif; `cargo deny` cannot see that) |
 | `heic` (imazen) | AGPL-3.0 | Not allowed |
-| `heic-rs` | MIT OR Apache-2.0 | Candidate for HEIC thumbnails (M5), behind a feature flag. It is very new and grants no HEVC patent rights. |
+| `heic-rs` | MIT OR Apache-2.0 | Used behind `oma-archive`'s non-default `heic` feature (`=0.1.4`); never in official or CI release builds (owner decision Q2). It is very new and grants no HEVC patent rights. |
 
 ## Questions that require real hardware
 

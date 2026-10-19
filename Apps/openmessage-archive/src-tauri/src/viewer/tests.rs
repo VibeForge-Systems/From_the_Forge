@@ -272,7 +272,7 @@ fn every_output(s: &ViewerSession, viewer: u32, reveal: bool) -> Vec<String> {
                 s,
                 &id_of(json!({
                     "viewer": viewer, "messageId": m.id.get(), "reveal": rv,
-                    "reactionPage": if i == 0 { json!(0) } else { Value::Null },
+                    "reactionPage": if i == 0 { json!({}) } else { Value::Null },
                 })),
             )
             .expect("detail");
@@ -645,6 +645,68 @@ fn searches_supersede_and_cancel() {
     }
 }
 
+/// A new search interrupts the running one **before** it waits for the
+/// search reader (§7.1): while search A holds the reader (here, inside
+/// its progress callback), search B's interrupt must already have been
+/// sent. If B waited for the reader first, the interrupt would come only
+/// after A let go, and this test would see none.
+#[test]
+fn a_new_search_interrupts_the_old_one_before_waiting_for_the_reader() {
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+    let f = fx("view-main-plain");
+    let host = ViewerHost::default();
+    let v = open_fx(&f, &host).viewer;
+    let s = host.get(v).expect("session");
+    let s = &*s;
+    let (holding_tx, holding_rx) = mpsc::channel::<()>();
+    std::thread::scope(|scope| {
+        let a = scope.spawn(move || {
+            let mut seen = None;
+            let mut first = true;
+            let r = search(
+                s,
+                &id_of(json!({ "viewer": v, "query": "SYNTH", "mode": "exact" })),
+                &mut |_| {
+                    if !first {
+                        return;
+                    }
+                    first = false;
+                    // A holds the search reader here (its own interrupt
+                    // was sent before).
+                    let before = s.search_interrupt.count();
+                    let _ = holding_tx.send(());
+                    let until = Instant::now() + Duration::from_secs(60);
+                    while Instant::now() < until {
+                        if s.search_interrupt.count() > before {
+                            seen = Some(true);
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    seen = Some(false);
+                },
+            );
+            (r, seen)
+        });
+        holding_rx
+            .recv_timeout(Duration::from_secs(60))
+            .expect("A holds the reader");
+        let b = search(
+            s,
+            &id_of(json!({ "viewer": v, "query": "SYNTH", "mode": "auto" })),
+            &mut |_| {},
+        );
+        let (a, seen) = a.join().expect("join");
+        assert_eq!(seen, Some(true), "B interrupted A before waiting");
+        assert_eq!(
+            a.expect_err("A superseded").code,
+            ErrorCode::SearchSuperseded
+        );
+        assert!(b.expect("B completes").total > 0);
+    });
+}
+
 #[test]
 fn playback_is_checked_in_rust_and_can_be_off() {
     let f = fx("view-media-plain");
@@ -746,6 +808,54 @@ fn served_keys_are_remembered_and_bounded() {
         .is_some());
 }
 
+/// The reaction history pages by a keyset Rust remembers: each next page
+/// is asked for by the last row's id, every row comes once, and an id
+/// that was never a served page end is refused.
+#[test]
+fn reaction_history_pages_by_remembered_positions() {
+    let f = fx("view-main-plain");
+    let host = ViewerHost::default();
+    let v = open_fx(&f, &host).viewer;
+    let s = host.get(v).expect("session");
+    let detail = |m: i64, page: Value| {
+        message_detail(
+            &s,
+            &id_of(json!({ "viewer": v, "messageId": m, "reactionPage": page })),
+        )
+    };
+    let mut paged = 0;
+    for page in walk_threads(&s, v, false) {
+        for m in &page.items {
+            let first = detail(m.id.get(), json!({})).expect("detail");
+            let h = first.reactions.expect("history");
+            if !h.has_more {
+                continue;
+            }
+            let mut seen: BTreeSet<i64> = h.rows.iter().map(|r| r.id.get()).collect();
+            let mut last = h.rows.last().expect("rows").id.get();
+            loop {
+                let next = detail(m.id.get(), json!({ "after": last }))
+                    .expect("next page")
+                    .reactions
+                    .expect("history");
+                for r in &next.rows {
+                    assert!(seen.insert(r.id.get()), "a row served twice");
+                }
+                if !next.has_more {
+                    break;
+                }
+                last = next.rows.last().expect("rows").id.get();
+            }
+            assert_eq!(u64::try_from(seen.len()).expect("n"), h.total.n);
+            // A row that ended no served page is refused.
+            let e = detail(m.id.get(), json!({ "after": m.id.get() })).expect_err("unknown");
+            assert_eq!(e.code, ErrorCode::InvalidInput);
+            paged += 1;
+        }
+    }
+    assert!(paged > 0, "a target with more than one page");
+}
+
 #[test]
 fn oversized_pages_are_cut_to_the_bound() {
     let f = fx("view-hostile-text-plain");
@@ -771,6 +881,46 @@ fn oversized_pages_are_cut_to_the_bound() {
         break;
     }
     assert!(biggest > 0 && biggest <= PAGE_JSON_MAX);
+    // An anchor the cut moved onto an item gets that item's key
+    // remembered, so the next page from it can still tell it moved.
+    let index =
+        list_conversations(&s, &id_of(json!({ "viewer": v, "sort": "recent" }))).expect("index");
+    let chat = ChatId::new(index.ids[0].get());
+    let page = s
+        .pages()
+        .expect("pages")
+        .thread_page(
+            chat,
+            oa::Anchor::Newest,
+            oa::Direction::Older,
+            10,
+            None,
+            oa::Reveal::default(),
+        )
+        .expect("page");
+    let mut dto = ThreadPageDto::build(&page);
+    assert!(dto.items.len() >= 2, "a page to cut");
+    // Grow it just past the bound (each added item's size is known), so
+    // the cut removes a few items only.
+    let base = dto.items.clone();
+    let sizes: Vec<usize> = base.iter().map(|m| to_json(m).len() + 1).collect();
+    let mut total = to_json(&dto).len();
+    let mut i = 0;
+    while total <= PAGE_JSON_MAX {
+        dto.items.push(base[i % base.len()].clone());
+        total += sizes[i % base.len()];
+        i += 1;
+    }
+    fit_page(&mut dto, false).expect("fits");
+    let moved = MessageId::new(dto.older_anchor.expect("moved").get());
+    let before = s.served_keys().expect("keys").get(chat, moved).is_some();
+    remember_moved_anchors(&s, chat, &page, &dto).expect("remember");
+    let keys = s.served_keys().expect("keys");
+    assert!(
+        before || keys.get(chat, moved).is_some(),
+        "the moved anchor's key is remembered"
+    );
+    assert_eq!(keys.get(chat, moved), page.key_of(moved));
 }
 
 // ------------------------------------------------------------- the guards

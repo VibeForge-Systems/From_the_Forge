@@ -251,7 +251,21 @@ pub struct GetReplyThreadRequest {
     pub reveal: Option<RevealInput>,
 }
 
-/// `get_message_detail`: `reactionPage` adds that page of the reaction
+/// Which page of the reaction history `get_message_detail` adds: the
+/// first (`{}`), or the one after the last row of the previous page
+/// (`after`: that row's id). The rows are paged by a keyset whose position
+/// Rust remembered when it served that row, so an import between two
+/// calls neither repeats nor skips a row.
+#[derive(Debug, Clone, Copy, Default, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(export)]
+pub struct ReactionPageInput {
+    #[serde(default)]
+    #[ts(as = "Option<SafeId>", optional)]
+    pub after: Option<InId>,
+}
+
+/// `get_message_detail`: `reactionPage` adds a page of the reaction
 /// history.
 #[derive(Debug, Clone, Copy, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -265,7 +279,7 @@ pub struct GetMessageDetailRequest {
     pub reveal: Option<RevealInput>,
     #[serde(default)]
     #[ts(optional)]
-    pub reaction_page: Option<u32>,
+    pub reaction_page: Option<ReactionPageInput>,
 }
 
 /// `get_message_text`: `fromUtf16` is clamped to the body in Rust.
@@ -430,6 +444,7 @@ pub const M5_VIEWER_INPUTS: &[&str] = &[
     "InspectAttachmentRequest",
     "ListConversationsRequest",
     "OpenViewerRequest",
+    "ReactionPageInput",
     "RevealInput",
     "SearchFiltersInput",
     "SearchMessagesRequest",

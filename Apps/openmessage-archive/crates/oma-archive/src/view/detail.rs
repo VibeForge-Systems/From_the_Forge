@@ -442,7 +442,30 @@ pub struct ReactionRecord {
     pub target_part: Option<i64>,
 }
 
-/// The reaction rows recorded on one target, paged.
+/// Where the next page of a reaction history starts: the date key and id
+/// of the last row served. Opaque; `Debug` prints nothing.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct ReactionCursor {
+    key: Vec<u8>,
+    id: i64,
+}
+
+impl std::fmt::Debug for ReactionCursor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ReactionCursor(..)")
+    }
+}
+
+impl ReactionCursor {
+    /// The last row the cursor follows.
+    pub fn after(&self) -> MessageId {
+        MessageId::new(self.id)
+    }
+}
+
+/// The reaction rows recorded on one target, paged by a keyset over
+/// (date key, id): a row an import adds between two calls is never served
+/// twice, and no row is skipped because another was added before it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ReactionHistory {
@@ -453,8 +476,9 @@ pub struct ReactionHistory {
     pub rows: Vec<ReactionRecord>,
     /// Every row read, capped at [`REACTION_HISTORY_LIMIT`].
     pub total: CappedCount,
-    pub page: u32,
     pub has_more: bool,
+    /// The cursor of the next page, when there is one.
+    pub next: Option<ReactionCursor>,
 }
 
 /// What one chunk of a body holds.
@@ -617,6 +641,22 @@ fn masked(
         return vec![TextPiece::Masked(MaskKind::OneTimeCode)];
     }
     mask_utf16(text, codes, MaskKind::OneTimeCode, cap)
+}
+
+/// An earlier edit text, codes masked unless `reveal_code`. When the runs
+/// were cut short (`runs_complete` false), the flags of the rest are
+/// unknown and a code could be missing from `codes`, so the whole text is
+/// withheld whether or not a code was seen (`EditBody::Text`'s contract).
+fn edit_text_pieces(
+    codes: &[(u32, u32)],
+    runs_complete: bool,
+    text: &str,
+    reveal_code: bool,
+) -> Vec<TextPiece> {
+    if !runs_complete && !reveal_code {
+        return vec![TextPiece::Masked(MaskKind::OneTimeCode)];
+    }
+    masked(codes, runs_complete, text, BODY_PAGE_UTF16, reveal_code)
 }
 
 fn history(c: &Connection, entity: Entity, id: i64) -> rusqlite::Result<Vec<HistoryValue>> {
@@ -977,11 +1017,10 @@ fn edit_entries(
                         runs_complete,
                     }) => match withhold {
                         Some(reason) if !reveal.earlier_text => EditEntryText::Withheld(reason),
-                        _ => EditEntryText::Text(masked(
+                        _ => EditEntryText::Text(edit_text_pieces(
                             one_time_codes,
                             *runs_complete,
                             text.expose(),
-                            BODY_PAGE_UTF16,
                             reveal.one_time_code,
                         )),
                     },
@@ -1284,16 +1323,18 @@ impl ArchiveReader {
         })
     }
 
-    /// Page `page` (from 0) of the reaction rows recorded on `target`
-    /// (§3.6): every add and remove row (`assoc_kind` 10–17, 20–27,
-    /// `assoc_present = 1`) whose target GUID is the keyed target's,
-    /// ordered by date (undated last), then id, [`REACTION_HISTORY_PAGE`]
-    /// per page. At most [`REACTION_HISTORY_LIMIT`] rows are read; `total`
-    /// says when there were more. An unkeyed target has none.
+    /// A page of the reaction rows recorded on `target` (§3.6): every add
+    /// and remove row (`assoc_kind` 10–17, 20–27, `assoc_present = 1`)
+    /// whose target GUID is the keyed target's, ordered by date (undated
+    /// last), then id, [`REACTION_HISTORY_PAGE`] per page: the first page
+    /// without `after`, else the rows strictly after the cursor the
+    /// previous page returned in `next`. At most [`REACTION_HISTORY_LIMIT`]
+    /// rows are read; `total` says when there were more. An unkeyed target
+    /// has none.
     pub fn reaction_history(
         &self,
         target: MessageId,
-        page: u32,
+        after: Option<&ReactionCursor>,
     ) -> Result<ReactionHistory, ArchiveError> {
         self.require_current()?;
         let conn = self.conn();
@@ -1314,8 +1355,8 @@ impl ArchiveReader {
                         n: 0,
                         capped: false,
                     },
-                    page,
                     has_more: false,
+                    next: None,
                 };
                 let Some(guid) = guid.filter(|g| key_kind == 1 && !g.is_empty()) else {
                     return Ok(empty(false));
@@ -1349,24 +1390,29 @@ impl ArchiveReader {
                 );
                 all.truncate(REACTION_HISTORY_LIMIT);
                 all.sort_by(|a, b| (&a.0, a.1.id).cmp(&(&b.0, b.1.id)));
-                let start = usize::try_from(page)
-                    .unwrap_or(usize::MAX)
-                    .saturating_mul(REACTION_HISTORY_PAGE);
-                let end = start.saturating_add(REACTION_HISTORY_PAGE);
-                let has_more = all.len() > end;
-                let rows: Vec<ReactionRecord> = all
-                    .into_iter()
-                    .skip(start)
-                    .take(REACTION_HISTORY_PAGE)
-                    .map(|(_, r)| r)
-                    .collect();
+                let mut rest: Vec<(Vec<u8>, ReactionRecord)> = match after {
+                    None => all,
+                    Some(cur) => all
+                        .into_iter()
+                        .filter(|(k, r)| (k, r.id.get()) > (&cur.key, cur.id))
+                        .collect(),
+                };
+                let has_more = rest.len() > REACTION_HISTORY_PAGE;
+                rest.truncate(REACTION_HISTORY_PAGE);
+                let next = rest
+                    .last()
+                    .filter(|_| has_more)
+                    .map(|(k, r)| ReactionCursor {
+                        key: k.clone(),
+                        id: r.id.get(),
+                    });
                 Ok(ReactionHistory {
                     target,
                     keyed: true,
-                    rows,
+                    rows: rest.into_iter().map(|(_, r)| r).collect(),
                     total,
-                    page,
                     has_more,
+                    next,
                 })
             })
         })
@@ -1499,28 +1545,34 @@ fn text_chunk(
         }
     }
     let piece = text.get(a..b).unwrap_or("");
-    let ranges: Vec<(u32, u32)> = {
+    // Every code range of the body, before any is dropped for lying
+    // outside this chunk: whether the body has a code at all, and whether
+    // its ranges can be trusted, is decided on the whole body, never on
+    // the chunk (an untrusted range says nothing about where the code is).
+    let all: Vec<(u32, u32)> = {
         let mut st = c.prepare(SQL_FLAGGED_PARTS)?;
         let rows = st.query_map(rusqlite::params![body, 1i64 << ONE_TIME_CODE_BIT], |r| {
             Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
         })?;
         let clamp = |v: i64| u32::try_from(v.max(0)).unwrap_or(u32::MAX);
-        rows.map(|r| {
-            r.map(|(s, e)| {
-                (
-                    clamp(s).saturating_sub(start),
-                    clamp(e).saturating_sub(start),
-                )
-            })
-        })
-        .collect::<rusqlite::Result<Vec<_>>>()?
-        .into_iter()
-        .filter(|(_, e)| *e > 0)
-        .collect()
+        rows.map(|r| r.map(|(s, e)| (clamp(s), clamp(e))))
+            .collect::<rusqlite::Result<Vec<_>>>()?
     };
     let trusted = source == Some(DisplaySource::AttributedBody.code()) && run_issue.is_none();
     let lossy = source == Some(DisplaySource::TextLossy.code());
-    let pieces = masked(&ranges, trusted, piece, u32::MAX, reveal.one_time_code)
+    if !all.is_empty() && !trusted && !reveal.one_time_code {
+        return Ok(Some(chunk(ChunkText::Text(vec![TextPiece::Masked(
+            MaskKind::OneTimeCode,
+        )]))));
+    }
+    // Trusted (or revealed): the ranges, moved to the chunk's start; a
+    // range that ends before the chunk does not touch it.
+    let ranges: Vec<(u32, u32)> = all
+        .into_iter()
+        .map(|(s, e)| (s.saturating_sub(start), e.saturating_sub(start)))
+        .filter(|(_, e)| *e > 0)
+        .collect();
+    let pieces = masked(&ranges, true, piece, u32::MAX, reveal.one_time_code)
         .into_iter()
         .map(|p| match p {
             TextPiece::Text(t) => TextPiece::Text(t.lossy(lossy)),
@@ -1534,6 +1586,36 @@ fn text_chunk(
 mod tests {
     use super::*;
     use crate::schema::codes::ArchiveColumn;
+
+    #[test]
+    fn an_edit_text_with_incomplete_runs_is_withheld_whole() {
+        let whole = vec![TextPiece::Masked(MaskKind::OneTimeCode)];
+        // No code decoded, but the runs stopped early: a code could be
+        // missing, so nothing is shown unless codes are revealed.
+        assert_eq!(edit_text_pieces(&[], false, "code 123456", false), whole);
+        assert_eq!(
+            edit_text_pieces(&[(5, 11)], false, "code 123456", false),
+            whole
+        );
+        assert_eq!(
+            edit_text_pieces(&[], false, "code 123456", true),
+            vec![TextPiece::Text(ContentText::from_str(
+                "code 123456",
+                BODY_PAGE_UTF16
+            ))]
+        );
+        // Complete runs: only the code is masked; no code, no mask.
+        let p = edit_text_pieces(&[(5, 11)], true, "code 123456", false);
+        assert_eq!(p.last(), Some(&TextPiece::Masked(MaskKind::OneTimeCode)));
+        assert_eq!(p.len(), 2);
+        assert_eq!(
+            edit_text_pieces(&[], true, "hello", false),
+            vec![TextPiece::Text(ContentText::from_str(
+                "hello",
+                BODY_PAGE_UTF16
+            ))]
+        );
+    }
 
     #[test]
     fn history_codes_name_the_columns_they_claim() {

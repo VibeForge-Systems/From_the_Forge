@@ -536,6 +536,7 @@ No GPL or LGPL tool or wrapper is committed.
 | The check on a backup outside the repository (oracle run 4) | `OMA_EXTERNAL_BACKUP=<backup dir> cargo test -p oma-messages --test external_sample -- --ignored --nocapture` |
 | One large photo made into both image renditions (M5 slice 5d: a 4032 × 3024 noise JPEG through `media::render`) | `cargo test -p oma-archive --release --test media_corpus -- --ignored --nocapture` |
 | The media code with the optional, never-shipped HEIC decoder (owner decision Q2; CI runs only clippy and `cargo deny` with it) | `cargo clippy -p oma-archive --all-targets --features heic -- -D warnings`, `cargo test -p oma-archive --features heic --test viewer_media --test media_corpus` and `cargo deny --features oma-archive/heic check` |
+| A self-built app with HEIC previews (owner decision Q2: **at your own legal risk**, HEVC is pooled-patent technology; never for official or CI release builds). The app's package does not forward the feature, so name the crate's feature | `npx tauri build --features oma-archive/heic` (the release binary, through the Tauri CLI as always), or `cargo build -p openmessage-archive --features oma-archive/heic` for a debug build; `--features heic` alone fails ("the package 'openmessage-archive' does not contain this feature"). Only the feature resolution was checked (`cargo tree -p openmessage-archive --features oma-archive/heic -i heic-rs`); no HEIC-enabled app build has been run |
 
 Record performance results in `docs/compatibility.md` as **synthetic**,
 with the profile, OS and CPU count.

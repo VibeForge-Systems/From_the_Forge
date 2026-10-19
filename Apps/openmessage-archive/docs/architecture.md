@@ -1468,7 +1468,8 @@ The shell side of M4 (spec §15) lives in `src-tauri/src/archives/`
   an archive, or both for an import). `reserve` answers `busy` when an
   active job shares either, then applies the one slot (D7). An import's
   reservation carries its `Gate`. Changing the archive location is refused
-  while any job runs (an archive is only open inside a job).
+  while any job runs or a viewer session is open (D114; an archive is open
+  only inside a job or a viewer session).
 - **The gate (D65).** `archives::gate::Gate` is a `Mutex` + `Condvar`;
   its deadline comes from a `GateClock` (two minutes; tests inject a
   clock and advance it), and the wait re-reads the clock and the cancel
@@ -2102,7 +2103,11 @@ rendition. No schema change; nothing is written.
   by default and never enabled in official or CI release builds**, decodes
   HEIF with `heic-rs =0.1.4` (pure Rust, `forbid(unsafe_code)`, MIT OR
   Apache-2.0, no dependencies with its default `parallel` feature off),
-  inside `render` only, under the same limits. Its decoder applies
+  inside `render` only, under the same input, side and (halved)
+  decoded-size limits; `heic-rs` offers no allocation limit (its
+  `DecodeOptions` has none), so unlike the `image` decoders it runs
+  without `DECODER_ALLOC` and its internal buffers are bounded only by its
+  own code and the helper process. Its decoder applies
   `clap`, `irot` and `imir` at full size, so the decoded image and its
   transformed copy are each held to half of the 128 MiB cap. Without the
   feature (the default) HEIF is a file card. HEVC is pooled-patent
@@ -2466,6 +2471,62 @@ in Rust). No UI yet: `services/media.ts` and the media elements are PR B.
   the manual checklist (**UNVERIFIED**). The Windows-only code
   (`CREATE_NO_WINDOW`, the `http://oma-media.localhost` base) is compiled
   and tested only by CI on `windows-2022`, not here.
+
+### M5 PR A review fixes
+
+The review of PR A changed these rules; each has a regression test
+(`compatibility.md`, "Milestone 5 PR A review fixes").
+
+- **Masking decides trust on the whole body.** `message_text` withholds
+  every chunk of a body whose one-time-code ranges are untrusted
+  (`display_source` ≠ 1 or a `run_issue`), whatever `fromUtf16` is; only
+  trusted ranges are moved to the chunk. An earlier edit text whose runs
+  were cut short (`runs_complete` false) is withheld whole, code seen or
+  not (`EditBody::Text`'s contract). "Show earlier text" no longer reveals
+  codes: `EarlierText::Revealed` carries `Vec<TextPiece>` masked by the
+  preview rule unless `reveal.oneTimeCode` (the DTO's `pieces`).
+- **Search reads a hit's version when it is served.** `search_hits`
+  compares the set's body with `current_body_id` at read time; a body that
+  stopped being current sends no text unless the request has
+  `includeEarlier`. The words cap counts distinct messages in both plans
+  (the global plan reads until `SEARCH_MATCH_CAP + 1` messages; with
+  `includeEarlier` it probes an admitted message's current body when the
+  cut fell before it, so the hit is not mislabelled "earlier").
+- **Folding is resolved at depth one.** A reaction folds only when its
+  target does not fold itself (`view::folds_into`, the day count's SQL);
+  a reaction to a folding reaction, or a cycle, stays visible with
+  `AssocVisibility::TargetFolds`.
+- **The sender needs a recorded direction.** With `is_from_me` NULL,
+  unreadable or out of range the sender is `DirectionNotRecorded`: the
+  row may be the owner's, whose `handle_id` is the other party.
+- **Parts are never guessed.** The part set of an unsend comes from the
+  decoded runs and the summary's `otr` entry count (§3.6's source); with
+  neither, `partCount` is `null` and there is no whole-bubble label.
+- **Ordering and paging.** The reply thread reads every reply under the
+  `Scan` budget and keeps the first 500 by `(sort_key, id)` in a bounded
+  heap. The reaction history pages by a keyset: the crate returns an
+  opaque `ReactionCursor`, the shell remembers it by (target, last row)
+  and the UI asks for `reactionPage: { after: <last row id> }`; an
+  unknown `after` is refused. `fit_page` remembers the key of an anchor it
+  moves (`ThreadPage::key_of`).
+- **Deadlines.** A page call's `Assembly` phase gets at least 500 ms
+  after its `Scan` (`ASSEMBLY_MIN`), so a `Scan` that used up the 2 s
+  deadline still returns its items; such a call can take up to 2.5 s.
+  An interrupt that lands on a snapshot's `BEGIN` or `COMMIT` is
+  `Cancelled`.
+- **Shell.** Viewer preferences are read field by field: a field that
+  parses keeps its value, an unreadable one takes its most private value
+  (playback off, no list previews, capture protection and blur on, no
+  earlier text), unknown fields are ignored, and the settings notice says
+  so. A search interrupts the previous one while it holds the search slot,
+  so a late interrupt can never reach a newer search; the interrupt handle
+  is counted for the order test. The surfaced set evicts least recently
+  surfaced (200,000).
+- **Media.** A `(blob, rendition)` being decoded is decoded by one worker;
+  other requests for it wait for that answer. A helper that exited
+  between requests, or whose request header cannot be written, is
+  replaced and the request retried once without counting a crash; a
+  helper the watchdog killed is never reused.
 
 ### Status and qualifiers (D43)
 

@@ -6,4 +6,9 @@ import type { SafeId } from "./SafeId";
 /**
  * A page of the reaction rows recorded on a message.
  */
-export type ReactionHistoryDto = { target: SafeId, keyed: boolean, rows: Array<ReactionRecordDto>, total: CappedCountDto, page: number, hasMore: boolean, };
+export type ReactionHistoryDto = { target: SafeId, keyed: boolean, rows: Array<ReactionRecordDto>, total: CappedCountDto, 
+/**
+ * More rows follow: ask for them with `reactionPage.after` set to the
+ * last row's id.
+ */
+hasMore: boolean, };

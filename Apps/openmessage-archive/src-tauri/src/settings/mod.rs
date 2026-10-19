@@ -76,8 +76,8 @@ pub struct Settings {
     #[serde(default)]
     #[ts(as = "Vec<AddedFolderEntry>")]
     pub backup_folders: BackupFolders,
-    /// The viewer's preferences (M5). Read leniently: a malformed object
-    /// falls back to the defaults.
+    /// The viewer's preferences (M5). Read leniently, field by field: an
+    /// unreadable field takes its most private value, with a notice.
     #[serde(default, deserialize_with = "viewer::lenient")]
     pub viewer: ViewerPreferences,
 }
@@ -172,13 +172,16 @@ mod tests {
         let old: Settings = serde_json::from_str(r#"{"schemaVersion":1,"archiveDirectory":"/a"}"#)
             .expect("old file");
         assert_eq!(old.viewer, ViewerPreferences::default());
-        // A malformed `viewer` keeps the rest of the file.
+        // A malformed `viewer` keeps the rest of the file and every
+        // preference that can still be read.
         let bad: Settings = serde_json::from_str(
-            r#"{"schemaVersion":1,"archiveDirectory":"/a","viewer":{"uiZoom":9000}}"#,
+            r#"{"schemaVersion":1,"archiveDirectory":"/a",
+                "viewer":{"uiZoom":9000,"mediaPlayback":"off","surprise":true}}"#,
         )
         .expect("lenient");
         assert_eq!(bad.archive_directory.as_deref(), Some("/a"));
-        assert_eq!(bad.viewer, ViewerPreferences::default());
+        assert_eq!(bad.viewer.media_playback, MediaPlayback::Off);
+        assert_eq!(bad.viewer.ui_zoom.get(), 100);
         // An update is strict.
         for attempt in [
             r#"{"viewer":{"uiZoom":410}}"#,

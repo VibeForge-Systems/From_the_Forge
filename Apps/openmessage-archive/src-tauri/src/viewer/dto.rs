@@ -750,11 +750,16 @@ pub struct ConversationRowsDto {
 #[ts(export)]
 pub enum SenderDto {
     FromMe,
-    Resolved { handle: SafeId },
+    Resolved {
+        handle: SafeId,
+    },
     NoSender,
     ColumnAbsent,
     Unreadable,
     NotFound,
+    /// The direction is not recorded, so the recorded handle may be the
+    /// other party: no sender is shown.
+    DirectionNotRecorded,
 }
 
 /// The backup set a direction value came from.
@@ -800,8 +805,16 @@ pub enum AssocVisibilityDto {
     NotAReaction,
     TargetUnreadable,
     TargetNotUnique,
-    TargetInAnotherChat { target: SafeId },
-    Folded { target: SafeId },
+    TargetInAnotherChat {
+        target: SafeId,
+    },
+    Folded {
+        target: SafeId,
+    },
+    /// The target is itself a folded reaction: this row stays visible.
+    TargetFolds {
+        target: SafeId,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -932,9 +945,10 @@ pub enum EarlierTextDto {
     Withheld {
         reason: WithheldReasonDto,
     },
+    /// Its one-time codes are masked unless codes were revealed too.
     Revealed {
         reason: WithheldReasonDto,
-        text: ContentTextDto,
+        pieces: Vec<TextPieceDto>,
         session: SafeId,
     },
 }
@@ -946,7 +960,7 @@ pub struct EditFactsDto {
     pub label: Option<EditLabelDto>,
     pub edited_parts: Vec<DecimalString>,
     pub unsent_parts: Vec<DecimalString>,
-    pub part_count: u32,
+    pub part_count: Option<u32>,
     pub unsent_whole: bool,
     pub stored_versions: u32,
     pub earlier: EarlierTextDto,
@@ -1159,7 +1173,7 @@ fn earlier(e: &oa::EarlierText, cx: &mut Conv) -> Option<EarlierTextDto> {
             session,
         } => EarlierTextDto::Revealed {
             reason: withheld(*reason),
-            text: text.into(),
+            pieces: pieces(text),
             session: cx.id(*session)?,
         },
         _ => EarlierTextDto::Withheld {
@@ -1271,6 +1285,9 @@ fn visibility(v: oa::AssocVisibility, cx: &mut Conv) -> Option<AssocVisibilityDt
         oa::AssocVisibility::Folded(m) => AssocVisibilityDto::Folded {
             target: cx.id(m.get())?,
         },
+        oa::AssocVisibility::TargetFolds(m) => AssocVisibilityDto::TargetFolds {
+            target: cx.id(m.get())?,
+        },
         _ => AssocVisibilityDto::Undeterminable,
     })
 }
@@ -1300,6 +1317,7 @@ impl MessageDto {
             oa::SenderReason::NoSender => SenderDto::NoSender,
             oa::SenderReason::ColumnAbsent => SenderDto::ColumnAbsent,
             oa::SenderReason::NotFound => SenderDto::NotFound,
+            oa::SenderReason::DirectionNotRecorded => SenderDto::DirectionNotRecorded,
             _ => SenderDto::Unreadable,
         };
         let recorded_by = match m.direction_recorded_by {
@@ -1860,7 +1878,8 @@ pub struct ReactionHistoryDto {
     pub keyed: bool,
     pub rows: Vec<ReactionRecordDto>,
     pub total: CappedCountDto,
-    pub page: u32,
+    /// More rows follow: ask for them with `reactionPage.after` set to the
+    /// last row's id.
     pub has_more: bool,
 }
 
@@ -1885,7 +1904,6 @@ impl ReactionHistoryDto {
                 })
                 .collect(),
             total: h.total.into(),
-            page: h.page,
             has_more: h.has_more,
         })
     }

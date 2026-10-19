@@ -380,8 +380,9 @@ names and attachment files in the window. *Status: the reading side, the
 commands, the media protocol, the decode helper and the window's settings
 exist from M5 PR A (slices 5a–5f); the screens that show them come in PR
 B. Nothing here has been run in a window or on Windows yet; items marked
-**UNVERIFIED** depend on the web engine and are on the manual checklist in
-`compatibility.md`.*
+**UNVERIFIED** depend on the web engine and are not yet tested: they are
+listed as not tested in `compatibility.md` (slice 5f) and are to be
+recorded per engine on the M5 manual checklist (slice 5k).*
 
 ### What crosses into the window
 
@@ -436,7 +437,8 @@ web engine only when you press Play, and only after:
 
 A file crafted by its sender could exploit a flaw in those codecs; the app
 cannot prevent that. On Linux the web engine's own sandbox may be off
-(**UNVERIFIED**, recorded per engine in `compatibility.md`). Playback can be
+(**UNVERIFIED**, not yet tested; to be recorded per engine in
+`compatibility.md` by slice 5k). Playback can be
 turned off in the viewer settings; with `off`, the app refuses playback in
 its own code and the engine never receives attachment bytes.
 
@@ -455,7 +457,8 @@ attachment is M6.
 - The window runs in a private (incognito) web profile, so the engine keeps
   no persistent HTTP cache or web storage, and every media response tells
   it not to store the response (`Cache-Control: no-store`). Whether either
-  engine keeps anything regardless is **UNVERIFIED** (manual checklist).
+  engine keeps anything regardless is **UNVERIFIED** (not yet tested; to
+  be recorded per engine in `compatibility.md` by slice 5k).
 - Search runs in memory; no search history is kept anywhere.
 - The window title is always "OpenMessage Archive", never a conversation
   name.
@@ -605,9 +608,15 @@ Backups and their contents are treated as hostile:
   rights. People who build the app themselves can turn on the optional
   `heic` Cargo feature of `crates/oma-archive`, which uses the pure-Rust
   `heic-rs` decoder (MIT OR Apache-2.0, no C, no `unsafe`) inside the same
-  helper process and under the same limits as other images. **Doing so is
-  at the self-builder's own legal risk**; the project gives no assurance
-  about patents (see `dependencies.md`).
+  helper process, under the same input, side and (halved) decoded-size
+  limits as other images. `heic-rs` offers no allocation limit, so its
+  internal buffers are bounded only by its own code and the helper
+  process (a HEIF that makes it allocate too much ends the helper, which
+  counts as a crash). The app's package does not forward the feature, so
+  the crate's feature is named: `npx tauri build --features
+  oma-archive/heic` (see `development.md`). **Doing so is at the
+  self-builder's own legal risk**; the project gives no assurance about
+  patents (see `dependencies.md`).
 - Message text is rendered as text, never as HTML. The UI does not use
   `v-html` with untrusted content, and HTML exports will escape everything.
 

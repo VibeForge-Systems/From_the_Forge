@@ -14,9 +14,11 @@
 //!
 //! **Images are decoded only from the buffer `read_blob_verified` read to
 //! the end through the hashing reader**, and only in a helper process. A
-//! failure of any kind is remembered per `(blob, rendition)`, so a hostile
-//! image is decoded at most once per session. After [`CRASH_CAP`] helper
-//! crashes in a session, previews are off for the rest of it.
+//! failure of any kind is remembered per `(blob, rendition)`, and a
+//! `(blob, rendition)` being decoded is decoded by one worker only (a
+//! second request for it waits for that answer), so a hostile image is
+//! decoded at most once per session. After [`CRASH_CAP`] helper crashes in
+//! a session, previews are off for the rest of it.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -88,10 +90,14 @@ pub struct StreamJob {
     pub reply: Reply,
 }
 
+type Key = (BlobId, Rendition);
+
 #[derive(Default)]
 struct Shared {
     cache: Mutex<RenditionCache>,
     sizes: Mutex<HashMap<BlobId, (u32, u32)>>,
+    /// Keys being decoded, with the replies waiting for that decode.
+    inflight: Mutex<HashMap<Key, Vec<Reply>>>,
     crashes: AtomicU32,
     previews_off: AtomicBool,
 }
@@ -255,6 +261,10 @@ impl MediaEngine {
         if let Ok(mut s) = self.shared.sizes.lock() {
             s.clear();
         }
+        // Waiting replies answer `503` as they drop.
+        if let Ok(mut w) = self.shared.inflight.lock() {
+            w.clear();
+        }
     }
 
     /// Wait for the workers to stop (tests; never from a command).
@@ -290,32 +300,62 @@ fn decode_one(
     if shared.previews_off.load(Ordering::Relaxed) || shared.failed(key) {
         return job.reply.send(Outcome::Refused, MediaResponse::refused());
     }
+    // One decode per key at a time: a request for a key another worker is
+    // decoding waits for that worker's answer (§5.8: at most once).
+    if let Ok(mut w) = shared.inflight.lock() {
+        match w.get_mut(&key) {
+            Some(waiting) => {
+                waiting.push(job.reply);
+                return;
+            }
+            None => {
+                w.insert(key, Vec::new());
+            }
+        }
+    }
+    let (outcome, response) = render_key(key, shared, source, rd, backend, factory, cap);
+    let waiting = shared
+        .inflight
+        .lock()
+        .ok()
+        .and_then(|mut w| w.remove(&key))
+        .unwrap_or_default();
+    for w in waiting {
+        w.send(outcome, response.clone());
+    }
+    job.reply.send(outcome, response);
+}
+
+/// Read, verify and render `key` once: the outcome and the response every
+/// request for it gets.
+fn render_key(
+    key: Key,
+    shared: &Shared,
+    source: &ReaderSource,
+    rd: &mut Option<ArchiveReader>,
+    backend: &mut Option<Box<dyn RenderBackend>>,
+    factory: &BackendFactory,
+    cap: u32,
+) -> (Outcome, MediaResponse) {
+    let (blob, rendition) = key;
     let Some(r) = reader(rd, source) else {
-        return job
-            .reply
-            .send(Outcome::Unreadable, MediaResponse::refused());
+        return (Outcome::Unreadable, MediaResponse::refused());
     };
-    let bytes = match r.read_blob_verified(job.blob, MAX_INPUT_BYTES) {
+    let bytes = match r.read_blob_verified(blob, MAX_INPUT_BYTES) {
         Ok(b) => b,
         Err(ArchiveError::Blob(BlobProblem::OverLimit | BlobProblem::DigestMismatch)) => {
             shared.fail(key);
-            return job
-                .reply
-                .send(Outcome::DecodeFailed, MediaResponse::refused());
+            return (Outcome::DecodeFailed, MediaResponse::refused());
         }
-        Err(_) => {
-            return job
-                .reply
-                .send(Outcome::Unreadable, MediaResponse::refused())
-        }
+        Err(_) => return (Outcome::Unreadable, MediaResponse::refused()),
     };
     let b = backend.get_or_insert_with(|| factory());
-    let outcome = b.render(bytes.expose(), job.rendition, &RenderLimits::default());
+    let outcome = b.render(bytes.expose(), rendition, &RenderLimits::default());
     drop(bytes);
     match outcome {
         RenderOutcome::Image(img) => {
             if let Ok(mut s) = shared.sizes.lock() {
-                s.insert(job.blob, (img.source_width, img.source_height));
+                s.insert(blob, (img.source_width, img.source_height));
             }
             let bytes = Arc::new(img.bytes);
             if let Ok(mut c) = shared.cache.lock() {
@@ -327,15 +367,14 @@ fn decode_one(
                     },
                 );
             }
-            job.reply.send(
+            (
                 Outcome::Decoded,
                 MediaResponse::image(img.format.mime(), bytes.to_vec()),
-            );
+            )
         }
         RenderOutcome::Refused(_) => {
             shared.fail(key);
-            job.reply
-                .send(Outcome::DecodeFailed, MediaResponse::refused());
+            (Outcome::DecodeFailed, MediaResponse::refused())
         }
         RenderOutcome::Crashed => {
             shared.fail(key);
@@ -351,8 +390,7 @@ fn decode_one(
                 previews_off = n >= cap,
                 "decode helper crashed"
             );
-            job.reply
-                .send(Outcome::HelperCrashed, MediaResponse::refused());
+            (Outcome::HelperCrashed, MediaResponse::refused())
         }
     }
 }

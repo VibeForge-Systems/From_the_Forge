@@ -3,4 +3,4 @@ import type { DecimalString } from "./DecimalString";
 import type { EarlierTextDto } from "./EarlierTextDto";
 import type { EditLabelDto } from "./EditLabelDto";
 
-export type EditFactsDto = { label: EditLabelDto | null, editedParts: Array<DecimalString>, unsentParts: Array<DecimalString>, partCount: number, unsentWhole: boolean, storedVersions: number, earlier: EarlierTextDto, };
+export type EditFactsDto = { label: EditLabelDto | null, editedParts: Array<DecimalString>, unsentParts: Array<DecimalString>, partCount: number | null, unsentWhole: boolean, storedVersions: number, earlier: EarlierTextDto, };

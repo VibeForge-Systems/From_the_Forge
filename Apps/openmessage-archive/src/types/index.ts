@@ -223,6 +223,7 @@ export type { RawValueDto } from './generated/RawValueDto';
 export type { ReactionChipDto } from './generated/ReactionChipDto';
 export type { ReactionHistoryDto } from './generated/ReactionHistoryDto';
 export type { ReactionKindDto } from './generated/ReactionKindDto';
+export type { ReactionPageInput } from './generated/ReactionPageInput';
 export type { ReactionRecordDto } from './generated/ReactionRecordDto';
 export type { ReactionSummaryDto } from './generated/ReactionSummaryDto';
 export type { RecentlyDeletedDto } from './generated/RecentlyDeletedDto';

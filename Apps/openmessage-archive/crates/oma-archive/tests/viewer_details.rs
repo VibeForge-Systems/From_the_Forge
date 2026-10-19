@@ -82,7 +82,7 @@ fn message_text_of(m: &AssembledMessage, out: &mut String) {
         }
     }
     if let EarlierText::Revealed { text, .. } = &m.edit.earlier {
-        out.push_str(text.text.expose());
+        pieces_text(text, out);
     }
     if let Some(ReplyRef::Resolved { quote, .. } | ReplyRef::InAnotherConversation { quote, .. }) =
         &m.reply
@@ -683,7 +683,9 @@ fn everything(r: &ArchiveReader, db: &std::path::Path, reveal: Reveal) -> String
                 message_text_of(m, &mut out);
             }
         }
-        let h = r.reaction_history(MessageId::new(id), 0).expect("history");
+        let h = r
+            .reaction_history(MessageId::new(id), None)
+            .expect("history");
         for row in &h.rows {
             if let Some(e) = &row.emoji {
                 opt_text(e, &mut out);
@@ -800,6 +802,247 @@ fn text_chunks_rebuild_every_body_and_clamp_their_offsets() {
     ));
 }
 
+/// A body whose code ranges are not trusted is withheld whole in every
+/// chunk, even one that starts past the stored range (§3.6, D115): the
+/// range does not say where the code really is.
+#[test]
+fn chunks_past_an_untrusted_code_range_stay_masked() {
+    let (tmp, lib) = library();
+    let id = lib.create(None).expect("create");
+    {
+        let mut a = lib.open(&id).expect("open");
+        let mut spec = BulkSpec::new(50);
+        spec.reaction_permille = 0;
+        spec.undated_permille = 0;
+        generate(&mut a, &spec);
+    }
+    let (body, text): (i64, String) = {
+        let c = raw(&db_path(&tmp, &id));
+        let (body, text): (i64, String) = c
+            .query_row(
+                "SELECT id, display_text FROM message_body \
+                 WHERE display_text IS NOT NULL AND length(display_text) > 12 LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("body");
+        // Units 0..6 are a one-time code (flags bit 4); the body came from
+        // the text column (display_source 2), so the range is untrusted.
+        c.execute(
+            "INSERT INTO message_body_part (body_id, ordinal, utf16_start, utf16_end, \
+                 utf8_start, utf8_end, flags, keys_present) VALUES (?1, 0, 0, 6, 0, 6, 16, 0)",
+            [body],
+        )
+        .expect("part");
+        c.execute(
+            "UPDATE message_body SET display_source = 2, run_issue = NULL WHERE id = ?1",
+            [body],
+        )
+        .expect("source");
+        (body, text)
+    };
+    let tail: String =
+        String::from_utf16(&text.encode_utf16().skip(6).collect::<Vec<u16>>()).expect("utf16");
+    let r = lib.open_read(&id).expect("reader");
+    let whole = vec![TextPiece::Masked(oma_archive::MaskKind::OneTimeCode)];
+    for from in [0, 6, 8] {
+        let c = r
+            .message_text(BodyId::new(body), from, Reveal::default())
+            .expect("chunk");
+        assert_eq!(c.text, ChunkText::Text(whole.clone()), "from {from}");
+    }
+    // Revealed, the text is shown.
+    let (shown, _) = chunk_text(&r, BodyId::new(body), REVEAL_ALL);
+    assert_eq!(shown, text);
+    drop(r);
+    // Trusted (decoded cleanly): a chunk past the code shows its text.
+    {
+        let c = raw(&db_path(&tmp, &id));
+        c.execute(
+            "UPDATE message_body SET display_source = 1 WHERE id = ?1",
+            [body],
+        )
+        .expect("source");
+    }
+    let r = lib.open_read(&id).expect("reader");
+    let c = r
+        .message_text(BodyId::new(body), 6, Reveal::default())
+        .expect("chunk");
+    let mut got = String::new();
+    let ChunkText::Text(p) = &c.text else {
+        panic!("text")
+    };
+    pieces_text(p, &mut got);
+    assert_eq!(got, tail);
+    let c = r
+        .message_text(BodyId::new(body), 0, Reveal::default())
+        .expect("chunk");
+    let ChunkText::Text(p) = &c.text else {
+        panic!("text")
+    };
+    assert_eq!(
+        p.first(),
+        Some(&TextPiece::Masked(oma_archive::MaskKind::OneTimeCode))
+    );
+}
+
+/// "Show earlier text" reveals the earlier text only: its one-time codes
+/// stay masked until "Show code" (D115), whole when the ranges cannot be
+/// trusted.
+#[test]
+fn revealed_earlier_text_keeps_its_codes_masked() {
+    let (tmp, lib) = library();
+    let id = lib.create(None).expect("create");
+    {
+        let mut a = lib.open(&id).expect("open");
+        let mut spec = BulkSpec::new(50);
+        spec.reaction_permille = 0;
+        spec.undated_permille = 0;
+        generate(&mut a, &spec);
+    }
+    let (message, earlier, text): (i64, i64, String) = {
+        let c = raw(&db_path(&tmp, &id));
+        let (message, earlier, text): (i64, i64, String) = c
+            .query_row(
+                "SELECT m.id, b.id, b.display_text FROM message m \
+                 JOIN message_body b ON b.id = m.current_body_id \
+                 WHERE b.display_text IS NOT NULL AND length(b.display_text) > 12 LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .expect("body");
+        // A newer body without text becomes current, so the old text is
+        // earlier text withheld as "no current text".
+        c.execute(
+            "INSERT INTO message_body (message_id, raw_hash, text_raw, text_raw_st, \
+                 attributed_raw, attributed_raw_st, summary_raw, summary_raw_st, \
+                 attributed_outcome, attributed_error, run_issue, unknown_attr_keys, \
+                 unknown_attr_classes, display_text, display_source, display_none_reason, \
+                 sources_differ, summary_outcome, otr, ec_state, rp_state, has_tmp, \
+                 summary_unknown_keys, edit_label, edit_label_a, edit_label_b, \
+                 decoder_version, first_session_id, first_rank, last_session_id, last_rank) \
+             SELECT message_id, randomblob(32), NULL, 1, NULL, 1, NULL, 1, \
+                 1, NULL, NULL, NULL, NULL, NULL, NULL, 1, NULL, 1, NULL, NULL, NULL, NULL, \
+                 NULL, edit_label, edit_label_a, edit_label_b, decoder_version, \
+                 first_session_id, first_rank, last_session_id, last_rank \
+             FROM message_body WHERE id = ?1",
+            [earlier],
+        )
+        .expect("newer body");
+        let newer = c.last_insert_rowid();
+        c.execute(
+            "UPDATE message SET current_body_id = ?2 WHERE id = ?1",
+            [message, newer],
+        )
+        .expect("current");
+        // Units 0..6 of the earlier text are a one-time code; it came from
+        // the text column, so the range is not trusted.
+        c.execute(
+            "INSERT INTO message_body_part (body_id, ordinal, utf16_start, utf16_end, \
+                 utf8_start, utf8_end, flags, keys_present) VALUES (?1, 0, 0, 6, 0, 6, 16, 0)",
+            [earlier],
+        )
+        .expect("part");
+        (message, earlier, text)
+    };
+    let earlier_only = Reveal {
+        earlier_text: true,
+        one_time_code: false,
+    };
+    let revealed = |reveal: Reveal| -> Vec<TextPiece> {
+        let r = lib.open_read(&id).expect("reader");
+        let d = r
+            .message_detail(MessageId::new(message), reveal)
+            .expect("detail");
+        match d.message.edit.earlier {
+            EarlierText::Revealed { text, .. } => text,
+            other => panic!("{other:?}"),
+        }
+    };
+    let whole = vec![TextPiece::Masked(oma_archive::MaskKind::OneTimeCode)];
+    assert_eq!(revealed(earlier_only), whole);
+    let mut all = String::new();
+    pieces_text(&revealed(REVEAL_ALL), &mut all);
+    assert_eq!(all, text);
+    // Trusted ranges: only the code is masked.
+    {
+        let c = raw(&db_path(&tmp, &id));
+        c.execute(
+            "UPDATE message_body SET display_source = 1, run_issue = NULL WHERE id = ?1",
+            [earlier],
+        )
+        .expect("source");
+    }
+    let pieces = revealed(earlier_only);
+    assert_eq!(
+        pieces.first(),
+        Some(&TextPiece::Masked(oma_archive::MaskKind::OneTimeCode))
+    );
+    let mut shown = String::new();
+    pieces_text(&pieces, &mut shown);
+    let tail: String =
+        String::from_utf16(&text.encode_utf16().skip(6).collect::<Vec<u16>>()).expect("utf16");
+    assert_eq!(shown, tail);
+}
+
+/// A whole-bubble unsend and a part count come only from recorded parts
+/// (decoded runs or the summary's `otr` count, §3.6), never from a guess.
+#[test]
+fn an_unsend_with_unknown_parts_is_not_called_whole() {
+    let (tmp, lib) = library();
+    let id = lib.create(None).expect("create");
+    {
+        let mut a = lib.open(&id).expect("open");
+        let mut spec = BulkSpec::new(50);
+        spec.reaction_permille = 0;
+        spec.undated_permille = 0;
+        generate(&mut a, &spec);
+    }
+    let (message, body): (i64, i64) = {
+        let c = raw(&db_path(&tmp, &id));
+        let pair = c
+            .query_row(
+                "SELECT m.id, b.id FROM message m JOIN message_body b ON b.id = m.current_body_id \
+                 WHERE b.display_text IS NOT NULL LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("body");
+        c.execute(
+            "INSERT INTO message_unsent_part (body_id, ordinal, part) VALUES (?1, 0, 0)",
+            [pair.1],
+        )
+        .expect("unsent");
+        pair
+    };
+    let edit = || {
+        let r = lib.open_read(&id).expect("reader");
+        let d = r
+            .message_detail(MessageId::new(message), Reveal::default())
+            .expect("detail");
+        (d.message.edit.part_count, d.message.edit.unsent_whole)
+    };
+    let set = |sql: &str| {
+        raw(&db_path(&tmp, &id))
+            .execute(sql, [body])
+            .expect("update");
+    };
+    // Text from the text column, no runs and no `otr`: parts unknown.
+    assert_eq!(edit(), (None, false));
+    // No text at all (an attributedBody that could not be decoded).
+    set(
+        "UPDATE message_body SET display_text = NULL, display_source = NULL, \
+         display_none_reason = 1 WHERE id = ?1",
+    );
+    assert_eq!(edit(), (None, false));
+    // `otr` records two original parts: one of two is unsent.
+    set("UPDATE message_body SET otr = 2 WHERE id = ?1");
+    assert_eq!(edit(), (Some(2), false));
+    // One original part, listed: the whole bubble.
+    set("UPDATE message_body SET otr = 1 WHERE id = ?1");
+    assert_eq!(edit(), (Some(1), true));
+}
+
 #[test]
 fn reaction_history_pages_every_row_in_date_order() {
     let (_, model) = model_docs()
@@ -824,7 +1067,7 @@ fn reaction_history_pages_every_row_in_date_order() {
         .collect::<Result<_, _>>()
         .expect("targets");
     assert!(targets.iter().any(|(_, n)| *n > 200), "a target over 200");
-    for (t, n) in targets {
+    for &(t, n) in &targets {
         let oracle: Vec<i64> = c
             .prepare(
                 "SELECT m.id FROM message m JOIN message t \
@@ -839,20 +1082,57 @@ fn reaction_history_pages_every_row_in_date_order() {
             .collect::<Result<_, _>>()
             .expect("rows");
         let mut got = Vec::new();
-        let mut page = 0;
+        let mut after = None;
         loop {
             let h = r
-                .reaction_history(MessageId::new(t), page)
+                .reaction_history(MessageId::new(t), after.as_ref())
                 .expect("history");
             assert!(h.keyed && h.rows.len() <= REACTION_HISTORY_PAGE);
             assert_eq!(h.total.n, u64::try_from(n).expect("n"));
             got.extend(h.rows.iter().map(|x| x.id.get()));
+            assert_eq!(h.has_more, h.next.is_some());
             if !h.has_more {
                 break;
             }
-            page += 1;
+            after = h.next;
         }
         assert_eq!(got, oracle, "every row once, by date then id");
+    }
+    // A reaction added before the first page between two calls (an
+    // import) is neither served twice nor makes a row repeat: the next
+    // page starts strictly after the last row served.
+    let (big, _) = *targets
+        .iter()
+        .find(|(_, n)| *n > i64::try_from(REACTION_HISTORY_PAGE).expect("page"))
+        .expect("a target over a page");
+    let first = r
+        .reaction_history(MessageId::new(big), None)
+        .expect("page 0");
+    let served: BTreeSet<i64> = first.rows.iter().map(|x| x.id.get()).collect();
+    {
+        let w = raw(&i.db());
+        let added: i64 = w
+            .query_row(
+                "SELECT id FROM message WHERE assoc_present = 0 AND key_kind = 1 \
+                   AND id <> ?1 ORDER BY id LIMIT 1",
+                [big],
+                |row| row.get(0),
+            )
+            .expect("a plain message");
+        w.execute(
+            "UPDATE message SET assoc_present = 1, assoc_kind = 10, assoc_target_shape = 2, \
+               assoc_target_guid = (SELECT guid FROM message WHERE id = ?2), \
+               sort_key = X'000000000000000001' WHERE id = ?1",
+            [added, big],
+        )
+        .expect("an earlier reaction");
+    }
+    let second = r
+        .reaction_history(MessageId::new(big), first.next.as_ref())
+        .expect("page 1");
+    assert!(!second.rows.is_empty());
+    for x in &second.rows {
+        assert!(!served.contains(&x.id.get()), "a row served twice");
     }
     // An unkeyed message has no resolvable reactions; an unknown id is not
     // found.
@@ -864,11 +1144,11 @@ fn reaction_history_pages_every_row_in_date_order() {
         )
         .expect("an unkeyed message");
     let h = r
-        .reaction_history(MessageId::new(unkeyed), 0)
+        .reaction_history(MessageId::new(unkeyed), None)
         .expect("history");
     assert!(!h.keyed && h.rows.is_empty());
     assert!(matches!(
-        r.reaction_history(MessageId::new(999_999), 0),
+        r.reaction_history(MessageId::new(999_999), None),
         Err(ArchiveError::AnchorNotFound)
     ));
 }

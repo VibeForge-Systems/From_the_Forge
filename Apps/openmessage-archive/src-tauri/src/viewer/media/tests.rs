@@ -568,6 +568,37 @@ fn five_crashes_turn_previews_off() {
 /// The handler never blocks (deterministic: the backend waits at a gate
 /// the test opens), and a full decode queue drops its oldest entry with
 /// `503`.
+/// Two requests for the same rendition at once are decoded once: the
+/// second waits for the first's answer, so a hostile image crashes the
+/// helper once, not once per worker (§5.8).
+#[test]
+fn concurrent_requests_for_one_rendition_decode_once() {
+    let gate = Arc::new(Gate::default());
+    let r = rig(Mode::Crash, Some(Arc::clone(&gate)));
+    let s = r.session();
+    let images = r.classes().remove("image").expect("images");
+    let (tok, _) = &images[0];
+    let first = ask(&r.host, &url(tok, "thumb"), &GET);
+    gate.wait_entered(1);
+    let second = ask(&r.host, &url(tok, "thumb"), &GET);
+    // The second job leaves the queue (a free worker takes it) before the
+    // first decode is let go.
+    let until = std::time::Instant::now() + WAIT;
+    while s.media().decode_queued() > 0 {
+        assert!(
+            std::time::Instant::now() < until,
+            "the second job was taken"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    std::thread::sleep(Duration::from_millis(50));
+    gate.release();
+    assert_refused(&wait(&first), "crashed");
+    assert_refused(&wait(&second), "the same answer");
+    assert_eq!(r.counts.calls.load(Ordering::SeqCst), 1, "decoded once");
+    assert_eq!(s.media().crashes(), 1, "one crash counted");
+}
+
 #[test]
 fn dispatch_never_blocks_and_a_full_queue_drops_the_oldest() {
     let gate = Arc::new(Gate::default());
@@ -575,9 +606,12 @@ fn dispatch_never_blocks_and_a_full_queue_drops_the_oldest() {
     let images = r.classes().remove("image").expect("images");
     let (tok, _) = &images[0];
     let s = r.session();
-    // Both decode workers take a job and wait at the gate.
-    let busy: Vec<_> = (0..2)
-        .map(|_| ask(&r.host, &url(tok, "thumb"), &GET))
+    // Both decode workers take a job and wait at the gate (two different
+    // renditions: a second request for one being decoded would wait for
+    // it instead of taking a worker).
+    let busy: Vec<_> = ["thumb", "display"]
+        .iter()
+        .map(|rendition| ask(&r.host, &url(tok, rendition), &GET))
         .collect();
     gate.wait_entered(2);
     // dispatch has returned for both, and neither is answered yet.
@@ -585,14 +619,14 @@ fn dispatch_never_blocks_and_a_full_queue_drops_the_oldest() {
         assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
     }
     let queued: Vec<_> = (0..DECODE_QUEUE)
-        .map(|_| ask(&r.host, &url(tok, "display"), &GET))
+        .map(|_| ask(&r.host, &url(tok, "thumb"), &GET))
         .collect();
     assert_eq!(s.media().decode_queued(), DECODE_QUEUE);
     for rx in &queued {
         assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
     }
     // One more: the oldest queued entry is dropped with 503, at once.
-    let newest = ask(&r.host, &url(tok, "display"), &GET);
+    let newest = ask(&r.host, &url(tok, "thumb"), &GET);
     let dropped = now(&queued[0]);
     assert_eq!(dropped.status, 503);
     assert!(dropped.body.is_empty());

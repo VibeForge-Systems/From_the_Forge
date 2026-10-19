@@ -272,7 +272,7 @@ describe('viewer wrappers (M5)', () => {
     await ipc.getConversations(3, [sid(1), sid(2)]);
     await ipc.getThreadPage({ viewer: 3, chatId: sid(1), anchor: { kind: 'newest' }, direction: 'older', limit: 50 });
     await ipc.getReplyThread({ viewer: 3, messageId: sid(9) });
-    await ipc.getMessageDetail({ viewer: 3, messageId: sid(9), reactionPage: 0 });
+    await ipc.getMessageDetail({ viewer: 3, messageId: sid(9), reactionPage: { after: sid(8) } });
     await ipc.getMessageText({ viewer: 3, bodyId: sid(4), fromUtf16: 0 });
     await ipc.getDayCounts({ viewer: 3, chatId: sid(1), boundsUtcMs: [0, 86_400_000] });
     await ipc.seekDate({ viewer: 3, chatId: sid(1), utcMs: 0, dir: 'onOrAfter' });

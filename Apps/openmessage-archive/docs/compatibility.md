@@ -854,8 +854,9 @@ CPUs); not CI, not a desktop, no window, synthetic data only:
 
 - **The protocol's core, without a window** (`viewer::media` tests, on an
   archive imported from `view-media-plain`, with a fake decoder): every
-  refusal of spec §13.6 answers `404` with an empty body before `dispatch`
-  returns; renditions are served from the decode workers and then from the
+  refusal of spec §13.6 except an evicted token answers `404` with an
+  empty body before `dispatch` returns (eviction is tested on the token
+  table only, bound 50,000, not through `dispatch`); renditions are served from the decode workers and then from the
   memory cache without a queue; a full decode queue drops its oldest entry
   with `503`; five decoder crashes turn previews off; tokens stop working
   when the session closes or is reopened, and the session's decoders end;
@@ -901,6 +902,72 @@ permission hooks fire on either engine (including downloads from native
 times on Windows; decode times on real hardware with synthetic photos. No
 row of this section has run on Windows; CI on `windows-2022` will compile
 and run the same tests.
+
+Also **not tested** yet, for either engine (each is a claim in
+`privacy.md`, to be recorded per engine on the M5 manual checklist of
+slice 5k): whether the web engine's own sandbox is on (WebKitGTK's
+bubblewrap sandbox on Linux, WebView2's renderer sandbox on Windows);
+whether print-to-PDF or the engine's print dialog can write what the
+window shows; whether either engine caches media or page data on disk
+despite `no-store` and the incognito profile; whether Windows Recall
+captures the window, with and without capture protection.
+
+### Milestone 5 PR A review fixes
+
+Run in the Linux container on 2026-10-19 (Rust 1.97.0, debug build, 4
+CPUs); not CI, not a desktop, no window, synthetic data only. Each fix has
+a regression test that ran there:
+
+- **Masking:** a `message_text` chunk past an untrusted code range is
+  withheld whole (`chunks_past_an_untrusted_code_range_stay_masked`); an
+  earlier edit text whose runs were cut short is withheld whole
+  (`an_edit_text_with_incomplete_runs_is_withheld_whole`); "Show earlier
+  text" keeps that text's one-time codes masked
+  (`revealed_earlier_text_keeps_its_codes_masked`).
+- **Search:** a hit whose body stopped being current after the search
+  sends no text without `includeEarlier`
+  (`a_hit_whose_body_stopped_being_current_withholds_its_text`); the words
+  cap counts messages in both plans and keeps "current" labels when the
+  cut leaves an earlier body first
+  (`the_words_cap_counts_messages_and_keeps_current_labels`); a new search
+  interrupts the old one before it waits for the search reader
+  (`a_new_search_interrupts_the_old_one_before_waiting_for_the_reader`,
+  which fails when the order is reversed).
+- **Threads and details:** a reaction to a folded reaction, and a cycle of
+  reactions, stay visible and counted
+  (`a_reaction_to_a_folded_reaction_stays_visible`); the reply thread
+  keeps the earliest replies by date
+  (`the_reply_thread_keeps_the_earliest_replies_by_date`); a `Scan` that
+  used up the call's deadline still assembles its items
+  (`a_scan_that_used_up_the_deadline_still_assembles_its_items`, which
+  fails without the fix); the reaction history pages by a remembered
+  keyset, so a row added between calls repeats nothing
+  (`reaction_history_pages_every_row_in_date_order`,
+  `reaction_history_pages_by_remembered_positions`); unsend part counts
+  and the whole-bubble label come only from recorded parts
+  (`an_unsend_with_unknown_parts_is_not_called_whole`); a message whose
+  direction is not recorded has no sender (the viewer catalogue's
+  re-pinned expectations); anchors moved by the page-size cut keep their
+  keys (`oversized_pages_are_cut_to_the_bound`).
+- **Shell and media:** an unreadable viewer preference keeps the others
+  and fails to its most private value with a notice
+  (`an_unreadable_viewer_preference_keeps_the_others_and_gives_a_notice`);
+  the surfaced set evicts least recently surfaced instead of refusing new
+  attachments; two requests for one rendition decode once and count one
+  crash (`concurrent_requests_for_one_rendition_decode_once`); a helper
+  killed between requests is replaced without failing the next image
+  (`a_helper_that_died_between_requests_does_not_fail_the_next_image`,
+  Linux only); the log check asserts that `media` events carry only
+  outcome, status, size bucket and elapsed time, and that no served or
+  fixture size appears as a field value; the `protocol-asset` check reads
+  `cargo metadata --filter-platform <host>`.
+- **Windows:** a test that a junctioned `<hh>` directory (to an identical
+  copy) is refused by `inspect_blob`, `verify_blob`, `open_range` and
+  `read_blob_verified`, and a file symlink where the runner allows one
+  (`store_readers_refuse_a_junctioned_fan_out_directory_on_windows`), was
+  added for `windows-2022` CI. **It has not run yet** (no Windows host
+  here); until a CI run records its `RECORD` lines, the junction refusal of
+  the M5 readers on Windows is untested.
 
 ## iOS versions and backup types
 

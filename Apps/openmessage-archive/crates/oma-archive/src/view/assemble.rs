@@ -27,11 +27,13 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OptionalExtension};
 
-use super::conversations::{preview_of, PreviewBody, FLOOR_2007_NS, ONE_TIME_CODE_BIT};
+use super::conversations::{
+    masked_preview, preview_of, PreviewBody, FLOOR_2007_NS, ONE_TIME_CODE_BIT,
+};
 use super::text::{facts, url_runs, utf16_len, ContentText, MaskKind, OptContent, TextPiece};
 use super::{
-    is_reaction, stored_as_blob, AttachmentId, BodyId, CappedCount, ChatId, DirectionCode,
-    HandleId, MessageId, COL_BODY_TEXT_RAW, IDENTIFIER_UTF16,
+    fold_target, is_reaction, reaction_target, stored_as_blob, AttachmentId, BodyId, CappedCount,
+    ChatId, DirectionCode, HandleId, MessageId, COL_BODY_TEXT_RAW, IDENTIFIER_UTF16,
 };
 use crate::import::LineageId;
 use crate::reader::BlobId;
@@ -130,6 +132,11 @@ pub enum SenderReason {
     Unreadable,
     /// A non-zero `handle_id` that resolves to no handle here.
     NotFound,
+    /// `is_from_me` is NULL, unreadable or out of range: the row may be
+    /// the owner's, whose `handle_id` is the other party, so the recorded
+    /// handle is never shown as the sender ("Sender not determinable:
+    /// direction not recorded").
+    DirectionNotRecorded,
 }
 
 /// The backup set a direction value came from, when more than one lineage
@@ -199,6 +206,10 @@ pub enum AssocVisibility {
     TargetInAnotherChat(MessageId),
     /// A reaction folded into its target, a timeline item of this chat.
     Folded(MessageId),
+    /// A reaction whose target is itself a reaction that folds (or would,
+    /// in a cycle): the target is not a timeline item, so this row stays
+    /// visible rather than disappear.
+    TargetFolds(MessageId),
 }
 
 /// The association facts of a message that is not a plain message.
@@ -356,10 +367,13 @@ pub enum EarlierText {
     /// Withheld until "Show earlier text".
     Withheld(WithheldReason),
     /// Revealed on request: the newest earlier version with text, and the
-    /// session whose backup first held it.
+    /// session whose backup first held it. Its one-time codes are masked
+    /// unless the request also reveals codes (D115), by the same rule as
+    /// a preview: a text whose code ranges cannot be trusted is withheld
+    /// whole.
     Revealed {
         reason: WithheldReason,
-        text: ContentText,
+        text: Vec<TextPiece>,
         session: i64,
     },
 }
@@ -375,9 +389,11 @@ pub struct EditFacts {
     pub edited_parts: Vec<i64>,
     /// The parts listed as unsent.
     pub unsent_parts: Vec<i64>,
-    /// The parts known for the bubble ("1 of 3 parts unsent").
-    pub part_count: u32,
-    /// Every part is unsent: a whole-bubble label.
+    /// The parts known for the bubble ("1 of 3 parts unsent"): `None`
+    /// when neither the decoded runs nor the summary's `otr` record them.
+    pub part_count: Option<u32>,
+    /// Every part is unsent: a whole-bubble label. Never set when the
+    /// part set is unknown.
     pub unsent_whole: bool,
     /// Body rows stored for the message ("N stored versions").
     pub stored_versions: u32,
@@ -582,7 +598,8 @@ const SQL_VERSIONS: &str = "SELECT b.id, b.first_rank, b.first_session_id, \
        b.display_text IS NOT NULL AND b.display_text IS NOT c.display_text \
      FROM message_body b LEFT JOIN message_body c ON c.id = ?2 \
      WHERE b.message_id = ?1";
-const SQL_BODY_TEXT: &str = "SELECT display_text FROM message_body WHERE id = ?1";
+const SQL_BODY_TEXT: &str =
+    "SELECT display_text, display_source, run_issue, otr FROM message_body WHERE id = ?1";
 const SQL_LINEAGES_SEEN: &str =
     "SELECT lineage_id, last_rank FROM lineage_seen WHERE entity = 3 AND row_id = ?1";
 const SQL_RD_MARKERS: &str =
@@ -1101,8 +1118,10 @@ fn item_row(c: &Connection, id: i64) -> rusqlite::Result<Option<ItemRow>> {
 }
 
 fn sender(row: &ItemRow) -> SenderReason {
-    if row.is_from_me == Some(1) && row.is_from_me_st.is_none() {
-        return SenderReason::FromMe;
+    match DirectionCode::of(row.is_from_me, row.is_from_me_st) {
+        DirectionCode::You => return SenderReason::FromMe,
+        DirectionCode::NotRecorded => return SenderReason::DirectionNotRecorded,
+        _ => {}
     }
     match row.handle_rowid_st.and_then(ValueState::from_code) {
         Some(ValueState::Absent) => return SenderReason::ColumnAbsent,
@@ -1164,7 +1183,9 @@ fn association(
                         Some(chat) => exists(c, SQL_IN_CHAT, chat, t)?,
                         None => exists(c, SQL_SHARE_A_CHAT, id, t)?,
                     };
-                    if here {
+                    if here && target_folds(c, chat, t)? {
+                        AssocVisibility::TargetFolds(MessageId::new(t))
+                    } else if here {
                         AssocVisibility::Folded(MessageId::new(t))
                     } else {
                         AssocVisibility::TargetInAnotherChat(MessageId::new(t))
@@ -1181,6 +1202,18 @@ fn association(
         emoji: (row.assoc_emoji.is_some() || row.assoc_emoji_st.is_some())
             .then(|| emoji_content(row.assoc_emoji.as_deref(), row.assoc_emoji_st)),
     }))
+}
+
+/// Whether target `t` would itself fold: in chat `chat`, or, without a
+/// chat, into a target it shares a chat with.
+fn target_folds(c: &Connection, chat: Option<i64>, t: i64) -> rusqlite::Result<bool> {
+    if let Some(chat) = chat {
+        return Ok(fold_target(c, chat, t)?.is_some());
+    }
+    match reaction_target(c, t)? {
+        Some(u) => exists(c, SQL_SHARE_A_CHAT, t, u),
+        None => Ok(false),
+    }
 }
 
 fn event(row: &ItemRow, item: Option<ItemKindCode>) -> Option<GroupEvent> {
@@ -1376,6 +1409,10 @@ fn body(
     ))
 }
 
+/// The largest `otr` entry count taken as a part count; a larger value is
+/// not believed (the summary is parsed from untrusted bytes).
+const MAX_OTR_PARTS: i64 = 4096;
+
 fn ints(c: &Connection, sql: &str, id: i64) -> rusqlite::Result<Vec<i64>> {
     let mut st = c.prepare(sql)?;
     let rows = st.query_map([id], |r| r.get::<_, i64>(0))?;
@@ -1403,13 +1440,26 @@ fn edits(
         ),
         None => (Vec::new(), Vec::new(), Vec::new()),
     };
+    // The parts of the bubble are known only from what is recorded: the
+    // `part` attributes of the decoded runs, and the summary's `otr`
+    // entry count (the original parts, §3.6). Nothing is assumed: with
+    // neither, the part set is unknown, so no whole-bubble label is given
+    // and no part count is reported.
     let mut parts: BTreeSet<i64> = part_indexes.into_iter().collect();
-    if parts.is_empty() && matches!(view, BodyView::Text(_)) {
-        parts.insert(0);
+    if let Some(b) = body {
+        let otr: Option<i64> = c
+            .prepare(SQL_BODY_TEXT)?
+            .query_row([b], |r| r.get::<_, Option<i64>>(3))
+            .optional()?
+            .flatten();
+        if let Some(n) = otr.filter(|n| (1..=MAX_OTR_PARTS).contains(n)) {
+            parts.extend(0..n);
+        }
     }
     let unsent_set: BTreeSet<i64> = unsent.iter().copied().collect();
-    let unsent_whole = !unsent.is_empty() && parts.is_subset(&unsent_set);
-    let part_count = u32_of(parts.union(&unsent_set).count());
+    let known = !parts.is_empty();
+    let unsent_whole = known && !unsent.is_empty() && parts.is_subset(&unsent_set);
+    let part_count = known.then(|| u32_of(parts.union(&unsent_set).count()));
 
     // Versions, ordered by first rank: which earlier ones hold other text.
     let mut versions: Vec<(Vec<u8>, i64, i64, bool)> = {
@@ -1443,23 +1493,28 @@ fn edits(
         };
         match other.last() {
             Some(newest) if reveal.earlier_text => {
-                let text: Option<String> = c
+                type EarlierRow = (Option<String>, Option<i64>, Option<i64>);
+                let row: Option<EarlierRow> = c
                     .prepare(SQL_BODY_TEXT)?
                     .query_row([newest.1], |r| {
-                        Ok(match r.get_ref(0)? {
+                        let text = match r.get_ref(0)? {
                             ValueRef::Text(t) => Some(String::from_utf8_lossy(t).into_owned()),
                             _ => None,
-                        })
+                        };
+                        Ok((text, r.get(1)?, r.get(2)?))
                     })
-                    .optional()?
-                    .flatten();
-                match text {
-                    Some(t) => EarlierText::Revealed {
+                    .optional()?;
+                match row {
+                    Some((Some(t), source, run_issue)) => EarlierText::Revealed {
                         reason,
-                        text: ContentText::from_str(&t, caps.body_utf16),
+                        text: if reveal.one_time_code {
+                            vec![TextPiece::Text(ContentText::from_str(&t, caps.body_utf16))]
+                        } else {
+                            masked_preview(c, newest.1, &t, source, run_issue, caps.body_utf16)?
+                        },
                         session: newest.2,
                     },
-                    None => EarlierText::Withheld(reason),
+                    _ => EarlierText::Withheld(reason),
                 }
             }
             _ => EarlierText::Withheld(reason),
@@ -1941,7 +1996,12 @@ pub(crate) fn size_bound(m: &AssembledMessage) -> usize {
         }
     }
     if let EarlierText::Revealed { text, .. } = &m.edit.earlier {
-        n += text_bound(text);
+        for p in text {
+            n += FIELD;
+            if let TextPiece::Text(t) = p {
+                n += text_bound(t);
+            }
+        }
     }
     n += (m.edit.edited_parts.len() + m.edit.unsent_parts.len()) * 24;
     n += m.labels.len() * FIELD + m.recently_deleted.len() * 4 * FIELD;

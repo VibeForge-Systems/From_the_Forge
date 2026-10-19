@@ -280,9 +280,11 @@ pub struct SearchHit {
     /// A reaction or another association (when events are included); a
     /// folded reaction opens its target (§3.5 step 5).
     pub association: Option<AssocKindCode>,
+    /// Read when the hit is served, not when the search ran.
     pub version: HitVersion,
     /// `None` when the body has no text any more (it changed since the
-    /// search).
+    /// search), or when it is no longer the current body and the request
+    /// did not include earlier versions (D115).
     pub text: Option<HitText>,
 }
 
@@ -524,7 +526,15 @@ type MessageRow = (
     Option<i64>,
 );
 
-fn hit_facts(c: &Connection, e: SetEntry) -> rusqlite::Result<Option<HitFacts>> {
+/// The facts of hit `e`, read now: whether its body is still the current
+/// one is decided from `current_body_id` at read time, never from the set
+/// (an import may have made it earlier since the search). An earlier body
+/// shows no text unless the request included earlier versions (D115).
+fn hit_facts(
+    c: &Connection,
+    e: SetEntry,
+    include_earlier: bool,
+) -> rusqlite::Result<Option<HitFacts>> {
     let row: Option<MessageRow> = c
         .prepare(SQL_HIT_MESSAGE)?
         .query_row([e.message.get()], |r| {
@@ -550,7 +560,8 @@ fn hit_facts(c: &Connection, e: SetEntry) -> rusqlite::Result<Option<HitFacts>> 
         )?
         .collect::<rusqlite::Result<_>>()?;
     let others = i64::try_from(chats.len().saturating_sub(1)).unwrap_or(i64::MAX);
-    let version = if e.current {
+    let current = current_body == Some(e.body.get());
+    let version = if current {
         HitVersion::Current
     } else {
         let unsent = match current_body {
@@ -578,6 +589,10 @@ fn hit_facts(c: &Connection, e: SetEntry) -> rusqlite::Result<Option<HitFacts>> 
         })
         .optional()?;
     let (text, source, run_issue) = body.unwrap_or((None, None, None));
+    // Earlier text is shown only on the explicit reveal of earlier
+    // versions: a body that stopped being current since the search sends
+    // no text otherwise.
+    let text = text.filter(|_| current || include_earlier);
     let masks: Vec<(u32, u32)> = if text.is_some() {
         let clamp = |v: i64| u32::try_from(v.max(0)).unwrap_or(u32::MAX);
         c.prepare(SQL_FLAGGED_PARTS)?
@@ -730,7 +745,7 @@ impl ArchiveReader {
                 let mut out = Vec::with_capacity(entries.len());
                 for e in &entries {
                     p.checkpoint()?;
-                    if let Some(f) = p.sql(|c| hit_facts(c, *e))? {
+                    if let Some(f) = p.sql(|c| hit_facts(c, *e, q.include_earlier))? {
                         out.push(f);
                     }
                 }

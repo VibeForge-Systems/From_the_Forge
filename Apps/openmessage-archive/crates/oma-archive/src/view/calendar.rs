@@ -7,10 +7,11 @@
 //!   encoder, so a seek key equals the import's key for the same instant.
 //! - **Visible items.** A reaction that folds into a timeline item of the
 //!   same chat (§3.5 step 3) is not an item: a seek moves past it to the
-//!   next visible item, and a day does not count it. The day count's SQL
-//!   states the folding rule of [`super::folds_into`] in one statement; a
-//!   NULL `assoc_kind` is not a reaction (`coalesce`, so SQL's NULL logic
-//!   never drops a visible row).
+//!   next visible item, and a day does not count it. A reaction whose
+//!   target would fold itself is an item. The day count's SQL states the
+//!   folding rule of [`super::folds_into`] in one statement; a NULL
+//!   `assoc_kind` is not a reaction (`coalesce`, so SQL's NULL logic never
+//!   drops a visible row).
 //! - **Rust is time-zone-free (D104).** The caller passes UTC instants: the
 //!   webview builds local-day bounds with ICU and DST-correct days.
 
@@ -55,7 +56,13 @@ const SQL_DAY_COUNT: &str = "SELECT count(*) FROM chat_message cm \
            OR coalesce(m.assoc_kind, 0) BETWEEN 20 AND 27) \
          AND EXISTS (SELECT 1 FROM message t \
            JOIN chat_message x ON x.chat_id = cm.chat_id AND x.message_id = t.id \
-           WHERE t.key_kind = 1 AND t.guid = m.assoc_target_guid))";
+           WHERE t.key_kind = 1 AND t.guid = m.assoc_target_guid \
+             AND NOT (t.assoc_present = 1 \
+               AND (coalesce(t.assoc_kind, 0) BETWEEN 10 AND 17 \
+                 OR coalesce(t.assoc_kind, 0) BETWEEN 20 AND 27) \
+               AND EXISTS (SELECT 1 FROM message u \
+                 JOIN chat_message y ON y.chat_id = cm.chat_id AND y.message_id = u.id \
+                 WHERE u.key_kind = 1 AND u.guid = t.assoc_target_guid))))";
 
 #[cfg_attr(not(feature = "fault-injection"), allow(dead_code))]
 pub(crate) fn plan_statements() -> Vec<(&'static str, String)> {

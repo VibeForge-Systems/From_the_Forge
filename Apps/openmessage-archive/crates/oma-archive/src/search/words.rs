@@ -2,9 +2,12 @@
 //!
 //! - **Global plan:** FTS5 over the whole archive, newest body rowid
 //!   first, each match joined to its body and message by primary key and
-//!   filtered in SQL, at most [`super::SEARCH_MATCH_CAP`] + 1 rows.
-//!   Rowid order is import order, not date, so a capped global search is
-//!   not the newest matches, and says so.
+//!   filtered in SQL, read until [`super::SEARCH_MATCH_CAP`] + 1 distinct
+//!   **messages** (the cap counts messages, as the exact scan does, never
+//!   body rows). Rowid order is import order, not date, so a capped global
+//!   search is not the newest matches, and says so. When the cut leaves an
+//!   admitted message without its current body, that body is probed, so a
+//!   hit is never labelled "earlier" when its current text matches too.
 //! - **Scoped plan** (a conversation filter): with the global plan only,
 //!   a common word in a small chat walks every archive-wide hit. So a
 //!   chat of at most [`SCOPED_CHAT_ROWS`] timeline rows (counted through
@@ -19,6 +22,7 @@
 //!   a 5 s deadline. Any SQLite error but an interrupt is
 //!   `SearchUnavailable`: the index cannot be read, browsing still works.
 
+use std::collections::HashMap;
 use std::time::Instant;
 
 use rusqlite::{Connection, OptionalExtension};
@@ -40,7 +44,7 @@ pub const SCOPED_CHAT_ROWS: u64 = 5_000;
 /// Messages per scoped keyset batch.
 pub const SCOPED_BATCH: usize = 500;
 
-pub(crate) const SQL_GLOBAL: &str = "SELECT b.id, m.id, m.sort_key, m.current_body_id = b.id \
+pub(crate) const SQL_GLOBAL: &str = "SELECT b.id, m.id, m.sort_key, m.current_body_id \
      FROM message_fts f JOIN message_body b ON b.id = f.rowid \
      JOIN message m ON m.id = b.message_id \
      WHERE f.message_fts MATCH ?1 \
@@ -100,53 +104,119 @@ pub(crate) fn chat_batch(
     rows.collect()
 }
 
+/// The global plan: the matches of at most [`SEARCH_MATCH_CAP`] distinct
+/// messages, and whether there were more.
 fn global(
     p: &Phase<'_>,
     q: &SearchRequest,
     expr: &str,
     range: (&[u8], &[u8]),
-) -> Result<Vec<Match>, ArchiveError> {
+) -> Result<(Vec<Match>, bool), ArchiveError> {
+    let cap = crate::fault::search_match_cap(SEARCH_MATCH_CAP);
     let who: Option<i64> = match q.filters.sender {
         super::SenderFilter::Anyone => None,
         super::SenderFilter::Me => Some(1),
         super::SenderFilter::Others => Some(0),
     };
+    // message -> (its current body, whether that body was collected)
+    let mut admitted: HashMap<i64, (Option<i64>, bool)> = HashMap::new();
+    let mut out: Vec<Match> = Vec::new();
+    let mut capped = false;
+    // The lowest body rowid read: every matching body above it was seen.
+    let mut lowest: Option<i64> = None;
     p.sql(|c| {
         let mut st = c.prepare(SQL_GLOBAL)?;
-        let rows = st.query_map(
-            rusqlite::params![
-                expr,
-                q.include_earlier,
-                q.include_events,
-                range.0,
-                range.1,
-                q.filters.has_attachment,
-                who,
-                q.filters.chat.map(|c| c.get()),
-                limit(SEARCH_MATCH_CAP + 1)
-            ],
-            |r| {
-                Ok(Match {
-                    body: r.get(0)?,
-                    message: r.get(1)?,
-                    key: r.get(2)?,
-                    current: r.get::<_, i64>(3)? == 1,
-                })
-            },
-        )?;
-        rows.collect::<rusqlite::Result<Vec<Match>>>()
-    })
+        let mut rows = st.query(rusqlite::params![
+            expr,
+            q.include_earlier,
+            q.include_events,
+            range.0,
+            range.1,
+            q.filters.has_attachment,
+            who,
+            q.filters.chat.map(|c| c.get()),
+            // Without earlier versions a message has one matching body,
+            // so the cap holds in SQL; with them, rows are read until the
+            // cap's distinct messages (bounded by the phase's budget).
+            if q.include_earlier {
+                -1
+            } else {
+                limit(cap + 1)
+            }
+        ])?;
+        while let Some(r) = rows.next()? {
+            let body: i64 = r.get(0)?;
+            let message: i64 = r.get(1)?;
+            let current_body: Option<i64> = r.get(3)?;
+            let current = current_body == Some(body);
+            let full = admitted.len() == cap;
+            match admitted.get_mut(&message) {
+                Some(e) => e.1 |= current,
+                None if full => {
+                    capped = true;
+                    break;
+                }
+                None => {
+                    admitted.insert(message, (current_body, current));
+                }
+            }
+            lowest = Some(body);
+            out.push(Match {
+                body,
+                message,
+                key: r.get(2)?,
+                current,
+            });
+        }
+        Ok(())
+    })?;
+    // The cut may have left an admitted message's current body unread
+    // (its rowid is below the last one read): probe it.
+    if capped && q.include_earlier {
+        let mut extra = Vec::new();
+        let mut probe = p.conn().prepare(SQL_PROBE).map_err(|e| p.err(&e))?;
+        for m in &out {
+            let Some(&(Some(cur), false)) = admitted.get(&m.message) else {
+                continue;
+            };
+            if lowest.is_some_and(|low| cur >= low) {
+                continue;
+            }
+            p.checkpoint()?;
+            let hit = probe
+                .query_row(rusqlite::params![expr, cur], |_| Ok(()))
+                .optional()
+                .map_err(|e| p.err(&e))?;
+            if let Some(e) = admitted.get_mut(&m.message) {
+                e.1 = true;
+            }
+            if hit.is_some() {
+                extra.push(Match {
+                    body: cur,
+                    message: m.message,
+                    key: m.key.clone(),
+                    current: true,
+                });
+            }
+        }
+        out.extend(extra);
+    }
+    Ok((out, capped))
 }
 
+/// The scoped plan: the matches of at most [`SEARCH_MATCH_CAP`] distinct
+/// messages (every matching body of each), and whether there were more.
 fn scoped(
     p: &Phase<'_>,
     q: &SearchRequest,
     expr: &str,
     chat: i64,
     ranges: &[KeyRange],
-) -> Result<Vec<Match>, ArchiveError> {
+) -> Result<(Vec<Match>, bool), ArchiveError> {
+    let cap = crate::fault::search_match_cap(SEARCH_MATCH_CAP);
     let filter = RowFilter::of(q);
     let mut out: Vec<Match> = Vec::new();
+    let mut messages = 0usize;
     let c = p.conn();
     let mut st = RowStmts::new(c).map_err(|e| p.err(&e))?;
     let mut probe = c.prepare(SQL_PROBE).map_err(|e| p.err(&e))?;
@@ -172,22 +242,27 @@ fn scoped(
                         } else {
                             facts.current_body.into_iter().collect()
                         };
+                        let mut hits = Vec::new();
                         for b in bodies {
                             let hit = probe
                                 .query_row(rusqlite::params![expr, b], |_| Ok(()))
                                 .optional()
                                 .map_err(|e| p.err(&e))?;
                             if hit.is_some() {
-                                out.push(Match {
+                                hits.push(Match {
                                     message: id,
                                     body: b,
                                     key: key.clone(),
                                     current: facts.current_body == Some(b),
                                 });
-                                if out.len() > SEARCH_MATCH_CAP {
-                                    return Ok(out);
-                                }
                             }
+                        }
+                        if !hits.is_empty() {
+                            if messages == cap {
+                                return Ok((out, true));
+                            }
+                            messages += 1;
+                            out.extend(hits);
                         }
                     }
                 }
@@ -198,11 +273,11 @@ fn scoped(
             }
         }
     }
-    Ok(out)
+    Ok((out, false))
 }
 
-/// Collect the matches of a words search: the plan used, at most
-/// [`SEARCH_MATCH_CAP`] matches, and whether there were more.
+/// Collect the matches of a words search: the plan used, the matches of
+/// at most [`SEARCH_MATCH_CAP`] messages, and whether there were more.
 pub(crate) fn collect(
     conn: &ReadConn,
     q: &SearchRequest,
@@ -227,7 +302,7 @@ pub(crate) fn collect(
             }
             _ => None,
         };
-        let (plan, mut matches) = match scoped_chat {
+        let (plan, (matches, capped)) = match scoped_chat {
             Some(chat) => (
                 WordsPlan::Scoped,
                 scoped(p, q, expr, chat, ranges).map_err(fts_err)?,
@@ -243,8 +318,6 @@ pub(crate) fn collect(
                 )
             }
         };
-        let capped = matches.len() > SEARCH_MATCH_CAP;
-        matches.truncate(SEARCH_MATCH_CAP);
         Ok((plan, matches, capped))
     })
 }

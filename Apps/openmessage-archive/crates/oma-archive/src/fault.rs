@@ -241,6 +241,15 @@ pub mod hooks {
         /// Replace the most messages one exact-text scan examines
         /// (M5 §4.4).
         pub scan_examined_limit: Option<u64>,
+        /// Replace the most messages one words search keeps
+        /// (`SEARCH_MATCH_CAP`, M5 §4.3).
+        pub search_match_cap: Option<usize>,
+        /// Replace the 2 s window of a page call (`thread_page`,
+        /// `reply_thread`; milliseconds).
+        pub page_window_ms: Option<u64>,
+        /// Sleep this long between a page call's `Scan` and `Assembly`
+        /// phases: a `Scan` that used up the call's deadline (M5 §3.2).
+        pub pause_after_scan_ms: Option<u64>,
         /// Replace the deadline of the `highlight()` phase of
         /// `search_hits` (milliseconds; M5 §4.5). The op budget cannot see
         /// work inside FTS5's own calls, so the deadline is what stops it.
@@ -581,6 +590,19 @@ pub(crate) fn cancel_at_view_tick() -> Option<u64> {
     }
 }
 
+/// The words search's match cap to use instead of `n`, if a test set one.
+#[inline]
+pub(crate) fn search_match_cap(n: usize) -> usize {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current().search_match_cap.unwrap_or(n)
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        n
+    }
+}
+
 /// The scoped-search threshold to use instead of `rows`, if a test set one.
 #[inline]
 pub(crate) fn scoped_search_rows(rows: u64) -> u64 {
@@ -605,6 +627,32 @@ pub(crate) fn scan_examined_limit(n: u64) -> u64 {
     #[cfg(not(feature = "fault-injection"))]
     {
         n
+    }
+}
+
+/// A page call's window to use instead of `w`, if a test set one.
+#[inline]
+pub(crate) fn page_window(w: std::time::Duration) -> std::time::Duration {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current()
+            .page_window_ms
+            .map_or(w, std::time::Duration::from_millis)
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        w
+    }
+}
+
+/// Sleep between a page call's `Scan` and `Assembly`, if a test asked.
+#[inline]
+pub(crate) fn pause_after_scan() {
+    #[cfg(feature = "fault-injection")]
+    {
+        if let Some(ms) = hooks::current().pause_after_scan_ms {
+            std::thread::sleep(std::time::Duration::from_millis(ms));
+        }
     }
 }
 

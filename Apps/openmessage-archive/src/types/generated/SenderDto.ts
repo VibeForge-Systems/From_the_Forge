@@ -4,4 +4,4 @@ import type { SafeId } from "./SafeId";
 /**
  * Who sent a message, as recorded. Never filled in from participants.
  */
-export type SenderDto = { "kind": "fromMe" } | { "kind": "resolved", handle: SafeId, } | { "kind": "noSender" } | { "kind": "columnAbsent" } | { "kind": "unreadable" } | { "kind": "notFound" };
+export type SenderDto = { "kind": "fromMe" } | { "kind": "resolved", handle: SafeId, } | { "kind": "noSender" } | { "kind": "columnAbsent" } | { "kind": "unreadable" } | { "kind": "notFound" } | { "kind": "directionNotRecorded" };

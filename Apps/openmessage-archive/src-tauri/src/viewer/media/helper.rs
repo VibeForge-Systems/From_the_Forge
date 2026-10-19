@@ -29,6 +29,7 @@ use std::ffi::OsString;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -370,6 +371,30 @@ impl HelperHost {
         self.spawned
     }
 
+    /// The running helper's process id (tests and diagnostics).
+    pub fn helper_pid(&self) -> Option<u32> {
+        let r = self.running.as_ref()?;
+        let c = r.child.lock().ok()?;
+        Some(c.id())
+    }
+
+    /// Whether the running helper has exited since its last answer (killed
+    /// from outside, or by a watchdog that fired as an answer arrived).
+    fn running_exited(&self) -> bool {
+        self.running.as_ref().is_some_and(|r| {
+            r.child
+                .lock()
+                .map(|mut c| !matches!(c.try_wait(), Ok(None)))
+                .unwrap_or(true)
+        })
+    }
+
+    fn drop_running(&mut self) {
+        if let Some(r) = self.running.take() {
+            r.kill();
+        }
+    }
+
     fn ensure(&mut self) -> Option<&mut Running> {
         if self.running.is_none() {
             let mut child = self.command.as_ref()?.spawn().ok()?;
@@ -389,53 +414,93 @@ impl HelperHost {
     }
 
     /// Send one request (`code` is the rendition's, or the test crash).
+    ///
+    /// A helper that died between requests is stale, not a crash of this
+    /// image: when it has already exited, or the request header cannot
+    /// be written (it read nothing of this image), it is replaced and the
+    /// request is sent once more, without blaming the image.
     pub fn request(&mut self, bytes: &[u8], code: u8, limits: &RenderLimits) -> RenderOutcome {
-        let timeout = self.timeout;
-        let Some(run) = self.ensure() else {
-            return RenderOutcome::Crashed;
-        };
-        // A watchdog kills a helper that does not answer in time; the
-        // blocked read then sees EOF.
-        let (done, wait) = mpsc::channel::<()>();
-        let child = Arc::clone(&run.child);
-        let dog = std::thread::Builder::new()
-            .name("oma-decode-watchdog".to_owned())
-            .spawn(move || {
-                if let Err(RecvTimeoutError::Timeout) = wait.recv_timeout(timeout) {
-                    if let Ok(mut c) = child.lock() {
-                        let _ = c.kill();
+        for attempt in 0..2 {
+            if self.running_exited() {
+                self.drop_running();
+            }
+            let timeout = self.timeout;
+            let Some(run) = self.ensure() else {
+                return RenderOutcome::Crashed;
+            };
+            // A watchdog kills a helper that does not answer in time; the
+            // blocked read then sees EOF. It says so first, so a helper it
+            // killed is never kept for the next request.
+            let (done, wait) = mpsc::channel::<()>();
+            let child = Arc::clone(&run.child);
+            let fired = Arc::new(AtomicBool::new(false));
+            let fired_dog = Arc::clone(&fired);
+            let dog = std::thread::Builder::new()
+                .name("oma-decode-watchdog".to_owned())
+                .spawn(move || {
+                    if let Err(RecvTimeoutError::Timeout) = wait.recv_timeout(timeout) {
+                        fired_dog.store(true, Ordering::SeqCst);
+                        if let Ok(mut c) = child.lock() {
+                            let _ = c.kill();
+                        }
                     }
+                });
+            let outcome = exchange(run, bytes, code, limits);
+            drop(done);
+            if let Ok(h) = dog {
+                let _ = h.join();
+            }
+            let fired = fired.load(Ordering::SeqCst);
+            match outcome {
+                Exchange::Done(o) => {
+                    if fired {
+                        self.drop_running();
+                    }
+                    return o;
                 }
-            });
-        let outcome = exchange(run, bytes, code, limits);
-        drop(done);
-        if let Ok(h) = dog {
-            let _ = h.join();
-        }
-        match outcome {
-            Some(o) => o,
-            None => {
-                if let Some(r) = self.running.take() {
-                    r.kill();
+                Exchange::Stale if attempt == 0 && !fired => self.drop_running(),
+                _ => {
+                    self.drop_running();
+                    return RenderOutcome::Crashed;
                 }
-                RenderOutcome::Crashed
             }
         }
+        RenderOutcome::Crashed
     }
 }
 
-/// One request and its reply; `None` for anything that is not a
-/// well-formed reply.
-fn exchange(
-    run: &mut Running,
-    bytes: &[u8],
-    code: u8,
-    limits: &RenderLimits,
-) -> Option<RenderOutcome> {
-    let len = u64::try_from(bytes.len()).ok()?;
-    run.stdin
+/// How one exchange with the helper ended.
+enum Exchange {
+    /// A well-formed reply.
+    Done(RenderOutcome),
+    /// The request header could not be written: the helper was already
+    /// gone and read nothing of this image.
+    Stale,
+    /// Anything else that is not a well-formed reply.
+    Failed,
+}
+
+/// One request and its reply.
+fn exchange(run: &mut Running, bytes: &[u8], code: u8, limits: &RenderLimits) -> Exchange {
+    let Ok(len) = u64::try_from(bytes.len()) else {
+        return Exchange::Failed;
+    };
+    if run
+        .stdin
         .write_all(&request_header(code, limits, len))
-        .ok()?;
+        .is_err()
+    {
+        return Exchange::Stale;
+    }
+    match reply(run, bytes) {
+        Some(o) => Exchange::Done(o),
+        None => Exchange::Failed,
+    }
+}
+
+/// The rest of one request (its payload) and the reply; `None` for
+/// anything that is not a well-formed reply.
+fn reply(run: &mut Running, bytes: &[u8]) -> Option<RenderOutcome> {
     run.stdin.write_all(bytes).ok()?;
     run.stdin.flush().ok()?;
     let mut head = [0u8; REPLY_HEADER];
