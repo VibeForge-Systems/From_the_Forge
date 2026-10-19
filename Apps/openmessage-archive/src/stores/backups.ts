@@ -320,6 +320,7 @@ export const useBackups = defineStore('backups', () => {
       case 'importPreflight':
       case 'importFinished':
       case 'verifyFinished':
+      case 'exportFinished':
         return;
       case 'finished': {
         const d = details.value[backupId];

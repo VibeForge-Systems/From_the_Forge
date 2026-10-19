@@ -162,7 +162,9 @@ export const useArchives = defineStore('archives', () => {
     () =>
       liveJob.value !== null ||
       Object.values(details.value).some((d) => d.activeJob !== null) ||
-      entries.value.some((e) => e.status === 'importing' || e.status === 'verifying'),
+      entries.value.some(
+        (e) => e.status === 'importing' || e.status === 'verifying' || e.status === 'exporting',
+      ),
   );
 
   /** The gate to show: this page's job first, else one re-shown after a reload. */
@@ -570,9 +572,11 @@ export const useArchives = defineStore('archives', () => {
         current.phase = 'awaitingConfirmation';
         void loadDetails(archiveId);
         return;
-      // The backup jobs' events: never sent to an archive job.
+      // The backup jobs' events, and the export's (whose job the export
+      // dialog owns): never sent to an import or a verify.
       case 'finished':
       case 'extractionFinished':
+      case 'exportFinished':
         return;
       case 'importFinished':
         stagingRemoved = event.stagingRemoved;

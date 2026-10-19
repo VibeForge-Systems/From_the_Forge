@@ -219,6 +219,47 @@ impl ArchiveReader {
         })
     }
 
+    /// The preview of a search scope (M6 spec §3.6, §3.7, slice 6h): in
+    /// ONE read transaction, as [`ArchiveReader::export_preview`], the
+    /// request is re-run with `rerun_cap` when given (the "all matches"
+    /// option), the hits this export may write under `opts` are kept
+    /// ([`ExportSnapshot::search_scope`]), and their exact counts taken.
+    /// Like `export_preview` it needs no hold: the job repeats the same
+    /// steps inside its snapshot, under the lock, and compares. Returns
+    /// the scope and its counts.
+    pub fn export_search_preview(
+        &self,
+        req: &crate::search::SearchRequest,
+        set: &crate::search::SearchResultSet,
+        rerun_cap: Option<usize>,
+        opts: PreviewOptions,
+        cancel: &CancelToken,
+        progress: &mut dyn FnMut(PreviewProgress),
+    ) -> Result<(SearchScope, ExportPreview), ArchiveError> {
+        self.require_current()?;
+        self.conn().exporting(cancel, |phase| {
+            let ctx = phase.sql(Ctx::load)?;
+            let snap = ExportSnapshot {
+                reader: self,
+                phase,
+                stmts: StmtCache::new(phase.connection()),
+                ctx,
+            };
+            let rerun;
+            let set = match rerun_cap {
+                Some(cap) => {
+                    rerun = snap.search_ids(req, cap, &mut |_| {})?;
+                    &rerun
+                }
+                None => set,
+            };
+            let scope = snap.search_scope(req, set, opts)?;
+            let ids = ExportScopeIds::Messages(scope.groups.clone());
+            let counts = preview::precount(&snap, &ids, opts, progress)?;
+            Ok((scope, counts))
+        })
+    }
+
     /// The archive generation (M6 spec §3.7), in one read transaction
     /// under the reader's op budget.
     pub fn archive_generation(&self) -> Result<ArchiveGeneration, ArchiveError> {

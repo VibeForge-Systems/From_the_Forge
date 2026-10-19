@@ -2736,6 +2736,7 @@ dependencies = [
  "getrandom 0.3.4",
  "oma-archive",
  "oma-backup",
+ "oma-export",
  "oma-fs",
  "oma-messages",
  "serde",

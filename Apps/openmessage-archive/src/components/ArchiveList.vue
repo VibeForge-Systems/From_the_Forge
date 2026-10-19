@@ -3,7 +3,7 @@
 // free text, rendered with interpolation only (I7).
 import ArchiveStatusBadge from '@/components/ArchiveStatusBadge.vue';
 import { useArchives } from '@/stores/archives';
-import { archiveName, formatMs } from '@/services/importText';
+import { STATUS_LABEL, archiveName, formatMs } from '@/services/importText';
 import type { ArchiveEntryDto } from '@/types';
 
 const archives = useArchives();
@@ -61,10 +61,10 @@ function subtitle(e: ArchiveEntryDto): string {
           <span class="d-flex align-items-center gap-2">
             <span class="fw-semibold text-truncate me-auto">{{ name(e) }}</span>
             <span
-              v-if="e.status === 'importing' || e.status === 'verifying'"
+              v-if="e.status === 'importing' || e.status === 'verifying' || e.status === 'exporting'"
               class="spinner-border spinner-border-sm text-primary"
               role="status"
-              :aria-label="e.status === 'importing' ? 'Importing' : 'Verifying'"
+              :aria-label="STATUS_LABEL[e.status].text"
             ></span>
             <ArchiveStatusBadge :status="e.status" />
           </span>

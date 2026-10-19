@@ -561,10 +561,11 @@ prevent them:
 
 ## Exports (M6, in progress)
 
-*Status: the export engine is being built (PR A). No export can be made
-from the app yet: there is no Export dialog and no export job, and
-nothing is written outside the archive. The full section, with what an
-export writes and where, comes with the export job and the dialog.*
+*Status: the export engine is being built (PR A). The export job and its
+five IPC commands exist from slice 6h1, but there is no Export dialog
+yet (slice 6k), so no export can be made from the app's interface. The
+full section, with what an export writes and where, comes with the
+dialog.*
 
 What is already decided and enforced in the archive's export reads
 (`crates/oma-archive/src/export/`, tested there):
@@ -736,6 +737,47 @@ browser in this slice, and nothing was run on Windows):
   conversation's name appears only in the page body, not in a browser's
   tab, history or window title.
 
+### The export job and its commands (slice 6h1)
+
+What the shell does, tested on Linux without a window
+(`src-tauri/src/exports/`); nothing here has run on Windows or in a
+real window:
+
+- **The webview never names a path.** The destination comes from a
+  native save dialog or folder picker that Rust opens; Rust keeps the
+  folder in memory, bound to the export's draft, and the webview gets
+  only the name the export will have, closed warning codes and a free
+  space bucket. The dialog's title names every sensitive option of the
+  draft ("includes one-time codes", "includes text captured before an
+  unsend or edit", "keeps risky file extensions"). No destination is
+  remembered: `settings.json` gains nothing.
+- **The checks run on the folder's real path.** A folder inside an iPhone
+  backup, Apple's `MobileSync/Backup` or iMazing's `Backups`, or inside
+  the archive folder, is refused, as is one the export cannot write to.
+  A folder other accounts can change (Linux), a sync client's folder, a
+  network or virtual drive, and too little free space are warnings the
+  user must confirm; the checks run again when the export starts.
+- **A draft holds the request in memory only**, for at most 30 minutes:
+  the plan, the counts, the zone table, the destination, and for a
+  search scope the search request (with its query) and its result set.
+  The query is never sent back by the webview; the job drops it as soon
+  as the search has been re-run and re-checked. Closing the viewer, the
+  privacy screen and idle hide discard the draft and stop its count.
+- **Consent is checked twice.** Starting refuses when the archive changed
+  since the counts were taken, and the job counts again under the
+  archive's lock and stops before writing anything when more messages
+  would be revealed than the user confirmed.
+- **The job holds the archive's lock**, so no import or verify, in this
+  copy of the app or another, changes the archive while it is read; it
+  keeps running if the viewer closes.
+- **What the app keeps after an export:** the folder of each finished
+  export, in memory only, so "Show in folder" can open it; the app
+  forgets it when it closes. Unfinished exports are removed on cancel or
+  failure; one a crash leaves is offered for removal the next time the
+  same folder is chosen.
+- **Not available yet, and refused rather than faked:** PDF and XLSX,
+  image previews, saving one attachment, and leaving events out.
+
 ## Device identifiers (M2)
 
 The app never stores or keeps these fields from a backup: `Unique
@@ -892,7 +934,11 @@ path (archive folder names included), display text, any value from the
 archive's issue or history tables, or SQLite error text (only the primary
 code). From M5 they also never record search or filter text, ids, media
 tokens, media URLs, byte ranges or exact file sizes (sizes are bucketed).
-The persistent diagnostic log file is deferred to M8 (D71, a lean
+From M6 (slice 6h1) the export job and commands log kinds, option flags,
+buckets, outcomes and elapsed time only: never a destination, an
+export's file or folder name, a zone name, a draft id, a query or an
+exact count (an automated check over every export command is still to
+come, slice 6h2). The persistent diagnostic log file is deferred to M8 (D71, a lean
 awaiting the owner). Set `OMA_LOG=debug` for more detail. That
 setting changes how much is recorded, not which kinds of data.
 

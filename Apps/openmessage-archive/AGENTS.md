@@ -159,9 +159,11 @@ Each one is enforced in code. Keep it that way.
   and CSV writers from 6f, and the HTML writer from 6g; `oma-device` (M7)
   is planned. Each must build and test without
   Tauri. The shell's `src-tauri/src/backups/` (registry, job table, worker,
-  DTOs, messages) and `src-tauri/src/archives/` (listing, details, the
-  gate, the import and verify workers, DTOs, sentences) have no Tauri
-  types either, so they are tested without a window.
+  DTOs, messages), `src-tauri/src/archives/` (listing, details, the
+  gate, the import and verify workers, DTOs, sentences) and
+  `src-tauri/src/exports/` (drafts, destination checks, the export job,
+  DTOs, sentences; slice 6h1) have no Tauri types either, so they are
+  tested without a window.
 - **Frontend:**
   - Views live in `src/views/`, components in `src/components/`, and Pinia
     stores in `src/stores/`.
@@ -698,6 +700,34 @@ Never hand-edit generated files.
   --test golden_html`, then re-pin `GOLDEN_SUMS_SHA256`). The tag and
   time helpers shared with TXT are in `writer/shared.rs`; a change there
   must leave the TXT goldens unchanged unless a TXT rule changes too.
+- **The export job and commands (M6 slice 6h1, `src-tauri/src/exports/`,
+  `commands/exports.rs`).** Five commands, each through the five steps
+  (`exports::tests` checks the wiring) and each parsing its raw request
+  with `parse_raw` (a rejection never echoes input; `ipc.ts` wrappers use
+  `callRedacted`). `preview_export` makes the one draft (a new one
+  replaces it and cancels its count) and counts on the blocking pool;
+  `choose_export_destination` opens the native dialog in Rust, whose title
+  names every sensitive option, and checks the folder in its canonical
+  form (`exports::destination`; tests use a fake `DestinationProbe`);
+  `start_export` consumes the draft, checks the confirmations
+  (`worker::prepare`), the generation and the folder again
+  (`worker::recheck`), reserves `JobKind::Export` on the archive's
+  subject, takes `Library::hold_for_export` and runs
+  `worker::run_export`, which re-checks the generation inside the
+  snapshot, drops the search query after the re-run, calls
+  `pipeline::run_detailed`, releases the lock **before** freeing the slot
+  and sends one terminal event (`exportFinished` with counts only,
+  `cancelled` or `failed`, each with `stagingRemoved`). `close_viewer` and
+  `hide_viewer` go through `AppState::{close_viewer, hide_viewer}`, which
+  discard the draft first; keep it so. What PR A does not build (PDF,
+  XLSX, previews, the attachment scope, events off) is refused at the
+  draft with `exportUnavailable`, never faked. Export DTOs live in
+  `exports/dto.rs`: a new one goes into `ts_guard::M6_EXPORT_TYPES` (or
+  `M6_EVENT_TYPES` if `JobEvent` reaches it, which the archive guard then
+  reviews); the walks stay disjoint but for `M6_SHARED_TYPES`, and the
+  only `string`s are `archiveId`, `jobId` and the brands (`DraftId`,
+  `LocalDate`, `ZoneName`, `UntrustedText` for `displayName` only). The
+  path never crosses IPC and is never logged.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush

@@ -30,14 +30,17 @@
 //!    is published with one no-replace rename (§8.3, §8.4).
 //!
 //! On any error the staging is removed before the error is returned (and
-//! the sweep finds what a crash leaves). Nothing here logs.
+//! the sweep finds what a crash leaves); [`run_detailed`] reports
+//! [`ExportStep::RemovingPartial`] first and says whether the removal
+//! succeeded (the shell's `stagingRemoved`, slice 6h1). Progress reports
+//! the step and the rows written after every batch. Nothing here logs.
 //!
 //! Not yet here: the "events" option off (refused with
 //! `OptionDoesNotApply` until the scope index can leave events out without
-//! a gap, slice 6h), `importSessions` (the session facts need a new
-//! snapshot read, 6h), the decode-helper pool behind the HTML writer's
-//! `PreviewSource` (6h; the caller hands the writers in) and the
-//! export-render helper's formats (6i, 6j). The writers' own counts (`neutralisedCells` from
+//! a gap; the shell refuses it before a draft exists), `importSessions`
+//! (the session facts need a new snapshot read), the decode-helper pool
+//! behind the HTML writer's `PreviewSource` (slice 6h2; the caller hands
+//! the writers in) and the export-render helper's formats (6i, 6j). The writers' own counts (`neutralisedCells` from
 //! CSV, the marker counts from TXT, CSV and HTML, the preview counts from
 //! HTML) reach the bundle's manifest; a
 //! single file's "About this export" is written before the writers finish
@@ -94,13 +97,58 @@ pub struct ExportReport {
     pub counts: ManifestCounts,
     pub writers: Vec<WriterReport>,
     pub attachments: AttachCounts,
+    /// Every file the export published (conversation files, tables,
+    /// copied attachments, provenance), and their bytes.
+    pub output_files: u64,
+    pub output_bytes: u64,
 }
 
-/// Progress: items and folded rows handed to the writers so far.
+/// Where a run is (slice 6h: the shell's job phases).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExportStep {
+    /// The pre-count, the consent check and the scope index.
+    #[default]
+    Preparing,
+    /// Records are being written (`rows` of `total_rows`).
+    Writing,
+    /// The writers are finishing; provenance is hashed and written, and
+    /// the output published.
+    Finishing,
+    /// A cancel or a failure: the staging is being removed.
+    RemovingPartial,
+}
+
+/// Progress: the step, and the items and folded rows handed to the
+/// writers so far out of the pre-count's timeline rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ExportProgress {
+    pub step: ExportStep,
     pub rows: u64,
+    pub total_rows: u64,
     pub files_written: u64,
+}
+
+/// Why a run stopped, and whether its staging was removed: `None` when
+/// none had been created yet (nothing was written).
+#[derive(Debug)]
+pub struct ExportFailure {
+    pub error: ExportError,
+    pub staging_removed: Option<bool>,
+}
+
+impl From<oma_archive::ArchiveError> for ExportFailure {
+    fn from(e: oma_archive::ArchiveError) -> ExportFailure {
+        ExportError::from(e).into()
+    }
+}
+
+impl From<ExportError> for ExportFailure {
+    fn from(error: ExportError) -> ExportFailure {
+        ExportFailure {
+            error,
+            staging_removed: None,
+        }
+    }
 }
 
 /// The scope of `plan` as ids, the local dates of a range turned into
@@ -369,7 +417,12 @@ impl Job<'_, '_, '_> {
         Ok(())
     }
 
-    fn group(&mut self, g: &Group, conv: Option<&ConversationRecord>) -> Result<(), ExportError> {
+    fn group(
+        &mut self,
+        g: &Group,
+        conv: Option<&ConversationRecord>,
+        progress: &mut dyn FnMut(ExportProgress),
+    ) -> Result<(), ExportError> {
         let file = match conv {
             Some(c) => ConversationFile::Conversation(c),
             None => ConversationFile::NoConversation,
@@ -419,6 +472,7 @@ impl Job<'_, '_, '_> {
                 }
             }
             self.staging.sync_batch()?;
+            progress(self.progress);
         }
         if let Some(m) = pending.take() {
             let at = Placement {
@@ -455,10 +509,24 @@ pub fn run(
     cancel: &CancelToken,
     progress: &mut dyn FnMut(ExportProgress),
 ) -> Result<ExportReport, ExportError> {
+    run_detailed(snap, run, writers, cancel, progress).map_err(|f| f.error)
+}
+
+/// [`run`], saying on failure whether the staging was removed (the job's
+/// `stagingRemoved`), and reporting [`ExportStep::RemovingPartial`]
+/// before it removes it.
+pub fn run_detailed(
+    snap: &ExportSnapshot<'_>,
+    run: &ExportRun<'_>,
+    writers: Vec<Box<dyn ExportWriter>>,
+    cancel: &CancelToken,
+    progress: &mut dyn FnMut(ExportProgress),
+) -> Result<ExportReport, ExportFailure> {
     let plan = run.plan;
     if !plan.options().events {
-        return Err(ExportError::Plan(PlanRefusal::OptionDoesNotApply));
+        return Err(ExportError::Plan(PlanRefusal::OptionDoesNotApply).into());
     }
+    progress(ExportProgress::default());
     // 1. Pre-count and consent, under the lock, in this snapshot.
     let pre = snap.precount(
         run.scope,
@@ -470,7 +538,7 @@ pub fn run(
         pre.messages_with_earlier_content,
     )?;
     if cancel.is_cancelled() {
-        return Err(ExportError::Cancelled);
+        return Err(ExportError::Cancelled.into());
     }
     // 2. Scope index, conversation files and records.
     let index = snap.scope_index(run.scope)?;
@@ -492,12 +560,32 @@ pub fn run(
     };
     let attach = match (plan.packaging(), plan.record_options().names_only) {
         (_, true) => None,
-        (Packaging::SingleFile, false) => return Err(ExportError::Limit(LimitKind::RowOrder)),
-        (Packaging::Bundle, false) => Some(
-            run.attach
+        (Packaging::SingleFile, false) => {
+            return Err(Removed::now(
+                staging,
+                progress,
+                ExportError::Limit(LimitKind::RowOrder),
+            ))
+        }
+        (Packaging::Bundle, false) => {
+            match run
+                .attach
                 .or_else(|| AttachPolicy::for_plan(plan, run.parent, run.target))
-                .ok_or(ExportError::Limit(LimitKind::RowOrder))?,
-        ),
+            {
+                Some(a) => Some(a),
+                None => {
+                    return Err(Removed::now(
+                        staging,
+                        progress,
+                        ExportError::Limit(LimitKind::RowOrder),
+                    ))
+                }
+            }
+        }
+    };
+    let fan = match FanOut::new(writers, plan) {
+        Ok(f) => f,
+        Err(e) => return Err(Removed::now(staging, progress, e)),
     };
     let mut job = Job {
         run,
@@ -505,19 +593,51 @@ pub fn run(
         cancel,
         mapper,
         attacher: attach.map(Attacher::new),
-        fan: Some(FanOut::new(writers, plan)?),
+        fan: Some(fan),
         staging,
         handles_sent: 0,
         streamed: BTreeSet::new(),
         derivation: DerivationFacts::default(),
-        progress: ExportProgress::default(),
+        progress: ExportProgress {
+            step: ExportStep::Writing,
+            total_rows: pre.timeline_rows,
+            ..ExportProgress::default()
+        },
     };
+    progress(job.progress);
     let result = body(&mut job, &groups, &conversations, &pre, progress);
     match result {
         Ok(report) => Ok(report),
-        Err(e) => {
-            let _ = job.staging.remove();
-            Err(e)
+        Err(error) => {
+            // Close every writer's file before the folder is removed.
+            drop(job.fan.take());
+            let mut p = job.progress;
+            p.step = ExportStep::RemovingPartial;
+            progress(p);
+            Err(ExportFailure {
+                error,
+                staging_removed: Some(job.staging.remove()),
+            })
+        }
+    }
+}
+
+/// Removing a staging that no record reached yet.
+struct Removed;
+
+impl Removed {
+    fn now(
+        mut staging: Staging,
+        progress: &mut dyn FnMut(ExportProgress),
+        error: ExportError,
+    ) -> ExportFailure {
+        progress(ExportProgress {
+            step: ExportStep::RemovingPartial,
+            ..ExportProgress::default()
+        });
+        ExportFailure {
+            error,
+            staging_removed: Some(staging.remove()),
         }
     }
 }
@@ -552,7 +672,7 @@ fn body(
             ),
             None => None,
         };
-        job.group(g, conv)?;
+        job.group(g, conv, progress)?;
         progress(job.progress);
     }
     // 6. Counts, checked against the pre-count.
@@ -593,6 +713,8 @@ fn body(
         search: run.search.clone(),
         import_sessions: Vec::new(),
     };
+    job.progress.step = ExportStep::Finishing;
+    progress(job.progress);
     let about = ManifestBody::new(input(counts.clone(), job))?;
     let fan = job
         .fan
@@ -614,11 +736,19 @@ fn body(
     if job.cancel.is_cancelled() {
         return Err(ExportError::Cancelled);
     }
+    let output_files = job.staging.files().len() as u64;
+    let output_bytes = job
+        .staging
+        .files()
+        .iter()
+        .fold(0u64, |a, f| a.saturating_add(f.bytes()));
     let published = job.staging.publish(run.target, run.replace)?;
     Ok(ExportReport {
         published,
         counts,
         writers: reports,
         attachments: attach,
+        output_files,
+        output_bytes,
     })
 }

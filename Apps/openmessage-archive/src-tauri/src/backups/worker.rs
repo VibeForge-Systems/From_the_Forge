@@ -362,10 +362,13 @@ fn execute(
     };
     let ending = match (kind, validated) {
         (_, Err(e)) => fail(e),
-        // Import and Verify jobs run in `archives::worker`, never here.
-        (JobKind::Import | JobKind::Verify, Ok(_)) => Ending::Failed(Failure::Backup(
-            BackupError::Internal("an archive job ran in the backup worker"),
-        )),
+        // Import, Verify and Export jobs run in `archives::worker` and
+        // `exports::worker`, never here.
+        (JobKind::Import | JobKind::Verify | JobKind::Export, Ok(_)) => {
+            Ending::Failed(Failure::Backup(BackupError::Internal(
+                "an archive job ran in the backup worker",
+            )))
+        }
         (JobKind::Validate, Ok(report)) => Ending::Finished(Box::new(report), encrypted),
         (JobKind::ExtractionCheck, Ok(report)) if !report.importable() => {
             Ending::ExtractionFinished(

@@ -215,6 +215,8 @@ pub enum ArchiveStatusDto {
     Importing,
     /// This app is verifying it.
     Verifying,
+    /// This app is exporting from it (M6; the export holds its lock).
+    Exporting,
     /// Another program (or another copy of the app) holds its lock.
     InUse,
     NeedsUpgrade,
@@ -1362,6 +1364,33 @@ pub(crate) fn guard_walk() -> std::collections::BTreeMap<String, String> {
     w.decls()
 }
 
+/// Field types that name a viewer brand or a viewer type (M5 §7.4), or an
+/// export input or brand (M6 §9.3): `ts_guard::is_string` sees only the
+/// word `string`, and `#[ts(type = …)]` drops the dependency edge, so the
+/// walk alone would never reach such a type from an archive DTO. Test-only.
+#[cfg(test)]
+pub(crate) fn brand_leaks(decls: &std::collections::BTreeMap<String, String>) -> Vec<String> {
+    use crate::ts_guard;
+    let viewer = crate::viewer::dto::M5_VIEWER_TYPES;
+    let brands = crate::viewer::dto::BRANDS;
+    let export = ts_guard::M6_EXPORT_TYPES;
+    let mut out = Vec::new();
+    for (ty, decl) in decls {
+        if ts_guard::M2_M3_TYPES.contains(&ty.as_str()) {
+            continue;
+        }
+        for (key, field_ty) in ts_guard::fields(decl) {
+            let leaks = field_ty
+                .split(|c: char| !c.is_alphanumeric())
+                .any(|w| brands.contains(&w) || viewer.contains(&w) || export.contains(&w));
+            if leaks {
+                out.push(format!("{ty}.{key}"));
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1547,28 +1576,8 @@ mod tests {
         guard_walk()
     }
 
-    /// Field types that name a viewer brand or a viewer type (M5 §7.4):
-    /// `ts_guard::is_string` sees only the word `string`, and
-    /// `#[ts(type = …)]` drops the dependency edge, so the walk alone would
-    /// never reach a viewer type from an archive DTO.
     fn viewer_leaks(decls: &BTreeMap<String, String>) -> Vec<String> {
-        let viewer = crate::viewer::dto::M5_VIEWER_TYPES;
-        let brands = crate::viewer::dto::BRANDS;
-        let mut out = Vec::new();
-        for (ty, decl) in decls {
-            if ts_guard::M2_M3_TYPES.contains(&ty.as_str()) {
-                continue;
-            }
-            for (key, field_ty) in ts_guard::fields(decl) {
-                let leaks = field_ty
-                    .split(|c: char| !c.is_alphanumeric())
-                    .any(|w| brands.contains(&w) || viewer.contains(&w));
-                if leaks {
-                    out.push(format!("{ty}.{key}"));
-                }
-            }
-        }
-        out
+        super::brand_leaks(decls)
     }
 
     #[test]

@@ -196,6 +196,7 @@ describe('import text: the archive list and verify', () => {
       'ready',
       'importing',
       'verifying',
+      'exporting',
       'inUse',
       'needsUpgrade',
       'newerVersion',

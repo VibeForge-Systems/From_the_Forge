@@ -181,3 +181,53 @@ pub const M4_EVENT_TYPES: &[&str] = &[
     "StopReasonDto",
     "VerifyOutcomeDto",
 ];
+
+/// The archive types `JobEvent` reaches through `exportFinished` (M6
+/// §9.3): the archive guard reviews them, as it does the M4 ones.
+pub const M6_EVENT_TYPES: &[&str] = &[
+    "AttachmentExclusionsDto",
+    "ExportOutcomeDto",
+    "ExportSizeBucketDto",
+    "ExportSummaryDto",
+];
+
+/// The export walk's own types (the guard compares this list with the
+/// walk).
+pub const M6_EXPORT_TYPES: &[&str] = &[
+    "AttachmentModeInput",
+    "ChooseExportDestinationRequest",
+    "ClockInput",
+    "CsvProfileInput",
+    "DraftId",
+    "DraftRef",
+    "ExcludedHitsDto",
+    "ExportConfirmationsInput",
+    "ExportDestinationDto",
+    "ExportDraftDto",
+    "ExportFormatInput",
+    "ExportOptionsInput",
+    "ExportPreviewDto",
+    "ExportScopeInput",
+    "ExportWarningDto",
+    "FreeSpaceDto",
+    "LineEndingsInput",
+    "LocalDate",
+    "PackagingDto",
+    "PageSizeInput",
+    "PreviewEvent",
+    "PreviewExportRequest",
+    "RevealConfirmationInput",
+    "SearchPreviewDto",
+    "ShowExportInFolderRequest",
+    "SpaceVerdictDto",
+    "StartExportRequest",
+    "SyncProviderDto",
+    "ZoneChoiceInput",
+    "ZoneName",
+    "ZoneTableInputDto",
+];
+
+/// Types the export walk shares with another walk: the viewer's brands
+/// (`SafeId` for input ids, `UntrustedText` for `displayName` only) and
+/// the error code a failed preview carries.
+pub const M6_SHARED_TYPES: &[&str] = &["ErrorCode", "SafeId", "UntrustedText"];

@@ -1050,6 +1050,31 @@ fn all_matches_reruns_with_the_export_cap_and_groups_by_conversation() {
                 .collect();
             assert!(keys.windows(2).all(|w| w[0] < w[1]), "timeline order");
         }
+        // The shell's search preview (slice 6h) is the same scope and the
+        // same counts as the job's steps in a snapshot, with and without
+        // the re-run.
+        let opts = PreviewOptions::default();
+        let (job_scope, job_counts) = snapshot(&r, &lib, &id, |s| {
+            let sc = s.search_scope(&q, &small, opts)?;
+            let ids = ExportScopeIds::Messages(sc.groups.clone());
+            let counts = s.precount(&ids, opts, &mut |_| {})?;
+            Ok((sc, counts))
+        });
+        let (scope, counts) = r
+            .export_search_preview(&q, &small, None, opts, &CancelToken::new(), &mut |_| {})
+            .expect("search preview");
+        assert_eq!((scope, counts), (job_scope, job_counts), "{mode:?}");
+        let (rerun, _) = r
+            .export_search_preview(
+                &q,
+                &small,
+                Some(EXPORT_SEARCH_CAP),
+                opts,
+                &CancelToken::new(),
+                &mut |_| {},
+            )
+            .expect("search preview with the re-run");
+        assert_eq!(rerun, sc, "{mode:?}: the re-run keeps every match");
     }
     // A cancelled job stops the re-run.
     let hold = lib.hold_for_export(&id).expect("hold");

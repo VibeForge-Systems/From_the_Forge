@@ -63,6 +63,12 @@ impl UntrustedText {
         UntrustedText(t.text.expose().clone())
     }
 
+    /// A name the user chose in a native dialog (an export's file or
+    /// folder name, M6 §8.1): untrusted too, and rendered the same way.
+    pub(crate) fn of_name(name: &str) -> UntrustedText {
+        UntrustedText(name.to_owned())
+    }
+
     /// The UTF-8 length (for tests and size bounds).
     pub fn len(&self) -> usize {
         self.0.len()

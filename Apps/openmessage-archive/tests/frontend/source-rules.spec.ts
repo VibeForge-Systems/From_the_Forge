@@ -95,7 +95,7 @@ const ALLOWED_BINDINGS: Record<string, readonly string[]> = {
   ],
   'components/ArchiveList.vue': [
     "aria-current=\"archives.selectedId === e.archiveId ? 'true' : undefined\"",
-    "aria-label=\"e.status === 'importing' ? 'Importing' : 'Verifying'\"",
+    'aria-label="STATUS_LABEL[e.status].text"',
     'class="{ active: archives.selectedId === e.archiveId }"',
   ],
   'components/ArchivePage.vue': ['aria-describedby="describedBy"'],

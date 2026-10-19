@@ -3926,6 +3926,152 @@ eleven `html.rs` tests and the golden test failed. Nothing was run on
 Windows, and no page was opened in a browser in this slice (the
 WebKitGTK observation in the spec is the research run's).
 
+### The export job and its commands (M6 slice 6h1)
+
+Slice 6h1 is the shell's first half of the export (spec §9.1–§9.5):
+`src-tauri/src/exports/` (Tauri-free) and `commands/exports.rs`.
+
+- **Five commands**, each through the five IPC steps and each parsing its
+  raw request in Rust: `preview_export` (a draft id at once, then
+  `progress`, `ready`, `needsZoneTable` or `failed` on its channel),
+  `choose_export_destination` (a native save dialog for one file, a
+  folder picker for a bundle; `null` when cancelled),
+  `start_export` (`JobStarted`, then job events), `discard_export_draft`
+  and `show_export_in_folder` (tauri-plugin-opener on the folder that
+  holds a finished export, remembered per job in memory until exit).
+  `cancel_job` is reused.
+- **Drafts.** One slot in `AppState.exports`; a new preview replaces it
+  and cancels the old count. A draft holds the parsed plan (the reveal's
+  confirmed count only arrives at start), the exact counts with the
+  archive generation, the zone, the destination and, for a search scope,
+  the live search request and set (an `Arc` of the viewer's). It expires
+  after 30 minutes (an injectable clock; tests move it) and
+  `start_export` consumes it. `AppState::close_viewer` and
+  `AppState::hide_viewer` (the privacy screen; idle hide closes the
+  viewer) discard it first, as does the exit handler.
+- **Zones.** UTC needs no table. A date range in any other zone needs its
+  table before counting: the preview answers `needsZoneTable` with the
+  window (the dates' UTC days widened by 18 hours and by now ± one day,
+  clamped to 1900 … now + 366 days), and the webview calls
+  `preview_export` again with the table. Every other scope is counted
+  first; its `ready` carries `zoneWindowUtcMs` (the span and now, clamped)
+  and the table arrives with `choose_export_destination`, validated there
+  (`ZoneTable::new`) before the default name is built from it.
+- **Search scopes.** The preview takes the viewer session's live set by
+  `{viewer, searchId}` (a superseded id is `searchSuperseded`); a new
+  `ArchiveReader::export_search_preview` re-runs it when "all matches" is
+  asked, keeps the hits the export may write (`search_scope`) and counts
+  them, in one read transaction (a test pins it to the job's own steps in
+  a snapshot). The job re-runs and re-checks in its snapshot, then drops
+  the request (the query) before writing.
+- **The destination** (`exports::destination`, §8.1, §8.2): the folder is
+  canonicalised and must be a UTF-8 directory; inside a backup,
+  `MobileSync/Backup`, `iMazing/Backups` or the archive folder is
+  refused; a `.probe` file must be creatable; the copied files' bytes
+  must fit (`insufficientSpace`). Warnings are closed codes (shared
+  folder on Linux, sync folder with a closed provider code, network or
+  virtual drive, FAT with a file of 4 GiB or more, "may not fit" below
+  the estimate × 1.2 + 64 MiB, an unreadable free space being "unknown").
+  A bundle is named `Messages export <date> <time>` in the export's zone
+  (the first free ` (n)` is shown; the publish itself moves on if it is
+  taken meanwhile); a single file keeps the typed name when it ends in
+  the format's extension and gets it appended otherwise; names
+  `sanitize_filename` would change and `.oma-export-*` names are refused
+  (`exportNameRefused`). An existing single file must be a regular file
+  and needs the app's "Replace" confirmation. Leftovers are listed by
+  `find_leftovers` and removed only on request, by the job, exactly as
+  listed. The file-system facts come through a `DestinationProbe`, so
+  tests use fakes.
+- **Start** (`worker::prepare`, `worker::recheck`): the draft must be
+  counted, zoned and placed; a reveal needs its confirmed count and a
+  count without a reveal is refused; "Keep original file extensions" must
+  be confirmed; every warning but FAT must be confirmed; then the
+  archive must open (damaged, older and newer archives keep their
+  codes), its generation must be the draft's (`exportConfirmationStale`),
+  and the folder's checks pass again from a fresh canonicalisation (a
+  moved folder is refused, a new unconfirmed warning is
+  `exportConfirmationStale`). Then the slot on the archive's subject
+  (`JobKind::Export`; `busy` against everything, D7/D73), the location
+  confirmation, and `Library::hold_for_export`.
+- **The job** (`worker::run_export`): its own reader; inside one export
+  snapshot the generation again, the scope (from the plan, or the search
+  re-run), the four writers PR A has (TXT, CSV, JSON, HTML), and
+  `pipeline::run_detailed`, whose pre-count refuses a reveal count above
+  the confirmed N before anything is written. Phases: `preparingExport`,
+  `writingMessages` (timeline rows, after every batch), `finishingExport`
+  and `removingPartial`; `renderingPreviews`, `writingSpreadsheet` and
+  `layingOutPdf` are declared for 6h2, 6i and 6j. The lock is dropped
+  after the cleanup and **before** the slot is freed; one terminal event
+  follows. `exportFinished` carries `ExportSummaryDto` (counts, the
+  attachment exclusions grouped into five codes, a size bucket, `bundle`,
+  the search hits left out) and is `completedWithExclusions` when an
+  attachment's file, undated messages of a range or search hits were
+  left out.
+- **Pipeline changes** (`oma-export`): `pipeline::run_detailed` reports an
+  `ExportStep` with the rows (after every batch, not only per file),
+  reports `RemovingPartial` before it removes the staging, and returns
+  `ExportFailure { error, staging_removed }`; `run` keeps its signature.
+  `ExportReport` gains the published files' count and bytes.
+- **DTOs and guards (D136).** Export types are in `exports/dto.rs`. The
+  export walk (`ts_guard::M6_EXPORT_TYPES`, 31 types) admits `string`
+  only for `ExportScopeInput.archiveId` and
+  `ShowExportInFolderRequest.jobId`, plus the brands `DraftId`
+  (`^[0-9a-f]{32}$`), `LocalDate`, `ZoneName` and the viewer's
+  `UntrustedText` for `ExportDestinationDto.displayName` alone; it bans
+  the viewer's keys plus `destination`, `fileName`, `query`, `filter`,
+  `provider`, `text` and `body`; it shares only `ErrorCode`, `SafeId` and
+  `UntrustedText` with other walks. `exportFinished`'s four types
+  (`M6_EVENT_TYPES`) are in the archive guard's walk, which now also
+  rejects any export type or brand in an archive field. The archive list
+  shows `exporting` for an archive this app exports from.
+- **Errors (§9.5):** `exportDestinationRefused`, `exportTargetExists`,
+  `exportNameRefused`, `exportDraftExpired`, `exportConfirmationStale`,
+  `exportZoneTableStale`, `exportWriteFailed`, `exportHelperFailed`
+  (from a rejected helper rendition) and `exportUnavailable`, each with
+  fixed sentences in `exports::messages`.
+
+**Deviations from the spec**, all recorded here:
+
+- `exportUnavailable` is a tenth code (not in §9.5): PDF and XLSX (6i,
+  6j), image previews (the decode-helper pool, 6h2), the `attachment`
+  scope (save a copy) and `events: false` are refused with it when the
+  draft is made, never faked.
+- `preview_export` takes an optional `zone`, for a date range only
+  (its local days need the table before anything can be counted); the
+  spec's flow sends the table only with the destination.
+- `PreviewEvent::failed` carries the code only (as the spec says), so a
+  failed count's sentence comes from the UI's table (6k).
+- The preview does not send the archive generation: it is opaque and
+  stays in the draft.
+- `ExportSummaryDto` groups the attachment exclusions into five counts
+  (withheld unsent, no stored file for every card state, checksum
+  mismatch, too large for the volume, write failed) to stay under the
+  event's 1 KiB; it has no "undrawable characters" count until PDF exists.
+- `start_export` consumes the draft before its checks, so any refusal
+  means reviewing the export again.
+
+**Not in this slice (6h2):** the decode-helper pool and `RenditionPair`
+behind HTML previews; `log_hygiene.rs`'s `exercise_export` with captured
+stderr; the cancel-latency tests; the Windows sharing-violation tests of
+the publish and removals through the job; the test-time record. No
+native dialog was opened (headless), and nothing ran on Windows.
+
+**Tests:** `src-tauri/src/exports/tests.rs` (18 tests): input validation
+that echoes nothing; the refusals of what is not built; drafts that count
+exactly, replace and expire; the three privacy controls discarding drafts
+and stopping their counts; zones before and after counting; the dialog
+title; the destination checks against fake probes (refusals, warnings,
+names, leftovers, a new warning and a moved folder at start); every
+confirmation; a changed archive refused at start; a whole export holding
+the lock (`busy` both ways, `Library::open` and a second hold refused,
+the list showing `exporting`, surviving `close_viewer`) and publishing a
+four-format bundle with the code masked; a recount over the confirmed N
+leaving nothing, and the right N writing the code; a cancel removing the
+unfinished export; a search scope exported after the viewer closed, with
+no query in the manifest; `exportFinished` under 1 KiB; the guards and
+the wiring. `oma-archive`'s `export_scope.rs` checks the search preview
+against the snapshot's steps.
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`
@@ -4154,7 +4300,10 @@ owner: its lean is applied and awaits confirmation.
 | D130 | CSV (slice 6f) | RFC 4180 with CRLF and every field quoted; default-deny OWASP neutralisation (White_Space and default-ignorables skipped, full-width and small forms, after escaping), listed per row and counted; "for data tools" raw except U+27E8; every file always present; the column contract pinned and only appended; always a bundle | Never neutralise; a leading-character blocklist | Spreadsheet safety by default, raw values on request, and a reversible prefix |
 | D132 | HTML (slice 6g) | A static template; escaping into text nodes; markers as elements; CSP meta first; one hashed style; inline thumbnails as `data:` from checked decode-helper renditions through a `PreviewSource`; display previews opt-in; originals never linked; no media elements; nav after main; backward-only links | Linking originals; `img-src 'self'` | D113's isolation; independence from browsers' `file:` origin rules; streamable |
 | D146 | Independent oracles (slices 6c, 6e2, 6f, 6g) | A projection from the archive with stdlib `sqlite3`; JSON against the projection and both schemas; CSV against JSON under `T`; local times against `zoneinfo`; TXT through its own grammar parser; HTML through `html.parser` and strict html5lib against JSON under `T`; masking scanned in every byte | Oracles against our own records | A mapping bug cannot pass every test |
-| D147 | Consent and drift (slice 6b2; the comparison is slice 6h's) | Exact, cancellable counts; the archive generation in the draft; a recount under the lock before writing; reveal counts that never understate | Budgeted "at least" counts | "N messages" is never an understatement |
+| D147 | Consent and drift (slice 6b2; compared from slice 6h1) | Exact, cancellable counts; the archive generation in the draft, compared at start and again inside the job's snapshot; a recount under the lock before writing; reveal counts that never understate | Budgeted "at least" counts | "N messages" is never an understatement |
+| D127 | Destination (slice 6h1) | Rust-opened dialogs whose titles name sensitive options; the folder kept in the draft, never crossing IPC; names generated in Rust; the format's extension enforced; `.oma-export-*` names refused; refusals per I1 plus the archive folder; warnings to confirm, checked again at start; no remembered destination | A name or path from the webview | I4, I3; `settings.json` stays content-free |
+| D136 | Export DTOs (slice 6h1) | A new export walk disjoint from the others but for three shared types; `exportFinished` inside the archive guard's walk, counts only; warnings and providers as closed codes | Reuse the viewer walk | Walks stay disjoint and events small |
+| D139 | Job (slice 6h1) | `JobKind::Export` on the archive subject, holding the archive lock until its cleanup ends; its own reader, so damaged or migrating archives are refused; survives the viewer closing; `removingPartial` keeps the slot | A viewer-session task | One job model; excludes writers in every instance |
 
 ## Logging
 

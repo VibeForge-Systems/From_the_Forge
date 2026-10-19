@@ -62,7 +62,7 @@ fn model(entry: &str) -> Value {
 }
 
 /// Import one catalogue backup into archive `id` of `library`.
-fn import_entry(
+pub(crate) fn import_entry(
     library: &Path,
     id: &ArchiveId,
     entry: &str,

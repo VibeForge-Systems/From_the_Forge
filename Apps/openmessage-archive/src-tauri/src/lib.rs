@@ -9,6 +9,7 @@ pub mod archives;
 pub mod backups;
 pub mod commands;
 pub mod error;
+pub mod exports;
 pub mod panic_hook;
 pub mod settings;
 #[cfg(test)]
@@ -105,6 +106,11 @@ pub fn run() {
             commands::viewer::get_search_results,
             commands::viewer::cancel_search,
             commands::viewer::inspect_attachment,
+            commands::exports::preview_export,
+            commands::exports::choose_export_destination,
+            commands::exports::start_export,
+            commands::exports::discard_export_draft,
+            commands::exports::show_export_in_folder,
         ])
         .build(tauri::generate_context!())
         .expect("the Tauri runtime failed to start")
@@ -116,6 +122,7 @@ pub fn run() {
                 // skips this; the startup sweep and the next write open of
                 // the archive cover that case.
                 if let Some(state) = app.try_state::<AppState>() {
+                    state.exports.discard_any();
                     state.viewer.close_any();
                     let clean = state.jobs.cancel_all_and_wait(EXIT_WAIT);
                     tracing::info!(clean, "exit");
