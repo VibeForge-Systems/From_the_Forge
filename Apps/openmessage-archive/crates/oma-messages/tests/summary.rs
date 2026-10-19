@@ -219,3 +219,107 @@ fn not_a_plist() {
         );
     }
 }
+
+/// `edit_texts` (M5 §3.7, owner Q3a): `ec[*].t` decoded at read time, in
+/// stored `(part, ordinal)` positions, with one-time-code runs reported;
+/// an over-budget plist, a missing or bad `ec` and a bad typedstream.
+#[test]
+fn edit_texts_decode_t_in_stored_positions() {
+    use common::ts_writer::{attributed, AttrVal};
+    use oma_messages::{edit_texts, EditBody, EditTextsError, TsBudget, TsErrorKind};
+
+    let (plain, _) = attributed(&[("SYNTH-EDIT-ORIGINAL".to_owned(), vec![])]);
+    let (coded, _) = attributed(&[
+        ("SYNTH code ".to_owned(), vec![]),
+        (
+            "123456".to_owned(),
+            vec![("__kIMOneTimeCodeAttributeName", AttrVal::Int(1))],
+        ),
+    ]);
+    let mut b = Bp::new();
+    let t0 = b.add(Obj::Data(plain));
+    let t1 = b.add(Obj::Data(coded));
+    let bad = b.add(Obj::Data(b"not a typedstream".to_vec()));
+    let d = b.int(700_000_000);
+    let e0 = b.dict(&[("d", d), ("t", t0)]);
+    let e1 = b.dict(&[("d", d)]);
+    let e2 = b.dict(&[("t", bad)]);
+    let e3 = b.dict(&[("t", t1)]);
+    let p0 = b.add(Obj::Array(vec![e0, e1, e2]));
+    let p2 = b.add(Obj::Array(vec![e3]));
+    let ec = b.dict(&[("2", p2), ("0", p0)]);
+    let root = b.dict(&[("ec", ec)]);
+    let got = edit_texts(&b.finish(root), &TsBudget::default()).expect("decoded");
+    let positions: Vec<(u32, u32)> = got.iter().map(|e| (e.part, e.ordinal)).collect();
+    assert_eq!(positions, [(2, 0), (0, 0), (0, 1), (0, 2)], "stored order");
+    let EditBody::Text {
+        text,
+        one_time_codes,
+        runs_complete,
+    } = &got[1].body
+    else {
+        panic!("decoded");
+    };
+    assert_eq!(text.expose(), "SYNTH-EDIT-ORIGINAL");
+    assert!(one_time_codes.is_empty() && *runs_complete);
+    let EditBody::Text {
+        text,
+        one_time_codes,
+        ..
+    } = &got[0].body
+    else {
+        panic!("decoded");
+    };
+    assert_eq!(text.expose(), "SYNTH code 123456");
+    assert_eq!(one_time_codes, &[(11, 17)]);
+    assert_eq!(got[2].body, EditBody::Absent);
+    assert!(matches!(got[3].body, EditBody::Failed(k) if k == TsErrorKind::UnsupportedHeader));
+    // Debug prints lengths only.
+    let shown = format!("{got:?}");
+    assert!(
+        !shown.contains("SYNTH") && !shown.contains("123456"),
+        "{shown}"
+    );
+
+    // No `ec`, a bad `ec`, an unreadable plist and an over-budget one.
+    let mut b = Bp::new();
+    let root = b.dict(&[]);
+    assert_eq!(
+        edit_texts(&b.finish(root), &TsBudget::default()),
+        Err(EditTextsError::NoEditHistory)
+    );
+    let mut b = Bp::new();
+    let arr = b.add(Obj::Array(vec![]));
+    let root = b.dict(&[("ec", arr)]);
+    assert_eq!(
+        edit_texts(&b.finish(root), &TsBudget::default()),
+        Err(EditTextsError::Bad(ShapeError::WrongType))
+    );
+    assert_eq!(
+        edit_texts(b"bplist00", &TsBudget::default()),
+        Err(EditTextsError::Unreadable(IssueKind::PlistInvalid))
+    );
+    let mut b = Bp::new();
+    let body = b.add(Obj::Data(vec![0x5a; 1024]));
+    let e = b.dict(&[("t", body)]);
+    let part = b.add(Obj::Array(vec![e; 2048]));
+    let parts: Vec<String> = (0..64).map(|k| k.to_string()).collect();
+    let pairs: Vec<(&str, usize)> = parts.iter().map(|k| (k.as_str(), part)).collect();
+    let ec = b.dict(&pairs);
+    let root = b.dict(&[("ec", ec)]);
+    assert_eq!(
+        edit_texts(&b.finish(root), &TsBudget::default()),
+        Err(EditTextsError::Unreadable(IssueKind::PlistOverBudget))
+    );
+    // A typedstream over its budget fails that entry only.
+    let (long, _) = attributed(&[("SYNTH-EDIT-LONG ".repeat(64), vec![])]);
+    let mut b = Bp::new();
+    let t = b.add(Obj::Data(long));
+    let e = b.dict(&[("t", t)]);
+    let p = b.add(Obj::Array(vec![e]));
+    let ec = b.dict(&[("0", p)]);
+    let root = b.dict(&[("ec", ec)]);
+    let got = edit_texts(&b.finish(root), &TsBudget::default().with_max_input(64))
+        .expect("the plist reads");
+    assert!(matches!(got[0].body, EditBody::Failed(TsErrorKind::Budget)));
+}

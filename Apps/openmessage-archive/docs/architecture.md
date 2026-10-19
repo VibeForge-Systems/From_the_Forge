@@ -1757,6 +1757,109 @@ changes the schema or writes a file.
   attachments sort in a temporary B-tree, and only the conversation list
   and the session table are scanned.
 
+### Viewer reads: details, dates, attachments and masking (M5 slice 5b3)
+
+The details panel, the reaction history, text chunks, date navigation and
+the attachment facts with their card, in `crates/oma-archive`
+(`view/detail.rs`, `view/calendar.rs`) and `oma-messages`
+(`summary::edit_texts`). Nothing here changes the schema, stores
+anything or writes a file.
+
+- **Edit history decoded at read time (D105; owner-confirmed, Q3a).**
+  `oma_messages::edit_texts(raw, budget)` re-reads a body version's stored
+  `summary_raw` (kept under D59) with the budgeted plist reader, and
+  decodes each `ec[part][*].t` with the clean-room typedstream decoder; it
+  reports the runs flagged as one-time codes. `message_detail` calls it
+  only for body versions with an edit entry that records a text. Entries
+  are matched to `message_edit_entry` rows by `(part, ordinal)` in stored
+  order ("oldest first" stays **UNVERIFIED**); on any mismatch every
+  entry reads "edit text could not be matched", and a summary that no
+  longer reads gives `SummaryUnreadable`. A failed `t` carries its
+  `TsErrorCode`. Nothing is stored, `DECODER_VERSION` is unchanged and the
+  text is not indexed, so search covers captured versions only. This adds
+  a caller of the typedstream decoder, whose clean-room review is still
+  pending; that review's scope grows by this function.
+- **Body versions are not edits.** `message_detail` lists every stored
+  version by `first_rank` with its first and last session, its text (or
+  its `NoText` reason) and its edit entries; a version whose displayed
+  text equals the one before it is marked `text_unchanged` ("Stored data
+  changed; text unchanged"). At most 50 versions and 200 entries per
+  version are listed, with counts beyond.
+- **Masking and retraction (D115; owner-confirmed, Q3b), on every path.**
+  Earlier versions and decoded edit texts are withheld, with the reason
+  the thread page gives (unsent, an earlier version for code 6, no
+  current text), unless the request carries `Reveal::earlier_text`;
+  one-time codes are withheld by range (only when the formatting was read
+  cleanly, otherwise the whole text) unless it carries
+  `Reveal::one_time_code`. `message_text(body, from, reveal)` applies the
+  same rules to a chunk: 32,768 UTF-16 units from an offset clamped to
+  the body and moved back off a low surrogate.
+- **Detail facts** (§7.3): the message as a page shows it (UI caps,
+  extras loaded); the raw `date`, `date_edited` and `date_retracted`
+  quads only (D94); `destination_caller_id` ("Account, meaning
+  unverified") and the subject; value history of the history columns the
+  viewer shows (subject, group title, account, chat name, file name,
+  Genmoji description), each with the session that first recorded it,
+  ordered by rank; and for each conversation the message is in, the raw
+  `style`, `is_filtered` and `is_archived` with no meaning claimed.
+- **The unkeyed identifier probe.** For a reply whose originator, or a
+  reaction whose target, is not uniquely identified, the detail counts
+  unkeyed messages with that GUID (`LIMIT 2`, over the `message_unkeyed`
+  partial index) in its own `Detail` phase: `NotInArchive`,
+  `SharedByUnkeyed`, or `NotChecked` when it trips. It never fails the
+  detail.
+- **The reaction history** (`reaction_history(target, page)`): every add
+  and remove row on a keyed target, with its sender, recorded time and
+  `assoc_target_part`, ordered by date (undated last) then id, 200 per
+  page; at most 10,000 rows are read and the total says when there were
+  more. An unkeyed target has none.
+- **Attachment facts and the card (§3.9, §5.9).** `attachment(id)` (the
+  `Lookup` phase) returns the declared type, UTI, name, size and flags
+  (raw `hide_attachment`), the Genmoji description, the current blob
+  (stored size and the session whose bytes it holds), every observation
+  as codes ordered by session rank, and its value history. The card is
+  decided from the highest-ranked observation's `LookupCode` first, then
+  its `CopyCode`: not copied, not in the backup, not found where looked
+  (StickerCache), class not looked up, location unusable, not decrypted,
+  could not be read, too large, or "not available" with both codes. A
+  present blob always shows the file; when the newest observation found
+  no file, the card names the older backup that holds it
+  (`current_blob_id` does not move, by design). A non-zero `verify_state`
+  is reported as historical, and "may be out of date" when a later
+  observation is `Replaced`. What a present file is (a rendition, Play, a
+  file card, "Unrecognised content") is the sniff's, slice 5d.
+- **Date navigation** (`view/calendar.rs`): `seek_date(chat, utc_ns,
+  OnOrAfter | Before)` reads the dated keyset from the instant's key (the
+  import's encoder) in batches of 64 and returns the first visible item,
+  skipping folded reactions; undated rows are never returned.
+  `day_counts(chat, bounds)` takes 2 to 43 strictly increasing UTC
+  instants (a six-week calendar built in the webview, D104) and counts
+  visible items per interval in one statement each, dated only, with the
+  folding rule stated in SQL (a NULL `assoc_kind` is not a reaction).
+- **Errors.** An unknown message, body or attachment id is
+  `AnchorNotFound`; bad day bounds are `Internal`; budget trips are
+  `QueryTooBroad`, never `Damaged`.
+- **Tests.** `tests/viewer_details.rs` reads the detail of every message
+  of every catalogue entry and scenario and checks its stored versions
+  and their grouping, the `ec` texts, the withheld or shown earlier text
+  and its reason, the value history and the reply probe against the
+  Python model and the M4 manifest; every attachment's observations,
+  sizes, flags and card against the model; that no one-time code or
+  earlier text reaches any command's output (previews, pages, reply
+  threads, details, text chunks, reaction histories) unless revealed, and
+  that all do when revealed; that text chunks rebuild every body,
+  including a 1 MiB one, and clamp their offsets; that the reaction
+  history pages every row once in date order; seek and day counts against
+  the model and against an independent oracle on a bulk archive; the
+  card states an import cannot produce (no observation, keys that do not
+  unwrap, too large, unknown codes, a stale verify report); and budget
+  trips and bad inputs. `oma-messages`' `tests/summary.rs` covers
+  `edit_texts` (decoded `t`, one-time-code runs, stored positions, a bad
+  `ec`, an unreadable or over-budget plist, a bad or over-budget
+  typedstream). The plans of the new statements are pinned; the unkeyed
+  probe is the only new scan (of the unkeyed partial index), and a
+  message's attachment ids the only new temporary B-tree.
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`

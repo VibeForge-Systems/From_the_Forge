@@ -172,10 +172,10 @@ impl ThreadPage {
 // ---------------------------------------------------------------------------
 
 const SQL_KEY: &str = "SELECT sort_key FROM chat_message WHERE chat_id = ?1 AND message_id = ?2";
-const SQL_DATED_OLDER: &str = "SELECT message_id, sort_key FROM chat_message \
+pub(crate) const SQL_DATED_OLDER: &str = "SELECT message_id, sort_key FROM chat_message \
      WHERE chat_id = ?1 AND (sort_key, message_id) < (?2, ?3) AND sort_key < X'01' \
      ORDER BY sort_key DESC, message_id DESC LIMIT ?4";
-const SQL_DATED_NEWER: &str = "SELECT message_id, sort_key FROM chat_message \
+pub(crate) const SQL_DATED_NEWER: &str = "SELECT message_id, sort_key FROM chat_message \
      WHERE chat_id = ?1 AND (sort_key, message_id) > (?2, ?3) AND sort_key < X'01' \
      ORDER BY sort_key, message_id LIMIT ?4";
 const SQL_UNDATED_OLDER: &str = "SELECT message_id, sort_key FROM chat_message \
@@ -188,6 +188,7 @@ const SQL_ORIGINATOR: &str = "SELECT key_kind, guid, sort_key FROM message WHERE
 const SQL_REPLIES: &str = "SELECT id, sort_key FROM message \
      WHERE thread_originator_guid = ?1 AND assoc_present = 0 AND item_kind = 1 LIMIT ?2";
 
+#[cfg_attr(not(feature = "fault-injection"), allow(dead_code))]
 pub(crate) fn plan_statements() -> Vec<(&'static str, String)> {
     [
         ("viewer timeline key", SQL_KEY),
@@ -248,12 +249,12 @@ struct Row {
 
 /// An exclusive keyset bound.
 #[derive(Clone)]
-struct Bound {
-    key: Vec<u8>,
-    id: i64,
+pub(crate) struct Bound {
+    pub(crate) key: Vec<u8>,
+    pub(crate) id: i64,
 }
 
-fn batch(
+pub(crate) fn batch(
     c: &Connection,
     sql: &str,
     chat: i64,

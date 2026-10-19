@@ -83,7 +83,7 @@ pub use gate::{
     OrderFacts, OrderSource, Preflight, ProceedWith, ProceedWithSuggestion, RdFacts, ResumePlan,
     LINEAGES_LIMIT,
 };
-#[cfg(feature = "fault-injection")]
+pub(crate) use messages::ts_code;
 pub use preflight::{KEY_SCAN_CAP, RECOVERABLE_SCAN_CAP};
 pub(crate) use session::{supersede_sessions, unfinished_sessions};
 pub use session::{ORDER_KEY_FLOOR_NS, ORDER_KEY_SLACK_NS};

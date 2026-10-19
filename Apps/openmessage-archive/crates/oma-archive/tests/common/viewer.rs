@@ -4,15 +4,17 @@
 //! in place with a temporary staging directory.
 #![allow(dead_code, clippy::disallowed_methods, clippy::disallowed_types)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::PathBuf;
 
 use oma_archive::{ArchiveId, Library, LineageChoice, LineageId};
 use serde_json::Value;
 
-use super::import::{import, lineage_for, open_dir, opts, LineageLabels, UDID};
-use super::{db_path, library};
+use super::import::{
+    import, lineage_for, manifest_ref, open_dir, opts, read_only, LineageLabels, UDID,
+};
+use super::{db_path, hex, library};
 
 /// The entries the catalogue must hold.
 pub const ENTRIES: &[&str] = &[
@@ -107,5 +109,90 @@ pub fn import_order(order: &Value, what: &str) -> Imported {
         lib,
         id,
         labels,
+    }
+}
+
+/// The model's name of every message: `guid:…` for keyed rows, and for
+/// unkeyed rows `unkeyed:message:<n>:<occ>`, where `n` numbers the distinct
+/// fingerprints in byte order (the model's `label_unkeyed`).
+pub fn message_names(c: &rusqlite::Connection) -> HashMap<i64, String> {
+    type KeyRow = (i64, i64, Option<Vec<u8>>, Option<Vec<u8>>, Option<i64>);
+    let rows: Vec<KeyRow> = c
+        .prepare("SELECT id, key_kind, guid, unkeyed_fp, unkeyed_occ FROM message")
+        .expect("prepare")
+        .query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("rows");
+    let fps: Vec<Vec<u8>> = rows
+        .iter()
+        .filter_map(|r| r.3.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    rows.into_iter()
+        .map(|(id, kind, guid, fp, occ)| {
+            let name = if kind == 1 {
+                let g = guid.expect("guid");
+                match String::from_utf8(g.clone()) {
+                    Ok(t) => format!("guid:{t}"),
+                    Err(_) => format!("guid-hex:{}", hex(&g)),
+                }
+            } else {
+                let n = fps.iter().position(|f| Some(f) == fp.as_ref()).expect("fp");
+                format!("unkeyed:message:{}:{}", n + 1, occ.expect("occ"))
+            };
+            (id, name)
+        })
+        .collect()
+}
+
+/// What a model comparison needs to name rows.
+pub struct Names {
+    pub messages: HashMap<i64, String>,
+    pub handles: HashMap<i64, String>,
+    pub chats: HashMap<i64, String>,
+    pub attachments: HashMap<i64, String>,
+    pub lineages: BTreeMap<i64, String>,
+    /// Import session id → the catalogue entry it imported.
+    pub entries: HashMap<i64, String>,
+}
+
+pub fn names(i: &Imported, order: &Value) -> Names {
+    let c = read_only(&i.db());
+    let all = |table: &str| -> HashMap<i64, String> {
+        let ids: Vec<i64> = c
+            .prepare(&format!("SELECT id FROM {table}"))
+            .expect("prepare")
+            .query_map([], |r| r.get(0))
+            .expect("query")
+            .collect::<Result<_, _>>()
+            .expect("ids");
+        ids.into_iter()
+            .map(|id| (id, manifest_ref(table, &c, id)))
+            .collect()
+    };
+    let sessions: Vec<i64> = c
+        .prepare("SELECT id FROM import_session ORDER BY id")
+        .expect("prepare")
+        .query_map([], |r| r.get(0))
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("sessions");
+    let steps = order.as_array().expect("steps");
+    assert_eq!(sessions.len(), steps.len(), "one session per step");
+    Names {
+        messages: message_names(&c),
+        handles: all("handle"),
+        chats: all("chat"),
+        attachments: all("attachment"),
+        lineages: i.labels.clone(),
+        entries: sessions
+            .into_iter()
+            .zip(steps)
+            .map(|(s, st)| (s, st["entry"].as_str().expect("entry").to_owned()))
+            .collect(),
     }
 }

@@ -343,6 +343,15 @@ Never hand-edit generated files.
   `view/assemble.rs` under `Caps`, masks one-time codes and earlier text
   unless the request's `Reveal` asks, and never reads read, delivery or
   sent state (D94).
+- **Details decode edit text at read time and withhold it (M5 slice
+  5b3).** `message_detail` decodes `ec[*].t` through
+  `oma_messages::edit_texts` from the stored `summary_raw` (owner Q3a):
+  never store, index or log it. Earlier versions, decoded edit text and
+  `message_text` chunks of earlier bodies are withheld like the thread
+  pages' earlier text, and one-time codes are masked, unless the
+  request's `Reveal` asks (D115, Q3b). A new viewer statement goes into
+  `view::plan_statements` and `tests/query_plans.rs`; SQL that excludes
+  folded reactions with `NOT (…)` must `coalesce` a NULL `assoc_kind`.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush

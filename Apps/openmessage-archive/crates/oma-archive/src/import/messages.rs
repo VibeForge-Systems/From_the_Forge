@@ -415,7 +415,7 @@ struct BodyObs {
     unsent: Vec<i64>,
 }
 
-fn ts_code(k: TsErrorKind) -> TsErrorCode {
+pub(crate) fn ts_code(k: TsErrorKind) -> TsErrorCode {
     match k {
         TsErrorKind::UnsupportedHeader => TsErrorCode::UnsupportedHeader,
         TsErrorKind::Truncated => TsErrorCode::Truncated,

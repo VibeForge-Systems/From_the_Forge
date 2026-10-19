@@ -16,11 +16,15 @@
 //!
 //! Slice 5b1 adds the conversation list ([`conversations`]); slice 5b2 the
 //! keyset thread pages and the reply thread ([`thread`]) over one assembly
-//! layer ([`assemble`]); details, dates, search and media follow in later
-//! slices.
+//! layer ([`assemble`]); slice 5b3 the message detail with edit texts
+//! decoded at read time, the reaction history, `message_text`, value
+//! history and the attachment facts and cards ([`detail`]), and date seek
+//! and day counts ([`calendar`]). Search and media follow in later slices.
 
 pub mod assemble;
+pub mod calendar;
 pub mod conversations;
+pub mod detail;
 pub mod text;
 pub mod thread;
 
@@ -34,10 +38,18 @@ pub use assemble::{
     ReplyRef, Reveal, Segment, SegmentKind, SenderReason, WithheldReason, EMOJI_BYTES, PAGE_BYTES,
     QUOTE_UTF16,
 };
+pub use calendar::{DayCounts, SeekDir, DAY_BOUNDS};
 pub use conversations::{
     ChatLabel, ChatStatsFacts, Conversation, ConversationIndex, ConversationSort, NameFilter,
     NameFilterError, Participant, Preview, PreviewBody, CONVERSATIONS_PER_CALL,
     CONVERSATION_INDEX_LIMIT, LABEL_PARTICIPANTS, PREVIEW_SCAN_ROWS,
+};
+pub use detail::{
+    AttachmentFacts, BlobFacts, BodyVersion, CardState, ChatFlags, ChunkText, DetailTimes,
+    EditEntryText, EditEntryView, EditTextsOutcome, EditTime, HistoryColumn, HistoryValue,
+    IdentifierProbe, MessageDetail, Observation, OlderBackup, RawNumber, RawValue, ReactionHistory,
+    ReactionRecord, TextChunk, VerifyFacts, VersionText, DETAIL_CHATS, DETAIL_EDIT_ENTRIES,
+    DETAIL_VERSIONS, REACTION_HISTORY_LIMIT, REACTION_HISTORY_PAGE, TEXT_CHUNK_UTF16,
 };
 pub use text::{
     ContentText, MaskKind, OptContent, TextPiece, UrlRun, BODY_PAGE_UTF16, IDENTIFIER_UTF16,
@@ -226,6 +238,7 @@ pub(crate) fn folds_into(c: &Connection, chat: i64, id: i64) -> rusqlite::Result
 
 /// Every viewer statement whose plan depends on an index, by name, exactly
 /// as the code prepares it (pinned in `tests/query_plans.rs`).
+#[cfg_attr(not(feature = "fault-injection"), allow(dead_code))]
 pub(crate) fn plan_statements() -> Vec<(&'static str, String)> {
     let mut v: Vec<(&'static str, String)> = vec![
         ("viewer value issue", SQL_VALUE_ISSUE.to_owned()),
@@ -236,6 +249,8 @@ pub(crate) fn plan_statements() -> Vec<(&'static str, String)> {
     v.extend(conversations::plan_statements());
     v.extend(thread::plan_statements());
     v.extend(assemble::plan_statements());
+    v.extend(detail::plan_statements());
+    v.extend(calendar::plan_statements());
     v
 }
 

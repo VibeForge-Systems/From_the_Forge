@@ -144,7 +144,7 @@ impl Budget {
 /// viewer call runs under its own budget, which resets at the phase's
 /// start, so a trip in one phase never interrupts the next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[allow(dead_code)] // the later viewer slices (5b2–5d) use the other phases
+#[allow(dead_code)] // the search slice (5c) uses `Search`, `Hits` and `ScanBatch`
 pub(crate) enum ViewBudget {
     /// `conversation_index`, `conversations`.
     List,

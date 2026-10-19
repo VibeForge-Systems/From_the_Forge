@@ -276,9 +276,10 @@ const SQL_PREVIEW_ROW: &str = "SELECT m.item_kind, m.is_from_me, m.is_from_me_st
        m.assoc_present, m.assoc_kind, b.id, b.display_text, b.display_source, \
        b.display_none_reason, b.run_issue \
      FROM message m LEFT JOIN message_body b ON b.id = m.current_body_id WHERE m.id = ?1";
-const SQL_FLAGGED_PARTS: &str = "SELECT utf16_start, utf16_end FROM message_body_part \
+pub(crate) const SQL_FLAGGED_PARTS: &str = "SELECT utf16_start, utf16_end FROM message_body_part \
      WHERE body_id = ?1 AND (flags & ?2) <> 0";
 
+#[cfg_attr(not(feature = "fault-injection"), allow(dead_code))]
 pub(crate) fn plan_statements() -> Vec<(&'static str, String)> {
     [
         ("viewer conversation order (recent)", SQL_ORDER_RECENT),
@@ -540,7 +541,7 @@ fn label(display: OptContent, first: Vec<Participant>, total: u64, ident: OptCon
 /// only when the formatting was decoded and read cleanly
 /// (`display_source = 1`, no `run_issue`, §3.6); otherwise a body with a
 /// one-time-code part is withheld whole.
-fn masked_preview(
+pub(crate) fn masked_preview(
     c: &Connection,
     body: i64,
     text: &str,

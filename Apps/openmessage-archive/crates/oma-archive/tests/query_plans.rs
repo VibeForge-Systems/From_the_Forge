@@ -19,7 +19,9 @@
 //! conversation list scans `chat` (once per call, by design: v1 has no
 //! recency index, §3.10) and only it and the per-call session read scan a
 //! table; only its orders and a message's attachments (at most one page's
-//! worth, ordered by their M4 order key) sort in a temporary B-tree.
+//! worth, ordered by their M4 order key) sort in a temporary B-tree. The
+//! detail's unkeyed identifier probe walks the partial index of unkeyed
+//! messages, under its own budget.
 #![allow(clippy::disallowed_methods)]
 
 mod common;
@@ -422,6 +424,119 @@ const PINNED: &[(&str, &[&str])] = &[
             "SEARCH handle USING INTEGER PRIMARY KEY (rowid=?)",
         ],
     ),
+    (
+        "viewer detail row",
+        &[
+            "SEARCH message USING INTEGER PRIMARY KEY (rowid=?)",
+        ],
+    ),
+    (
+        "viewer detail versions",
+        &[
+            "SEARCH message_body USING INDEX sqlite_autoindex_message_body_1 (message_id=?)",
+        ],
+    ),
+    (
+        "viewer edit entries",
+        &[
+            "SEARCH message_edit_entry USING PRIMARY KEY (body_id=?)",
+        ],
+    ),
+    (
+        "viewer edit entry count",
+        &[
+            "SEARCH message_edit_entry USING PRIMARY KEY (body_id=?)",
+        ],
+    ),
+    (
+        "viewer summary raw",
+        &[
+            "SEARCH message_body USING INTEGER PRIMARY KEY (rowid=?)",
+        ],
+    ),
+    (
+        "viewer unkeyed identifier probe",
+        &[
+            "CO-ROUTINE (subquery-1)",
+            "SCAN message USING INDEX message_unkeyed",
+            "SCAN (subquery-1)",
+        ],
+    ),
+    (
+        "viewer message chats",
+        &[
+            "SEARCH cm USING COVERING INDEX chat_message_by_message (message_id=?)",
+            "SEARCH c USING INTEGER PRIMARY KEY (rowid=?)",
+        ],
+    ),
+    (
+        "viewer value history",
+        &[
+            "SEARCH value_history USING PRIMARY KEY (entity=? AND row_id=?)",
+        ],
+    ),
+    (
+        "viewer attachment ids",
+        &[
+            "SEARCH message_attachment USING PRIMARY KEY (message_id=?)",
+            "USE TEMP B-TREE FOR ORDER BY",
+        ],
+    ),
+    (
+        "viewer attachment row",
+        &[
+            "SEARCH a USING INTEGER PRIMARY KEY (rowid=?)",
+            "SEARCH b USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN",
+        ],
+    ),
+    (
+        "viewer attachment observations",
+        &[
+            "SEARCH o USING PRIMARY KEY (attachment_id=?)",
+            "SEARCH s USING INTEGER PRIMARY KEY (rowid=?)",
+        ],
+    ),
+    (
+        "viewer reaction target",
+        &[
+            "SEARCH message USING INTEGER PRIMARY KEY (rowid=?)",
+        ],
+    ),
+    (
+        "viewer reaction history",
+        &[
+            "SEARCH message USING INDEX message_assoc (assoc_target_guid=?)",
+        ],
+    ),
+    (
+        "viewer text body",
+        &[
+            "SEARCH b USING INTEGER PRIMARY KEY (rowid=?)",
+            "SEARCH m USING INTEGER PRIMARY KEY (rowid=?)",
+        ],
+    ),
+    (
+        "viewer current body state",
+        &[
+            "SEARCH message_body USING INTEGER PRIMARY KEY (rowid=?)",
+        ],
+    ),
+    (
+        "viewer any unsent part",
+        &[
+            "SEARCH message_unsent_part USING PRIMARY KEY (body_id=?)",
+        ],
+    ),
+    (
+        "viewer day count",
+        &[
+            "SEARCH cm USING COVERING INDEX chat_message_timeline (chat_id=? AND sort_key>? AND sort_key<?)",
+            "SEARCH m USING INTEGER PRIMARY KEY (rowid=?)",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SEARCH t USING COVERING INDEX message_guid (guid=?)",
+            "SEARCH x USING COVERING INDEX chat_message_by_message (message_id=? AND chat_id=?)",
+        ],
+    ),
 ];
 
 fn plan(c: &rusqlite::Connection, sql: &str) -> Vec<String> {
@@ -481,14 +596,23 @@ fn viewer_statements_stay_on_their_indexes() {
                 // whole once per call.
                 let allowed = list_scans.contains(&name)
                     || (name, line.as_str()) == ("viewer newest session", "SCAN import_session")
-                    || (name, line.as_str()) == ("viewer sessions", "SCAN import_session");
+                    || (name, line.as_str()) == ("viewer sessions", "SCAN import_session")
+                    // The unkeyed probe walks the partial index of unkeyed
+                    // messages only, under its own budgeted phase.
+                    || (name, line.as_str())
+                        == (
+                            "viewer unkeyed identifier probe",
+                            "SCAN message USING INDEX message_unkeyed",
+                        );
                 assert!(allowed, "{name}: {line}");
             }
             if line.contains("TEMP B-TREE") {
                 // A message's attachments (at most one page's worth) are
                 // ordered by their M4 order key, which no index holds.
                 assert!(
-                    name.starts_with("viewer conversation order") || name == "viewer attachments",
+                    name.starts_with("viewer conversation order")
+                        || name == "viewer attachments"
+                        || name == "viewer attachment ids",
                     "{name}: {line}"
                 );
             }

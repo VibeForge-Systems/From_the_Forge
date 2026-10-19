@@ -264,6 +264,37 @@ fn logs_errors_and_debug_output_hold_no_label_id_or_path() {
             shown.push(format!("{t:?}"));
         }
         shown.push(format!("{page:?} {page:#?} {:?}", page.served_keys()));
+        // Details, edit texts, attachments, reaction histories, text
+        // chunks and dates (slice 5b3), codes and earlier text revealed.
+        let all = oma_archive::Reveal {
+            earlier_text: true,
+            one_time_code: true,
+        };
+        for m in page.items.iter().take(5) {
+            let d = reader.message_detail(m.id, all).expect("detail");
+            for a in &d.attachments {
+                shown.push(format!("{:?}", reader.attachment(a.id).expect("facts")));
+            }
+            for v in &d.versions {
+                shown.push(format!(
+                    "{:?}",
+                    reader.message_text(v.body, 0, all).expect("chunk")
+                ));
+            }
+            shown.push(format!(
+                "{d:?} {d:#?} {:?}",
+                reader.reaction_history(m.id, 0).expect("history")
+            ));
+        }
+        shown.push(format!(
+            "{:?} {:?}",
+            reader
+                .seek_date(*chat, 0, oma_archive::SeekDir::OnOrAfter)
+                .expect("seek"),
+            reader
+                .day_counts(*chat, &[i64::MIN, 0, i64::MAX])
+                .expect("days")
+        ));
     }
     assert!(items > 0, "the catalogue has thread items");
     let e = ArchiveError::AnchorNotFound;

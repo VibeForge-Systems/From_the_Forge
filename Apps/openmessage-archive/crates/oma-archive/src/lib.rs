@@ -120,6 +120,14 @@ pub use view::{
     LABEL_PARTICIPANTS, PAGE_BYTES, PAGE_HANDLES, PAGE_ITEMS, PREVIEW_SCAN_ROWS, PREVIEW_UTF16,
     QUOTE_UTF16, REPLY_THREAD_LIMIT,
 };
+pub use view::{
+    AttachmentFacts, BlobFacts, BodyVersion, CardState, ChatFlags, ChunkText, DayCounts,
+    DetailTimes, EditEntryText, EditEntryView, EditTextsOutcome, EditTime, HistoryColumn,
+    HistoryValue, IdentifierProbe, MessageDetail, Observation, OlderBackup, RawNumber, RawValue,
+    ReactionHistory, ReactionRecord, SeekDir, TextChunk, VerifyFacts, VersionText, DAY_BOUNDS,
+    DETAIL_CHATS, DETAIL_EDIT_ENTRIES, DETAIL_VERSIONS, REACTION_HISTORY_LIMIT,
+    REACTION_HISTORY_PAGE, TEXT_CHUNK_UTF16,
+};
 
 /// The app version recorded in `archive_meta.created_by`,
 /// `import_session.app_version` and `schema_migration.app_version`.

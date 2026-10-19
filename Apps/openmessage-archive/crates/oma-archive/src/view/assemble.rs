@@ -297,7 +297,7 @@ pub struct BodyText {
     /// `None` for a code this build does not know.
     pub source: Option<DisplaySource>,
     /// The whole text's length in UTF-16 units; the rest comes from
-    /// `message_text` (5b3).
+    /// [`ArchiveReader::message_text`](crate::ArchiveReader::message_text).
     pub full_utf16: u32,
     /// The shown text was cut to the cap.
     pub truncated: bool,
@@ -497,7 +497,8 @@ pub enum ReplyRef {
     NotUniquelyIdentified,
 }
 
-/// An attachment as a page lists it. The card is decided later (5b3, §5.9).
+/// An attachment as a page lists it. The card is decided by
+/// [`ArchiveReader::attachment`](crate::ArchiveReader::attachment) (§5.9).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct AttachmentRef {
@@ -609,6 +610,7 @@ const SQL_REPLY_COUNT: &str = "SELECT count(*) FROM (SELECT 1 FROM message \
 const SQL_REPLY_OF: &str = "SELECT thread_originator_guid FROM message WHERE id = ?1";
 const SQL_HANDLE: &str = "SELECT address, address_st, service_class FROM handle WHERE id = ?1";
 
+#[cfg_attr(not(feature = "fault-injection"), allow(dead_code))]
 pub(crate) fn plan_statements() -> Vec<(&'static str, String)> {
     [
         ("viewer sessions", SQL_SESSIONS),
@@ -700,7 +702,7 @@ impl Ctx {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn bytes_of(v: ValueRef<'_>) -> Option<Vec<u8>> {
+pub(crate) fn bytes_of(v: ValueRef<'_>) -> Option<Vec<u8>> {
     match v {
         ValueRef::Text(b) | ValueRef::Blob(b) => Some(b.to_vec()),
         _ => None,
@@ -720,7 +722,7 @@ fn opt_content(v: Option<&[u8]>, st: Option<i64>, cap: u32) -> OptContent {
 
 /// `assoc_emoji` as content: at most [`EMOJI_BYTES`] bytes, cut at a char
 /// boundary and marked truncated beyond.
-fn emoji_content(v: Option<&[u8]>, st: Option<i64>) -> OptContent {
+pub(crate) fn emoji_content(v: Option<&[u8]>, st: Option<i64>) -> OptContent {
     match (v, st) {
         (Some(b), None) if b.len() > EMOJI_BYTES => {
             let decoded = String::from_utf8_lossy(b);
@@ -1116,7 +1118,7 @@ fn sender(row: &ItemRow) -> SenderReason {
     }
 }
 
-fn recorded_time(
+pub(crate) fn recorded_time(
     raw: Option<i64>,
     st: Option<i64>,
     unit: Option<i64>,
@@ -1630,6 +1632,20 @@ struct ReactionRow {
     key: Vec<u8>,
 }
 
+/// The sender of a reaction row: `is_from_me = 1`, else a resolved handle
+/// with `is_from_me = 0`, else not determinable.
+pub(crate) fn chip_sender(
+    is_from_me: Option<i64>,
+    st: Option<i64>,
+    handle: Option<i64>,
+) -> ChipSender {
+    match (is_from_me, st, handle) {
+        (Some(1), None, _) => ChipSender::Me,
+        (Some(0), None, Some(h)) => ChipSender::Handle(HandleId::new(h)),
+        _ => ChipSender::NotRecorded,
+    }
+}
+
 fn reactions(
     c: &Connection,
     guid: &[u8],
@@ -1647,11 +1663,7 @@ fn reactions(
         let fm: Option<i64> = r.get(4)?;
         let fm_st: Option<i64> = r.get(5)?;
         let handle: Option<i64> = r.get(6)?;
-        let sender = match (fm, fm_st, handle) {
-            (Some(1), None, _) => ChipSender::Me,
-            (Some(0), None, Some(h)) => ChipSender::Handle(HandleId::new(h)),
-            _ => ChipSender::NotRecorded,
-        };
+        let sender = chip_sender(fm, fm_st, handle);
         all.push(ReactionRow {
             id: r.get(0)?,
             kind,
