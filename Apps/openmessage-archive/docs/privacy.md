@@ -681,6 +681,34 @@ can be started from the app yet; nothing was run on Windows):
   are). This keeps a message from faking another item or a sender line,
   but it is not a guarantee about every viewer.
 
+What the JSON and CSV writers do (slice 6f, tested on Linux through the
+export pipeline on the synthetic catalogues; no export can be started
+from the app yet; nothing was run on Windows, in Excel or in
+LibreOffice):
+
+- **JSON keeps every character of the recorded text** (escaped where JSON
+  needs it). Hidden characters are not marked; each text carries flags
+  saying it holds direction or invisible characters. A JSON export also
+  holds copies of its two schemas (no content).
+- **CSV "for spreadsheets" (the default)** starts a cell that a
+  spreadsheet could run as a formula (a leading `=`, `+`, `-`, `@`, their
+  full-width and small forms, also after spaces and invisible
+  characters, or a leading tab or line break) with an apostrophe, and
+  names the column in the row's `neutralised_columns`; every E.164
+  address starting with `+` is prefixed so. Control characters are
+  written as codes. This follows OWASP's "CSV Injection" advice; OWASP
+  also notes that a spreadsheet may turn the formula back on after the
+  file is saved and opened again, which is **not tested** here, nor is
+  how Excel or LibreOffice treat the invisible characters.
+- **CSV "for data tools"** writes values raw, controls included, except
+  the export's own marker character: opening those files in a
+  spreadsheet can run formulas hidden in messages, and printing them in
+  a terminal can run terminal escape codes. The dialog will say so
+  (slice 6k).
+- **With "Include archive and source identifiers" off** (the default),
+  the CSV's `source_*` columns are present and empty, and JSON's
+  `source` says the option left them out.
+
 ## Device identifiers (M2)
 
 The app never stores or keeps these fields from a backup: `Unique

@@ -24,6 +24,13 @@ pub struct Dest {
     pub parent: PathBuf,
 }
 
+/// A file of this crate's `tests/` folder.
+pub fn path_of(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join(name)
+}
+
 /// A fresh destination `<tmp>/dest`, so tests can check that nothing is
 /// written beside it.
 pub fn dest() -> Dest {

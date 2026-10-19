@@ -64,11 +64,11 @@ use std::io::Write;
 use oma_archive::schema::codes::EditLabelCode;
 
 use crate::codes::{
-    AttachmentAccessCode, CardStateCode, ChipSenderCode, Code, Direction, ExportCode,
-    MessageLabelCode, SegmentKindCode, SenderReasonCode, UNRECOGNISED_TOKEN,
+    AttachmentAccessCode, CardStateCode, ChipSenderCode, Code, Direction, MessageLabelCode,
+    SegmentKindCode, SenderReasonCode,
 };
 use crate::error::{ExportError, LimitKind};
-use crate::hidden::{self, MarkCounts, MarkPolicy, MARKER_CLOSE, MARKER_OPEN};
+use crate::hidden::{self, MarkCounts, MarkPolicy};
 use crate::ids::Ordinal;
 use crate::map::ExportZone;
 use crate::naming::{BundlePath, FileExt, FileStem};
@@ -76,10 +76,11 @@ use crate::plan::{Clock, Format, LineEndings, Packaging};
 use crate::record::*;
 use crate::stage::{StagedFile, Staging};
 use crate::time::{self, format_human, CivilDate, HumanStyle, Localized};
-use crate::words::{self, txt_legend, WordsTable};
+use crate::words::txt_legend;
 
 use super::{
-    AboutDraft, ConversationFile, ConversationTotals, ExportContext, ExportWriter, WriterReport,
+    is, phrase, placeholder, AboutDraft, ConversationFile, ConversationTotals, ExportContext,
+    ExportWriter, Words, WriterReport,
 };
 
 /// The indent of a label line.
@@ -100,48 +101,6 @@ pub const UNDATED_TIME: &str = "Undated";
 pub const NO_TIME: &str = "No usable time";
 /// The single file's "About" heading.
 pub const ABOUT: &str = "==== About this export ====";
-
-/// Sentences by (table, code), built once from `words.rs`.
-struct Words {
-    by: BTreeMap<(&'static str, i64), &'static str>,
-}
-
-impl Words {
-    fn new() -> Words {
-        let mut by = BTreeMap::new();
-        for t in words::tables() {
-            let WordsTable { name, entries, .. } = t;
-            for e in entries {
-                by.insert((name, e.code), e.sentence);
-            }
-        }
-        Words { by }
-    }
-
-    /// The sentence of `c` in `table`; a number this build does not know
-    /// says so with its number.
-    fn say(&self, table: &'static str, c: Code) -> String {
-        match self.by.get(&(table, c.code)) {
-            Some(s) if !c.is_unrecognised() => (*s).to_owned(),
-            _ => format!(
-                "Recorded with a code this app does not know ({table} {})",
-                c.code
-            ),
-        }
-    }
-}
-
-fn phrase(key: &str) -> &'static str {
-    words::PHRASES
-        .iter()
-        .find(|p| p.key == key)
-        .map_or("", |p| p.sentence)
-}
-
-/// Is `c` the code of `v`?
-fn is<T: ExportCode>(c: Code, v: T) -> bool {
-    c.code == v.export_code() && c.token != UNRECOGNISED_TOKEN && c.token == v.token()
-}
 
 /// What one conversation file has written so far.
 #[derive(Debug, Default)]
@@ -243,10 +202,6 @@ impl Comma for [String] {
 enum Run<'a> {
     Text(&'a str),
     Placeholder(String),
-}
-
-fn placeholder(s: &str) -> String {
-    format!("{MARKER_OPEN}{s}{MARKER_CLOSE}")
 }
 
 impl TxtWriter {

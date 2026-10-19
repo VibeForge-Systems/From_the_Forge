@@ -20,4 +20,6 @@ disallowed-methods = [
     { path = "tempfile::tempfile", reason = "nothing is written outside the destination (spec §8.3)" },
     { path = "tempfile::NamedTempFile::new", reason = "nothing is written outside the destination (spec §8.3)" },
     { path = "tempfile::Builder::new", reason = "nothing is written outside the destination (spec §8.3)" },
+    { path = "csv::Writer::from_path", reason = "CSV is written only through Writer::from_writer over a staged file (spec §5.2)" },
+    { path = "csv::WriterBuilder::from_path", reason = "CSV is written only through WriterBuilder::from_writer over a staged file (spec §5.2)" },
 ]

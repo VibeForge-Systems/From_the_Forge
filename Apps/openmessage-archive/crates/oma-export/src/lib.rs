@@ -54,8 +54,18 @@
 //! - [`pipeline`]: one export from the pre-count to the publish
 //!   (`pipeline::run`, the spec's `Exporter::run`).
 //!
-//! The other writers follow in 6f to 6j. Nothing here logs; errors carry
-//! kinds only (I6).
+//! Slice 6f, the structured writers:
+//!
+//! - [`writer::json`]: JSON Lines per conversation file plus the
+//!   conversation and handle tables, or one streamed single file, through
+//!   [`jsonfmt::to_line`]; the open, strict and manifest schemas
+//!   (`schema/`, made by `scripts/make-export-schemas.py`);
+//! - [`writer::csv`]: nine RFC 4180 tables through `csv`'s
+//!   `WriterBuilder::from_writer`, both profiles, default-deny formula
+//!   neutralisation listed per row and counted.
+//!
+//! HTML follows in 6g, XLSX and PDF in 6i and 6j. Nothing here logs;
+//! errors carry kinds only (I6).
 #![cfg_attr(
     not(test),
     deny(

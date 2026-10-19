@@ -42,9 +42,9 @@ use oma_archive::{
 use crate::codes::{
     AltTextSourceCode, AltTextWithheldCode, AssocVisibilityCode, AttachmentAccessCode,
     AttachmentOutcome, CardStateCode, ChipSenderCode, ChipStateCode, Code, Direction,
-    EditTextsOutcomeCode, FormattingCode, HistoryColumnCode, MaskKindCode, MessageLabelCode,
-    NoTextReason, ReactionKindCode, ReplyResolution, SegmentKindCode, SenderReasonCode,
-    SniffedKindCode, Style, WithheldReasonCode,
+    EditTextsOutcomeCode, ExportCode, FormattingCode, HistoryColumnCode, MaskKindCode,
+    MessageLabelCode, NoTextReason, ReactionKindCode, ReplyResolution, SegmentKindCode,
+    SenderReasonCode, SniffedKindCode, Style, WithheldReasonCode,
 };
 use crate::error::{ExportError, LimitKind};
 use crate::ids::{IdentifierMode, MessageRef, Ordinal, Ordinals};
@@ -175,6 +175,12 @@ pub struct Mapper {
     zone: ExportZone,
     options: RecordOptions,
     counts: RecordCounts,
+    /// The file outcome of each attachment of a message that is a
+    /// timeline item of more than one exported conversation, decided at
+    /// its first placement and repeated at the others (slice 6f), so the
+    /// record's intrinsic part is the same in every conversation file
+    /// (spec §4.9) and the copy is asked once.
+    shared_files: BTreeMap<(MessageId, oma_archive::AttachmentId), FileRecord>,
 }
 
 // ---------------------------------------------------------------------------
@@ -351,6 +357,7 @@ impl Mapper {
             zone,
             options,
             counts: RecordCounts::default(),
+            shared_files: BTreeMap::new(),
         }
     }
 
@@ -1057,6 +1064,14 @@ impl Mapper {
         if facts.len() != refs.len() || codes.len() != refs.len() {
             return Err(limit(LimitKind::RowCountMismatch));
         }
+        // Timeline items of more than one exported conversation keep the
+        // first placement's file outcome.
+        let shared = m
+            .chats
+            .iter()
+            .filter(|x| self.ordinals.conversation(x.chat).is_some())
+            .count()
+            > 1;
         let mut out = Vec::with_capacity(refs.len());
         for ((r, x), c) in refs.iter().zip(&facts).zip(codes) {
             let f = &x.facts;
@@ -1090,7 +1105,22 @@ impl Mapper {
                 _ => return Err(unmapped()),
             };
             let card = self.card(f.card)?;
-            let file = self.file_outcome(x, &card, files)?;
+            let file = if shared {
+                let key = (m.item.message.id, f.id);
+                match self.shared_files.get(&key).cloned() {
+                    Some(prev) => {
+                        self.recount(&prev, &card);
+                        prev
+                    }
+                    None => {
+                        let rec = self.file_outcome(x, &card, files)?;
+                        self.shared_files.insert(key, rec.clone());
+                        rec
+                    }
+                }
+            } else {
+                self.file_outcome(x, &card, files)?
+            };
             let held_by = f.blob.map(|b| self.session(b.held_by));
             let current_blob = f.blob.map(|b| b.id);
             let mut observations = Vec::with_capacity(f.observations.len());
@@ -1179,6 +1209,33 @@ impl Mapper {
         };
         rec.state = Code::of(state);
         Ok(rec)
+    }
+
+    /// Count a later placement of an attachment whose outcome `prev` was
+    /// decided at the message's first placement, as `file_outcome` counts
+    /// a placement: a written file counts as deduplicated (its bytes were
+    /// written once), every other outcome as it did the first time.
+    fn recount(&mut self, prev: &FileRecord, card: &CardRecord) {
+        use AttachmentOutcome as O;
+        let c = &mut self.counts;
+        c.attachment_records += 1;
+        let excluded = |c: &mut RecordCounts, key: &str| {
+            *c.attachments_excluded.entry(key.to_owned()).or_insert(0) += 1;
+        };
+        let code = prev.outcome.code;
+        if code == O::Copied.export_code()
+            || code == O::Deduplicated.export_code()
+            || code == O::BlockedExtension.export_code()
+        {
+            c.attachments_with_file += 1;
+            c.files_deduplicated += 1;
+        } else if code == O::NotRequested.export_code() {
+            c.attachments_not_requested += 1;
+        } else if code == O::NoStoredFile.export_code() {
+            excluded(c, card.state.token);
+        } else {
+            excluded(c, prev.outcome.token);
+        }
     }
 
     fn file_outcome(

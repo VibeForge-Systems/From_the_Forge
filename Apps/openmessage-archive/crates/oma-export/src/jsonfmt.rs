@@ -7,8 +7,9 @@
 //! string in `serde_json`'s output is ASCII, so the post-pass only ever
 //! touches characters inside strings and the result is the same JSON value.
 //!
-//! Slice 6e uses it for `manifest.json`; the JSON writer (6f) uses the same
-//! rule for its records.
+//! Slice 6e uses it for `manifest.json`; the JSON writer (6f) writes every
+//! record through [`to_line`], so no JSON Lines record can be split by a
+//! tool that breaks lines on those characters.
 
 use serde::Serialize;
 
@@ -30,6 +31,17 @@ pub fn escape_separators(json: &str) -> String {
         }
     }
     out
+}
+
+/// `v` as compact JSON on one line (no newline), escaped: the form of a
+/// JSON Lines record and of an element of the writer's arrays.
+pub fn to_line<T: Serialize>(v: &T) -> Result<String, ExportError> {
+    let s = serde_json::to_string(v).map_err(|_| ExportError::Limit(LimitKind::NotSerializable))?;
+    if s.chars().any(needs_escape) {
+        Ok(escape_separators(&s))
+    } else {
+        Ok(s)
+    }
 }
 
 /// `v` as pretty-printed JSON (two-space indent, LF), escaped, with a
@@ -60,5 +72,27 @@ mod tests {
         assert_eq!(back, v);
         assert_eq!(s.lines().count(), 3);
         assert!(s.ends_with("}\n"));
+    }
+
+    #[test]
+    fn a_line_is_one_line_under_every_line_break_rule() {
+        let v =
+            serde_json::json!({ "t": "a\nb\r\u{2028}\u{2029}\u{85}\u{b}\u{c}\u{1c}\u{1d}\u{1e}c" });
+        let s = to_line(&v).expect("json");
+        // Python's str.splitlines() breaks on these; none is left raw.
+        for c in [
+            '\n', '\r', '\u{b}', '\u{c}', '\u{1c}', '\u{1d}', '\u{1e}', '\u{85}', '\u{2028}',
+            '\u{2029}',
+        ] {
+            assert!(!s.contains(c), "{c:?}");
+        }
+        let back: serde_json::Value = serde_json::from_str(&s).expect("parse");
+        assert_eq!(back, v);
+        // Big integers stay exact when they travel as strings.
+        let big = serde_json::json!({ "raw": "9223372036854775807" });
+        assert_eq!(
+            to_line(&big).expect("json"),
+            r#"{"raw":"9223372036854775807"}"#
+        );
     }
 }

@@ -1,0 +1,651 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openmessage-archive:export-manifest:1",
+  "title": "OpenMessage Archive export manifest",
+  "description": "manifest.json of an export bundle (spec 7.1). It never holds a search query, a device fact, an archive id or label, a GUID or a path outside the bundle.",
+  "type": "object",
+  "required": [
+    "format",
+    "manifestVersion",
+    "schemaVersion",
+    "tabularColumnsVersion",
+    "appVersion",
+    "archiveSchemaVersion",
+    "exportId",
+    "createdUtc",
+    "snapshot",
+    "scope",
+    "formats",
+    "options",
+    "zone",
+    "derivation",
+    "counts",
+    "search",
+    "importSessions",
+    "exclusions",
+    "files"
+  ],
+  "properties": {
+    "format": {
+      "const": "openmessage-archive-export-manifest"
+    },
+    "manifestVersion": {
+      "const": "1.0.0"
+    },
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "tabularColumnsVersion": {
+      "type": "string"
+    },
+    "appVersion": {
+      "type": "string"
+    },
+    "archiveSchemaVersion": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "exportId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "createdUtc": {
+      "type": "string",
+      "pattern": "^[-+]?[0-9]{4,}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "snapshot": {
+      "type": "object",
+      "required": [
+        "kind",
+        "archiveLockHeld"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "archiveLockHeld": {
+          "type": "boolean"
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "required": [
+        "kind",
+        "conversations"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "conversation",
+            "dateRange",
+            "searchResults",
+            "archive"
+          ]
+        },
+        "fromLocalDate": {
+          "type": "string",
+          "pattern": "^-?[0-9]{4,}-[0-9]{2}-[0-9]{2}$"
+        },
+        "untilLocalDate": {
+          "type": "string",
+          "pattern": "^-?[0-9]{4,}-[0-9]{2}-[0-9]{2}$"
+        },
+        "fromUtc": {
+          "type": "string",
+          "pattern": "^[-+]?[0-9]{4,}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+        },
+        "untilUtc": {
+          "type": "string",
+          "pattern": "^[-+]?[0-9]{4,}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+        },
+        "conversations": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "formats": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "txt",
+          "csv",
+          "json",
+          "html",
+          "pdf",
+          "xlsx"
+        ]
+      }
+    },
+    "options": {
+      "type": "object",
+      "required": [
+        "attachments",
+        "keepExtensions",
+        "previews",
+        "largerPreviews",
+        "history",
+        "reactions",
+        "events",
+        "reveal",
+        "clock",
+        "seconds",
+        "lineEndings",
+        "hiddenCharacterMarkers",
+        "csvProfile",
+        "identifiers",
+        "pageSize"
+      ],
+      "properties": {
+        "attachments": {
+          "enum": [
+            "namesOnly",
+            "copyOriginals"
+          ]
+        },
+        "keepExtensions": {
+          "type": "boolean"
+        },
+        "previews": {
+          "type": "boolean"
+        },
+        "largerPreviews": {
+          "type": "boolean"
+        },
+        "history": {
+          "type": "boolean"
+        },
+        "reactions": {
+          "type": "boolean"
+        },
+        "events": {
+          "type": "boolean"
+        },
+        "reveal": {
+          "type": "object",
+          "required": [
+            "oneTimeCodes",
+            "earlierContent",
+            "confirmedUpTo"
+          ],
+          "properties": {
+            "oneTimeCodes": {
+              "type": "boolean"
+            },
+            "earlierContent": {
+              "type": "boolean"
+            },
+            "confirmedUpTo": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "clock": {
+          "enum": [
+            "h23",
+            "h12"
+          ]
+        },
+        "seconds": {
+          "type": "boolean"
+        },
+        "lineEndings": {
+          "enum": [
+            "lf",
+            "crlf"
+          ]
+        },
+        "hiddenCharacterMarkers": {
+          "type": "boolean"
+        },
+        "csvProfile": {
+          "anyOf": [
+            {
+              "enum": [
+                "spreadsheet",
+                "dataTools"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "identifiers": {
+          "enum": [
+            "ordinals",
+            "archiveAndSource"
+          ]
+        },
+        "pageSize": {
+          "anyOf": [
+            {
+              "enum": [
+                "a4",
+                "letter"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "zone": {
+      "type": "object",
+      "required": [
+        "name",
+        "source",
+        "windowUtc",
+        "transitions"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_+\\-/]{1,64}$"
+        },
+        "source": {
+          "enum": [
+            "utc",
+            "intl"
+          ]
+        },
+        "windowUtc": {
+          "anyOf": [
+            {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "pattern": "^[-+]?[0-9]{4,}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^[-+]?[0-9]{4,}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+                }
+              ],
+              "items": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "transitions": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": "string",
+                "pattern": "^[-+]?[0-9]{4,}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "items": false
+          }
+        }
+      }
+    },
+    "derivation": {
+      "type": "object",
+      "required": [
+        "derivedBy",
+        "decoderVersion"
+      ],
+      "properties": {
+        "derivedBy": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "decoderVersion": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "required": [
+        "conversations",
+        "timelineRows",
+        "distinctMessages",
+        "crossConversationRows",
+        "foldedReactionRows",
+        "items",
+        "undatedExcluded",
+        "before2007",
+        "noText",
+        "lossy",
+        "orderTies",
+        "eventsNotIncluded",
+        "oneTimeCodesMasked",
+        "bodiesWithheldWhole",
+        "earlierTextWithheld",
+        "editTextWithheld",
+        "alternativeTextWithheld",
+        "hiddenCharactersMarked",
+        "controlsEscaped",
+        "combiningRunsLimited",
+        "neutralisedCells",
+        "continuationRows",
+        "pdfUndrawableCharacters",
+        "pdfForcedWraps",
+        "timesOutsideZoneWindow",
+        "attachments"
+      ],
+      "properties": {
+        "conversations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timelineRows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "distinctMessages": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "crossConversationRows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "foldedReactionRows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "items": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "undatedExcluded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "before2007": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "noText": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lossy": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "orderTies": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "eventsNotIncluded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "oneTimeCodesMasked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bodiesWithheldWhole": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "earlierTextWithheld": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "editTextWithheld": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "alternativeTextWithheld": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hiddenCharactersMarked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "controlsEscaped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "combiningRunsLimited": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "neutralisedCells": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "continuationRows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pdfUndrawableCharacters": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pdfForcedWraps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timesOutsideZoneWindow": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attachments": {
+          "type": "object",
+          "required": [
+            "records",
+            "withFile",
+            "notRequested",
+            "filesWritten",
+            "deduplicated",
+            "blocked",
+            "namesShortened",
+            "previewsEmbedded",
+            "previewsUnavailable",
+            "previewsSkippedAfterHelperFailures",
+            "motwNotWritten",
+            "excluded"
+          ],
+          "properties": {
+            "records": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "withFile": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "notRequested": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "filesWritten": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "deduplicated": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "blocked": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "namesShortened": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "previewsEmbedded": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "previewsUnavailable": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "previewsSkippedAfterHelperFailures": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "motwNotWritten": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "excluded": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "search": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "mode",
+            "filterKinds",
+            "includeEarlierForMatching",
+            "matchesWritten",
+            "capped",
+            "newestKept",
+            "coverageComplete",
+            "allMatches"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string"
+            },
+            "filterKinds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "includeEarlierForMatching": {
+              "type": "boolean"
+            },
+            "matchesWritten": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "capped": {
+              "type": "boolean"
+            },
+            "newestKept": {
+              "type": "boolean"
+            },
+            "coverageComplete": {
+              "type": "boolean"
+            },
+            "allMatches": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "importSessions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "session",
+          "backupDate",
+          "dateSource",
+          "completed"
+        ],
+        "properties": {
+          "session": {
+            "$ref": "#/$defs/ordinal"
+          },
+          "backupDate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{4,}-[0-9]{2}-[0-9]{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dateSource": {
+            "type": "string"
+          },
+          "completed": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "exclusions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "bytes",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "pattern": "^[^/\\\\]+(/[^/\\\\]+)*$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "ordinal": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "An export-local ordinal (spec 4.9)."
+    }
+  }
+}

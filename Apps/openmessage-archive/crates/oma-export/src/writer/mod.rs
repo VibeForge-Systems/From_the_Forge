@@ -20,22 +20,78 @@
 //! folded reaction rows of each conversation file, and refuses a writer
 //! whose report disagrees with what it was given (`RowCountMismatch`, the
 //! manifest's "counts equal the writer reports"). The writers themselves
-//! are [`txt`] (slice 6e2), then JSON and CSV (6f), HTML (6g), and XLSX
-//! and PDF through the export-render helper (6i, 6j).
+//! are [`txt`] (slice 6e2), [`json`] and [`csv`] (6f), then HTML (6g),
+//! and XLSX and PDF through the export-render helper (6i, 6j).
+//!
+//! The sentence lookup ([`Words`]), the phrase table and the placeholder
+//! form are shared by the writers that print words (TXT, CSV).
 
+pub mod csv;
+pub mod json;
 pub mod txt;
 
 use std::collections::BTreeMap;
 
 use oma_archive::CancelToken;
 
+use crate::codes::{Code, ExportCode, UNRECOGNISED_TOKEN};
 use crate::error::{ExportError, LimitKind};
+use crate::hidden::{MARKER_CLOSE, MARKER_OPEN};
 use crate::manifest::ManifestBody;
 use crate::map::ExportZone;
 use crate::naming::EntryId;
 use crate::plan::{ExportPlan, Format};
 use crate::record::{ConversationRecord, HandleRecord, ItemRecord, VersionRecord};
 use crate::stage::Staging;
+use crate::words::{self, WordsTable};
+
+/// Sentences by (table, code), built once from `words.rs`.
+pub(crate) struct Words {
+    by: BTreeMap<(&'static str, i64), &'static str>,
+}
+
+impl Words {
+    pub(crate) fn new() -> Words {
+        let mut by = BTreeMap::new();
+        for t in words::tables() {
+            let WordsTable { name, entries, .. } = t;
+            for e in entries {
+                by.insert((name, e.code), e.sentence);
+            }
+        }
+        Words { by }
+    }
+
+    /// The sentence of `c` in `table`; a number this build does not know
+    /// says so with its number.
+    pub(crate) fn say(&self, table: &'static str, c: Code) -> String {
+        match self.by.get(&(table, c.code)) {
+            Some(s) if !c.is_unrecognised() => (*s).to_owned(),
+            _ => format!(
+                "Recorded with a code this app does not know ({table} {})",
+                c.code
+            ),
+        }
+    }
+}
+
+/// A fixed phrase of `words.rs` by its key.
+pub(crate) fn phrase(key: &str) -> &'static str {
+    words::PHRASES
+        .iter()
+        .find(|p| p.key == key)
+        .map_or("", |p| p.sentence)
+}
+
+/// Is `c` the code of `v`?
+pub(crate) fn is<T: ExportCode>(c: Code, v: T) -> bool {
+    c.code == v.export_code() && c.token != UNRECOGNISED_TOKEN && c.token == v.token()
+}
+
+/// A placeholder of the export, in the reserved marker form `⟨…⟩`.
+pub(crate) fn placeholder(s: &str) -> String {
+    format!("{MARKER_OPEN}{s}{MARKER_CLOSE}")
+}
 
 /// What every writer knows before its first record.
 #[derive(Debug, Clone, Copy)]

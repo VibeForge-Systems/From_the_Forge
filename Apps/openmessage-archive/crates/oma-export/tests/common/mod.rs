@@ -469,19 +469,87 @@ pub fn export_txt(
     target: &str,
     attach: Option<oma_export::attach::AttachPolicy>,
 ) -> Result<oma_export::pipeline::ExportReport, ExportError> {
-    use oma_export::plan::{ExportOptions, ExportPlan, Format};
-    let mut o = ExportOptions::defaults(&scope, &[Format::Txt]);
+    export_formats(
+        i,
+        parent,
+        scope,
+        &[oma_export::plan::Format::Txt],
+        tweak,
+        target,
+        attach,
+        &ExportZone::Utc,
+    )
+}
+
+/// A writer for each in-process format.
+pub fn writers(
+    formats: &[oma_export::plan::Format],
+) -> Vec<Box<dyn oma_export::writer::ExportWriter>> {
+    use oma_export::plan::Format;
+    formats
+        .iter()
+        .map(|f| -> Box<dyn oma_export::writer::ExportWriter> {
+            match f {
+                Format::Txt => Box::new(oma_export::writer::txt::TxtWriter::new()),
+                Format::Json => Box::new(oma_export::writer::json::JsonWriter::new()),
+                Format::Csv => Box::new(oma_export::writer::csv::CsvWriter::new()),
+                other => panic!("no in-process writer for {other:?}"),
+            }
+        })
+        .collect()
+}
+
+/// Export `i` to `formats` through the whole pipeline (see
+/// [`export_txt`]), with times in `zone`.
+#[allow(clippy::too_many_arguments)]
+pub fn export_formats(
+    i: &Imported,
+    parent: &Path,
+    scope: oma_export::plan::ScopePlan,
+    formats: &[oma_export::plan::Format],
+    tweak: &dyn Fn(&mut oma_export::plan::ExportOptions),
+    target: &str,
+    attach: Option<oma_export::attach::AttachPolicy>,
+    zone: &ExportZone,
+) -> Result<oma_export::pipeline::ExportReport, ExportError> {
+    export_with(
+        i,
+        parent,
+        scope,
+        formats,
+        tweak,
+        target,
+        attach,
+        zone,
+        writers(formats),
+    )
+}
+
+/// [`export_formats`] with the caller's writers (one per format).
+#[allow(clippy::too_many_arguments)]
+pub fn export_with(
+    i: &Imported,
+    parent: &Path,
+    scope: oma_export::plan::ScopePlan,
+    formats: &[oma_export::plan::Format],
+    tweak: &dyn Fn(&mut oma_export::plan::ExportOptions),
+    target: &str,
+    attach: Option<oma_export::attach::AttachPolicy>,
+    zone: &ExportZone,
+    writers: Vec<Box<dyn oma_export::writer::ExportWriter>>,
+) -> Result<oma_export::pipeline::ExportReport, ExportError> {
+    use oma_export::plan::{ExportOptions, ExportPlan};
+    let mut o = ExportOptions::defaults(&scope, formats);
     tweak(&mut o);
-    let plan = ExportPlan::new(scope, vec![Format::Txt], o).expect("plan");
-    let zone = ExportZone::Utc;
+    let plan = ExportPlan::new(scope, formats.to_vec(), o).expect("plan");
     let target = oma_export::TargetName::new(target).expect("name");
     let r = i.lib.open_read(&i.id).expect("reader");
     let hold = i.lib.hold_for_export(&i.id).expect("hold");
     r.with_export_snapshot(&hold, &CancelToken::new(), |snap| {
-        let scope = oma_export::pipeline::scope_ids(&plan, &zone)?.expect("not a search");
+        let scope = oma_export::pipeline::scope_ids(&plan, zone)?.expect("not a search");
         let run = oma_export::pipeline::ExportRun {
             plan: &plan,
-            zone: &zone,
+            zone,
             scope: &scope,
             export_id: oma_export::EntryId::from_bytes([9; 16]),
             created_utc_ns: MODEL_NOW_NS,
@@ -492,10 +560,58 @@ pub fn export_txt(
             attach,
             search: None,
         };
-        let writers: Vec<Box<dyn oma_export::writer::ExportWriter>> =
-            vec![Box::new(oma_export::writer::txt::TxtWriter::new())];
         oma_export::pipeline::run(snap, &run, writers, &CancelToken::new(), &mut |_| {})
     })
+}
+
+/// The SHA-256 of `tests/fixtures/export/zones/SHA256SUMS` (slice 6f).
+pub const ZONE_SUMS_SHA256: &str =
+    "b5e68c4cb6316c0eacafaec16dcf0ec595d07d34adf258982da851a30a5a426c";
+
+/// The fixed test zones (`tests/fixtures/export/zones/`, made by
+/// `scripts/make-export-zone-tables.mjs` from Node's ICU), each checked
+/// against its pin and validated by `ZoneTable::new` at the catalogues'
+/// import start: `(name, zone)`.
+pub fn zone_fixtures() -> Vec<(String, ExportZone)> {
+    use sha2::Digest;
+    let dir = fixtures("export").join("zones");
+    let sums = fs::read(dir.join("SHA256SUMS")).expect("zones/SHA256SUMS");
+    let hex = |b: &[u8]| -> String {
+        sha2::Sha256::digest(b)
+            .iter()
+            .map(|x| format!("{x:02x}"))
+            .collect()
+    };
+    assert_eq!(hex(&sums), ZONE_SUMS_SHA256, "zones/SHA256SUMS changed");
+    let mut out = Vec::new();
+    for line in String::from_utf8(sums).expect("UTF-8").lines() {
+        let (h, name) = line.split_once("  ").expect("sums line");
+        let bytes = fs::read(dir.join(name)).expect("zone table");
+        assert_eq!(hex(&bytes), h, "{name}");
+        let v: Value = serde_json::from_slice(&bytes).expect("zone json");
+        let w = &v["windowUtcMs"];
+        let input = oma_export::ZoneTableInput {
+            name: v["name"].as_str().expect("name").to_owned(),
+            window_utc_ms: (w[0].as_i64().expect("from"), w[1].as_i64().expect("to")),
+            transitions: v["transitions"]
+                .as_array()
+                .expect("transitions")
+                .iter()
+                .map(|t| {
+                    (
+                        t[0].as_i64().expect("ms"),
+                        i32::try_from(t[1].as_i64().expect("offset")).expect("i32"),
+                    )
+                })
+                .collect(),
+        };
+        let name = input.name.clone();
+        let t = oma_export::ZoneTable::new(input, None, MODEL_NOW_NS / 1_000_000)
+            .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        out.push((name, ExportZone::Table(t)));
+    }
+    assert_eq!(out.len(), 4);
+    out
 }
 
 /// The store file of the blob with digest `sha256` (hex) in `i`'s archive.

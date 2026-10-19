@@ -112,7 +112,7 @@ pub struct Piece {
     pub end: usize,
 }
 
-fn in_table(table: &[(u32, u32)], c: char) -> bool {
+pub(crate) fn in_table(table: &[(u32, u32)], c: char) -> bool {
     let cp = u32::from(c);
     table
         .binary_search_by(|&(lo, hi)| {

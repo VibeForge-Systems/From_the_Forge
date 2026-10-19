@@ -12,8 +12,9 @@
 //! - paths inside or beside a bundle are built only in `naming.rs`
 //!   (`.join(` appears nowhere else), files are created only through
 //!   `stage.rs` (no `OpenOptions`, `File::create`, `fs::write` or
-//!   `fs::copy` anywhere), and nothing names a temporary directory
-//!   (spec §4.1, §8.3, I2; `clippy.toml` bans the same calls).
+//!   `fs::copy` anywhere), nothing names a temporary directory, and the
+//!   CSV writer never opens a path (`from_path`; spec §4.1, §5.2, §8.3,
+//!   I2; `clippy.toml` bans the same calls).
 
 use std::path::{Path, PathBuf};
 
@@ -61,6 +62,7 @@ fn paths_are_built_in_naming_and_files_created_in_stage_only() {
             "temp_dir",
             "tempfile",
             "set_permissions",
+            "from_path",
         ] {
             assert!(!c.contains(banned), "{}: {banned}", p.display());
         }

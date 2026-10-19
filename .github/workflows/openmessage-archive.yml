@@ -115,6 +115,17 @@ jobs:
             --ignored --exact write_oracle_txt
           "$RUNNER_TEMP/venv-oracles/bin/python" -I scripts/oracles/txt_grammar.py --exports "$txt"
           for b in "$txt"/*/export/*/; do (cd "$b" && sha256sum --quiet -c SHA256SUMS); done
+          # Slice 6f: every catalogue entry exported to JSON + CSV (with and
+          # without the identifier opt-in, both CSV profiles) and to JSON in
+          # four fixed zones; the JSON is checked against the projection and
+          # both schemas, the CSV against the JSON, the zones with zoneinfo.
+          data="$RUNNER_TEMP/oracle-data"
+          OMA_ORACLE_DATA_OUT="$data" cargo test -p oma-export --locked --test json -- \
+            --ignored --exact write_oracle_data
+          "$RUNNER_TEMP/venv-oracles/bin/python" -I scripts/oracles/data_oracle.py --exports "$data"
+          for b in "$data"/*/ids/*/ "$data"/*/ordinals/*/ "$data"/*/zone-*/*/; do
+            (cd "$b" && sha256sum --quiet -c SHA256SUMS)
+          done
       - name: IPC bindings are up to date
         run: |
           if ! git diff --exit-code -- src/types/generated; then

@@ -13,6 +13,7 @@ publish = false
 # D123): every archive read goes through `oma-archive`'s public export
 # APIs. `tests/source_rules.rs` enforces both.
 [dependencies]
+csv.workspace = true # the CSV writer, through `Writer::from_writer` only (§5.2, D130)
 dunce.workspace = true # the destination is checked in its canonical form (§8.2, D143)
 getrandom.workspace = true # 128-bit export and staging ids (§7.1, §8.3)
 oma-archive.workspace = true

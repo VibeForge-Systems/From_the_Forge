@@ -56,6 +56,8 @@ pub const BLOCKED: &str = ".blocked";
 pub const ZONE_IDENTIFIER: &str = ":Zone.Identifier";
 /// The folder copied attachments go into.
 pub const ATTACHMENTS_DIR: &str = "attachments";
+/// The folder of a JSON bundle's copies of its schemas (spec §5.1).
+pub const SCHEMA_DIR: &str = "schema";
 /// The most bytes an attachment's `<name>` part may take (§6.2).
 pub const MAX_ATTACHMENT_NAME_BYTES: usize = 120;
 /// Below this budget an attachment's name is its ordinal only (§6.2).
@@ -293,6 +295,24 @@ impl TableStem {
     }
 }
 
+/// The schemas a JSON bundle carries a copy of (spec §5.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SchemaFile {
+    /// `schema/export-v1.schema.json`, the open record schema.
+    Export,
+    /// `schema/manifest-v1.schema.json`.
+    Manifest,
+}
+
+impl SchemaFile {
+    fn file(self) -> &'static str {
+        match self {
+            SchemaFile::Export => "export-v1.schema.json",
+            SchemaFile::Manifest => "manifest-v1.schema.json",
+        }
+    }
+}
+
 /// The extensions a format's files take.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FileExt {
@@ -368,6 +388,14 @@ impl BundlePath {
         BundlePath {
             dirs: vec![format.token().to_owned()],
             file: format!("{stem}.{}", ext.token()),
+        }
+    }
+
+    /// `schema/<file>`.
+    pub fn schema(f: SchemaFile) -> BundlePath {
+        BundlePath {
+            dirs: vec![SCHEMA_DIR.to_owned()],
+            file: f.file().to_owned(),
         }
     }
 

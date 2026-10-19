@@ -805,13 +805,13 @@ pub mod readme {
 
     pub const ARCHIVE_IDS: &str = "This export also carries the archive's row ids (as decimal strings) and the identifiers the phone recorded. Row ids have gaps that reveal how many rows the archive holds outside this export, and the phone's identifiers can match these records to other copies of the same messages.";
 
-    pub const CSV: &str = "CSV files are UTF-8, comma-separated, with CRLF line ends (RFC 4180). In the 'for spreadsheets' profile, a cell that a spreadsheet could run as a formula starts with an apostrophe, and the column 'neutralised_columns' names the columns where that was done.";
+    pub const CSV: &str = "CSV files (csv/) are UTF-8, comma-separated, with CRLF record ends and every field in quotes (RFC 4180, whose text is ASCII: UTF-8 is an extension). Read columns by their header name: the column contract is 'tabularColumnsVersion' in manifest.json, and columns are only ever added. Every file is present, with its header row only when an option left its rows out. In the 'for spreadsheets' profile each file starts with a byte order mark, control characters are written as codes such as \u{27E8}U+001B\u{27E9}, and a cell that a spreadsheet could run as a formula starts with an apostrophe; the row's 'neutralised_columns' names the columns where that was done. In the 'for data tools' profile values are raw, except that \u{27E8} is escaped. A spreadsheet may round long numbers such as raw times or cut very long cells: the JSON files keep exact values.";
 
     pub const XLSX: &str = "In XLSX workbooks, a value longer than a cell can hold continues on the next rows, marked as continuation rows.";
 
     pub const PDF: &str = "PDF files show the text with the bundled fonts; a character no font can draw shows as a box and is counted in manifest.json, while the text layer keeps the true character.";
 
-    pub const JSON: &str = "The JSON files keep values as recorded, with codes instead of sentences, and follow the schema named by 'schemaVersion'. 'Raw' there means as stored in the archive, which is not always the bytes the phone stored.";
+    pub const JSON: &str = "The JSON files (json/) keep values as recorded, with codes instead of sentences, and follow the schema in schema/export-v1.schema.json, named by 'schemaVersion'. Each conversation is a JSON Lines file, one record per line; conversations.json and handles.json list the conversations and addresses. Numbers that can be too large for some readers, such as raw times, are written as strings. Line and paragraph separators and other characters that some tools treat as line ends are written as \\u escapes. 'Raw' there means as stored in the archive, which is not always the bytes the phone stored: bytes that were not valid text show as U+FFFD and are flagged, and text is not normalised. The files are JSON (RFC 8259), not I-JSON.";
 
     pub const CONTRACT: &str = "Columns and keys are only ever added in a minor version; a key is never removed or renamed within a major version. The versions are in manifest.json.";
 

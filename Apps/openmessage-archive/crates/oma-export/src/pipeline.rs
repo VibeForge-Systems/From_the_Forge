@@ -36,7 +36,10 @@
 //! `OptionDoesNotApply` until the scope index can leave events out without
 //! a gap, slice 6h), `importSessions` (the session facts need a new
 //! snapshot read, 6h), previews (6g, 6h) and the export-render helper's
-//! formats (6i, 6j).
+//! formats (6i, 6j). The writers' own counts (`neutralisedCells` from
+//! CSV, the marker counts from TXT and CSV) reach the bundle's manifest; a
+//! single file's "About this export" is written before the writers finish
+//! and so carries the record counts only.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -597,6 +600,8 @@ fn body(
     counts.hidden_characters_marked = sum(&reports, "hiddenCharactersMarked");
     counts.controls_escaped = sum(&reports, "controlsEscaped");
     counts.combining_runs_limited = sum(&reports, "combiningRunsLimited");
+    counts.neutralised_cells = sum(&reports, "neutralisedCells");
+    counts.continuation_rows = sum(&reports, "continuationRows");
     counts.check_identities()?;
     let body = ManifestBody::new(input(counts.clone(), job))?;
     if plan.packaging() == Packaging::Bundle {
