@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import LocationStateBadge from '@/components/LocationStateBadge.vue';
 import LocationStatusList from '@/components/LocationStatusList.vue';
+import ViewerSettings from '@/components/ViewerSettings.vue';
 import { useSettings } from '@/stores/settings';
 import type { Theme } from '@/types';
 
@@ -104,6 +105,8 @@ const THEMES: { value: Theme; label: string; icon: string }[] = [
         </fieldset>
       </div>
     </section>
+
+    <ViewerSettings />
 
     <section class="card mb-4" aria-labelledby="settings-storage">
       <div class="card-header d-flex align-items-center gap-2">

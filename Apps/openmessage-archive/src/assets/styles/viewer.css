@@ -1,0 +1,99 @@
+/*
+ * The viewer's styles (M5 §8.1, §8.4, §8.10). Untrusted text is laid out
+ * so it cannot paint outside its box or reorder its neighbours; every
+ * fallback for a missing engine feature is keyed on an `oma-no-*` class
+ * that `services/features.ts` sets on <html>.
+ */
+
+/* SafeText: the only renderer of archive content. */
+.oma-safe-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.oma-safe-text bdi {
+  unicode-bidi: isolate;
+}
+
+.oma-safe-id bdi {
+  /* A long address or file name wraps instead of widening its row. */
+  overflow-wrap: anywhere;
+}
+
+/* A visible token for a hidden or direction-control character. */
+.oma-cp {
+  display: inline-block;
+  padding-inline: 0.15em;
+  margin-inline: 0.05em;
+  font-family: var(--bs-font-monospace);
+  font-size: 0.85em;
+  color: var(--bs-warning-text-emphasis);
+  background: var(--bs-warning-bg-subtle);
+  border: 1px solid var(--bs-warning-border-subtle);
+  border-radius: var(--bs-border-radius-sm);
+  unicode-bidi: isolate;
+  direction: ltr;
+}
+
+.oma-missing,
+.oma-masked {
+  font-style: italic;
+  color: var(--bs-secondary-color);
+}
+
+.oma-masked {
+  border: 1px dashed var(--bs-border-color);
+  border-radius: var(--bs-border-radius-sm);
+  padding-inline: 0.25em;
+}
+
+.oma-badge-inline {
+  display: inline-block;
+  margin-inline-start: 0.35em;
+  padding: 0 0.35em;
+  font-size: var(--oma-text-xs);
+  font-style: normal;
+  line-height: 1.4;
+  white-space: nowrap;
+  color: var(--bs-secondary-color);
+  border: 1px solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius-pill);
+}
+
+/*
+ * A bubble (5h2) and any box holding untrusted text: stacked combining
+ * marks cannot paint over neighbours, and no height is fixed (WCAG 1.4.12).
+ */
+.oma-contained {
+  contain: paint;
+  overflow: clip;
+}
+
+.oma-no-overflow-clip .oma-contained {
+  overflow: hidden;
+}
+
+/* Without `unicode-bidi: isolate`, <bdi> alone isolates. */
+.oma-no-bidi-isolate .oma-safe-text bdi,
+.oma-no-bidi-isolate .oma-cp {
+  unicode-bidi: normal;
+}
+
+/* The off-screen buffer of the degraded clipboard path. */
+.oma-copy-buffer {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline-start: -9999px;
+  opacity: 0;
+}
+
+/* Media boxes (5h3) are fixed-aspect placeholders, so a late image never
+ * reflows the feed. */
+.oma-media-box {
+  width: 320px;
+  max-width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  background: var(--bs-tertiary-bg);
+}

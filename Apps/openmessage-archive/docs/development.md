@@ -136,6 +136,25 @@ frontend then reports an `internal` error naming the command.
   For the Tauri `invoke` function, use a hand-written fake, not `vi.fn()`:
   Vitest 4 reports a plain-object rejection returned from a `vi.fn()` as
   unhandled even when the caller handles it.
+- **Vitest projects (M5 slice 5g).** `vite.config.ts` defines a `frontend`
+  project (every spec except `tests/frontend/dst/`) and one project per
+  time zone for the DST tests of the day-boundary builder:
+  `dst Europe/London`, `dst America/Sao_Paulo` and `dst Australia/Lord_Howe`,
+  each with `TZ` set in its workers' environment. `npm test` runs all four.
+  Run one with `npx vitest run --project 'dst Europe/London'`. Each DST run
+  first asserts that its zone took effect (the zone's UTC offsets differ
+  between two dates), so a runner that ignores `TZ` fails rather than
+  passing on UTC; whether Node honours `TZ` on the Windows runner is
+  checked by that assertion in CI.
+- **The source rule** (`tests/frontend/source-rules.spec.ts`) reads every
+  file under `src/` and fails on HTML sinks, string evaluation, dynamic
+  bindings and components, render functions, DOM writes outside
+  `SafeText.vue`, navigation, object URLs, casts to the content brands,
+  `console.` outside `services/devlog.ts`, and any `:href`, `:src`,
+  `:class`, `:id`, `:title`, `:alt`, `:aria-*`, `:data-*` (and similar)
+  binding that is not on its per-file allowlist (a `:src` must call
+  `mediaUrl(`). Comments may name the banned forms; whole-line `//`,
+  block and HTML comments are ignored.
 - **Fixtures** go in `tests/fixtures/`. They must be synthetic.
   **Never commit a real backup, real messages, or real contact data**, even
   "anonymized" by hand. `.gitignore` blocks `*.db` and `*.sqlite` outside

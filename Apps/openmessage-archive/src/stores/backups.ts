@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
+import { devNote } from '@/services/devlog';
 import { IpcError, ipc } from '@/services/ipc';
 import type {
   BackupDetails,
@@ -409,7 +410,7 @@ export const useBackups = defineStore('backups', () => {
       if (!current || current.backupId !== backupId || current.ended) return;
       if (current.jobId === null) adopt(current, started.jobId);
       else if (current.jobId !== started.jobId) {
-        console.debug('job id mismatch between response and events; ignored');
+        devNote('jobIdMismatch');
       }
     } catch (error) {
       if (job.value?.backupId === backupId && job.value.jobId === null) job.value = null;

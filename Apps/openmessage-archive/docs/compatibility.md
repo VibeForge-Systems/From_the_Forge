@@ -844,8 +844,10 @@ desktop, synthetic data only:
 
 **Not yet observed:** any of this on Windows. Spike 5s (virtualisation
 and playback on a desktop with audio, WebKitGTK and WebView2) cannot run
-in this container; its results are **UNVERIFIED**, and the designed
-behaviour stays behind feature detection until it is run.
+in full in this container: its playback half and every WebView2 result
+are **UNVERIFIED**, and the designed behaviour stays behind feature
+detection until it is run. The virtualisation half was run headlessly on
+WebKitGTK in slice 5g (below).
 
 ### Milestone 5 media protocol, decode helper and window (slice 5f)
 
@@ -968,6 +970,70 @@ a regression test that ran there:
   added for `windows-2022` CI. **It has not run yet** (no Windows host
   here); until a CI run records its `RECORD` lines, the junction refusal of
   the M5 readers on Windows is untested.
+
+### Milestone 5 spike 5s(1): virtua on WebKitGTK (slice 5g)
+
+Run in the Linux container on 2026-10-19: a **release** build made with
+`npx tauri build --no-bundle`, so the **production CSP** of
+`tauri.conf.json` merged with `tauri.linux.conf.json` (`style-src 'self'`,
+no `unsafe-inline`) and `freezePrototype: true` applied; under `Xvfb` with
+`WEBKIT_DISABLE_DMABUF_RENDERER=1`, **WebKitGTK 2.52.6** (user agent
+AppleWebKit/605.1.15). The page was a scratch harness, not the app's UI and
+not committed: a prototype `VirtualFeed` over **virtua 0.53.1**'s Vue
+`Virtualizer` in its own scroller with `overflow-anchor: none`, rendering
+200 synthetic message bubbles (fake `ContentText` through `SafeText`, 3–92
+mixed-script words, 20 % with a 320×240 media placeholder), then prepending
+batches of 50 such items with virtua's `shift` prop. The position of the
+first visible item was sampled on every animation frame for 30 frames
+after each prepend. Run three times with refinements; the results below
+are the last run, and the first two agreed where they overlapped.
+
+| Check | Result |
+|---|---|
+| `Object.isFrozen(Object.prototype)` | `true` (freezePrototype active); virtua worked under it |
+| CSP violations (`securitypolicyviolation`) | 0: virtua positions items through the CSSOM, which `style-src 'self'` allows |
+| `CSS.supports('overflow-anchor', 'auto')` | `false`; the computed value is empty (WebKitGTK has no scroll anchoring, so the declaration is inert there) |
+| Prepends of 50 while reading the middle of the window (scrollTop well above 0), 6 batches | **No movement**: 0 px on every frame |
+| Prepends of 50 with the scroller at scrollTop 200, 6 batches | **No movement**: 0 px on every frame |
+| Prepends of 50 with the scroller at **scrollTop 0**, 18 batches in three variants (`shift` toggled per batch; the same after a 60-frame settle; `shift` kept true) | **Failed in 9 of 18**: virtua did not move `scrollTop` (it stayed at 0, or moved by only 9–270 px), so the visible item left the viewport and the 50 new items were shown instead. One further batch moved by 21 px. The other 8 compensated exactly |
+| DOM size | 8–9 bubbles mounted for 1,250–1,700 items |
+| Focus retention with `keepMounted` | The focused bubble stayed connected and focused after scrolling ~1,000 items away and after a prepend (with `keepMounted` updated in the same tick as the data); without `keepMounted` it was unmounted, as expected |
+| Node identity across a prepend | The same DOM node was kept, **once each item's slot fragment was keyed**: virtua keys a row by its slot content's single root key, and a wrapper that re-exposes a `<slot>` must pass `:key` to it. Without that, every row got the same key and the focused node was lost |
+
+**Verdict: virtua 0.53.1 does not pass the 5s(1) acceptance on WebKitGTK
+2.52.6 as written** ("no visible jump on prepends of 50 items with mixed
+heights"): it passes everywhere except when the prepend lands while the
+scroller is at its very top, which is exactly where a reverse-infinite feed
+loads older pages. A mitigation to evaluate in slice 5h1 is to request
+older pages before the scroller reaches 0 (for example at 200 px or more
+from the top, where all 6 batches compensated exactly) and keep a spacer
+so it cannot reach 0 while older pages exist; otherwise slice 5h0 (the
+in-house feed) applies. Focus retention, the production CSP and
+`freezePrototype` passed.
+
+**Not tested:** WebView2 (all of this is **UNVERIFIED** on Windows,
+including whether Chromium's own scroll anchoring interferes despite
+`overflow-anchor: none`); a real desktop, real input (wheel and touchpad
+scrolling were not simulated, only `scrollTop` writes and virtua's
+`scrollTo`), a screen reader, and any WebKitGTK other than 2.52.6.
+Playback (spike 5s(2)) needs a desktop with audio and Windows and was not
+run; its results remain **UNVERIFIED**, and the designed behaviour stays
+behind feature detection.
+
+### Milestone 5 frontend foundations (slice 5g)
+
+Run in the Linux container on 2026-10-19 (Node 22.22.0, Vitest 4.1.12,
+jsdom); not a desktop, synthetic data only. The day-boundary builder's DST
+tests ran in three Vitest projects with `TZ` set to `Europe/London`,
+`America/Sao_Paulo` and `Australia/Lord_Howe`; each first asserted that
+its zone took effect (the offsets of two dates differ, and for São Paulo
+the 2018 offsets differ from 2026's), then checked local days of 23, 24,
+25, 23.5 and 24.5 hours across DST changes, including São Paulo's 2018
+change at local midnight (a day that starts at 01:00). Whether Node honours
+`TZ` on the `windows-2022` runner is shown by that first assertion in CI,
+not here. Feature detection is tested with injected probes only: which
+features WebKitGTK and WebView2 actually report is on the slice 5k
+checklist, apart from `overflow-anchor` above.
 
 ## iOS versions and backup types
 

@@ -24,6 +24,7 @@
     "bootstrap": "5.3.8",
     "bootstrap-icons": "1.13.1",
     "pinia": "3.0.4",
+    "virtua": "0.53.1",
     "vue": "3.5.44",
     "vue-router": "4.6.4"
   },

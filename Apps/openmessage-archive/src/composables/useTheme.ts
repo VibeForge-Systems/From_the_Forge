@@ -24,7 +24,7 @@ export function useTheme(theme: Ref<Theme>) {
   const prefersDark = useMediaQuery('(prefers-color-scheme: dark)');
   const resolved = computed(() => resolveTheme(theme.value, prefersDark.value));
   watchEffect(() => {
-    document.documentElement.setAttribute('data-bs-theme', resolved.value);
+    document.documentElement.dataset.bsTheme = resolved.value;
     document.documentElement.style.colorScheme = resolved.value;
   });
   return { resolved };

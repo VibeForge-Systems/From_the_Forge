@@ -40,7 +40,9 @@ viewer) is in progress:** PR A (slices 5a–5f: the viewer catalogue, the
 viewer reads and search in `oma-archive`, media sniffing and checks, the 14
 viewer commands, the `oma-media` protocol, the image decode helper and the
 main window built in Rust) is implemented and tested in a Linux container
-without a window; the UI is PR B. The owner answered the M5 questions
+without a window; the UI is PR B, whose slice 5g (frontend foundations:
+`SafeText`, the viewer words, time, media URLs, the store, the source rule
+and the Viewer settings section) is in place, with no viewer page yet. The owner answered the M5 questions
 (`docs/architecture.md`, "Milestone 5 decisions").
 
 Read these before designing anything:
@@ -204,7 +206,8 @@ Never hand-edit generated files.
 ## Testing
 
 - **Rust tests live beside the code.** Filesystem tests use `tempfile`.
-- **Frontend tests live in `tests/frontend/*.spec.ts`.**
+- **Frontend tests live in `tests/frontend/*.spec.ts`** (the DST tests in
+  `tests/frontend/dst/`, run under three `TZ` values).
   `tests/frontend/helpers.ts` provides snapshot and status builders, plus a
   `matchMedia` stub, because jsdom has none.
 - **Fixtures in `tests/fixtures/` must be synthetic.** Never commit a real
@@ -418,6 +421,22 @@ Never hand-edit generated files.
   window is built in Rust (`window.rs`, `"create": false`, `incognito`):
   navigation to the app's origin only, new windows, downloads and
   permission requests denied; keep those hooks when touching `setup`.
+- **The viewer frontend (M5 slice 5g).** `components/viewer/SafeText.vue`
+  is the only renderer of archive content (`ContentText`, `OptContent`,
+  text pieces), by interpolation inside a `<bdi>`; never bind content into
+  an attribute (accessible names use `aria-labelledby`, images `alt=""`),
+  and take a `src` only from `services/media.ts`'s `mediaUrl`.
+  `tests/frontend/source-rules.spec.ts` enforces this over all of `src/`:
+  a new `:class`, `:id`, `:title`, `:aria-*`… binding must be added to its
+  per-file allowlist of non-content expressions, deliberately. Viewer words
+  live in `services/viewerText.ts` (exhaustive tables; never a read,
+  delivery or sent word, D94). The console is reached only through
+  `services/devlog.ts` (`devNote(kind, number?)`, dev builds only). Local
+  day boundaries come from an injectable `DayBoundaryBuilder`
+  (`services/time.ts`); its DST tests in `tests/frontend/dst/` run once
+  per `TZ` as separate Vitest projects (`vite.config.ts`), and each run
+  first checks that its zone took effect. `stores/viewer.ts` keeps at most
+  1,500 items per chat and windows for three chats, and persists nothing.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush
