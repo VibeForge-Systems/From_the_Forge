@@ -258,6 +258,8 @@ describe('MessageBubble', () => {
     );
     const t = w.text();
     expect(t).toContain('Some characters could not be decoded');
+    expect(t).toContain('From the plain-text column; some of its bytes were not valid text');
+    expect(t.split('Some characters could not be decoded')).toHaveLength(2);
     expect(t).toContain('which one the phone showed is not known');
     expect(t).toContain('Formatting could not be read: A formatting range refers to a missing entry');
   });
@@ -443,6 +445,9 @@ describe('SystemRow', () => {
       expect(w.find('.oma-system').exists(), kind).toBe(true);
       expect(w.text(), kind).toContain('+1 555 0100');
       expect(w.text(), kind).toContain('Text recorded with this item:');
+      // The sentence and "by" keep their space (lost before the slice 5k
+      // smoke test: "…not decoded)by …").
+      expect(w.get('.oma-system-text').element.textContent, kind).toMatch(/\S by \S/);
     }
     const sticker = mountItem(
       message(43, { association: { visibility: { kind: 'notAReaction' }, kind: 'stickerLegacy', shape: null, targetPart: null, emoji: null } }),

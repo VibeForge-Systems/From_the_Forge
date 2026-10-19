@@ -1,8 +1,8 @@
 # Architecture
 
-Status: Milestone 4 (the archive database and import) is implemented;
-its sign-off, like that of milestones 2 and 3, is pending (see the README
-roadmap). Sections marked *planned* describe the intended design for later
+Status: Milestone 5 (the rich viewer) is implemented; its sign-off, like
+that of milestones 2 to 4, is pending (see the README roadmap and the
+manual checklists in `compatibility.md`). Sections marked *planned* describe the intended design for later
 milestones. They will be revised against evidence as each milestone lands.
 Nothing in them is implemented yet.
 
@@ -74,12 +74,12 @@ flowchart LR
 
 | Unit | Responsibility | State |
 |---|---|---|
-| `src/` | Vue 3 UI: views, Pinia stores, the typed IPC client, the shortcut registry, and the capability roadmap | M1, M2 (Backups page), M3 (extraction report), M4 slice 4m (Archive page) |
-| `src-tauri/` | Tauri shell. Holds IPC commands, application state, settings persistence, archive-location validation, the backup registry, job table and DTOs, (M3) the report mapping and the panic hook, and (M4 slice 4l) the archive commands, the import gate and the import and verify jobs. Contains no domain logic. | M1, M2, M3, M4 (slice 4l) |
+| `src/` | Vue 3 UI: views, Pinia stores, the typed IPC client, the shortcut registry, and the capability roadmap | M1, M2 (Backups page), M3 (extraction report), M4 slice 4m (Archive page), M5 slices 5g–5j (the viewer) |
+| `src-tauri/` | Tauri shell. Holds IPC commands, application state, settings persistence, archive-location validation, the backup registry, job table and DTOs, (M3) the report mapping and the panic hook, (M4 slice 4l) the archive commands, the import gate and the import and verify jobs, and (M5 slices 5e, 5f) the viewer session and commands, the `oma-media` protocol handler, the decode helper host and the main window built in Rust. Contains no domain logic. | M1, M2, M3, M4 (slice 4l), M5 (slices 5e, 5f) |
 | `crates/oma-fs` | Filesystem safety: filename sanitization, contained path resolution, and guards for backups, MobileSync, iMazing's default store and cloud sync. From M4: volume facts (`volume`: free space, network/virtualised/FAT detection), the Unix private-permission check (`perm::check_private`), and durable placement (`place`: `fsync_dir`, `create_dir_durable`, `place_noreplace`, `open_nofollow`). From slice 4d: `check_owned_unshared` (the library folder), `rename_dir_noreplace`, `create_new_private` and `total_space` | M1, M4 (slices 4a, 4d) |
 | `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them. From M4: `copy_file_to` streams one listed file's plaintext into a caller's writer, hashing it, under `Limits::attachment_bytes` and per-file stamps | ✔ M2, M3, M4 (slice 4b) |
 | `crates/oma-messages` | Scans and probes the sms.db schema by capability, streams typed records (handles, chats, the joins, messages, attachments, Recently Deleted links) as `Col<T>` values, decodes `attributedBody` with a clean-room typedstream decoder, and produces the aggregate `ExtractionReport`. Persists nothing. From M4: stable `KnownColumn` codes, raw values of unreadable cells (`raw_issues`), `payload_data` on request, the raw association columns, key-only passes and the storage class of text cells | ✔ M3, M4 (slice 4c) |
-| `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep; slices 4e–4j the import; slice 4k the report-only verifier and `open_blob`. Used by the shell since slice 4l | ✔ M4 (slices 4d–4k) |
+| `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep; slices 4e–4j the import; slice 4k the report-only verifier and `open_blob`. Used by the shell since slice 4l. From M5: the viewer reads (`view/`, `sortkey.rs`, phased budgets), search (`search/`) and media sniffing, checks and rendering (`media/`, `blobs::open_range`) | ✔ M4 (slices 4d–4k), M5 (slices 5a–5d) |
 | `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX | planned, M6 |
 | `crates/oma-device` | Detects devices and creates backups behind a platform trait | planned, M7 |
 
@@ -223,7 +223,8 @@ table is our own, and the fingerprint has matched its schema text.
 
 The directory name is a random id (`a` and 32 lowercase hex characters);
 the user's label lives only in the database (D52). There is no
-`thumbnails/` directory in M4 (D72). Attachments are content-addressed by
+`thumbnails/` directory in M4 (D72), nor in M5: image previews are kept in
+memory only (D102). Attachments are content-addressed by
 SHA-256, and a stored name is parsed against `^[0-9a-f]{64}$` before any
 path is built from it. The original filename stays in the database and is
 used only on export, after `sanitize_filename`.
@@ -1084,7 +1085,9 @@ running until finalize (slice 4j, below).
 - **"Not in the latest import"** (§8.7) needs no new column: a lineage's
   newest full observation is read from `import_session`, and a row it
   labels is one whose `lineage_seen.last_rank` for that lineage is lower.
-  The tests compute it that way; the reader query is M5's.
+  The tests compute it that way; M5's reader computes it the same way
+  for the "not in the newest complete import" label (`view/assemble.rs`,
+  "Viewer reads: thread pages and the assembly layer" below).
 - **Tests**: every entry and every scenario order now also match the
   model's chat handles, message chats, message attachments in the §6.5
   order, Recently Deleted markers, attachment rows and their columns and
@@ -1984,7 +1987,8 @@ is no search history (owner-confirmed, Q1c).
   took 0.5–0.9 s on this host, against 0.15 s for `instr` over
   `message_body` in rowid order (the scratch figure's shape), which is not
   newest first. The hostile-index row used 5 × 10^5 terms, not the spec's
-  10^6. The spec's §11 rows are re-measured in slice 5k.
+  10^6. Slice 5k measured the other §11 rows (`perf_viewer.rs`,
+  `compatibility.md`); these search rows were not re-run.
 - **Plans.** Fifteen statements are pinned in `tests/query_plans.rs`.
   FTS5 is reached only through its `MATCH` index (`192:M1` for the global
   collection, rowid descending with no sort; `0:=M1` for the probe and
@@ -2694,7 +2698,7 @@ pure rules are in `services/attachmentView.ts`; the words in
   the session closes.
 - **The media viewer** (`MediaViewer`, a `ModalDialog` mounted once in
   the viewer page) shows the `display` rendition, labelled "Preview,
-  re-encoded and reduced to 2048 px; original W×H; N stored (M declared)";
+  re-encoded, at most 2048 px; original W×H; N stored (M declared)";
   the original size is asked from Rust once the preview has loaded. It has
   no download, open or share action. Closing it unmounts the element,
   which stops playback.
@@ -2913,6 +2917,39 @@ only (`docs/compatibility.md`).
   rows wrap and the menu keeps inside the window. `tests/frontend/accessibility.spec.ts`
   checks the style sheets; the rest needs the manual checklist.
 
+### The viewer in a real window, and the documents (M5 slice 5k)
+
+Slice 5k ran the viewer for the first time in a real window (a headless
+smoke test of the release binary on WebKitGTK 2.52.6 in a Linux container;
+`compatibility.md` records exactly what was seen), measured the spec's §11
+reads (`crates/oma-archive/tests/perf_viewer.rs`, ignored; numbers in
+`compatibility.md`, "Synthetic performance (M5)") and wrote the M5 manual
+checklist. Nothing in the crate or the shell changed.
+
+- **A library for smoke tests.** `tests/smoke_library.rs` (ignored) imports
+  three viewer catalogue entries into one archive below `OMA_SMOKE_LIB`,
+  with the test's fake space probe; it reads the committed fixtures in
+  place and writes nothing else.
+- **Fixes from the smoke test**, each re-observed after a rebuild:
+  explicit `{{ ' ' }}` where Vue's whitespace condensing had dropped the
+  space at an element's edge (the list's label and preview, system rows);
+  the three-panel grid's single `minmax(0, 1fr)` row and flex-column right
+  panels, so a tall panel scrolls inside itself instead of scrolling the
+  page; the conversation list's tools wrap so the sort choice shows whole,
+  and the search mode reads "Words" with a sentence under it; details and
+  replies close when another conversation opens (D122); the media viewer
+  scales a tiny image up to at least 16 rem and its label says "at most
+  2048 px"; the lossy-text source note no longer repeats the badge.
+- **Engine floors (§8.10)** are not established: they are to be the oldest
+  WebKitGTK and WebView2 on which the manual checklist passes. Feature
+  detection keeps the designed degraded paths (`overflow: hidden` for
+  `overflow: clip`, `<bdi>` alone, fixed formatting without the `Intl`
+  options, `execCommand('copy')`, `canPlayType` before any Play), and spike
+  5s(2) (playback on a desktop with audio, and on Windows) is still
+  **UNVERIFIED**: in the container, `canPlayType` offered Play for
+  QuickTime and WAV only, and the one file played through the scheme got
+  one `206` response and then failed for lack of an audio device.
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`
@@ -3048,7 +3085,7 @@ are design decisions of the M4 spec.
 | D69 | Verifier (roadmap: a lean **awaiting the owner's confirmation**) | The library verifier ships in M4, report-only, quick and full (slice 4k); the verify job is the shell's (4l) and its sentence per finding the UI's (4m); repair stays in M8 | All verification in M8 | The M4 brief asks for integrity checks; nothing is repaired before M8 |
 | D70 | Provenance file (product fields: a lean **awaiting the owner's confirmation**) | `imports/session-<n>.json`, content-free, best effort, written at each terminal state; it includes the product type and version | A full copy of the session row | Survives database damage without personal data |
 | D71 | Diagnostic log (a lean **awaiting the owner's confirmation**) | The persistent, redacted log file (D15) is deferred again, to M8 | Ship it in M4 | A new on-disk artifact needs its own review |
-| D72 | Thumbnails | Deferred to M5; no `thumbnails/` directory in v1 | Reserve the directory | No speculative layout |
+| D72 | Thumbnails | Deferred to M5; no `thumbnails/` directory in v1 (M5 keeps renditions in memory only, D102) | Reserve the directory | No speculative layout |
 | D73 | Jobs | `reserve` by subject (backup, archive or both); `Import` and `Verify` kinds; one job at a time (D7) | Key jobs by backup only | An archive can never be double-booked |
 | D74 | Staged sms.db lifetime | The whole import, the gate and P6 included; removed after P8, before finalize | Re-stage per pass | One copy, versus a longer plaintext window (disclosed) |
 | D75 | `application_id` | `0x4F4D4131` ("OMA1"), unregistered | Register it | Registration is optional |
@@ -3069,7 +3106,7 @@ are design decisions of the M4 spec.
 ### Milestone 5 decisions
 
 D89–D117 (M5 spec §18), as PR A (slices 5a–5f) implements them, and
-D118 to D121 from PR B (slices 5h3, 5i and 5j). **The
+D118 to D122 from PR B (slices 5h3, 5i, 5j and 5k). **The
 owner answered the spec's four questions on 2026-10-18**: D97's and D99's
 playback wording, D100 and D110 (Q1), D101 (Q2, **which differs from the
 lean**), D105 and D115 (Q3) and D99's default (Q4) are **owner-confirmed**.
@@ -3110,6 +3147,7 @@ D104, D107–D109, D112's UI side) are implemented in PR B.
 | D119 | Cancelling a running scan (slice 5i) | Each `ScanProgressDto` carries the running search's `searchId`, so `cancel_search` can stop an exact-text scan before it returns; a words search that has not answered cannot be named and runs out within its 5 s deadline, its answer dropped | `cancel_search` without an id stops whatever runs | The id still guards against cancelling a newer search; a Cancel button that only hid results would have left a 2,000,000-row scan running |
 | D120 | Dropping renditions under the privacy screen (slice 5j) | A 15th viewer command, `hide_viewer`, drops the session's cached renditions (keeping the failure cache, tokens and workers) when the curtain goes up; idle hide closes the session instead | No command: the renditions stay cached until the viewer closes | The spec's "clear the rendition LRU" (§9.2) needs Rust; one more command through the five steps, and a hostile image still decodes at most once per session |
 | D121 | Copy without invisible characters (slice 5j) | Bidi controls, invisible and control characters are dropped, but a zero-width joiner or non-joiner stays between two non-ASCII letters, marks or emoji, and tag characters stay inside a flag's tag sequence | Drop every character `SafeText` shows as a code | Emoji sequences, subdivision flags and joining scripts (Persian, Indic) keep their shape, while a joiner hidden between ASCII letters is still removed |
+| D122 | The right panel when another conversation opens (slice 5k) | Details and the reply thread close; search stays open | Keep the details open | They describe a message of the conversation that was open and resolve its addresses from that conversation's window; kept open, they showed "Sender" instead of the address (seen in the smoke test) |
 | D118 | Play order (slice 5h3) | Rust's structural check and full hash run on the first Play, **before** the confirmation, so the confirmation's "It has checked the file's structure" is true and a refused file never asks | The spec's §2 order: confirm, then check | A full hash of a file the user may then cancel; no attachment byte reaches the engine before the confirmation either way |
 
 ## Logging

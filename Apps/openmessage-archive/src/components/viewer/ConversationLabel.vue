@@ -22,9 +22,9 @@ defineProps<{ label: ChatLabelDto; chatId: SafeId; quiet?: boolean }>();
       <template v-for="(h, i) in label.first" :key="h.id"
         ><template v-if="i > 0">, </template
         ><SafeText :value="h.address" mode="identifier" ltr :quiet="quiet"
-      /></template>
-      <template v-if="label.more > 0"> {{ fill(LIST_TEXT.moreParticipants, { n: label.more }) }}</template>
-      <span class="oma-label-note"> {{ CHAT_LABEL_TEXT.participants }}</span>
+      /></template
+      ><template v-if="label.more > 0">{{ ' ' }}{{ fill(LIST_TEXT.moreParticipants, { n: label.more }) }}</template
+      ><span class="oma-label-note">{{ ' ' }}{{ CHAT_LABEL_TEXT.participants }}</span>
     </template>
     <SafeText v-else-if="label.kind === 'identifier'" :value="label.value" mode="identifier" ltr :quiet="quiet" />
     <span v-else class="oma-missing">{{ fill(LIST_TEXT.unnamedId, { id: chatId }) }}</span>

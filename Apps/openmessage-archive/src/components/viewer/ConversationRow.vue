@@ -51,8 +51,8 @@ const preview = computed(() => (settings.viewer.listPreviews ? props.row.preview
       <span v-if="row.empty" class="oma-missing">{{ LIST_TEXT.empty }}</span>
     </div>
     <div v-if="preview" class="oma-conv-preview oma-contained">
-      <span v-if="preview.direction === 'you'" class="oma-preview-who">{{ LIST_TEXT.previewYou }} </span>
-      <SafeText v-if="preview.body.kind === 'text'" :pieces="preview.body.pieces" quiet />
+      <span v-if="preview.direction === 'you'" class="oma-preview-who">{{ LIST_TEXT.previewYou }}{{ ' ' }}</span
+      ><SafeText v-if="preview.body.kind === 'text'" :pieces="preview.body.pieces" quiet />
       <span v-else class="oma-missing">{{ previewSentence(preview.body, preview.item) }}</span>
     </div>
   </div>

@@ -129,6 +129,23 @@ describe('viewer store', () => {
     expect(store.openWindow?.pages[0]!.items).toHaveLength(PAGE_LIMIT);
   });
 
+  it('closes details and replies when another conversation opens, and keeps search', async () => {
+    const store = await openSession();
+    serveChat(10);
+    await store.openChat(sid(4));
+    store.openDetails(sid(3));
+    await store.openChat(sid(4));
+    expect(store.panel).toEqual({ kind: 'details', message: 3, reactions: false });
+    await store.openChat(sid(5));
+    expect(store.panel).toBeNull();
+    store.openReplies(sid(3));
+    await store.openChat(sid(4));
+    expect(store.panel).toBeNull();
+    store.openSearch(null);
+    await store.openChat(sid(5));
+    expect(store.panel).toEqual({ kind: 'search' });
+  });
+
   it('sends reveal.earlierText only when the setting asks', async () => {
     const settings = useSettings();
     const snap = snapshot();

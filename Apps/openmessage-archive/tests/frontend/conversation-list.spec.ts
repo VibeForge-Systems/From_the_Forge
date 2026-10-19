@@ -188,6 +188,9 @@ describe('ConversationList', () => {
     const first = w.get('#oma-conv-opt-0');
     expect(first.text()).toContain('You:');
     expect(first.text()).toContain('see you <b>');
+    // "You:" and the text keep their space (Vue drops a whitespace-only
+    // text node at the edge of an element; seen in the slice 5k smoke test).
+    expect(first.get('.oma-conv-preview').element.textContent).toMatch(/You: \S/);
     expect(first.text()).toContain('One-time code hidden');
     expect(first.find('b').exists()).toBe(false);
     const off = snapshot();
@@ -223,8 +226,9 @@ describe('ConversationLabel precedence', () => {
     };
     const shown = render(label);
     expect(shown).toContain('+1 555 0100, b@example.invalid');
-    expect(shown).toContain('+3');
-    expect(shown).toContain('(from participants)');
+    // Spaces between the addresses, the count and the note survive Vue's
+    // whitespace condensing (they were lost before the slice 5k smoke test).
+    expect(shown).toMatch(/b@example\.invalid\S* \+3 \(from participants\)$/);
   });
 
   it('falls back to the chat identifier, then to a sentence with the id', () => {

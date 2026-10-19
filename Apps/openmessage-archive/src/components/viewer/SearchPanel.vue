@@ -216,6 +216,7 @@ function open(hit: SearchHitDto): void {
         </select>
       </div>
       <p v-if="viewer.searchForm.mode === 'exact'" class="form-text mt-0">{{ SEARCH_TEXT.exactNote }}</p>
+      <p v-else class="form-text mt-0">{{ SEARCH_TEXT.autoNote }}</p>
 
       <fieldset class="oma-search-filters">
         <legend class="fs-6 mb-1">{{ SEARCH_TEXT.filtersLegend }}</legend>

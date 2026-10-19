@@ -354,7 +354,7 @@ describe('the media viewer', () => {
     expect(w.find('.oma-dialog').text()).toContain('Type recorded: image/jpeg; content: JPEG image');
     await full.trigger('load');
     await flushPromises();
-    expect(w.find('.oma-dialog').text()).toContain('Preview, re-encoded and reduced to 2048 px; original 4032×3024');
+    expect(w.find('.oma-dialog').text()).toContain('Preview, re-encoded, at most 2048 px; original 4032×3024');
     // No download, open or share control.
     const labels = w.find('.oma-dialog').findAll('button').map((b) => b.text().toLowerCase());
     for (const l of labels) expect(l).not.toMatch(/download|save|open|share/);

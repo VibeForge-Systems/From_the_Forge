@@ -527,6 +527,41 @@ on CI yet. With the 4× factor seen for slices 4a–4f, the M5 tests would add
 about 4 minutes on `windows-2022`, inside the 6-minute budget; that is an
 extrapolation until a CI run is recorded. Slice 5k measures again.
 
+**Milestone 5, measured again in slice 5k** (spec §0.1), in the same
+container and the same way (after compiling; 1,240 Rust tests passed, 12
+ignored, the two new ignored ones being `perf_viewer.rs` and
+`smoke_library.rs`):
+
+| What | Time |
+|---|---|
+| `cargo test --workspace`, wall clock | 2 min 2 s |
+| Sum of all test binaries' run times | 119.0 s |
+| Added since M4 (slice 4n: 57.2 s) | about 62 s |
+| of which the shell's unit tests | 37.4 s |
+| of which `oma-archive`'s viewer binaries (the seven of slice 5f) | 14.7 s |
+| `npm test` (570 frontend tests in 46 files, the three DST projects included), wall clock | 19 s |
+
+PR B added two quick Rust tests (slice 5j) and one test case (slice 5i),
+so the Rust figure is essentially slice 5f's. **On CI**, PR A's run
+([39205163013](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39205163013))
+against milestone 4's last run
+([39163096062](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39163096062)),
+as the sums of the test binaries' own times read from the job logs:
+
+| Job | M4 (slices 4g–4n) | M5 PR A | Added |
+|---|---|---|---|
+| `checks` (ubuntu-22.04) | 54.2 s | 106.3 s | 52.1 s |
+| `build` (ubuntu-22.04) | 54.2 s | 100.9 s | 46.7 s |
+| `build` (windows-2022) | 325.5 s | 560.4 s | 234.9 s (3.9 min) |
+
+So milestone 5 adds under 1 minute of Rust test time per Linux job and
+about 4 minutes on Windows, inside its budgets of 3 and 6 minutes. On
+Windows `oma-archive` went from 159.3 s to 310.8 s; its largest binaries in
+PR A's run were `crash.rs` (78.2 s), `resume.rs` (52.0 s), `import_core.rs`
+(23.7 s), `viewer_search.rs` (19.6 s) and `viewer_details.rs` (16.2 s), and
+the shell's unit tests took 43.7 s. Run-to-run noise on the Windows runner
+is large: `oma-messages`' `resume.rs` alone took 94.0 s in PR A's run.
+
 **Optional oracles** (manual; nothing enters the repository or CI; each
 run is recorded in `docs/compatibility.md` with the checksum it tested):
 
@@ -554,6 +589,9 @@ No GPL or LGPL tool or wrapper is committed.
 | The archive's growth factor `K`, the time of each import phase, the FTS size and the time of a quick and a full verify, on a synthetic import (`OMA_PERF_MESSAGES` messages, default 20,000; generating 100,000 takes about 4 minutes) | `OMA_PERF_MESSAGES=100000 cargo test -p oma-archive --release --test perf -- --ignored --nocapture` |
 | The check on a backup outside the repository (oracle run 4) | `OMA_EXTERNAL_BACKUP=<backup dir> cargo test -p oma-messages --test external_sample -- --ignored --nocapture` |
 | One large photo made into both image renditions (M5 slice 5d: a 4032 × 3024 noise JPEG through `media::render`) | `cargo test -p oma-archive --release --test media_corpus -- --ignored --nocapture` |
+| Search on a bulk archive (M5 slice 5c; `OMA_PERF_MESSAGES` messages, default 500,000) | `cargo test -p oma-archive --test perf_search -- --ignored --nocapture` |
+| The viewer reads of spec §11 on bulk archives: the conversation list (2,000 and 20,000 chats), thread pages, `seek_date`, `day_counts` and a chat of 90 % reactions (M5 slice 5k; `OMA_PERF_MESSAGES`, `OMA_PERF_LIST_MESSAGES` and `OMA_PERF_REACTION_MESSAGES` set the sizes; about 1 minute and 550 MiB of temporary space at the defaults) | `cargo test -p oma-archive --test perf_viewer -- --ignored --nocapture` |
+| A library for the viewer's smoke test: one archive with three viewer catalogue entries (M5 slice 5k) | `OMA_SMOKE_LIB=/dev/shm/oma-smoke/lib cargo test -p oma-archive --test smoke_library -- --ignored --nocapture` (the folder must be empty or absent) |
 | The media code with the optional, never-shipped HEIC decoder (owner decision Q2; CI runs only clippy and `cargo deny` with it) | `cargo clippy -p oma-archive --all-targets --features heic -- -D warnings`, `cargo test -p oma-archive --features heic --test viewer_media --test media_corpus` and `cargo deny --features oma-archive/heic check` |
 | A self-built app with HEIC previews (owner decision Q2: **at your own legal risk**, HEVC is pooled-patent technology; never for official or CI release builds). The app's package does not forward the feature, so name the crate's feature | `npx tauri build --features oma-archive/heic` (the release binary, through the Tauri CLI as always), or `cargo build -p openmessage-archive --features oma-archive/heic` for a debug build; `--features heic` alone fails ("the package 'openmessage-archive' does not contain this feature"). Only the feature resolution was checked (`cargo tree -p openmessage-archive --features oma-archive/heic -i heic-rs`); no HEIC-enabled app build has been run |
 
@@ -577,7 +615,7 @@ OMA_EXTERNAL_PASSWORD` in bash; `$env:OMA_EXTERNAL_PASSWORD = Read-Host
 `cancel.rs` and `typedstream_mutation.rs` within 120 s. These targets are
 not enforced by a timer; review them when a run exceeds them.
 
-### Headless smoke test of the Backups and Archive pages
+### Headless smoke test of the Backups and Archive pages and the viewer
 
 The GTK folder picker cannot list directories without D-Bus, so pre-write
 `settings.json` with an archive folder and an added parent folder that
@@ -598,6 +636,27 @@ Start `Xvfb :99` once and run the binary with `DISPLAY=:99` in the
 background, so the window can be driven step by step with `xdotool` and
 `import -window root`; the confirmation step waits two minutes for an
 answer. The milestone 4 run is recorded in `docs/compatibility.md`.
+
+For the viewer (M5), make a library with `smoke_library.rs` (the table
+above) instead of importing through the window, and point
+`archiveDirectory` at it:
+
+```sh
+OMA_SMOKE_LIB=/dev/shm/oma-smoke/lib \
+  cargo test -p oma-archive --test smoke_library -- --ignored --nocapture
+mkdir -p "$S/config/com.vibeforgesystems.openmessagearchive"
+printf '%s' '{"schemaVersion": 1, "archiveDirectory": "/dev/shm/oma-smoke/lib", "theme": "light", "backupFolders": []}' \
+  > "$S/config/com.vibeforgesystems.openmessagearchive/settings.json"
+```
+
+Run the release binary with `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and
+`XDG_CACHE_HOME` all under `$S`, so the web profile's files can be checked
+afterwards. On the Archive page, scroll to **Browse conversations**. The
+first open after a launch can take a few seconds to fill the list.
+`xdotool type` needs `LC_ALL=C.UTF-8` for non-ASCII text (a CJK search).
+Without an audio device, playback ends with "This file could not be played
+here."; record that as not tested. The slice 5k run is recorded in
+`docs/compatibility.md`.
 
 ## Repository conventions
 

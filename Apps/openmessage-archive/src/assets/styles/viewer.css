@@ -142,12 +142,22 @@
 
 .oma-conv-tools {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--oma-space-1);
   padding: var(--oma-space-2);
 }
 
+.oma-conv-tools input {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+/* Sized to its longest choice, so "Most recent dated activity" is never
+   cut off; it moves to its own row when the panel is narrow. */
 .oma-conv-tools select {
-  flex: 0 1 9rem;
+  flex: 1 1 auto;
+  width: auto;
+  max-width: 100%;
 }
 
 .oma-conv-note {
@@ -551,6 +561,14 @@
   background: var(--bs-tertiary-bg);
 }
 
+/* A tiny image (a 6×4 sticker) is scaled up to a visible size, as its
+   card is, instead of showing a few pixels in an empty dialog (seen in
+   the slice 5k smoke test). */
+img.oma-media-full {
+  min-width: min(100%, 16rem);
+  height: auto;
+}
+
 audio.oma-media-full,
 .oma-media-viewer audio {
   width: 100%;
@@ -649,6 +667,17 @@ audio.oma-media-full,
 }
 
 /* Search (slice 5i). Matches are marked by <mark>, which forced colours keep. */
+/* The right panel's views are one flex column, so their body scrolls
+   inside the panel. */
+.oma-details,
+.oma-replies,
+.oma-search {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .oma-search-row {
   display: flex;
   align-items: center;

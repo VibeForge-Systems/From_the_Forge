@@ -36,24 +36,22 @@ M8). All slices pass CI on `ubuntu-22.04` and `windows-2022`. Its sign-off
 is pending the manual checklist in
 `docs/compatibility.md`, and the owner's answers on D69, D70, D71, D79 and
 D82 (D51, D59, D60 and D61 are owner-confirmed). **Milestone 5 (the rich
-viewer) is in progress:** PR A (slices 5a–5f: the viewer catalogue, the
-viewer reads and search in `oma-archive`, media sniffing and checks, the 14
+viewer) is implemented:** PR A (slices 5a–5f: the viewer catalogue, the
+viewer reads and search in `oma-archive`, media sniffing and checks, the
 viewer commands, the `oma-media` protocol, the image decode helper and the
 main window built in Rust) is merged into `main` (`eabb759`) after CI
 passed on `ubuntu-22.04` and `windows-2022` ([run 39205163013](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39205163013),
-including the Windows-only tests); the UI is PR B, whose slice 5g (frontend foundations:
-`SafeText`, the viewer words, time, media URLs, the store, the source rule
-and the Viewer settings section) and slice 5h1 (the in-house `VirtualFeed`
-of slice 5h0, the conversation list and the thread, the viewer routes) and
-slice 5h2 (message bubbles, system rows, reaction chips, reply quotes,
-per-part edits and unsends, and the reveals of codes and earlier text) and
-slice 5h3 (attachment cards, the media viewer, the play confirmation, the
-details panel and the reply thread) and slice 5i (the search panel, the
-date dialog and the viewer shortcuts) and slice 5j (the privacy screen,
-the message menu's copy actions, the page guards and the accessibility
-pass) are in place. The viewer opens from the Archive page and the
-roadmap's `viewer`, `search` and `privacy-screen` are available; the
-documents and the manual checklist (5k) are next.
+including the Windows-only tests). PR B (slices 5g–5k: the frontend
+foundations, the in-house `VirtualFeed`, the conversation list and thread,
+bubbles, attachments, the media viewer, details, search, the date dialog,
+the privacy screen, copy actions, page guards, the accessibility pass and
+the documents) is in review. The viewer opens from the Archive page and
+the roadmap's `viewer`, `search` and `privacy-screen` are available. It
+was tested in jsdom and once in a real window, a headless smoke test of the
+release binary on WebKitGTK 2.52.6 in a Linux container
+(`docs/compatibility.md`); its sign-off is pending PR B's CI and the M5
+manual checklist there (no desktop, audio, screen-reader or WebView2 run
+yet, so no engine floor is established).
 The owner answered the M5 questions (`docs/architecture.md`, "Milestone 5
 decisions").
 
@@ -61,7 +59,7 @@ Read these before designing anything:
 
 | Doc | Read it for |
 |---|---|
-| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, the archive (layout, threat model, import data flow, one section per M4 slice), and the decision records (D1–D121; D43 is how "do not fabricate" is read for the check) |
+| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, the archive (layout, threat model, import data flow, one section per M4 and M5 slice), the viewer, and the decision records (D1–D122; D43 is how "do not fabricate" is read for the check) |
 | [`docs/supported-formats.md`](docs/supported-formats.md) | Sourced research on the backup format, encryption, the sms.db schema (columns with sources, timestamps, codes, typedstream) and device tooling. Items marked **UNVERIFIED** are hypotheses, not facts. |
 | [`docs/privacy.md`](docs/privacy.md) | What is copied, where and for how long, including the plaintext copies of sms.db, and what an archive holds (plaintext at rest) |
 | [`docs/compatibility.md`](docs/compatibility.md) | What has actually been tested |
@@ -478,8 +476,11 @@ Never hand-edit generated files.
   code" and "Show earlier text" call `useViewer().revealMessage`, which
   re-reads that one message with `get_message_detail` and keeps an overlay
   (`shown(m)`, at most 100); "Hide" drops it. Put explicit `{{ ' ' }}`
-  separators between inline elements whose text forms an accessible name
-  (Vue's whitespace condensing removes them otherwise).
+  separators between inline elements whose text forms an accessible name,
+  and wherever a space sits at the start or end of an element or a
+  `<template>` (`<span> {{ x }}</span>`, `{{ x }} </span>`): Vue's
+  whitespace condensing drops a whitespace-only text node there. Assert
+  the space with `element.textContent` in a test.
 - **Attachments, details and media (M5 slice 5h3).** Card rules live in
   `services/attachmentView.ts` (tests in `attachment-view.spec.ts`): Rust's
   card state first, then the sniffed content, never the declared type.
@@ -492,8 +493,10 @@ Never hand-edit generated files.
   `disablepictureinpicture` and `disableremoteplayback`. Under `off` no
   element exists. `MediaViewer` and `PlayConfirmDialog` are mounted once in
   `ViewerView`; the right panel (`viewer.panel`) shows `MessageDetails` or
-  `ReplyThread`. A `ThreadItem` outside the feed needs its own `idPrefix`,
-  so ids stay unique. Details repeat only the reveal the user asked for.
+  `ReplyThread`, and closes when another conversation opens (its
+  addresses come from the open chat's window; search stays open). A
+  `ThreadItem` outside the feed needs its own `idPrefix`, so ids stay
+  unique. Details repeat only the reveal the user asked for.
 - **Search and dates (M5 slice 5i).** The search form lives in
   `stores/viewer.ts` (`searchForm`) until the viewer closes; never persist
   it or put the query, a filter or a message id in a URL or a sentence.
@@ -582,6 +585,19 @@ Never hand-edit generated files.
   volume free, clamped to 1–10 GiB, and refuse before the gate below that.
   On a nearly full development disk, put the smoke test's library on a
   tmpfs such as `/dev/shm` (classified as local).
+- **Smoke-test the viewer on a prepared library.** Make one with
+  `OMA_SMOKE_LIB=<empty dir> cargo test -p oma-archive --test
+  smoke_library -- --ignored` (three viewer catalogue entries, one
+  archive) and point `archiveDirectory` at it; `docs/development.md` has
+  the steps. The slice 5k run found layout and wording defects that jsdom
+  could not show (dropped spaces, a page that scrolled as a whole, cut-off
+  selects), so look at screenshots after any change to the viewer's
+  layout. `perf_viewer.rs` (ignored) measures the §11 reads on bulk
+  archives; never assert a timing.
+- **The three-panel grid has one `minmax(0, 1fr)` row.** A panel's view
+  must be a flex column with `min-height: 0` whose `.oma-panel-body`
+  scrolls (`.oma-details`, `.oma-replies`, `.oma-search`); otherwise a tall
+  panel grows the row and the whole page scrolls under the navigation bar.
 - **Headless smoke testing works**, using `xvfb-run` with
   `WEBKIT_DISABLE_DMABUF_RENDERER=1` and `XDG_CONFIG_HOME` pointed at a
   scratch directory. However, the GTK folder picker cannot list directories

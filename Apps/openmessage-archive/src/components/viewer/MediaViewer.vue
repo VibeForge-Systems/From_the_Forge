@@ -5,7 +5,7 @@
 // confirmation). Mounted once, in the viewer page.
 //
 // - The image is the app's own re-encoded preview, labelled "Preview,
-//   re-encoded and reduced to 2048 px; original W×H; N stored (M
+//   re-encoded, at most 2048 px; original W×H; N stored (M
 //   declared)". The original size is asked from Rust once the preview has
 //   loaded (it is known only after the decode helper made one).
 // - `<audio>`/`<video>` exist only once playback was enabled: native

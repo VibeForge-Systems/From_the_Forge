@@ -261,10 +261,10 @@ function cancelUnheard(): void {
           <button type="button" class="btn btn-outline-secondary" :disabled="!canBrowse" @click="browse">
             <i class="bi bi-chat-square-text me-1" aria-hidden="true"></i>Browse conversations
           </button>
+          <button type="button" class="btn btn-outline-secondary" :disabled="!canBrowse" @click="searchMessages">
+            <i class="bi bi-search me-1" aria-hidden="true"></i>Search messages
+          </button>
         </div>
-        <button type="button" class="btn btn-outline-secondary" :disabled="!canBrowse" @click="searchMessages">
-          <i class="bi bi-search me-1" aria-hidden="true"></i>Search messages
-        </button>
       </div>
     </section>
   </div>

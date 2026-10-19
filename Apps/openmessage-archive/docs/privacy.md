@@ -376,17 +376,16 @@ a message from one yet. These settings are hygiene, not protection; see
 ## The viewer (M5)
 
 M5 is the first milestone that shows message content, addresses, chat
-names and attachment files in the window. *Status: the reading side, the
-commands, the media protocol, the decode helper and the window's settings
-exist from M5 PR A (slices 5a–5f); PR B adds the screens (the threads,
-attachments, the media viewer, the play confirmation and the details panel
-since slice 5h3; search and the date dialog since slice 5i; the privacy
-screen, the copy actions and the page guards since slice 5j). The
-screens have been tested in jsdom only. Nothing here has been run in a
-window or on Windows yet; items marked
-**UNVERIFIED** depend on the web engine and are not yet tested: they are
-listed as not tested in `compatibility.md` (slice 5f) and are to be
-recorded per engine on the M5 manual checklist (slice 5k).*
+names and attachment files in the window. *Status: implemented (PR A,
+slices 5a–5f, merged; PR B, slices 5g–5k, in review). The screens were
+tested in jsdom and once in a real window: a headless smoke test on
+WebKitGTK 2.52.6 in a Linux container, with synthetic data and no audio
+device (`compatibility.md`). Nothing here has run on a desktop or on
+Windows. Items marked **UNVERIFIED** depend on the web engine and are not
+yet tested; each is a row of the milestone 5 manual checklist in
+`compatibility.md`, to be recorded per engine and engine version.
+Spike 5s(2) (playback on a desktop with audio, and on Windows) is still
+UNVERIFIED, so playback stays behind feature detection (`canPlayType`).*
 
 ### What crosses into the window
 
@@ -441,8 +440,8 @@ web engine only when you press Play, and only after:
 
 A file crafted by its sender could exploit a flaw in those codecs; the app
 cannot prevent that. On Linux the web engine's own sandbox may be off
-(**UNVERIFIED**, not yet tested; to be recorded per engine in
-`compatibility.md` by slice 5k). Playback can be
+(**UNVERIFIED**: not determined in the smoke test; a row of the manual
+checklist in `compatibility.md`). Playback can be
 turned off in the viewer settings; with `off`, the app refuses playback in
 its own code and the engine never receives attachment bytes.
 
@@ -460,16 +459,20 @@ attachment is M6.
   the viewer closes. **Nothing is cached on disk.**
 - The window runs in a private (incognito) web profile, so the engine keeps
   no persistent HTTP cache or web storage, and every media response tells
-  it not to store the response (`Cache-Control: no-store`). Whether either
-  engine keeps anything regardless is **UNVERIFIED** (not yet tested; to
-  be recorded per engine in `compatibility.md` by slice 5k).
+  it not to store the response (`Cache-Control: no-store`). In the smoke
+  test on WebKitGTK 2.52.6 (container, one session with image previews and
+  one attempted playback), the app's data and cache folders afterwards held
+  only WebKit's empty `salt` files, an `hsts-storage.sqlite` and
+  GStreamer's plugin registry, and none of them contained message text.
+  Whether either engine keeps anything elsewhere, or on a desktop, or on
+  WebView2, is **UNVERIFIED** (manual checklist).
 - Search runs in memory; no search history is kept anywhere. The query
   and filters stay in the window's memory until the viewer closes, never
   in a URL, a setting or a log. The search and date fields ask the engine
   not to spell-check, auto-complete or auto-capitalise
   (`spellcheck="false"`, `autocomplete="off"`, `autocapitalize="off"`);
   whether each engine and the system's input methods honour that is
-  **UNVERIFIED** (slice 5k's checklist).
+  **UNVERIFIED** (the milestone 5 manual checklist).
 - The window title is "Viewer — OpenMessage Archive" in the viewer, never
   a conversation name.
 - Hiding the screen drops the image previews kept in memory as well; idle
@@ -526,7 +529,9 @@ The viewer stops Ctrl+P (print, which can save a PDF), Ctrl+S, F5 and
 Ctrl+R, the engine's own context menu ("Save image as") and dragging
 messages or images out of the window. This works only if the engine lets
 the app see the key or the action first, which is **UNVERIFIED** on both
-engines. If an engine prints anyway, the printout shows only "Printing is
+engines. (In the smoke test on WebKitGTK 2.52.6, a right click opened the
+app's own menu, and Ctrl+P opened no print dialog; whether the app or the
+engine was the reason was not determined.) If an engine prints anyway, the printout shows only "Printing is
 not available in the conversation viewer."
 
 ### Not prevented by the app

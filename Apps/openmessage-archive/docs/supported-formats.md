@@ -879,6 +879,19 @@ only.
     an external data reference at all (a manual test with the check
     bypassed in a debug build, M5 §5.3).
 
+Added by milestone 5's viewer (slice 5k), from the display rules; also
+**UNVERIFIED**:
+
+37. Whether a removal row of an emoji reaction (associated type 3006)
+    records the emoji it removes. The viewer pairs a removal with the
+    emoji's chip only when the row carries one, and otherwise lists it as
+    "Removal of an emoji reaction (emoji not recorded)" without guessing
+    which chip it removed (seen in the synthetic catalogue,
+    `view-main-plain`). The other display rules that rest on open
+    questions are the reaction states (question 21), attachment matching
+    (question 23) and the read, delivery and sent columns, which the viewer
+    never shows (question 27).
+
 Two questions from the M3 research were settled by tests rather than
 hardware: a schema with double-quoted string literals still loads with
 `DQS_DDL` off (`crates/oma-backup/tests/staged_db.rs`), and table-valued

@@ -468,6 +468,12 @@ export const useViewer = defineStore('viewer', () => {
   async function openChat(chatId: SafeId, anchor: AnchorInput = { kind: 'newest' }): Promise<void> {
     const v = viewer.value;
     if (v === null) return;
+    // Details and replies describe a message of the conversation that was
+    // open, with its addresses; they close when another one opens (seen in
+    // the slice 5k smoke test). The search panel stays.
+    if (openChatId.value !== chatId && panel.value !== null && panel.value.kind !== 'search') {
+      panel.value = null;
+    }
     openChatId.value = chatId;
     const kept = touchWindow(chatId);
     if (

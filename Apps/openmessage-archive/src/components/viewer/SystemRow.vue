@@ -63,7 +63,7 @@ const showBody = computed(() => props.message.body.kind === 'text');
       >
       <template v-if="emoji">: <SafeText :value="emoji" quiet /></template>
       <template v-if="sender">
-        {{ BUBBLE_TEXT.reactionBy }}
+        {{ ' ' }}{{ BUBBLE_TEXT.reactionBy }}
         <SafeText v-if="'handle' in sender" :value="sender.handle.address" mode="identifier" ltr quiet />
         <template v-else>{{ sender.text }}</template>
       </template>

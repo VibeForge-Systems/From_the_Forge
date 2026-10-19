@@ -202,7 +202,8 @@ export const ATTRIBUTED_OUTCOME_TEXT: Record<AttributedOutcomeDto, string> = {
 export const DISPLAY_SOURCE_TEXT: Record<DisplaySourceDto, string> = {
   attributedBody: 'From the formatted text',
   text: 'From the plain-text column',
-  textLossy: 'Some characters could not be decoded',
+  // Not the lossy badge's words again (both showed in the slice 5k smoke test).
+  textLossy: 'From the plain-text column; some of its bytes were not valid text',
 };
 
 export const SOURCES_DIFFER_TEXT =
@@ -649,7 +650,7 @@ export const ATTACHMENT_TEXT = {
   previewFailed: 'Preview could not be loaded.',
   retry: 'Retry',
   structureNotChecked: 'Structure not checked for this format (its first bytes only)',
-  renditionPrefix: 'Preview, re-encoded and reduced to 2048 px',
+  renditionPrefix: 'Preview, re-encoded, at most 2048 px',
   originalSize: 'original {w}×{h}',
   originalLater: 'original size shown after the preview loads',
   viewerTitle: 'Attachment',
@@ -808,7 +809,10 @@ export const SEARCH_TEXT = {
   queryLabel: 'Search messages',
   queryHint: 'Words match whole words; the last word also matches as a prefix when it has 3 or more characters.',
   modeLabel: 'Mode',
-  modeAuto: 'Words (exact text for Chinese, Japanese, Korean, Thai and emoji)',
+  // Short, so the select shows it whole (cut off in the slice 5k smoke
+  // test); `autoNote` says what it does.
+  modeAuto: 'Words',
+  autoNote: 'Searches whole words, and exact text for Chinese, Japanese, Korean, Thai and emoji.',
   modeExact: 'Exact text',
   exactNote: 'Exact text is case-, accent- and Unicode-normalisation-sensitive.',
   scopeLabel: 'Only this conversation',

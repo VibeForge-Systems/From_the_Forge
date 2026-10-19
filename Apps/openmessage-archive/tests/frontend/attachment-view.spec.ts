@@ -132,7 +132,7 @@ describe('sizes and labels', () => {
 
   it('labels the preview as re-encoded, with the original size once known', () => {
     expect(renditionLabel(null, 20480, d('20480'))).toBe(
-      'Preview, re-encoded and reduced to 2048 px; original size shown after the preview loads; 20 KB stored (20 KB declared)',
+      'Preview, re-encoded, at most 2048 px; original size shown after the preview loads; 20 KB stored (20 KB declared)',
     );
     expect(renditionLabel({ width: 4032, height: 3024 }, 20480, d('20480'))).toContain('original 4032×3024');
   });
