@@ -34,7 +34,7 @@ pub mod thread;
 pub mod uncapped;
 
 use rusqlite::types::ValueRef;
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::OptionalExtension;
 
 pub use assemble::{
     AssembledMessage, AssocVisibility, AssociationFacts, AttachmentRef, BodyText, BodyView,
@@ -72,6 +72,7 @@ pub use thread::{
 pub use uncapped::{CapMiss, ExportItem};
 
 use crate::schema::codes::{AssocKindCode, Entity};
+use crate::stmt::StmtCache;
 
 macro_rules! row_id {
     ($(#[$meta:meta])* $name:ident) => {
@@ -192,7 +193,7 @@ const SQL_VALUE_ISSUE: &str = "SELECT 1 FROM value_issue \
 /// Whether the value of `entity` row `id`, column `col`, was stored as a
 /// BLOB in the source.
 pub(crate) fn stored_as_blob(
-    c: &Connection,
+    c: &StmtCache<'_>,
     entity: Entity,
     id: i64,
     col: i64,
@@ -219,7 +220,7 @@ const SQL_IN_CHAT: &str = "SELECT 1 FROM chat_message WHERE chat_id = ?1 AND mes
 /// visible (the target's own association is resolved once, at depth one:
 /// a chain or a cycle of reactions never hides a row). `None` when the row
 /// stays visible.
-pub(crate) fn folds_into(c: &Connection, chat: i64, id: i64) -> rusqlite::Result<Option<i64>> {
+pub(crate) fn folds_into(c: &StmtCache<'_>, chat: i64, id: i64) -> rusqlite::Result<Option<i64>> {
     let Some(target) = fold_target(c, chat, id)? else {
         return Ok(None);
     };
@@ -232,7 +233,7 @@ pub(crate) fn folds_into(c: &Connection, chat: i64, id: i64) -> rusqlite::Result
 /// The target `id` would fold into in chat `chat` if its target were a
 /// timeline item: a reaction whose target resolves to a keyed message of
 /// the same chat, whether or not that message folds itself.
-pub(crate) fn fold_target(c: &Connection, chat: i64, id: i64) -> rusqlite::Result<Option<i64>> {
+pub(crate) fn fold_target(c: &StmtCache<'_>, chat: i64, id: i64) -> rusqlite::Result<Option<i64>> {
     let Some(target) = reaction_target(c, id)? else {
         return Ok(None);
     };
@@ -247,7 +248,7 @@ pub(crate) fn fold_target(c: &Connection, chat: i64, id: i64) -> rusqlite::Resul
 /// The keyed message reaction `id` targets: `None` when `id` is not a
 /// reaction (`assoc_present = 1`, kind 10–17 or 20–27) or its target GUID
 /// resolves to no keyed message.
-pub(crate) fn reaction_target(c: &Connection, id: i64) -> rusqlite::Result<Option<i64>> {
+pub(crate) fn reaction_target(c: &StmtCache<'_>, id: i64) -> rusqlite::Result<Option<i64>> {
     let row: Option<(i64, Option<i64>, Option<Vec<u8>>)> = c
         .prepare(SQL_FOLD_ROW)?
         .query_row([id], |r| {

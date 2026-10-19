@@ -12,16 +12,15 @@
 //!   extras under `Caps::EXPORT`, with the raw codes and states the view
 //!   types collapse ([`RawCodes`], §3.9).
 //! - The public export reads (`with_export_snapshot`, the cursors, the
-//!   uncapped rows) are slice 6b's. Until then the only callers are the
-//!   fault-injection hooks, which run one item in one read transaction
-//!   under `ReadConn::cancellable`, as an export snapshot will.
+//!   uncapped rows) are in `crate::export` (slice 6b1), which assembles
+//!   through [`export_item`] and [`checked`]. The fault-injection hooks
+//!   below run one item with caps a test lowers, in its own read
+//!   transaction under `ReadConn::cancellable`.
 //!
 //! The reply quote is the one capped value an export item keeps: it is the
 //! viewer's two-line excerpt of the originator ([`super::QUOTE_UTF16`]),
 //! and an export references the originator instead of quoting it. The
 //! check ignores it for that reason.
-
-use rusqlite::Connection;
 
 use super::assemble::{self, AssembledMessage, BodyView, Caps, Ctx, Formatting, Reveal};
 use super::raw::RawCodes;
@@ -30,6 +29,7 @@ use super::{ChatId, EarlierText, HandleId, MessageId, Participant, SegmentKind};
 use crate::error::{ArchiveError, Stage};
 use crate::progress::CancelToken;
 use crate::reader::ArchiveReader;
+use crate::stmt::StmtCache;
 
 /// Where a cap left its marker in an assembled message, or why its extras
 /// are missing (M6 spec §3.3). `oma-export` maps
@@ -156,7 +156,7 @@ pub struct ExportItem {
 /// codes. `None` when the message does not exist. Unchecked: see
 /// [`checked`].
 pub(crate) fn export_item(
-    c: &Connection,
+    c: &StmtCache<'_>,
     ctx: &Ctx,
     chat: Option<i64>,
     id: i64,
@@ -184,8 +184,8 @@ pub(crate) fn checked(item: ExportItem) -> Result<ExportItem, ArchiveError> {
 impl ArchiveReader {
     /// One export item in one read transaction under
     /// `ReadConn::cancellable` (no op budget, stopped by `cancel` only),
-    /// checked. Slice 6b replaces this single-item entry with the export
-    /// snapshot; until then only the fault-injection hooks call it.
+    /// checked, under caps a test may lower. Only the fault-injection
+    /// hooks call it; exports read through `with_export_snapshot`.
     #[cfg_attr(not(feature = "fault-injection"), allow(dead_code))]
     pub(crate) fn export_item(
         &self,
@@ -200,14 +200,22 @@ impl ArchiveReader {
         let item = conn.snapshot(|| {
             conn.cancellable(cancel, Stage::View, |c| {
                 let ctx = Ctx::load(c)?;
-                export_item(c, &ctx, chat.map(ChatId::get), id.get(), &caps, reveal)
+                export_item(
+                    &StmtCache::new(c),
+                    &ctx,
+                    chat.map(ChatId::get),
+                    id.get(),
+                    &caps,
+                    reveal,
+                )
             })
         })?;
         checked(item.ok_or(ArchiveError::AnchorNotFound)?)
     }
 
     /// One handle with its address under `caps`, in one read transaction
-    /// under `ReadConn::cancellable`. Test-only until slice 6b.
+    /// under `ReadConn::cancellable`, under caps a test may lower.
+    /// Test-only.
     #[cfg_attr(not(feature = "fault-injection"), allow(dead_code))]
     pub(crate) fn export_handle(
         &self,
@@ -219,7 +227,7 @@ impl ArchiveReader {
         let conn = self.conn();
         conn.snapshot(|| {
             conn.cancellable(cancel, Stage::View, |c| {
-                assemble::handle(c, id.get(), &caps)
+                assemble::handle(&StmtCache::new(c), id.get(), &caps)
             })
         })?
         .ok_or(ArchiveError::AnchorNotFound)

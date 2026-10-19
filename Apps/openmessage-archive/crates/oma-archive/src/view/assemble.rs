@@ -48,6 +48,7 @@ use crate::schema::codes::{
     ValueState,
 };
 use crate::sortkey;
+use crate::stmt::StmtCache;
 
 /// The bytes of `assoc_emoji` kept before a marker (§3.8).
 pub const EMOJI_BYTES: usize = 64;
@@ -805,7 +806,7 @@ fn u32_of(n: usize) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
 }
 
-fn exists(c: &Connection, sql: &str, a: i64, b: i64) -> rusqlite::Result<bool> {
+fn exists(c: &StmtCache<'_>, sql: &'static str, a: i64, b: i64) -> rusqlite::Result<bool> {
     Ok(c.prepare(sql)?
         .query_row([a, b], |_| Ok(()))
         .optional()?
@@ -813,7 +814,7 @@ fn exists(c: &Connection, sql: &str, a: i64, b: i64) -> rusqlite::Result<bool> {
 }
 
 /// The keyed message a GUID resolves to (`message_guid`, `key_kind = 1`).
-fn keyed(c: &Connection, guid: &[u8]) -> rusqlite::Result<Option<i64>> {
+fn keyed(c: &StmtCache<'_>, guid: &[u8]) -> rusqlite::Result<Option<i64>> {
     c.prepare(SQL_KEYED_BY_GUID)?
         .query_row([guid], |r| r.get(0))
         .optional()
@@ -1125,7 +1126,7 @@ struct ItemRow {
     effect_st: Option<i64>,
 }
 
-fn item_row(c: &Connection, id: i64) -> rusqlite::Result<Option<ItemRow>> {
+fn item_row(c: &StmtCache<'_>, id: i64) -> rusqlite::Result<Option<ItemRow>> {
     c.prepare(SQL_ITEM)?
         .query_row([id], |r| {
             let key_kind: i64 = r.get(0)?;
@@ -1213,7 +1214,7 @@ pub(crate) fn recorded_time(
 /// The association facts and the visibility class of `row` in `chat` (or,
 /// without a chat, against every chat the message is in).
 fn association(
-    c: &Connection,
+    c: &StmtCache<'_>,
     chat: Option<i64>,
     id: i64,
     row: &ItemRow,
@@ -1270,7 +1271,7 @@ fn association(
 
 /// Whether target `t` would itself fold: in chat `chat`, or, without a
 /// chat, into a target it shares a chat with.
-fn target_folds(c: &Connection, chat: Option<i64>, t: i64) -> rusqlite::Result<bool> {
+fn target_folds(c: &StmtCache<'_>, chat: Option<i64>, t: i64) -> rusqlite::Result<bool> {
     if let Some(chat) = chat {
         return Ok(fold_target(c, chat, t)?.is_some());
     }
@@ -1319,7 +1320,7 @@ type BodyParts = (
 /// left out, the GUIDs of the keyed ones, and their raw values.
 type Attachments = (Vec<AttachmentRef>, u64, KeyedGuids, Vec<AttachmentCodes>);
 
-fn attachments(c: &Connection, id: i64, caps: &Caps) -> rusqlite::Result<Attachments> {
+fn attachments(c: &StmtCache<'_>, id: i64, caps: &Caps) -> rusqlite::Result<Attachments> {
     let limit = i64::try_from(caps.attachments).unwrap_or(i64::MAX);
     let mut st = c.prepare(SQL_ATTACHMENTS)?;
     let mut rows = st.query(rusqlite::params![id, limit])?;
@@ -1366,7 +1367,7 @@ fn attachments(c: &Connection, id: i64, caps: &Caps) -> rusqlite::Result<Attachm
 
 /// The current body, segmented.
 fn body(
-    c: &Connection,
+    c: &StmtCache<'_>,
     body_id: Option<i64>,
     atts: &[(Vec<u8>, i64)],
     caps: &Caps,
@@ -1500,14 +1501,14 @@ fn body(
 /// not believed (the summary is parsed from untrusted bytes).
 const MAX_OTR_PARTS: i64 = 4096;
 
-fn ints(c: &Connection, sql: &str, id: i64) -> rusqlite::Result<Vec<i64>> {
+fn ints(c: &StmtCache<'_>, sql: &'static str, id: i64) -> rusqlite::Result<Vec<i64>> {
     let mut st = c.prepare(sql)?;
     let rows = st.query_map([id], |r| r.get::<_, i64>(0))?;
     rows.collect()
 }
 
 fn edits(
-    c: &Connection,
+    c: &StmtCache<'_>,
     message: i64,
     view: &BodyView,
     label: Option<i64>,
@@ -1623,7 +1624,7 @@ fn edits(
 /// Labels and provenance (§3.6), and the lineage that set the direction
 /// when more than one recorded the message.
 fn labels(
-    c: &Connection,
+    c: &StmtCache<'_>,
     ctx: &Ctx,
     id: i64,
     row: &ItemRow,
@@ -1711,7 +1712,7 @@ fn labels(
 /// conversation it is shown in (`None` in the reply thread). `None` when
 /// the message does not exist.
 pub(crate) fn base(
-    c: &Connection,
+    c: &StmtCache<'_>,
     ctx: &Ctx,
     chat: Option<i64>,
     id: i64,
@@ -1724,7 +1725,7 @@ pub(crate) fn base(
 /// [`base`], with the raw codes and states the view types collapse
 /// (M6 spec §3.9), read from the same rows.
 pub(crate) fn base_coded(
-    c: &Connection,
+    c: &StmtCache<'_>,
     ctx: &Ctx,
     chat: Option<i64>,
     id: i64,
@@ -1820,7 +1821,7 @@ pub(crate) fn chip_sender(
 }
 
 fn reactions(
-    c: &Connection,
+    c: &StmtCache<'_>,
     guid: &[u8],
     caps: &Caps,
 ) -> rusqlite::Result<Option<ReactionSummary>> {
@@ -1971,7 +1972,7 @@ fn two_lines(body: PreviewBody) -> PreviewBody {
     PreviewBody::Text(out)
 }
 
-fn reply(c: &Connection, chat: Option<i64>, id: i64) -> rusqlite::Result<Option<ReplyRef>> {
+fn reply(c: &StmtCache<'_>, chat: Option<i64>, id: i64) -> rusqlite::Result<Option<ReplyRef>> {
     let guid: Option<Vec<u8>> = c
         .prepare(SQL_REPLY_OF)?
         .query_row([id], |r| Ok(bytes_of(r.get_ref(0)?)))
@@ -2010,7 +2011,7 @@ fn reply(c: &Connection, chat: Option<i64>, id: i64) -> rusqlite::Result<Option<
 /// The extras of one message: reaction chips, the reply reference and the
 /// reply count. Sets [`AssembledMessage::extras`].
 pub(crate) fn extras(
-    c: &Connection,
+    c: &StmtCache<'_>,
     chat: Option<i64>,
     m: &mut AssembledMessage,
     x: &Extras,
@@ -2032,7 +2033,7 @@ pub(crate) fn extras(
 /// One handle as a page lists it, its address capped at
 /// [`Caps::identifier_utf16`].
 pub(crate) fn handle(
-    c: &Connection,
+    c: &StmtCache<'_>,
     id: i64,
     caps: &Caps,
 ) -> rusqlite::Result<Option<super::Participant>> {

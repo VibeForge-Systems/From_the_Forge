@@ -573,17 +573,21 @@ Linux job, 6 on Windows), measured from slice 6a.** The baseline is `main`
 at `9883217` (milestones 1–5), run in a Linux container (4 CPUs, debug
 build, `CARGO_INCREMENTAL=0`, after compiling), then again with slice 6a:
 
-| What | Baseline (`9883217`) | Slice 6a |
-|---|---|---|
-| `cargo test --workspace`, wall clock | 2 min 8 s | 2 min 6 s |
-| Sum of all test binaries' run times | 124.2 s | 123.1 s |
-| Rust tests passed | 1,241 (12 ignored) | 1,251 (12 ignored) |
-| `oma-archive`'s `export_caps.rs` | — | 2.4 s (4 tests) |
+| What | Baseline (`9883217`) | Slice 6a | Slice 6b1 |
+|---|---|---|---|
+| `cargo test --workspace`, wall clock | 2 min 8 s | 2 min 6 s | 2 min 26 s |
+| Sum of all test binaries' run times | 124.2 s | 123.1 s | 142.9 s |
+| Rust tests passed | 1,241 (12 ignored) | 1,251 (12 ignored) | 1,270 (12 ignored) |
+| `oma-archive`'s `export_caps.rs` | — | 2.4 s (4 tests) | 3.0 s |
+| `oma-archive`'s `export_reads.rs` | — | — | 5.4 s (12 tests) |
 
 The difference between the two runs is inside the run-to-run noise: a
 first, cold run of the baseline in the same container took 3 min 58 s
 (148.4 s summed). Slice 6a's own cost is `export_caps.rs` plus six quick
-unit tests. Windows has not been measured for M6. Slices 6h and 6l record
+unit tests. Slice 6b1 adds `export_reads.rs` (5.4 s), one plan test and
+six unit tests; the rest of its run's increase is inside the noise above
+(the same binaries' times move by several seconds between runs). Windows
+has not been measured for M6. Slices 6h and 6l record
 the figures again, with CI's.
 
 **Optional oracles** (manual; nothing enters the repository or CI; each

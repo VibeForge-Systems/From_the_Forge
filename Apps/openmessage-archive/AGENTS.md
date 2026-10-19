@@ -541,6 +541,20 @@ Never hand-edit generated files.
   `debug_assert`). Raw codes and states for exports come from
   `base_coded()` as `RawCodes` (`view/raw.rs`); the view types keep
   collapsing them for the viewer.
+- **Export reads (M6 slice 6b1).** An export reads only through
+  `crates/oma-archive/src/export/`: `Library::hold_for_export` (the
+  archive lock for the job) and `ArchiveReader::with_export_snapshot` (one
+  read transaction in `ReadConn::exporting`, cancel only). Inside it every
+  other mode of that reader refuses with `Internal`; never add a
+  `budgeted`, `viewing` or `cancellable` call to code an export snapshot
+  runs (`open_blob` there reads the row through the snapshot). Cursors
+  read a batch to the end and return their statement before anything else
+  runs (`hooks::statements_stepping` checks it), keep sort keys inside, and
+  bound dated reads with `sort_key < X'01'`. The assembly layer and the
+  details take a `&StmtCache` (`src/stmt.rs`): its `prepare` takes only a
+  `&'static str` and shadows `Connection::prepare`, so a constant
+  statement is reused; prepare dynamic SQL on the connection. A new export
+  statement goes into `export::plan_statements` and `tests/query_plans.rs`.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush

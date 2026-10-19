@@ -3005,6 +3005,118 @@ Not done in 6a: content `_st` codes this build does not know still read
 same. The detail lists keep their M5 limits (`DETAIL_VERSIONS`,
 `DETAIL_EDIT_ENTRIES`, `REACTION_HISTORY_LIMIT`); slice 6b streams them.
 
+### Export reads (M6 slice 6b1)
+
+Slice 6b1 adds `crates/oma-archive/src/export/`, the only way an export
+reads an archive (M6 spec §3.2, §3.4, §3.5, D124). `oma-export` (slice 6d
+on) never reaches SQLite.
+
+- **The lock.** `Library::hold_for_export(id)` runs `Library::open`'s
+  checks and takes the same `ArchiveLock::acquire`, and returns an
+  `ExportHold` that the job keeps. While it lives, `Library::open` (an
+  import or a verify, in this process or another instance) gets `Locked`,
+  a second hold gets `Locked`, and `Library::list` reports the archive as
+  in use. Viewer readers take no lock and keep reading. Tested on Linux
+  only (`tests/export_reads.rs`); the lock is the M4 one, which CI
+  exercises on Windows.
+- **One snapshot per job.** `ArchiveReader::with_export_snapshot(hold,
+  cancel, f)` refuses a hold of another archive, then runs `f` inside
+  **one** `BEGIN DEFERRED … COMMIT` read transaction in a new
+  `ReadConn::exporting` mode: no op budget and no deadline, stopped only
+  by the cancel token (in the progress handler every 1,000 VM operations,
+  and by `checkpoint()` between statements); a stop is `Cancelled`, never
+  `Damaged`. The transaction ends when `f` returns, so `conn.rs`'s "no read
+  transaction outlives a call" holds with the call being the job. The mode
+  is fixed for the whole closure: `budgeted`, `cancellable`, `viewing` and
+  a nested `exporting` on the same reader refuse with `Internal`, so no
+  nested call can toggle the shared `Budget` under a statement that is
+  still stepping (§3.1 item 6). A test deletes timeline rows and inserts a
+  session from a raw connection inside a snapshot and sees neither until
+  the snapshot ends.
+- **Cursors** (`export/cursor.rs`). `timeline(chat, range)` pages
+  `chat_message_timeline` by keyset over `(sort_key, message_id)`, first
+  the dated range (`sort_key < X'01'`, plus the half-open bounds of a
+  `TimeRange::Dated { from_ns, until_ns }`, the keyset starting at the
+  lower bound so the first batch seeks), then, for `TimeRange::All` only,
+  the undated range (`sort_key >= X'01'`). `unassigned(range)` does the same
+  over `message_sort` for messages with no `chat_message` row (probing
+  `chat_message_by_message`). `by_ids(ids)` walks a given list. Each
+  `next_batch()` reads its rows to the end and puts the statement back
+  (reset) before the fold checks and the pre-measure run, so no statement
+  steps while another runs on the connection (a `fault-injection` hook,
+  `statements_stepping`, checks `sqlite3_stmt_busy` after each call). In a
+  conversation, a reaction row that folds into a timeline item of the same
+  conversation (M5 §3.5 step 3) is returned in `folded` with its target,
+  never as an item. `rewind()` starts over within the same snapshot.
+- **Byte-sized batches** (`export/measure.rs`). Each candidate is measured
+  from stored lengths only (`octet_length` of the current body's
+  `display_text` and `attributed_raw`, plus every version's `display_text`
+  and `summary_raw` at `ExportDepth::WithHistory`). A batch takes at most
+  `BatchLimits::max_ids` (256) messages and at most `max_bytes` (32 MiB)
+  measured; a larger message is a batch of its own. The keyset moves only
+  past what the batch returned. One short statement per candidate, because
+  the archive has no id-list table without a temporary table.
+- **Assembly** (`ExportSnapshot::assemble(ids, reveal, depth)`) runs the
+  viewer's assembly layer under `Caps::EXPORT` outside any conversation
+  (the intrinsic part is the same in every conversation file), with the
+  raw codes, then slice 6a's check (a missed cap or missing extras is
+  refused as `Internal`, never exported). It adds, uncapped:
+  `DetailColumns` (raw `date_edited` and `date_retracted`, the account, the
+  subject, the Recently Deleted listings with raw `delete_*` and
+  `ck_sync_state`), every `ChatMembership` with its raw `join_date`, every
+  `ReactionRow` targeting the message (no `REACTION_HISTORY_LIMIT`), the
+  closed value-history set, `HistoryState` (version and phone-entry counts)
+  and `Derivation` (`derived_by`, the current body's `decoder_version`).
+  `attachment_facts`, `chat_columns` and `handle_columns` read the
+  attachment (`is_outgoing`, `transfer_state`, raw `created_*` and
+  `start_*`), conversation (name, identifier, raw service, flags, every
+  `chat_handle` participant, name history) and handle (address, raw
+  service, `country`) columns, uncapped. GUIDs, `uncanonicalized_id`,
+  `person_centric_id` and session-local rowids are not read (the D141
+  opt-in is slice 6d's); read, delivery and sent state never are (D94).
+- **History** streams one version at a time (`history(m, reveal)`, a
+  `HistoryCursor`): only the version list (ids and ranks) is held, each
+  version's row is read when asked for, every phone edit entry is read (no
+  `DETAIL_VERSIONS` or `DETAIL_EDIT_ENTRIES`), and "text unchanged"
+  compares SHA-256 digests, so one version's text is in memory at a time.
+  Masking is the details' (D115), shared through `detail::version_view`.
+- **Masking.** One-time codes and earlier text follow the export's
+  `Reveal` exactly as the viewer's details do. A subject history value of
+  a message with an unsent part is `ValueHistoryEntry::Withheld` unless
+  earlier content is revealed (§3.8); the other columns are not withheld.
+  The rest of the §3.8 widening (attachments of unsent parts, the
+  plain-column alternative text), the exact preview counts, the dated span,
+  `search_ids` with membership classification, the masking oracle and the
+  hostile-history RSS test are slice 6b2's.
+- **The generation** (`archive_generation()`, `ExportSnapshot::generation`)
+  is the newest session (id, state, resume count), the newest completed
+  session and the highest row id of `message`, `message_body`,
+  `attachment` and `blob`: rows are never deleted (D57), so every import
+  insert moves one, and each is one primary-key seek. It is opaque:
+  compared only, and its `Debug` prints nothing.
+- **Statement reuse.** rusqlite's `prepare_cached` needs its `cache`
+  feature, which pulls in `hashlink`, a crate the workspace does not have;
+  PR A adds no dependency but `csv`. So `src/stmt.rs` is a small
+  statement cache (`StmtCache`, 64 idle statements, the longest idle
+  finalized first): a statement is taken out while used, so a nested use
+  of the same SQL prepares a second one, and put back when its guard
+  drops, after rusqlite has reset it. The assembly layer and the details
+  now take a `&StmtCache` (which derefs to the connection; its own
+  `prepare(&'static str)` shadows `Connection::prepare`). An export
+  snapshot keeps one cache for the whole job; the viewer passes a new one
+  per call site, so it reuses a statement only within that one call, and
+  its results are unchanged (`Caps::PAGE` stays byte-identical,
+  `tests/export_caps.rs`). Measured in the container
+  (debug test build, SQLite at `opt-level = 3`), assembling every timeline
+  item of a 20,000-message bulk archive through a snapshot took 358 µs per
+  message without the cache and 141 µs with it.
+- **Plans.** Every new statement is in `export::plan_statements` and
+  pinned in `tests/query_plans.rs`; `export_statements_stay_on_their_indexes`
+  checks that the timeline batches stay on `chat_message_timeline`, the
+  unassigned batches walk `message_sort` and probe
+  `chat_message_by_message`, nothing sorts in a temporary B-tree, and only
+  the chat id list (`SCAN chat`) and the newest session scan.
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`

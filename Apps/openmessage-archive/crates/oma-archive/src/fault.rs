@@ -300,6 +300,20 @@ pub mod hooks {
         v
     }
 
+    /// The export reads' statements, by name, exactly as the code
+    /// prepares them (for `tests/query_plans.rs`, M6 spec §3.4).
+    pub fn export_statements() -> Vec<(&'static str, String)> {
+        crate::export::plan_statements()
+    }
+
+    /// Whether any statement on the snapshot's connection has stepped
+    /// and not been reset (`sqlite3_stmt_busy` over every statement): the
+    /// cursors materialise and reset before they return (M6 spec §3.2).
+    /// Test-only.
+    pub fn statements_stepping(snapshot: &crate::ExportSnapshot<'_>) -> bool {
+        snapshot.statements_stepping()
+    }
+
     pub use crate::bulk::{sort_key, BulkFinalize, BulkWriter};
 
     /// Caps to lower below [`Caps::EXPORT`](crate::view::assemble::Caps)
@@ -333,7 +347,8 @@ pub mod hooks {
     /// One message assembled as an export will assemble it (M6 slice 6a):
     /// `Caps::EXPORT` lowered by `lower`, base and extras, the raw codes,
     /// in one read transaction with no op budget, then the cap check that
-    /// runs in every build. Test-only until slice 6b's export snapshot.
+    /// runs in every build. Test-only: exports read through
+    /// `ArchiveReader::with_export_snapshot`.
     pub fn export_item(
         reader: &crate::ArchiveReader,
         chat: Option<crate::ChatId>,

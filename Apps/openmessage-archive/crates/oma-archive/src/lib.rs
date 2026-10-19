@@ -33,6 +33,11 @@
 //! spec §11), quick or full, and [`ArchiveReader::open_blob`] the one way
 //! attachment bytes are read back in full.
 //!
+//! The export reads (M6 slice 6b1) are [`Library::hold_for_export`] and
+//! [`ArchiveReader::with_export_snapshot`]: one read transaction per job
+//! under the archive's lock, with keyset cursors, byte-sized batches and
+//! the assembly layer under `Caps::EXPORT`.
+//!
 //! [`media`] (M5 slice 5d) holds the viewer's media rules: the content
 //! sniffer, the structural check of audio and video containers, the
 //! viewer's blob readers (`inspect_blob`, `verify_blob`, `check_container`,
@@ -61,6 +66,7 @@ mod blobs;
 mod bulk;
 mod conn;
 mod error;
+mod export;
 mod fault;
 mod id;
 mod import;
@@ -75,6 +81,7 @@ pub mod schema;
 mod search;
 mod sortkey;
 pub mod space;
+mod stmt;
 mod store_fs;
 mod verify;
 mod view;
@@ -88,6 +95,12 @@ pub use conn::SearchInterrupt;
 pub use error::{
     ArchiveError, BlobProblem, DamageKind, IoOp, LocationRefusal, PermProblem, QueryProblem,
     RefusalKind, Stage,
+};
+pub use export::{
+    ArchiveGeneration, BatchLimits, ChatColumns, ChatMembership, CursorBatch, Derivation,
+    DetailColumns, ExportAttachment, ExportDepth, ExportHold, ExportMessage, ExportSnapshot,
+    HandleColumns, HistoryCursor, HistoryState, IdCursor, ReactionRow, RecentlyDeletedRow,
+    TimeRange, TimelineCursor, ValueHistoryEntry,
 };
 pub use id::{ArchiveId, IdError, Label, LabelState, ARCHIVE_ID_LEN, LABEL_MAX_BYTES};
 pub use import::{

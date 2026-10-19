@@ -299,6 +299,49 @@ pub(crate) fn inspect(conn: &ReadConn, plan: &SchemaPlan) -> Result<Inspected, A
     })
 }
 
+/// `blob.sha256`, `byte_len` and `storage_name` of blob `id`, as read.
+pub(crate) const SQL_BLOB_ROW: &str =
+    "SELECT sha256, byte_len, storage_name FROM blob WHERE id = ?1";
+
+/// What [`blob_row`] read: the digest, the length (-1 when not an
+/// integer) and the storage name.
+pub(crate) type BlobRow = Option<(Vec<u8>, i64, Option<String>)>;
+
+/// The row of blob `id`, in the caller's mode (the reader's op budget, or
+/// an export snapshot's cancel mode).
+pub(crate) fn blob_row(c: &Connection, id: BlobId) -> rusqlite::Result<BlobRow> {
+    let mut stmt = c.prepare(SQL_BLOB_ROW)?;
+    let mut rows = stmt.query([id.0])?;
+    let Some(r) = rows.next()? else {
+        return Ok(None);
+    };
+    let sha = match r.get_ref(0)? {
+        ValueRef::Blob(b) => b.to_vec(),
+        _ => Vec::new(),
+    };
+    let len = match r.get_ref(1)? {
+        ValueRef::Integer(n) => n,
+        _ => -1,
+    };
+    let name = match r.get_ref(2)? {
+        ValueRef::Text(t) => std::str::from_utf8(t).ok().map(str::to_owned),
+        _ => None,
+    };
+    Ok(Some((sha, len, name)))
+}
+
+/// Open the store file of a blob row: its storage name must parse and
+/// spell its digest; the file is opened by `open_checked`.
+pub(crate) fn open_blob_row(dir: &ArchiveDir, row: BlobRow) -> Result<BlobReader, ArchiveError> {
+    let (sha, len, name) = row.ok_or(ArchiveError::Blob(BlobProblem::NotFound))?;
+    let name = name
+        .as_deref()
+        .and_then(StorageName::parse)
+        .filter(|n| n.sha256().is_some_and(|s| s.as_slice() == sha.as_slice()))
+        .ok_or(ArchiveError::Blob(BlobProblem::BadName))?;
+    open_checked(dir, &name, len).map_err(ArchiveError::Blob)
+}
+
 /// A lock-free, query-only view of one archive.
 pub struct ArchiveReader {
     conn: ReadConn,
@@ -498,35 +541,10 @@ impl ArchiveReader {
     /// never replaced.
     pub fn open_blob(&self, id: BlobId) -> Result<BlobReader, ArchiveError> {
         self.require_current()?;
-        let row: Option<(Vec<u8>, i64, Option<String>)> =
-            self.conn.budgeted(READ_OP_BUDGET, Stage::Read, |c| {
-                let mut stmt =
-                    c.prepare("SELECT sha256, byte_len, storage_name FROM blob WHERE id = ?1")?;
-                let mut rows = stmt.query([id.0])?;
-                let Some(r) = rows.next()? else {
-                    return Ok(None);
-                };
-                let sha = match r.get_ref(0)? {
-                    ValueRef::Blob(b) => b.to_vec(),
-                    _ => Vec::new(),
-                };
-                let len = match r.get_ref(1)? {
-                    ValueRef::Integer(n) => n,
-                    _ => -1,
-                };
-                let name = match r.get_ref(2)? {
-                    ValueRef::Text(t) => std::str::from_utf8(t).ok().map(str::to_owned),
-                    _ => None,
-                };
-                Ok(Some((sha, len, name)))
-            })?;
-        let (sha, len, name) = row.ok_or(ArchiveError::Blob(BlobProblem::NotFound))?;
-        let name = name
-            .as_deref()
-            .and_then(StorageName::parse)
-            .filter(|n| n.sha256().is_some_and(|s| s.as_slice() == sha.as_slice()))
-            .ok_or(ArchiveError::Blob(BlobProblem::BadName))?;
-        open_checked(&self.dir, &name, len).map_err(ArchiveError::Blob)
+        let row = self
+            .conn
+            .budgeted(READ_OP_BUDGET, Stage::Read, |c| blob_row(c, id))?;
+        open_blob_row(&self.dir, row)
     }
 
     /// The newest verify run, if any (spec §4.3). A run a crash
