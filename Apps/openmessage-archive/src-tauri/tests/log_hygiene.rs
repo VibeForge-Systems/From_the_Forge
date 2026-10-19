@@ -14,6 +14,13 @@
 //! the archive details and the listing are checked like the reports, and
 //! no log line carries an archive id or the archive's label.
 //!
+//! M5 (§7.7): every viewer operation over archives imported from the
+//! synthetic viewer catalogue, with filter and query strings that carry
+//! sentinels, refusals included: no content, filter or query text and no
+//! archive id reaches a log line. The `oma-media` handler is driven for
+//! every attachment token, with the real decode helper (this package's
+//! binary): no token, URI, range or exact size is logged (§6.4 rule 5).
+//!
 //! Its own test binary with one global capturing subscriber: a thread-local
 //! subscriber would miss events from worker threads.
 
@@ -242,8 +249,14 @@ impl JobEventSink for Confirming<'_> {
 /// Import `name` into a fresh labelled archive, then verify it. Returns
 /// the archive id; `texts` receives the events, the details and the list.
 fn import_and_verify(name: &str, tmp: &Path, texts: &mut Vec<String>) -> String {
+    import_and_verify_from(&imports_fixtures(), name, tmp, texts)
+}
+
+/// [`import_and_verify`] for an entry of the catalogue at `root`. The
+/// library is `tmp/implib-<name>`.
+fn import_and_verify_from(root: &Path, name: &str, tmp: &Path, texts: &mut Vec<String>) -> String {
     let dir = tmp.join(format!("imp-{name}")).join(UDID);
-    copy_tree(&imports_fixtures().join(name).join(UDID), &dir);
+    copy_tree(&root.join(name).join(UDID), &dir);
     let library = tmp.join(format!("implib-{name}"));
     std::fs::create_dir_all(&library).expect("mkdir");
     let env = ArchiveEnv {
@@ -404,6 +417,252 @@ fn run_job_in(
     sink.0
 }
 
+fn viewer_fixtures() -> PathBuf {
+    PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../tests/fixtures/viewer"
+    ))
+}
+
+/// Values planted in the viewer catalogue (its README), and the filter
+/// and query sentinels this test sends.
+const VIEWER_SENTINELS: &[&str] = &[
+    "SYNTH-VIEW",
+    "SYNTH-HX",
+    "SYNTH-MEDIA",
+    "SYNTH-LIN",
+    "SYNTH-OLD",
+    "SYNTH-OTC",
+    "example.invalid",
+    "+1555",
+    FILTER_SENTINEL,
+    QUERY_SENTINEL,
+];
+const FILTER_SENTINEL: &str = "SYNTH-FILTER-SENTINEL";
+const QUERY_SENTINEL: &str = "SYNTH-QUERY-SENTINEL";
+
+fn req<T: serde::de::DeserializeOwned>(v: serde_json::Value) -> T {
+    serde_json::from_value(v).expect("request")
+}
+
+/// Run every viewer operation on one archive, refusals included. Returns
+/// the DTOs as JSON (they carry content, so they are never added to the
+/// content-free texts).
+fn exercise_viewer(
+    library: &Path,
+    id: &str,
+    tokens: &mut Vec<String>,
+    sizes: &mut std::collections::BTreeSet<u64>,
+) -> Vec<String> {
+    use openmessage_archive_lib::settings::MediaPlayback;
+    use openmessage_archive_lib::viewer::media::engine::MediaConfig;
+    use openmessage_archive_lib::viewer::media::helper::{
+        HelperCommand, HelperHost, RenderBackend, HELPER_FLAG,
+    };
+    use openmessage_archive_lib::viewer::media::{self, MediaRequest, Reply};
+    use openmessage_archive_lib::viewer::{self, ViewerHost};
+    use serde_json::json;
+    let env = ArchiveEnv {
+        space: Some(std::sync::Arc::new(FakeSpace)),
+    };
+    let helper = HelperCommand::new(
+        PathBuf::from(env!("CARGO_BIN_EXE_openmessage-archive")),
+        vec![std::ffi::OsString::from(HELPER_FLAG)],
+    );
+    let host = ViewerHost::with_media(MediaConfig {
+        backend: std::sync::Arc::new(move || {
+            Box::new(HelperHost::new(Some(helper.clone()))) as Box<dyn RenderBackend>
+        }),
+        crash_cap: 5,
+    });
+    // Every exact size the protocol served: bodies, Content-Length and
+    // the totals of Content-Range.
+    let served_sizes = std::sync::Arc::new(Mutex::new(Vec::<u64>::new()));
+    let sink = std::sync::Arc::clone(&served_sizes);
+    let ask = move |host: &ViewerHost, target: &str, ranges: &[&str]| -> u16 {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let sink = std::sync::Arc::clone(&sink);
+        let reply = Reply::new(Box::new(move |r: media::MediaResponse| {
+            if let Ok(mut v) = sink.lock() {
+                v.push(r.body.len() as u64);
+                if let Some(n) = r.header("Content-Length").and_then(|l| l.parse().ok()) {
+                    v.push(n);
+                }
+                if let Some(n) = r
+                    .header("Content-Range")
+                    .and_then(|c| c.rsplit('/').next())
+                    .and_then(|t| t.parse().ok())
+                {
+                    v.push(n);
+                }
+            }
+            let _ = tx.send(r.status);
+        }));
+        media::dispatch(
+            host,
+            &MediaRequest {
+                label: "main",
+                method: "GET",
+                target,
+                ranges,
+                origins: &[],
+                playback_allowed: true,
+            },
+            reply,
+        );
+        rx.recv_timeout(std::time::Duration::from_secs(60))
+            .expect("media answer")
+    };
+    let jobs = Jobs::default();
+    let opened = viewer::open(&host, library, &env, &jobs, id).expect("open viewer");
+    let v = opened.viewer;
+    let mut out = vec![serde_json::to_string(&opened).expect("json")];
+    let all = json!({ "earlierText": true, "oneTimeCode": true });
+    viewer::with_session(&host, v, |s| {
+        let mut push = |j: String| out.push(j);
+        for filter in [None, Some(FILTER_SENTINEL), Some("SYNTH")] {
+            let mut r = json!({ "viewer": v, "sort": "name" });
+            if let Some(f) = filter {
+                r["filter"] = json!(f);
+            }
+            push(serde_json::to_string(&viewer::list_conversations(s, &req(r))?).expect("json"));
+        }
+        let long = format!("{FILTER_SENTINEL}{}", "x".repeat(200));
+        let refused =
+            viewer::list_conversations(s, &req(json!({ "viewer": v, "sort": "name", "filter": long })));
+        assert!(refused.is_err());
+        let index = viewer::list_conversations(s, &req(json!({ "viewer": v, "sort": "recent" })))?;
+        let ids: Vec<i64> = index.ids.iter().map(|i| i.get()).collect();
+        push(
+            serde_json::to_string(&viewer::get_conversations(
+                s,
+                &req(json!({ "viewer": v, "ids": ids })),
+                true,
+            )?)
+            .expect("json"),
+        );
+        for chat in &ids {
+            for anchor in [json!({ "kind": "newest" }), json!({ "kind": "undated" })] {
+                let page = viewer::thread_page(
+                    s,
+                    &req(json!({ "viewer": v, "chatId": chat, "anchor": anchor,
+                                 "direction": "older", "limit": 100, "reveal": all })),
+                )?;
+                for m in page.items.iter().take(5) {
+                    let d = viewer::message_detail(
+                        s,
+                        &req(json!({ "viewer": v, "messageId": m.id.get(), "reveal": all, "reactionPage": {} })),
+                    )?;
+                    for b in &d.versions {
+                        push(
+                            serde_json::to_string(&viewer::message_text(
+                                s,
+                                &req(json!({ "viewer": v, "bodyId": b.body.get(), "fromUtf16": 3, "reveal": all })),
+                            )?)
+                            .expect("json"),
+                        );
+                    }
+                    push(serde_json::to_string(&d).expect("json"));
+                    push(
+                        serde_json::to_string(&viewer::reply_thread(
+                            s,
+                            &req(json!({ "viewer": v, "messageId": m.id.get() })),
+                        )?)
+                        .expect("json"),
+                    );
+                }
+                for m in &page.items {
+                    for a in &m.attachments {
+                        for playback in [MediaPlayback::Confirm, MediaPlayback::Off] {
+                            push(
+                                serde_json::to_string(&viewer::inspect(
+                                    s,
+                                    &req(json!({ "viewer": v, "attachmentId": a.id.get(), "forPlayback": true })),
+                                    playback,
+                                )?)
+                                .expect("json"),
+                            );
+                        }
+                        // The protocol, for every token: renditions through
+                        // the real helper, streams, refusals.
+                        if let Some(t) = &a.token {
+                            let t = t.as_str();
+                            tokens.push(t.to_owned());
+                            for (rendition, ranges) in [
+                                ("thumb", &[][..]),
+                                ("display", &[][..]),
+                                ("thumb", &[][..]),
+                                ("stream", &["bytes=0-"][..]),
+                                ("stream", &["bytes=-0"][..]),
+                                ("stream", &["bytes= 0-1"][..]),
+                                ("stream", &[][..]),
+                                ("raw", &[][..]),
+                            ] {
+                                let status = ask(&host, &format!("/v1/{t}/{rendition}"), ranges);
+                                push(format!("media {rendition} {status}"));
+                            }
+                        }
+                    }
+                }
+                push(serde_json::to_string(&page).expect("json"));
+            }
+            push(
+                serde_json::to_string(&viewer::day_counts(
+                    s,
+                    &req(json!({ "viewer": v, "chatId": chat, "boundsUtcMs": [-1_000_000_000_000_i64, 0, 4_000_000_000_000_i64] })),
+                )?)
+                .expect("json"),
+            );
+            push(
+                serde_json::to_string(&viewer::seek_date(
+                    s,
+                    &req(json!({ "viewer": v, "chatId": chat, "utcMs": 0, "dir": "onOrAfter" })),
+                )?)
+                .expect("json"),
+            );
+        }
+        for (query, mode) in [
+            ("SYNTH", "auto"),
+            ("SYNTH", "exact"),
+            (QUERY_SENTINEL, "auto"),
+            (QUERY_SENTINEL, "exact"),
+        ] {
+            let started = viewer::search(
+                s,
+                &req(json!({ "viewer": v, "query": query, "mode": mode, "includeEarlier": true, "includeEvents": true })),
+                &mut |_| {},
+            )?;
+            if started.total > 0 {
+                push(
+                    serde_json::to_string(&viewer::search_results(
+                        s,
+                        &req(json!({ "viewer": v, "searchId": started.search_id, "offset": 0, "limit": 50 })),
+                    )?)
+                    .expect("json"),
+                );
+            }
+            viewer::cancel_search(s, started.search_id)?;
+        }
+        let bad = format!("{QUERY_SENTINEL}\u{1}");
+        assert!(viewer::search(
+            s,
+            &req(json!({ "viewer": v, "query": bad, "mode": "auto" })),
+            &mut |_| {}
+        )
+        .is_err());
+        Ok(())
+    })
+    .expect("viewer operations");
+    host.close(v).expect("close");
+    sizes.extend(served_sizes.lock().expect("sizes").iter().copied());
+    out
+}
+
+/// The `name=value` fields of a captured event line.
+fn fields_of(e: &str) -> Vec<(&str, &str)> {
+    e.split(' ').filter_map(|t| t.split_once('=')).collect()
+}
+
 #[test]
 fn nothing_identifying_is_logged() {
     let capture = Capture::default();
@@ -480,6 +739,39 @@ fn nothing_identifying_is_logged() {
     }
     texts.extend(archive_texts);
 
+    // M5: every viewer operation over the viewer catalogue.
+    let mut viewer_outputs = Vec::new();
+    let mut media_tokens = Vec::new();
+    let mut media_sizes = std::collections::BTreeSet::new();
+    for f in std::fs::read_dir(viewer_fixtures().join("media")).expect("media") {
+        media_sizes.insert(f.expect("entry").metadata().expect("meta").len());
+    }
+    let mut viewer_events = Vec::new();
+    for name in [
+        "view-main-plain",
+        "view-hostile-text-plain",
+        "view-media-plain",
+    ] {
+        let mut viewer_texts = Vec::new();
+        let id = import_and_verify_from(&viewer_fixtures(), name, tmp.path(), &mut viewer_texts);
+        let library = tmp.path().join(format!("implib-{name}"));
+        let from = capture.0.lock().expect("lock").len();
+        viewer_outputs.extend(exercise_viewer(
+            &library,
+            &id,
+            &mut media_tokens,
+            &mut media_sizes,
+        ));
+        let to = capture.0.lock().expect("lock").len();
+        viewer_events.push(from..to);
+        archive_ids.push(id);
+        texts.extend(viewer_texts);
+    }
+    assert!(
+        viewer_outputs.iter().any(|o| o.contains("SYNTH-")),
+        "the viewer returned content (so the log check means something)"
+    );
+
     openmessage_archive_lib::panic_hook::install();
     let panicked = std::panic::catch_unwind(|| {
         panic!("SYNTH-BODY panic payload sentinel");
@@ -544,8 +836,58 @@ fn nothing_identifying_is_logged() {
         for id in &archive_ids {
             assert!(!e.contains(id.as_str()), "an archive id was logged: {e}");
         }
+        for sentinel in VIEWER_SENTINELS {
+            assert!(!e.contains(sentinel), "{sentinel:?} logged in {e}");
+        }
         assert!(!has_40_hex(e), "a fileID-like value was logged: {e}");
+        for t in &media_tokens {
+            assert!(!e.contains(t.as_str()), "a media token was logged: {e}");
+        }
+        assert!(!e.contains("/v1/"), "a media URI was logged: {e}");
+        assert!(!e.contains("bytes="), "a range was logged: {e}");
     }
+    assert!(media_tokens.len() > 10, "the protocol was exercised");
+    // No exact size (§6.4 rule 5, §13.6): every `media` event carries the
+    // outcome, the status, a size bucket and the elapsed time only, and no
+    // viewer-time event carries a size the protocol served or a media
+    // fixture's size as a field value (statuses and elapsed times aside;
+    // values under 64 could be anything).
+    let buckets = ["<64KiB", "<1MiB", "<16MiB", ">=16MiB"];
+    let exact: Vec<u64> = media_sizes.iter().copied().filter(|n| *n >= 64).collect();
+    assert!(!exact.is_empty(), "sizes were served");
+    let mut media_events = 0;
+    for range in &viewer_events {
+        for e in &events[range.clone()] {
+            let fields = fields_of(e);
+            if fields.contains(&("message", "media")) {
+                media_events += 1;
+                for (k, v) in &fields {
+                    assert!(
+                        ["message", "outcome", "status", "size", "elapsed_ms"].contains(k),
+                        "a media event logged {k}: {e}"
+                    );
+                    if *k == "size" {
+                        assert!(buckets.contains(v), "an exact size was logged: {e}");
+                    }
+                }
+            }
+            for (k, v) in &fields {
+                if ["status", "elapsed_ms"].contains(k) {
+                    continue;
+                }
+                if let Ok(n) = v.parse::<u64>() {
+                    assert!(!exact.contains(&n), "an exact size was logged ({k}): {e}");
+                }
+            }
+        }
+    }
+    assert!(media_events > 10, "media events were checked");
+    assert!(
+        events
+            .iter()
+            .any(|e| e.contains("media") && e.contains("decoded")),
+        "the media handler logged its outcomes (so the check means something)"
+    );
     // User-facing messages from errors and checks never carry device text,
     // passwords or SnapshotState values either.
     for m in &messages_seen {

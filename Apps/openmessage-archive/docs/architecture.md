@@ -99,6 +99,11 @@ converts between IPC types and library calls.
 - **Inputs validated by deserialization.** Input types use
   `deny_unknown_fields`, and enums are closed. For example, `SettingsUpdate`
   has no `archiveDirectory` field, so the webview cannot set one.
+- **Free text and ids from the viewer (M5).** The two viewer commands that
+  take free text (a conversation filter, a search query) parse the raw
+  request in Rust, so a malformed body is `invalidInput` with a fixed
+  sentence and is never echoed; viewer ids are checked in Rust to be
+  integers in `1..=2^53 − 1` (slice 5e).
 - **Uniform errors.** Every failure crosses as `IpcError { code, message }`.
   `code` is a closed enum. `message` is a user-facing sentence. Errors never
   carry message content or secrets.
@@ -300,12 +305,15 @@ A verify (`verify_archive`) opens the writer without recovery, runs the
 database, index and file checks of slice 4k, and records one `verify_run`
 row; its terminal event is `verifyFinished`.
 
-Planned (M5):
+M5 (PR A implemented; the UI is PR B):
 
 ```
   → UI: paged queries through ArchiveReader (keyset pagination on
-        (chat_id, sort_key, message_id)), virtualized thread list,
-        attachments loaded on demand through BlobReader and a scoped asset protocol
+        (chat_id, sort_key, message_id)), virtualized thread list (PR B),
+        attachments by session token through the oma-media scheme:
+        images re-encoded in a decode helper process from the hashed
+        file, audio and video streamed in ranges after the hash and
+        structural checks (no asset protocol)
 ```
 
 Decrypted intermediates are written only inside the archive library's
@@ -1460,7 +1468,8 @@ The shell side of M4 (spec §15) lives in `src-tauri/src/archives/`
   an archive, or both for an import). `reserve` answers `busy` when an
   active job shares either, then applies the one slot (D7). An import's
   reservation carries its `Gate`. Changing the archive location is refused
-  while any job runs (an archive is only open inside a job).
+  while any job runs or a viewer session is open (D114; an archive is open
+  only inside a job or a viewer session).
 - **The gate (D65).** `archives::gate::Gate` is a `Mutex` + `Condvar`;
   its deadline comes from a `GateClock` (two minutes; tests inject a
   clock and advance it), and the wait re-reads the clock and the cancel
@@ -1596,6 +1605,928 @@ owner decisions):
   reload it is not known and not shown.
 - **Backdrop clicks decline the gate**, like Escape. Declining writes
   nothing.
+
+### Viewer reads: budgets and the conversation list (M5 slice 5b1)
+
+The first M5 reads, in `crates/oma-archive` (`sortkey.rs`, `conn.rs`,
+`view/`). Nothing here changes the schema or writes a file.
+
+- **One `sort_key` encoder** (`sortkey.rs`): `0x00 ‖ be64(ns XOR 2^63)`
+  for a dated message, `0x01 ‖ first_rank ‖ be64(first_src_rowid XOR
+  2^63)` for an undated one. The import, the test-only bulk generator
+  and the viewer share it. Every undated key sorts after every dated key,
+  so each read that means "recent", "newest" or "on or after a date" is
+  bounded with `sort_key < X'01'`. Sort keys never leave the crate.
+- **Viewer phases** (`ReadConn::viewing`, M5 D90): one phase runs under
+  an op budget (`ViewBudget`: `List` 5 M, `Scan` 2 M, `Assembly` 4 M,
+  `Month` 2 M, `Detail` 4 M, `Search` 30 M, `Hits` 6 M, `ScanBatch` 2 M,
+  `Lookup` 100 k VM operations), an optional cancel token and a
+  deadline, all checked by the progress handler every 1,000 operations.
+  Over budget or past the deadline is `ArchiveError::QueryTooBroad`; a
+  cancel, or an interrupt through `ReadConn::interrupt_handle`, is
+  `Cancelled`. Neither is ever `Damaged`: `budgeted()` and
+  `Damaged(WorkBudget)` keep their M4 meaning for `info`, `list`, `open`
+  and the other M4 reads. Each phase resets the budget and every stop
+  flag, so a trip in one phase does not interrupt the next. SQLite counts
+  operations per statement, so a phase made of many short statements
+  calls `Phase::checkpoint` between them; work inside one opcode cannot be
+  stopped and is bounded by construction. Every viewer call wraps its
+  phases in one `BEGIN DEFERRED … COMMIT` (`ReadConn::snapshot`): one
+  snapshot per call, and no read transaction outlives a call, so an
+  import's `wal_checkpoint(TRUNCATE)` is never held back.
+- **Content text** (`view/text.rs`): every content string leaves as an
+  `OptContent`: a `ContentText` (`Redacted<String>`, cut at a char
+  boundary to its cap with `truncated` and `full_utf16`, `lossy` when a
+  BLOB was decoded with replacement characters, `stored_as_blob` from
+  `value_issue` kind 3, and the `bidi_controls` and `invisible` facts of
+  the whole value), or `Missing(ValueState)` for NULL, absent, too large
+  or unreadable. URL runs (`http://`/`https://` to the next whitespace,
+  `hidden` when a bidi control or invisible character is inside) and
+  masking (`mask_utf16`, which widens over a split surrogate pair) are
+  ready for the thread pages.
+- **The conversation list** (`view/conversations.rs`):
+  `conversation_index(sort, filter)` returns at most 100,000 chat ids,
+  computed per call because v1 has no recency index and `chat_stats` is
+  stale while an import runs. `Recent` orders by each chat's newest
+  **dated** key (reactions and events included), chats with none last by
+  id; `Name` by the label's text, case-insensitively; `Count` by
+  `chat_stats.message_count`. A `NameFilter` (at most 128 bytes, no
+  control characters) matches the name, the identifier and every
+  participant's address in Rust. `conversations(ids)` (at most 200)
+  returns, per chat: the label by §8.4's precedence (a name recorded but
+  unreadable never falls through), the service, the `chat_handle` count
+  (`group` when more than one; `chat.style` is never read), `chat_stats`
+  with `stats_stale` when the newest session is not a completed one, and
+  live facts from the timeline index: the newest dated instant, the first
+  dated row of 2007 or later and the number before it, the undated count,
+  "empty", and a preview. The preview is the newest dated row that is not
+  a folded reaction, within 50 rows; a reaction folds only when its
+  target resolves through `message_guid` (`key_kind = 1`) to a timeline
+  item of the same chat. One-time-code parts are withheld (D115): by their
+  ranges when the formatting was decoded cleanly (`display_source = 1`,
+  no `run_issue`), otherwise the whole text. List previews never reveal.
+- **Tests.** `tests/viewer_conversations.rs` checks the order and every
+  row's facts against the viewer catalogue's Python model for every entry
+  and scenario, the undated rules against an oracle over
+  `message.date_utc_ns` on a bulk archive, the orders and the filter,
+  masking, `QueryTooBroad`, reads while an import holds the lock, stale
+  statistics and "reading writes nothing". `tests/query_plans.rs` pins
+  every viewer statement (`hooks::viewer_statements`) and checks that only
+  the conversation list scans `chat` or sorts.
+
+### Viewer reads: thread pages and the assembly layer (M5 slice 5b2)
+
+Keyset thread pages, the reply thread and the one assembly layer, in
+`crates/oma-archive` (`view/thread.rs`, `view/assemble.rs`). Nothing here
+changes the schema or writes a file.
+
+- **Keyset pages** (`thread_page(chat, anchor, dir, want, hint, reveal)`,
+  D91): rows come from `chat_message_timeline` with a row-value bound
+  `(sort_key, message_id) < (?, ?)` (or `>`), in batches of `2 × want`,
+  bounded to **one range**: dated (`sort_key < X'01'`) or undated
+  (`sort_key >= X'01'`). `Anchor::Newest` and `Oldest` read the dated
+  range; the undated section is reachable only through `Anchor::Undated`.
+  A page stops at `want` visible items (at most 100), at `8 × want` rows
+  scanned, or at the `Scan` budget; a scan that trips after an item
+  returns `partial`, before one `QueryTooBroad`. Items come oldest first;
+  `older_anchor` and `newer_anchor` are the outermost rows scanned (valid
+  anchors even when folded), with `has_older` and `has_newer`. Dated pages
+  carry the chat's undated row count to offer the undated section.
+- **Remembered keys.** Anchors are message ids; sort keys never leave the
+  crate. A page returns the keys it served for its anchors and focus as
+  opaque `SortKeyHint`s (no `Debug` content, no serialisation). Passed
+  back with the anchor, paging continues from the remembered key, so when
+  a higher-ranked import moved the anchor (the `message_sort_au` trigger),
+  no row between its old and new positions is skipped, and `anchor_moved`
+  tells the UI to reload around it. `Around` centres on the anchor (focus
+  `anchor`), on a folded reaction's target (`reactionTarget`), or on the
+  next visible item (`nextVisible`). An anchor that is not in the chat is
+  `ArchiveError::AnchorNotFound`.
+- **Folding** (D93): only reactions (`assoc_kind` 10–17, 20–27,
+  `assoc_present = 1`) whose target resolves through `message_guid`
+  (`key_kind = 1`) to a timeline item of the same chat. Every other row
+  stays an item with an `AssocVisibility` code: undeterminable, no kind,
+  not a reaction (legacy sticker, poll vote, unknown), target unreadable,
+  target not unique, or target in another chat.
+- **Assembly** (`view/assemble.rs`, §3.11) turns one message id into an
+  `AssembledMessage` under `Caps` (the page caps: 8,192 UTF-16 units per
+  body, 2,000 segments, 200 reaction rows, 50 chips, 100 attachments,
+  replies counted to 1,000; M6 will run the same layer without them). It
+  runs as a second phase (`Assembly`) in the same read transaction,
+  nearest items first: `base` (direction, sender reason, service, the date
+  quad, item and group event, association, body, edits, labels,
+  Recently Deleted markers, attachments) then `extras` (chips, the reply
+  reference with a masked two-line quote, the reply count). A trip keeps
+  the items assembled so far, marks `extras_incomplete`, and moves the far
+  anchor to the last kept item. The page also stops before a running
+  upper bound of its serialised size (6 bytes per UTF-16 unit plus a
+  fixed cost per field, handles included) passes 1 MiB.
+- **Facts, never fabricated** (§3.6): the sender is a closed
+  `SenderReason` and is never taken from a chat's participants; the
+  direction names the backup set when more than one lineage recorded the
+  message; chips are grouped per (kind or emoji, sender) and their state
+  is derived from the recorded rows (latest by key wins; undated or tied
+  rows give "cannot be determined"; an undeterminable sender stands
+  alone; an emoji removal without an emoji is unpaired); replies resolve
+  through `key_kind = 1` only, and counts exclude association rows.
+  Labels: undated, before 2007, unkeyed, `schedule_type`, app content,
+  effect, "not in the newest complete import" per lineage (against each
+  lineage's newest full observation), and provisional (the scalars' or
+  the current body's session ran an untested iOS version). Recently
+  Deleted markers list later completed sessions of the same lineage that
+  no longer list the message.
+- **Bodies.** Formatting ranges apply only when `display_source = 1` and
+  there is no `run_issue`; the text is split into segments (styles,
+  mention, transcription, URL runs with their `hidden` fact, inline
+  emoji, attachments placed by GUID, unmatched placeholders). Over 2,000
+  segments the body is plain text with a note.
+- **Masking and retraction (D115; owner-confirmed, Q3b).** One-time codes
+  are `Withheld` segments, by range when the formatting applies and the
+  whole body otherwise, unless the request carries
+  `Reveal::one_time_code`. Earlier text is `Withheld` (with its reason:
+  unsent, an earlier version for edit code 6, or no current text) unless
+  the request carries `Reveal::earlier_text`; a reply quote never
+  reveals. The setting that reveals earlier text by default is the
+  shell's (5e) and is off by default.
+- **The reply thread** (`reply_thread`): the originator, then at most 500
+  replies across conversations in timeline order; an unkeyed originator
+  has none.
+- **Tests.** `tests/viewer_threads.rs` pages every chat of every
+  catalogue entry and scenario from both ends and through the undated
+  section, and checks the order and every item's facts against the
+  Python model; it checks that no masked string reaches a page unless
+  revealed and that `Debug` prints no content; pages a bulk archive
+  against an SQL oracle (every visible row once, `Around` from many
+  anchors); moves an anchor under the reader (every row between its
+  positions exactly once, `anchor_moved` set); reads during an import's
+  write transaction (the committed snapshot, never `Locked`); truncates
+  the WAL once a call has returned; and trips the budgets
+  (`QueryTooBroad`, `extras_incomplete`). The plans of every new
+  statement are pinned; only the conversation list and a message's
+  attachments sort in a temporary B-tree, and only the conversation list
+  and the session table are scanned.
+
+### Viewer reads: details, dates, attachments and masking (M5 slice 5b3)
+
+The details panel, the reaction history, text chunks, date navigation and
+the attachment facts with their card, in `crates/oma-archive`
+(`view/detail.rs`, `view/calendar.rs`) and `oma-messages`
+(`summary::edit_texts`). Nothing here changes the schema, stores
+anything or writes a file.
+
+- **Edit history decoded at read time (D105; owner-confirmed, Q3a).**
+  `oma_messages::edit_texts(raw, budget)` re-reads a body version's stored
+  `summary_raw` (kept under D59) with the budgeted plist reader, and
+  decodes each `ec[part][*].t` with the clean-room typedstream decoder; it
+  reports the runs flagged as one-time codes. `message_detail` calls it
+  only for body versions with an edit entry that records a text. Entries
+  are matched to `message_edit_entry` rows by `(part, ordinal)` in stored
+  order ("oldest first" stays **UNVERIFIED**); on any mismatch every
+  entry reads "edit text could not be matched", and a summary that no
+  longer reads gives `SummaryUnreadable`. A failed `t` carries its
+  `TsErrorCode`. Nothing is stored, `DECODER_VERSION` is unchanged and the
+  text is not indexed, so search covers captured versions only. This adds
+  a caller of the typedstream decoder, whose clean-room review is still
+  pending; that review's scope grows by this function.
+- **Body versions are not edits.** `message_detail` lists every stored
+  version by `first_rank` with its first and last session, its text (or
+  its `NoText` reason) and its edit entries; a version whose displayed
+  text equals the one before it is marked `text_unchanged` ("Stored data
+  changed; text unchanged"). At most 50 versions and 200 entries per
+  version are listed, with counts beyond.
+- **Masking and retraction (D115; owner-confirmed, Q3b), on every path.**
+  Earlier versions and decoded edit texts are withheld, with the reason
+  the thread page gives (unsent, an earlier version for code 6, no
+  current text), unless the request carries `Reveal::earlier_text`;
+  one-time codes are withheld by range (only when the formatting was read
+  cleanly, otherwise the whole text) unless it carries
+  `Reveal::one_time_code`. `message_text(body, from, reveal)` applies the
+  same rules to a chunk: 32,768 UTF-16 units from an offset clamped to
+  the body and moved back off a low surrogate.
+- **Detail facts** (§7.3): the message as a page shows it (UI caps,
+  extras loaded); the raw `date`, `date_edited` and `date_retracted`
+  quads only (D94); `destination_caller_id` ("Account, meaning
+  unverified") and the subject; value history of the history columns the
+  viewer shows (subject, group title, account, chat name, file name,
+  Genmoji description), each with the session that first recorded it,
+  ordered by rank; and for each conversation the message is in, the raw
+  `style`, `is_filtered` and `is_archived` with no meaning claimed.
+- **The unkeyed identifier probe.** For a reply whose originator, or a
+  reaction whose target, is not uniquely identified, the detail counts
+  unkeyed messages with that GUID (`LIMIT 2`, over the `message_unkeyed`
+  partial index) in its own `Detail` phase: `NotInArchive`,
+  `SharedByUnkeyed`, or `NotChecked` when it trips. It never fails the
+  detail.
+- **The reaction history** (`reaction_history(target, page)`): every add
+  and remove row on a keyed target, with its sender, recorded time and
+  `assoc_target_part`, ordered by date (undated last) then id, 200 per
+  page; at most 10,000 rows are read and the total says when there were
+  more. An unkeyed target has none.
+- **Attachment facts and the card (§3.9, §5.9).** `attachment(id)` (the
+  `Lookup` phase) returns the declared type, UTI, name, size and flags
+  (raw `hide_attachment`), the Genmoji description, the current blob
+  (stored size and the session whose bytes it holds), every observation
+  as codes ordered by session rank, and its value history. The card is
+  decided from the highest-ranked observation's `LookupCode` first, then
+  its `CopyCode`: not copied, not in the backup, not found where looked
+  (StickerCache), class not looked up, location unusable, not decrypted,
+  could not be read, too large, or "not available" with both codes. A
+  present blob always shows the file; when the newest observation found
+  no file, the card names the older backup that holds it
+  (`current_blob_id` does not move, by design). A non-zero `verify_state`
+  is reported as historical, and "may be out of date" when a later
+  observation is `Replaced`. What a present file is (a rendition, Play, a
+  file card, "Unrecognised content") is the sniff's, slice 5d.
+- **Date navigation** (`view/calendar.rs`): `seek_date(chat, utc_ns,
+  OnOrAfter | Before)` reads the dated keyset from the instant's key (the
+  import's encoder) in batches of 64 and returns the first visible item,
+  skipping folded reactions; undated rows are never returned.
+  `day_counts(chat, bounds)` takes 2 to 43 strictly increasing UTC
+  instants (a six-week calendar built in the webview, D104) and counts
+  visible items per interval in one statement each, dated only, with the
+  folding rule stated in SQL (a NULL `assoc_kind` is not a reaction).
+- **Errors.** An unknown message, body or attachment id is
+  `AnchorNotFound`; bad day bounds are `Internal`; budget trips are
+  `QueryTooBroad`, never `Damaged`.
+- **Tests.** `tests/viewer_details.rs` reads the detail of every message
+  of every catalogue entry and scenario and checks its stored versions
+  and their grouping, the `ec` texts, the withheld or shown earlier text
+  and its reason, the value history and the reply probe against the
+  Python model and the M4 manifest; every attachment's observations,
+  sizes, flags and card against the model; that no one-time code or
+  earlier text reaches any command's output (previews, pages, reply
+  threads, details, text chunks, reaction histories) unless revealed, and
+  that all do when revealed; that text chunks rebuild every body,
+  including a 1 MiB one, and clamp their offsets; that the reaction
+  history pages every row once in date order; seek and day counts against
+  the model and against an independent oracle on a bulk archive; the
+  card states an import cannot produce (no observation, keys that do not
+  unwrap, too large, unknown codes, a stale verify report); and budget
+  trips and bad inputs. `oma-messages`' `tests/summary.rs` covers
+  `edit_texts` (decoded `t`, one-time-code runs, stored positions, a bad
+  `ec`, an unreadable or over-budget plist, a bad or over-budget
+  typedstream). The plans of the new statements are pinned; the unkeyed
+  probe is the only new scan (of the unkeyed partial index), and a
+  message's attachment ids the only new temporary B-tree.
+
+### Viewer search (M5 slice 5c)
+
+Full-text and exact-text search in `crates/oma-archive` (`search/`):
+`ArchiveReader::search`, `search_hits`, `unsearchable_count` and
+`search_interrupt`. No schema change (D92), nothing is stored and there
+is no search history (owner-confirmed, Q1c).
+
+- **Grammar (`search/query.rs`, §4.1).** User text never reaches
+  `MATCH`: terms (words or `"quoted phrases"`; an unterminated quote runs
+  to the end) are re-quoted with `"` doubled and joined with ` AND `; only
+  the last unquoted term whose last token has 3 or more characters gets
+  ` *`; terms without a letter, number or private-use character are
+  dropped. Refused as `InvalidQuery(QueryProblem)`: over 512 bytes, 16
+  terms or 128 bytes per term, any NUL or C0 control, nothing left, or an
+  exact needle over 64 code points. `OR`, `NOT`, `NEAR`, `^`, `*`, `-`,
+  `+` and `x:` column filters are all quoted text (table-tested).
+- **Modes (§4.2).** A query with an emoji or a CJK, kana, Hangul, Thai,
+  Lao, Khmer, Myanmar or Tibetan character (our own approximate table)
+  runs as **exact text**, as does any query when the caller asks; the
+  needle is the whole trimmed query. Otherwise **words** through FTS5.
+- **Words, global plan.** One statement: FTS5 newest body rowid first
+  (no sort), each match joined to its body and message by primary key,
+  filters in SQL, at most 10,001 rows. Rowid order is import order, so a
+  capped global set reports `newest_kept: false` ("not necessarily the
+  newest 10,000").
+- **Words, scoped plan (deviation: threshold 5,000, not 50,000).** With a
+  conversation filter, a chat of at most `SCOPED_CHAT_ROWS` = 5,000
+  timeline rows is walked newest first in keyset batches of 500, each
+  kept message's bodies checked with a rowid-constrained `MATCH`. A query
+  with a **prefix term always uses the global plan**: FTS5 rebuilds a
+  prefix's merged doclist on every `MATCH` it starts, so one call per body
+  costs 2–15 ms instead of 0.03 ms (measured below; the spec's inference
+  is now observed). The threshold follows the measurement: the walk costs
+  about 30–80 µs per message, the global plan with the chat filter about
+  0.2 s for a word in a fifth of 500,000 messages, so the plans cross at
+  a few thousand rows.
+- **Exact text (`search/scan.rs`, §4.4).** Keyset batches of 5,000 keys,
+  newest first (dated range, then undated), on `message_sort` with each
+  message's current body joined and **streamed** (never a batch of texts
+  in memory), or on `chat_message_timeline` for one conversation. Filters
+  run in Rust, so a batch bounds rows *examined*. Matching is
+  `str::contains` (case-, accent- and normalisation-sensitive). Each batch
+  is its own `ScanBatch` phase within one 20 s deadline; the cancel token
+  and the deadline are checked every 64 rows. Limits: 2,000,000 examined,
+  10,000 matches. A cancel is `Cancelled`; any other stop returns what
+  was found with `ScanCoverage { examined, complete, stop }`
+  (`ExaminedLimit`, `MatchCap` or `TooBroad`). Progress is pushed after
+  every batch.
+- **Result sets.** Ids only (`SetEntry { message, body, current, dated
+  }`), one entry per message (its current body when that matched, else
+  the highest body id), dated by `(sort_key DESC, id DESC)` then undated
+  (`dated` says where "Undated" begins), at most 10,000. Defaults:
+  current bodies of message items only; `include_events` adds reactions
+  and system rows; `include_earlier` is the explicit reveal for search
+  (D115, Q3b), and its hits say `Earlier` or `Unsent` (an earlier body of
+  a message with an unsent part). Filters: one conversation, a UTC range
+  (always dated: undated rows leave the set), `message_attachment` rows
+  (never the cache flag), and the sender on `is_from_me` as recorded (an
+  unrecorded direction matches neither "me" nor "others").
+- **Hits and highlighting (`search/highlight.rs`, §4.5).** At most 50 per
+  call. Facts load under `Assembly`: the lowest chat id and "also in N
+  other conversations" (capped at 100), the dated instant, the direction,
+  the item and association codes and the version. Words hits run
+  `highlight()` with U+FDD0/U+FDD1 bound as markers, on the base table,
+  for the page only, in a `Hits` phase with a **2 s** deadline; a body
+  holding a marker or NUL is never highlighted, and the output is used
+  only when the markers pair up and the stripped text equals the stored
+  text. Exact hits use the scan's substring search. One-time codes are
+  then withheld by range (or the whole text when the formatting did not
+  read cleanly); a match only inside withheld text is `matched_hidden`.
+  The snippet is at most 200 characters, starting 60 before the first
+  visible match, with `cut_start`/`cut_end` and no inserted ellipsis.
+  Fallbacks are closed codes (`MarkerInText`, `Mismatch`, `Budget`,
+  `NotFound`).
+- **Budgets, cancel and errors.** Words collection: one `Search` phase
+  (30 M ops, 5 s, the cancel token). `SearchInterrupt::interrupt` (kept
+  by the shell outside the reader's mutex) stops a running statement as
+  `Cancelled`. **The op budget cannot see work inside one FTS5 call**
+  (`xFilter`, `highlight()`), which is a single VM opcode: a `Hits`
+  budget of zero ops does not stop a highlight, so the `Hits` phase is
+  bounded by its deadline, and words collection by its deadline, the
+  cancel and the interrupt (§3.2's granularity limit, now observed). Any
+  other SQLite error from an FTS statement is `SearchUnavailable`
+  (browsing still works; Verify reports the damage; repair is M8).
+- **Unsearchable count (deviation: budget).** Message items whose current
+  body is missing or has no `display_text`, one pass over `message` under
+  the `Search` budget and 5 s (the spec named `Detail`; the pass measured
+  about 0.3 s at 500,000 messages). Computed once per viewer session.
+- **Measurements (synthetic, one host, not real data, no CI assertion).**
+  `tests/perf_search.rs` (`#[ignore]`) on a 500,000-message bulk archive
+  (410 MiB, 300 chats: one of 201,336 messages, the others about 1,000),
+  dev profile with `oma-archive` and SQLite at `opt-level = 3`, a 4-core
+  2.1 GHz Xeon VM, medians of warm runs:
+
+  | Operation | Measured | §11 target |
+  |---|---|---|
+  | Words, common word (global, capped) | 25 ms | ≤ 150 ms |
+  | Words, common word scoped to a 1,101-message chat | 31–32 ms | ≤ 50 ms |
+  | The same through the global plan with the filter | 206–235 ms | — |
+  | Words, common word in the 201,336-message chat (global) | 70–81 ms | — |
+  | Words, prefix `lor*` / `synthbulk1*` | 26–27 ms | ≤ 2.5 s |
+  | Words, prefix `syn*` (500,000 distinct terms sharing it) | 66–72 ms | — |
+  | Exact text, whole archive, rare needle | 0.79–0.81 s | ≤ 400 ms (**not met**) |
+  | Exact text, common needle (stops at 10,000) | 76–93 ms | — |
+  | `search_hits` 50, common word | 5–7 ms | ≤ 30 ms |
+  | `search_hits` 50, prefix `lor*` / `synthbulk1*` | 0.16–0.19 s / 0.59–0.74 s | within `Hits` (2 s) |
+  | Rowid-constrained `MATCH` per body: word / `lor*` / `synthbulk1*` | 0.03 / 2.3 / 10–15 ms | — |
+  | Unsearchable count | 0.25–0.32 s | — |
+  | Cancel during `syn*`: token / `SearchInterrupt` | returns 2–15 ms / 0.07–0.12 ms after | measured only |
+
+  The whole-archive scan misses its target: its date-ordered reads alone
+  (a plain connection walking `message_sort` with each current body)
+  took 0.5–0.9 s on this host, against 0.15 s for `instr` over
+  `message_body` in rowid order (the scratch figure's shape), which is not
+  newest first. The hostile-index row used 5 × 10^5 terms, not the spec's
+  10^6. The spec's §11 rows are re-measured in slice 5k.
+- **Plans.** Fifteen statements are pinned in `tests/query_plans.rs`.
+  FTS5 is reached only through its `MATCH` index (`192:M1` for the global
+  collection, rowid descending with no sort; `0:=M1` for the probe and
+  `highlight()`); the only new scan is the unsearchable count's pass over
+  `message`. On `message_sort` the row-value keyset seeks on `sort_key`
+  only (SQLite does not seek on the rowid alias `id` there), so messages
+  that share one `sort_key` are re-read by each batch; a crafted archive
+  of many ties is stopped by the batch budget, never mis-read.
+- **Tests.** `tests/viewer_search.rs`: for every catalogue entry and
+  scenario, about 1,900 searches (words, quoted words, exact needles
+  including non-ASCII, and the model's withheld strings) under every
+  filter, compared with an oracle built from plain rows (`str::contains`,
+  or a plain FTS5 `MATCH` with filters in Rust), every hit's facts and
+  snippet checked, no one-time code or withheld earlier text in any
+  snippet unless `include_earlier`, and the scoped plan equal to the
+  global one; capping and order; scan batches, progress, coverage and the
+  examined limit; case sensitivity; a 2-character CJK query that FTS5
+  misses and the scan finds; deterministic cancels (before the call,
+  between batches, at the n-th progress tick) and `SearchInterrupt` from
+  another thread; budget trips (`QueryTooBroad`, partial coverage,
+  unhighlighted hits); a corrupted FTS shadow table
+  (`SearchUnavailable`, browsing works); refused queries; the
+  unsearchable count; and that searches write nothing. Unit tests cover
+  the grammar, the mode table, marker parsing and reconstruction, masking
+  inside snippets, a hit inside an RLO run and the ordering.
+- **Not verified here.** Nothing has run on Windows. Spike 5s (playback
+  and the virtualiser) cannot run in this environment; its results stay
+  **UNVERIFIED** and the designed behaviour stays behind feature
+  detection.
+
+### Viewer media in the crate (M5 slice 5d)
+
+`crates/oma-archive/src/media/` and `blobs.rs`: what an attachment's
+bytes are, whether a container may be streamed, and how an image becomes a
+rendition. No schema change; nothing is written.
+
+- **Sniffing (`media/sniff.rs`, §5.2).** The stored `mime_type`, `uti` and
+  `transfer_name` decide nothing. A clean-room table of the WHATWG MIME
+  Sniffing facts (image §6.1, audio and video §6.2) plus ISO-BMFF `ftyp`
+  brands (major first, then compatible in order: `qt  `, `M4A `, `M4V `,
+  the HEIF brands, any `mp4*`), then CAF, PDF, XML (so SVG is never an
+  image), HTML tags, vCard and UTF-8 text without binary control bytes;
+  anything else, empty files included, is `Unknown` ("Unrecognised
+  content"). At most 4 KiB are read. `SniffedKind::class()` is what the
+  viewer offers: `Image` (PNG, JPEG, GIF, WebP), `Playable` (MP4, M4V,
+  MOV, M4A and WAV with a structural check; MP3, Ogg and WebM magic only),
+  `File` (a card that names the type) or `Unrecognised`. The table is
+  also stated in the catalogue's Python model and `tests/viewer_media.rs`
+  compares them on every catalogue attachment. **Deviations:** an MP3
+  without an `ID3` tag is not recognised (the WHATWG frame walk is not
+  implemented); a text window cut inside a UTF-8 sequence of a longer file
+  is still text (the model, which only has short files, would say
+  unknown). The sniff does not choose the engine's demuxer (GStreamer
+  typefinds on its own; **UNVERIFIED**, `supported-formats.md` question
+  35).
+- **Structural check (`media/container.rs`, §5.3).** Over the verified
+  file through `open_range`, reading box and chunk headers only (a 3 GiB
+  file is checked from a fake source in a few dozen reads), bounded to
+  10,000 boxes or chunks, depth 16 and 2 s, and stopped by the cancel
+  token. ISO-BMFF/QuickTime: every box inside its parent and the file,
+  64-bit sizes checked for overflow, `size 0` at the top level only;
+  reference-movie atoms (`rmra`, `rmda`, `rdrf`, `rmdr`) and `dref`
+  entries (`url `, `urn `, `alis`, `rsrc`) without the self-contained flag
+  are refused anywhere, and a file without a top-level `moov` is refused.
+  WAV: chunks inside the RIFF size and the file, `fmt ` before `data`.
+  Verdicts are `Ok`, `NotChecked` (MP3, Ogg, WebM) or `Refused` with a
+  closed reason named as in the model. The atom names and the flag's
+  meaning come from the M5 spec's summary of Apple's QuickTime File Format
+  Specification, which was not re-read: **UNVERIFIED**
+  (`supported-formats.md` question 36). It is not a safety guarantee.
+- **Blob readers (`blobs.rs`, `media/mod.rs`, §5.4).** `blobs.rs` stays
+  the only module that opens store files (`tests/source_rules.rs`):
+  `open_checked` (whole files, hashed) and `open_range` share one
+  `open_store_file` check (the parsed name, the private directories,
+  `open_nofollow`, a regular file of `byte_len` bytes).
+  `ArchiveReader::inspect_blob` sniffs the first 4 KiB, the one read of an
+  unverified file. `verify_blob` hashes the whole file in 1 MiB reads,
+  checking the cancel token between them, and returns a `BlobIdentity`
+  (on Unix `(dev, ino, len, mtime)`, on Windows `(len, mtime)`, D113 and
+  §20 item 1), refusing a file whose identity changed while it was read.
+  `check_container` and `open_range` need that identity: another blob's is
+  `NotVerified`, a changed file is `Changed` (a changed length is caught
+  first, as `LengthMismatch`). `RangeReader::read_at` refuses an offset at
+  or past the end. `read_blob_verified(id, max)` reads to the end through
+  the hashing reader and returns the bytes only when they match
+  (`DigestMismatch` otherwise; `OverLimit` above `max`, before reading);
+  images are decoded only from that buffer. The blob row is read in its
+  own `Lookup` phase and snapshot, so no read transaction is held while a
+  file is hashed. **Integrity, not safety:** a file crafted by its sender
+  passes. The remaining time-of-check gap (a same-size rewrite keeping
+  the mtime on Windows; an in-place rewrite keeping inode, size and mtime
+  on Unix) is documented, not closed.
+- **Cards.** `attachment()` still returns `CardState::File` for a present
+  file; `inspect_blob`'s `MediaClass` says which kind of card it is. The
+  shell (slice 5e) combines them; a digest mismatch while reading now and
+  a structural refusal are card states built from these errors and
+  verdicts.
+- **Renditions (`media/render.rs`, §5.5, D98, D113).** `render(bytes,
+  rendition, limits)` is a pure function, unit-tested in the crate and run
+  by the shell **only inside the decode helper process** (slice 5f). In
+  order, before decoding: input ≤ 64 MiB; only the sniffed PNG, JPEG, GIF
+  and WebP (HEIF with the `heic` feature); each side ≤ 16384; `width ×
+  height × bytes per pixel` of the decoder's colour type ≤ 128 MiB; then
+  `image::Limits` with the same sides and a 160 MiB allocation limit. It
+  **downscales, then orients** (the EXIF orientation from
+  `ImageDecoder::orientation`, applied to the 640 or 2048 px image), and
+  encodes a JPEG at quality 85, or a PNG when the colour type has alpha,
+  with no metadata. A GIF gives its first frame, and `animated` is set
+  from a block walk that counts image descriptors without decoding (WebP
+  from the `VP8X` animation flag). Errors are six closed codes, which the
+  helper protocol returns as its status (`RenderError::code`). `image`
+  moves from a dev-dependency to a dependency of `oma-archive`; only
+  `media/render.rs` may name it.
+- **HEIC (D101; owner-confirmed 2026-10-18, Q2, differing from the
+  spec's lean).** An optional `heic` Cargo feature of `oma-archive`, **off
+  by default and never enabled in official or CI release builds**, decodes
+  HEIF with `heic-rs =0.1.4` (pure Rust, `forbid(unsafe_code)`, MIT OR
+  Apache-2.0, no dependencies with its default `parallel` feature off),
+  inside `render` only, under the same input, side and (halved)
+  decoded-size limits; `heic-rs` offers no allocation limit (its
+  `DecodeOptions` has none), so unlike the `image` decoders it runs
+  without `DECODER_ALLOC` and its internal buffers are bounded only by its
+  own code and the helper process. Its decoder applies
+  `clap`, `irot` and `imir` at full size, so the decoded image and its
+  transformed copy are each held to half of the 128 MiB cap. Without the
+  feature (the default) HEIF is a file card. HEVC is pooled-patent
+  technology and the crate's own NOTICE grants no patent licence; the risk
+  is the self-builder's (`privacy.md`, `dependencies.md`). CI runs clippy
+  and `cargo deny` with the feature on Linux so it does not rot;
+  `tests/source_rules.rs` checks that it is not a default and that the
+  app's manifest never names it. The decode path itself is **untested**:
+  no synthetic HEIC image can be made without an encoder, so only the
+  header-only fixture (refused as `Malformed`) runs through it.
+- **Measured (synthetic, one host, no CI assertion).** A 4032 × 3024
+  noise JPEG (21.7 MiB, a worst case), `perf_render_a_large_photo`
+  (`#[ignore]`), on the 4-core VM of slice 5c: under the release profile's
+  `opt-level = "s"` (without LTO), 0.84 s for `thumb` and 1.33 s for
+  `display`; at `opt-level = 3`, 0.46 s and 0.69 s. The spec's scratch
+  figure (342 ms) was at `opt-level = 3`. Whether the decoders should be
+  built at `opt-level = 3` in release, and the helper's pipe overhead, are
+  for slice 5f.
+- **Tests.** Unit tests: every magic number and `ftyp` brand, truncated
+  headers, empty and one-byte files, polyglots (GIF then HTML is a GIF,
+  only ever re-encoded; HTML is a card; SVG with a script is XML), the
+  4 KiB window; valid MP4, MOV, M4A, M4V and WAV, every reference atom and
+  external `dref` type, sizes past the end, 64-bit overflow, `size 0`
+  nested, depth and box-count limits, RIFF chunk errors, a 3 GiB fake
+  source, cancel, the deadline and short reads; EXIF orientations 1–8
+  after downscaling (dimensions and where the stored top-left lands), no
+  EXIF in the output, alpha to PNG and opaque to JPEG, the limits refused
+  before decoding, other kinds refused, GIF frame counting, the error
+  codes. `tests/viewer_media.rs`: for every catalogue entry and scenario
+  with stored files, every attachment's sniffed kind and card match the
+  model, every playable file's `verify_blob` and `check_container` give
+  the model's verdict and reason, every image is rendered from
+  `read_blob_verified` (valid ones without metadata, the bomb, 16-bit and
+  oversized-IHDR PNGs refused before decoding), and reading writes
+  nothing; and on a copy, `open_range` refusing another blob's identity, a
+  changed mtime, length and (Unix) inode, a link and a directory,
+  `read_at` past the end, a digest mismatch (no bytes returned; the sniff
+  window still reads), cancel, the size limit and unknown ids.
+  `tests/media_corpus.rs`: `render` on every media fixture at the app's
+  limits, and on 200 seeded mutations of each of the six valid images
+  (PNG CRCs repaired on half of them) under an 8 MiB decoded cap, each
+  within a per-input wall-time cap: no panic, only the closed error codes,
+  and every rendition re-decodes at its stated size. One statement is
+  pinned in `tests/query_plans.rs`; `log_hygiene.rs` covers the new reads.
+- **Not verified here.** Nothing has run on Windows (the `(len, mtime)`
+  identity and the store checks under `win32-longpath` are CI's).
+  Spike 5s (playback and the virtualiser) cannot run in this environment;
+  its results stay **UNVERIFIED** and the designed behaviour stays behind
+  feature detection (`canPlayType`, slice 5h3).
+
+### The shell viewer: session, commands and DTOs (M5 slice 5e)
+
+`src-tauri/src/viewer/` (no Tauri types, like `archives/`) and
+`src-tauri/src/commands/viewer.rs`: the viewer session, the 14 viewer
+commands, their DTOs and guards, the viewer settings and their window
+effects. No UI yet (PR B); the media protocol, the decode helper and the
+window built in Rust are slice 5f.
+
+- **One session (§7.1, D89).** `ViewerHost` (in `AppState`) holds at most
+  one `ViewerSession` with a generation number; every request names it,
+  and a stale one is `viewerClosed`. `open_viewer` closes any open session
+  first, then opens three `ArchiveReader`s through `Library::open_read`
+  (each repeats the M4 checks: permissions, volume, header, fingerprint,
+  meta; `NeedsMigration`, `NewerSchema`, `Damaged` and `Refused` map to
+  their M4 codes): `pages` (list, pages, details, text, dates, attachment
+  facts and sniffing), `search` (search only; its `SearchInterrupt` is
+  kept outside the mutex) and `verify` (hashing and the structural check
+  for playback). Each reader call is one snapshot; nothing is held across
+  calls. The stream and decode readers come with slice 5f. The session
+  keeps the attachments it surfaced (`inspect_attachment` refuses any
+  other with `attachmentUnavailable`), the sort keys served for page
+  anchors (at most 20,000, evicted oldest first; keys never cross IPC),
+  one search slot (the running search's token and the last finished set
+  with its `Redacted` request), and the identities of files that passed
+  both playback checks (for slice 5f's streaming). An answer of
+  `archiveNotFound` (the archive's directory went away) closes the session
+  and becomes `viewerClosed`. The exit handler closes the session.
+- **D114.** A session counts as an open archive: changing or clearing the
+  archive location is refused with `busy` and "Close the viewer to change
+  the archive location" (`refuse_during_job` now checks the viewer too).
+- **Commands (§7.2).** `open_viewer`, `close_viewer`,
+  `list_conversations`, `get_conversations`, `get_thread_page`,
+  `get_reply_thread`, `get_message_detail`, `get_message_text`,
+  `get_day_counts`, `seek_date`, `search_messages`, `get_search_results`,
+  `cancel_search` and `inspect_attachment`, each through the five steps
+  (a test reads `lib.rs`, `build.rs`, the capability and `ipc.ts`). Reads
+  run on the blocking pool. Inputs refuse unknown fields; ids are any JSON
+  number checked in Rust to be an integer in `1..=2^53 − 1` (a fraction,
+  0, a negative or 2^53 is `invalidInput`, never rounded); instants are
+  UTC milliseconds whose nanosecond product fits. The two commands with
+  free text (`list_conversations`'s filter, `search_messages`'s query)
+  take the raw `tauri::ipc::Request` and parse its `request` member in
+  Rust: any failure is `invalidInput` with one fixed sentence that echoes
+  nothing; their `ipc.ts` wrappers use `callRedacted`. `search_messages`
+  also takes a progress `Channel<ScanProgressDto>` (no `core:*`
+  permission, as for the jobs).
+- **Search (§7.1).** `search_messages` validates the query, then sets the
+  running search's token and calls `SearchInterrupt::interrupt` **before**
+  it waits for the search reader; a search whose token was set ends as
+  `searchSuperseded` (as does `get_search_results` for any id but the
+  live one), which the UI drops. `cancel_search` sets the token, then
+  interrupts. Hits are read with the request the set was made with.
+- **DTOs and guards (§7.3, §7.4, D95).** Content crosses only as
+  `UntrustedText` (`string & { readonly __untrusted: unique symbol }`)
+  inside `ContentTextDto`/`OptContentDto`; raw source integers as
+  `DecimalString`; ids as `SafeId` (`number & { readonly __id: unique
+  symbol }`); input ids are declared `SafeId` too, so the frontend can only
+  send ids it was given. Each brand has one Rust newtype with a validating
+  constructor. A row whose id is out of range is skipped and counted in
+  `skippedRows`. Closed schema codes are mirrored by a macro with an
+  exhaustive match. The viewer guard walks every viewer output and input
+  type: no `bigint`, no `string` field but the three inputs (the archive
+  id, the filter, the query), every id field `SafeId`, and none of the
+  banned keys (`guid`, `rank`, `sortKey`, `path`, `sha256`, … and every
+  read, delivery or sent key, D94); `M5_VIEWER_TYPES` must equal the walk.
+  The archive guard now rejects any field type naming a brand or a viewer
+  type (with a negative test on a content-carrying archive-shaped type),
+  and the two walks are disjoint.
+- **Size bound (§7.3).** The crate bounds a page's estimated size; the
+  shell checks the real serialised size of every page and detail against
+  1 MiB and, over it, drops the items farthest from where the page was
+  read (moving that anchor, setting `hasOlder`/`hasNewer` and
+  `cutForSize`), or a detail's oldest non-current versions (counted in
+  `moreVersions`). Every page and detail built from the catalogue,
+  `view-hostile-text-plain` included, is under the bound.
+- **Masking (D115).** The DTOs carry exactly what the crate assembled:
+  one-time codes and earlier text cross only when the request's `reveal`
+  asks. A test runs every read command over four catalogue entries
+  without `reveal` and finds none of the model's `masked` strings in any
+  output, then finds every one with `reveal`.
+- **Playback in Rust (owner Q4).** `inspect_attachment` sniffs the stored
+  file; with `forPlayback` it refuses when `mediaPlayback` is `off`,
+  otherwise (for a playable kind only) it hashes the whole file on the
+  `verify` reader (integrity only, cancelled when the session closes),
+  runs the structural check, and remembers the file's identity only when
+  both pass. The confirmation dialog of `confirm` is the UI's (slice 5h3).
+- **Errors (§7.5).** `ErrorCode` gains `viewerClosed`, `queryTooBroad`,
+  `invalidQuery`, `searchUnavailable`, `searchSuperseded`,
+  `messageNotFound`, `anchorNotFound` and `attachmentUnavailable`, each
+  with a fixed sentence (`viewer/messages.rs`) and listed in `ipc.ts`.
+  `AnchorNotFound` from the crate is `anchorNotFound` for a page anchor
+  and `messageNotFound` for a message, body or attachment id.
+- **Settings (§7.6).** `Settings.viewer: ViewerPreferences` and
+  `SettingsUpdate.viewer` (whole-object replace, unknown fields refused;
+  `uiZoom` 100–400 in steps of 10 and `idleHideMinutes` 0, 1, 5, 15 or 30
+  checked by `try_from`). `SETTINGS_SCHEMA_VERSION` stays 1: an old file
+  loads with the defaults, and a malformed `viewer` object falls back to
+  the defaults instead of setting the whole file aside.
+  `mediaPlayback` defaults to `confirm` (**owner-confirmed 2026-10-18,
+  Q4**) and `revealEarlierText` to off (Q3b). `uiZoom` is applied with
+  `Webview::set_zoom` and `captureProtection` (Windows only) with
+  `WebviewWindow::set_content_protected`, at startup and whenever an
+  update carries `viewer` (D116); no webview permission is granted.
+  `listPreviews` off makes `get_conversations` send `hidden` instead of
+  preview text.
+- **Logging (§7.7).** `info`: viewer open and close (outcome kind) and
+  each search (mode, plan, match-count bucket, capped, elapsed ms).
+  `debug`: page and hit buckets, partial and size flags, the conversation
+  index bucket. Never query or filter text, ids, labels, addresses, names,
+  text or exact byte counts. `src-tauri/tests/log_hygiene.rs` imports
+  three viewer catalogue entries and runs every viewer operation,
+  refusals included, with a filter and a query that carry sentinels, and
+  checks every log line for the catalogue's sentinels, the filter and
+  query sentinels and the archive ids.
+- **Deviations.** `searchId` is a number, not an allowlisted string.
+  `get_day_counts` returns the visible counts only (the crate has no
+  `basis` or undated count; the conversation row has the undated count).
+  `ViewerSessionDto` carries the import sessions (id, state, start and
+  end) instead of lineages, and no `mediaBase` (slice 5f, with the
+  protocol). The details panel's UTC ISO string is not built in Rust: the
+  DTO carries the floored milliseconds, the raw value as digits and its
+  unit. Message DTOs carry no media token yet (slice 5f). `skippedRows`
+  has no test with a real out-of-range id (the catalogue has none); the
+  conversion is unit-tested.
+- **Not verified here.** Nothing has run on Windows (`set_content_protected`
+  and the zoom included), and no command has been invoked from a webview:
+  that a command taking both the raw `Request` and a `Channel` receives
+  both from Tauri 2.12.4 is checked by the compiler only, and stays
+  **UNVERIFIED** at run time until the UI (PR B) calls it. Spike 5s
+  (playback and the virtualiser) cannot run in this environment; its
+  results stay **UNVERIFIED**, and the designed behaviour stays behind
+  feature detection (slice 5h3).
+
+### The media protocol, the decode helper and the main window (M5 slice 5f)
+
+`src-tauri/src/viewer/media/` (Tauri-free: `mod.rs` the request rules and
+responses, `range.rs`, `tokens.rs`, `cache.rs`, `exec.rs`, `engine.rs`,
+`helper.rs`), the scheme registration in `lib.rs`, the decode helper's
+entry in `main.rs`, and `src-tauri/src/window.rs` (the main window built
+in Rust). No UI yet: `services/media.ts` and the media elements are PR B.
+
+- **Why a custom scheme (§6.1, D97).** Tauri's `asset:` protocol makes the
+  URL a filesystem path (I4), falls back to `text/html`, logs the path and
+  opens files without the store checks; it stays off (`protocol-asset` is
+  not a feature of `tauri`, checked through `cargo metadata` by a test).
+  IPC with `blob:` URLs cannot serve ranges for video.
+- **Registration (§6.2).** `register_asynchronous_uri_scheme_protocol("oma-media", …)`.
+  The adapter in `lib.rs` turns Tauri's request into a `MediaRequest`
+  (webview label, method, path and query, every `Range` and `Origin`
+  value, whether `mediaPlayback` is not `off`) and the responder into a
+  `Reply`; `viewer::media::dispatch` does the rest. URLs are
+  `oma-media://localhost/v1/<token>/<rendition>` on Linux and
+  `http://oma-media.localhost/v1/…` on Windows; Rust sends the base as
+  `ViewerSessionDto.mediaBase` (a `MediaBase` brand), so the frontend never
+  guesses the platform. The hyphenated scheme name is valid (RFC 3986
+  §3.1); in a headless smoke test WebKitGTK 2.52.6 routed `<img>` and
+  `<video>` requests for it to the handler with `incognito` on
+  (`compatibility.md`); a desktop run and WebView2 are spike 5s
+  (**UNVERIFIED**; the fallback name is `omamedia`).
+- **The handler never blocks.** `dispatch` parses, authorises, answers
+  refusals, `416`s and rendition cache hits at once, and hands everything
+  else to the session's executors. A `Reply` answers exactly once; one
+  dropped unanswered (a closed queue, a stopped worker) answers `503`
+  itself, so no request hangs. A test proves `dispatch` returned before a
+  worker (held at a gate by the test) answered; no timing is asserted.
+- **Authorisation (§6.4 rule 1).** Custom schemes bypass the capability
+  ACL, so every request is checked here, and anything not exactly right is
+  `404` with an empty body and no reason: a webview other than `main`; a
+  method other than `GET` or `HEAD`; a target that is not exactly
+  `/v1/<32 lowercase hex>/<thumb|display|stream>` (no query, fragment,
+  escape or trailing slash); more than one `Origin`, or one that is not
+  the app's page origin (`tauri://localhost` on Linux,
+  `http://tauri.localhost` on Windows, plus the dev server's in a dev
+  build); more than one `Range`, or one that is not a single strict spec;
+  an unknown, stale or evicted token; a token whose file has not been
+  inspected; a rendition the sniffed kind does not allow (`thumb` and
+  `display` for images only, `stream` for audio and video only); `stream`
+  before both the full hash and the structural check passed in this
+  session, or with playback off; `stream` without `Range` for a file over
+  8 MiB.
+- **Tokens (§6.3).** One random 128-bit token (`getrandom`) per
+  `(session, attachment)`, minted by `get_thread_page`, `get_reply_thread`
+  and `get_message_detail` for every listed attachment with a stored file
+  (`AttachmentDto.token`, a `MediaToken` brand) and by
+  `inspect_attachment` (`AttachmentInspectionDto.token`). The table lives
+  in the session (at most 50,000 entries, evicting the one least recently
+  minted or requested), so tokens die with it: `close_viewer`, an archive
+  switch, a reopen after a reload, the exit handler. `inspect_attachment`
+  records the sniffed kind on the token; until then no rendition is
+  served. Tokens keep row ids out of URLs and limit serving to files the
+  session surfaced; they are defence in depth, not a boundary against a
+  compromised page, which could read any message through IPC anyway.
+- **Executors (§6.2, D89).** Per session: **decode**, 2 workers, each with
+  its own reader and helper process, a queue of 64 taken newest first (a
+  full queue drops its oldest entry with `503`); **stream**, 2 workers,
+  each with its own reader, a FIFO queue of 16 (full is `503`); **verify**,
+  the session's `verify` reader behind a gate of one running and four
+  waiting checks (`inspect_attachment { forPlayback }` beyond that is
+  `busy`). Readers open on a worker's first job (each repeats the M4 open
+  checks); helpers start on a decode worker's first cache miss. Closing a
+  session closes both queues (waiting requests answer `503`); the workers
+  stop after the job each holds, dropping their readers and helpers.
+- **Renditions (§5.5, §5.8, D98, D102, D113).** A decode worker reads the
+  whole file through `read_blob_verified` (the hashing reader; over
+  64 MiB or a digest mismatch is a remembered failure) and hands the
+  verified bytes to its helper. The result is cached in memory (an LRU of
+  96 MiB of encoded renditions keyed by blob and rendition, cleared when
+  the session closes; nothing on disk) and answered `200` with
+  `image/jpeg` or `image/png`. Every failure (a refusal, a crash, a bad
+  hash) is remembered per `(blob, rendition)`, so a hostile image is
+  decoded at most once per session. The original's size the helper
+  reports is returned by `inspect_attachment` as `originalSize` once a
+  rendition exists. After 5 helper crashes in a session previews are off
+  (`previewsOff`) and every rendition request is refused.
+- **The decode helper (§5.5, D113).** The app's own binary started with
+  `--oma-decode-helper` (exactly that one argument; `main` checks it before
+  Tauri, logging or settings run), through `std::process::Command` with
+  piped stdin and stdout, stderr discarded and, on Windows,
+  `CREATE_NO_WINDOW` (`CommandExt::creation_flags`); no `unsafe`. Frames
+  are length-prefixed: the request is a fixed 42-byte header (magic,
+  version, rendition, the four limits, the length) plus the verified
+  bytes; the reply a fixed 31-byte header (status, format, alpha and
+  animation flags, the rendition's and the original's size, the length)
+  plus the encoded image. No path, id or name crosses (a test rebuilds the
+  header from those fields alone). The helper clamps the limits to the
+  app's own, calls only `oma_archive::media::render::render`, and exits on
+  any malformed frame. The host treats a closed pipe, a malformed reply or
+  no reply within 20 s (a watchdog thread kills the helper) as a crash,
+  and starts a new helper for the next request. It is **not an OS
+  sandbox**: the helper runs as the same user. Debug builds accept one
+  extra rendition code that makes the helper exit without replying, for
+  the restart test.
+- **Streams (§6.4 rule 3).** Exactly one `bytes=a-b`, `bytes=a-` or
+  `bytes=-n` (ASCII digits, values that fit in `u64`, no spaces, no list,
+  `bytes=` in lower case) is honoured: `206` with `Content-Range: bytes
+  a-b/len`, `Content-Length` and `Accept-Ranges: bytes`, each chunk at most
+  2 MiB, read through `open_range` with the identity `verify_blob`
+  recorded (a changed file is refused). `a > b`, `bytes=-0` and a start at
+  or past the end are `416` with `bytes */len`; a suffix longer than the
+  file is served from byte 0. Without `Range`, a file of at most 8 MiB is
+  `200` with the whole body (never `206`); a larger one is refused, so if an
+  engine ever requests media without `Range`, files over 8 MiB cannot play
+  on it (whether either engine does is spike 5s, **UNVERIFIED**).
+  `inspect_attachment { forPlayback }` now hashes a file once per session
+  and enables `stream` only when the structural check also passed.
+- **Headers (§6.4 rule 4).** Every response: `X-Content-Type-Options:
+  nosniff`, `Cache-Control: no-store`, `Content-Security-Policy:
+  default-src 'none'; sandbox`; every `2xx` also the `Content-Type`
+  decided in Rust (the rendition's, or the sniffed kind's for a stream)
+  and `Content-Length`. No `Content-Disposition`, and no CORP header
+  (whether either engine treats the app origin and the scheme as same-site
+  is **UNVERIFIED**). `HEAD` gets the headers only.
+- **CSP per platform (§6.5).** `tauri.linux.conf.json` adds `oma-media:`
+  and `tauri.windows.conf.json` adds `http://oma-media.localhost` to
+  `img-src` (after `'self' data:`) and as the whole of `media-src`, in
+  both `csp` and `devCsp`; Tauri merges them over `tauri.conf.json` (JSON
+  Merge Patch). Nothing else changes: `connect-src` stays IPC only. On
+  Linux `http://oma-media.localhost` would be a real loopback origin, so
+  each platform names only the form its engine serves. A test merges each
+  platform file the way tauri-utils does and compares both maps exactly,
+  and checks that neither names the other platform's form. The `ipc`
+  form on Linux is a follow-up (§19), not changed here.
+- **The window built in Rust (§6.6, §6.7, D106).** `main` has
+  `"create": false` and `"incognito": true` (no persistent HTTP cache or
+  web storage; WebView2 needs runtime 101.0.1210.39 or later). `setup`
+  builds it with `WebviewWindowBuilder::from_config` and four hooks:
+  navigation only to the app's page origin (plus the dev server's in a dev
+  build), new windows denied, downloads refused, permission requests
+  denied. The policies are plain functions with tests; the hooks
+  themselves run only in a real window (**UNVERIFIED** here, as is the
+  scheme under incognito on WebKitGTK, spike 5s). Zoom hotkeys stay off
+  (D116); the title is never a chat name (D112).
+- **Logs (§6.4 rule 5).** One `debug` line per request: a closed outcome
+  kind (`refused`, `cached`, `decoded`, `decodeFailed`, `helperCrashed`,
+  `streamed`, `unsatisfiable`, `unreadable`, `dropped`), the status, a size
+  bucket (< 64 KiB, < 1 MiB, < 16 MiB, ≥ 16 MiB) and the elapsed time; a
+  `warn` per helper crash with the session's crash count. Never the token,
+  the blob, the range, the URI or an exact size.
+  `src-tauri/tests/log_hygiene.rs` drives the handler for every token of
+  three catalogue archives through the real helper.
+- **Tests.** In `viewer/media/tests.rs` (on the `view-media-plain`
+  archive, with a fake decode backend; reads, hashes, structural checks and
+  ranges are real): every refusal of §13.6, answered before `dispatch`
+  returns; tokens and helpers ending with the session and a reopen;
+  renditions decoded once and then served from memory without a queue;
+  remembered failures; five crashes turning previews off; the full decode
+  queue dropping its oldest entry with `503`; verification never holding
+  a decode or stream worker, and its bounded gate; the range rules on a
+  real stream; the arithmetic for an injected 3 GiB length and the 8 MiB
+  rule. Unit tests for the range parser and planner, the token table, the
+  cache and the queues. `tests/decode_helper.rs` starts the real binary
+  (`CARGO_BIN_EXE_openmessage-archive`): images round-trip through one
+  long-lived helper, refusals are codes, a helper that dies mid-request is
+  restarted, and (Unix) a hung helper is killed after the timeout.
+  `window/tests.rs`: the merged configurations, the media base, the
+  feature check and the window policies.
+- **Deviations.** `get_search_results` mints no token: its hits list no
+  attachments. The original's size is kept beside the rendition cache
+  (per blob), not in the token table. A failed preview is `404` (a queue
+  overflow is `503`). The verify executor is the session's existing
+  `verify` reader with a five-place gate, not a thread of its own. An
+  evicted token is tested on the table, not through the protocol (the
+  bound is 50,000).
+- **Not verified here.** Apart from one headless smoke test (WebKitGTK
+  2.52.6 under `xvfb-run`, a dev build and a scratch page: the window was
+  built, the scheme reached the handler under incognito, and a scripted
+  navigation away was not followed; `compatibility.md`), nothing has run
+  in a window, and nothing on Windows: that either engine loads images from
+  the scheme under the merged production CSP, sends
+  `Range`, seeks, honours `no-store`, or reaches the hooks is spike 5s and
+  the manual checklist (**UNVERIFIED**). The Windows-only code
+  (`CREATE_NO_WINDOW`, the `http://oma-media.localhost` base) is compiled
+  and tested only by CI on `windows-2022`, not here.
+
+### M5 PR A review fixes
+
+The review of PR A changed these rules; each has a regression test
+(`compatibility.md`, "Milestone 5 PR A review fixes").
+
+- **Masking decides trust on the whole body.** `message_text` withholds
+  every chunk of a body whose one-time-code ranges are untrusted
+  (`display_source` ≠ 1 or a `run_issue`), whatever `fromUtf16` is; only
+  trusted ranges are moved to the chunk. An earlier edit text whose runs
+  were cut short (`runs_complete` false) is withheld whole, code seen or
+  not (`EditBody::Text`'s contract). "Show earlier text" no longer reveals
+  codes: `EarlierText::Revealed` carries `Vec<TextPiece>` masked by the
+  preview rule unless `reveal.oneTimeCode` (the DTO's `pieces`).
+- **Search reads a hit's version when it is served.** `search_hits`
+  compares the set's body with `current_body_id` at read time; a body that
+  stopped being current sends no text unless the request has
+  `includeEarlier`. The words cap counts distinct messages in both plans
+  (the global plan reads until `SEARCH_MATCH_CAP + 1` messages; with
+  `includeEarlier` it probes an admitted message's current body when the
+  cut fell before it, so the hit is not mislabelled "earlier").
+- **Folding is resolved at depth one.** A reaction folds only when its
+  target does not fold itself (`view::folds_into`, the day count's SQL);
+  a reaction to a folding reaction, or a cycle, stays visible with
+  `AssocVisibility::TargetFolds`.
+- **The sender needs a recorded direction.** With `is_from_me` NULL,
+  unreadable or out of range the sender is `DirectionNotRecorded`: the
+  row may be the owner's, whose `handle_id` is the other party.
+- **Parts are never guessed.** The part set of an unsend comes from the
+  decoded runs and the summary's `otr` entry count (§3.6's source); with
+  neither, `partCount` is `null` and there is no whole-bubble label.
+- **Ordering and paging.** The reply thread reads every reply under the
+  `Scan` budget and keeps the first 500 by `(sort_key, id)` in a bounded
+  heap. The reaction history pages by a keyset: the crate returns an
+  opaque `ReactionCursor`, the shell remembers it by (target, last row)
+  and the UI asks for `reactionPage: { after: <last row id> }`; an
+  unknown `after` is refused. `fit_page` remembers the key of an anchor it
+  moves (`ThreadPage::key_of`).
+- **Deadlines.** A page call's `Assembly` phase gets at least 500 ms
+  after its `Scan` (`ASSEMBLY_MIN`), so a `Scan` that used up the 2 s
+  deadline still returns its items; such a call can take up to 2.5 s.
+  An interrupt that lands on a snapshot's `BEGIN` or `COMMIT` is
+  `Cancelled`.
+- **Shell.** Viewer preferences are read field by field: a field that
+  parses keeps its value, an unreadable one takes its most private value
+  (playback off, no list previews, capture protection and blur on, no
+  earlier text), unknown fields are ignored, and the settings notice says
+  so. A search interrupts the previous one while it holds the search slot,
+  so a late interrupt can never reach a newer search; the interrupt handle
+  is counted for the order test. The surfaced set evicts least recently
+  surfaced (200,000).
+- **Media.** A `(blob, rendition)` being decoded is decoded by one worker;
+  other requests for it wait for that answer. A helper that exited
+  between requests, or whose request header cannot be written, is
+  replaced and the request retried once without counting a crash; a
+  helper the watchdog killed is never reused.
 
 ### Status and qualifiers (D43)
 
@@ -1750,6 +2681,47 @@ are design decisions of the M4 spec.
 | D87 | Migrations | Explicit `migrate()` only; fingerprint first; space checked before anything changes; unfinished sessions superseded; a real migration refused until the pre-migration copy exists | Migrate on open | No surprise writes; reads never migrate |
 | D88 | Stopped state | Session state 6, `stopped`, for resumable stops (space, a changed source, a volume limit) | Reuse cancelled or failed | "Failed" is kept for errors that cannot be continued. A file-size limit hit on the database itself (`EFBIG`) still fails the session; only per-file limits on attachments are handled |
 
+### Milestone 5 decisions
+
+D89–D117 (M5 spec §18), as PR A (slices 5a–5f) implements them. **The
+owner answered the spec's four questions on 2026-10-18**: D97's and D99's
+playback wording, D100 and D110 (Q1), D101 (Q2, **which differs from the
+lean**), D105 and D115 (Q3) and D99's default (Q4) are **owner-confirmed**.
+The rest are design decisions of the M5 spec. Rows about the UI (D96,
+D104, D107–D109, D112's UI side) are implemented in PR B.
+
+| # | Topic | Choice | Main alternative | Trade-off |
+|---|---|---|---|---|
+| D89 | Reader | `ArchiveReader` methods; per session a `pages`, a `search` and a `verify` reader, plus one reader per stream and decode worker; one snapshot per call | One reader behind one mutex; long-lived read transactions | Search, decode and verify cannot stall page reads or playback, and checkpoints are never held back |
+| D90 | Budgets | `ReadConn::viewing` in phases with `QueryTooBroad`, `Cancelled` and deadlines; `budgeted()` unchanged for M4 | One budget per call | A broad search is never reported as damage |
+| D91 | Paging | Keysets on `(sort_key, message_id)` bounded to dated keys, the undated section on its own, remembered keys for moved anchors | `OFFSET`; unbounded `max(sort_key)` | Pages cost the same at any depth; undated rows never pose as newest |
+| D92 | Schema | No change in M5; a bounded exact-text scan matched in Rust | A trigram or names index with the first migration | v1 stays frozen; short-query search is slower |
+| D93 | Reactions | Fold only tapbacks whose target is in the same chat; chip state derived from recorded rows; the full history shown | Show only raw rows | Readable threads without hiding a recorded row |
+| D94 | Status | No read, delivery or sent value crosses IPC, chat-level included; the guard bans the keys | A raw "recorded columns" view | Follows I5 |
+| D95 | Content DTOs | A separate viewer module and guard; brands `UntrustedText`, `DecimalString`, `SafeId`, and from 5f `MediaToken` and `MediaBase`; the archive guard rejects every brand and viewer type | Extend the archive guard | Neither guard silently covers the other |
+| D96 | Rendering | `SafeText` only, no HTML path, no linkification (PR B) | Sanitised HTML | Links need copy and paste |
+| D97 | Media transport (**owner-confirmed wording, Q1**) | The `oma-media` async scheme; stable 128-bit tokens per attachment; bounded chunks; a self-authorising handler; per-platform CSP; the window built in Rust | `asset:` (rejected); IPC plus `blob:` URLs | Streaming and seeking without paths, network origins or save paths |
+| D98 | Images | Only app-produced renditions reach the webview; SVG never served | Serve sniffed originals | The engine's decoders never see attachment image bytes |
+| D99 | Audio and video (**owner-confirmed, Q1b and Q4**) | The engine's media stack after a structural check, a full hash check (integrity only) and, by default (`confirm`), a confirmation per file; `off` refused in Rust and by the protocol | No inline playback | Playback, at the disclosed cost of exposing native codecs to sender-chosen bytes |
+| D100 | Opening attachments (**owner-confirmed, Q1a**) | Never in M5; downloads refused by the window's hook; saving is M6 | Hand off to the OS | No plaintext copy outside the archive |
+| D101 | HEIC (**owner-confirmed, Q2; differs from the lean**) | An optional `heic` feature of `oma-archive` (pure-Rust `heic-rs`, MIT OR Apache-2.0), **off by default and never enabled in official or CI release builds**; HEIC is a file card otherwise | No decoder and no feature | Self-builders may opt in at their own legal risk (HEVC patent pools); official builds show HEIC as cards |
+| D102 | Rendition cache | Memory LRU of 96 MiB per session; no disk cache | An opt-in disk cache | No new writer, plaintext derivative or viewing history; re-decoding after a restart |
+| D103 | Search | Rust-built quoted FTS queries; scoped and global plans; highlight under a budget with a reconstruction check; exact text matched in Rust | Pass user syntax through | No query injection, no markup across IPC |
+| D104 | Time | ICU in the webview; Rust is time-zone-free; raw values as decimal strings | A time-zone crate | One time-zone source |
+| D105 | Edited text (**owner-confirmed, Q3a**) | Decode `ec[*].t` at read time; never stored or indexed | No edit text | Matches what the phone shows |
+| D106 | Webview profile | `incognito: true`, `no-store`, the navigation hook; context-menu, drag, print and reload guards in PR B | A persistent profile | No web cache of media |
+| D107 | Clipboard | Web copy on explicit action only (PR B) | `arboard` (BSL-1.0 transitively) | No new licence class |
+| D108 | Privacy screen | A curtain that unmounts content; idle hide closes the session (PR B) | CSS blur | Honest about not being a lock |
+| D109 | Virtualisation | `virtua` behind `VirtualFeed`, pending spike 5s (PR B) | TanStack; hand-written | Prepend anchoring ready-made if the spike passes |
+| D110 | Search history (**owner-confirmed, Q1c**) | Nothing persisted | A v2 table | The reader stays read-only |
+| D111 | Handles | Shown as recorded, with the service when one address has two | Phone formatting | No misleading grouping |
+| D112 | Window title | Never a chat name | Show the chat name | Nothing leaks to taskbars or screen shares |
+| D113 | Image decoding process | Two long-lived helper processes per session (the app's own binary, `--oma-decode-helper`), fed verified bytes over pipes; no `unsafe`; failure cache; restart, and previews off after 5 crashes | Decode in the main process (`panic = "abort"`) or in the webview | A decoder panic, OOM or memory bug cannot end the app or reach keys, connections or IPC; not an OS sandbox |
+| D114 | Viewer and the archive location | A session counts as an open archive; location changes refused | Drop the session silently | Consistent with M4 |
+| D115 | Masking and retraction (**owner-confirmed, Q3b**) | Enforced in Rust on every content path, released only by `reveal` after a click; revealing by default is a setting, off | Mask in the bubble only | A one-time code or withdrawn text never reaches the webview unasked |
+| D116 | Zoom | `uiZoom` applied from Rust with `set_zoom`; no webview permission | `zoomHotkeysEnabled` | WCAG reflow without widening the capability |
+| D117 | M6 export source | `view/assemble.rs` is the uncapped layer M6 streams | Export from the paging APIs | Exports are complete |
+
 ## Logging
 
 `tracing` writes to stderr, filtered by `OMA_LOG` (default `info`). Log
@@ -1810,6 +2782,22 @@ fingerprints, content digests, ranks, attachment hashes or storage names,
 source rowids and cursors, device names or product types, display text,
 values from `value_issue` or `value_history`, or SQLite error text (only
 the primary code).
+
+The viewer (M5 slice 5e) logs, at `info`, viewer open and close by
+outcome kind and each search's mode, plan, match-count bucket and elapsed
+time; at `debug`, page and hit buckets and flags. It never logs query or
+filter text, ids, labels, addresses, names, text or exact byte counts;
+`src-tauri/tests/log_hygiene.rs` runs every viewer operation over the
+viewer catalogue with sentinel filters and queries and checks the log.
+
+The `oma-media` handler (M5 slice 5f) logs, at `debug`, one line per
+request: a closed outcome kind, the status, a size bucket and the elapsed
+time; at `warn`, a decode helper crash with the session's crash count. It
+never logs the token, the blob, the range, the URI or an exact size (an
+exact size can identify a known file). The decode helper logs nothing and
+its stderr is discarded. The log-hygiene test drives the handler for every
+token of three catalogue archives, through the real helper, and checks
+that no token, `/v1/` path or range appears.
 
 The persistent, redacted diagnostic log file was deferred to M4 (D15); M4
 defers it again, to M8 (D71, a lean awaiting the owner).

@@ -1,0 +1,1614 @@
+{
+ "content": {
+  "attachments": [],
+  "blobs": [],
+  "chats": [
+   {
+    "columns": {
+     "chat_identifier": {
+      "text": "synthetic-lineage-1@example.invalid"
+     },
+     "display_name": {
+      "text": "SYNTH-LIN-NAME-2"
+     },
+     "group_id": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "iMessage;-;synthetic-lineage-1@example.invalid"
+     },
+     "is_archived": {
+      "int": 0
+     },
+     "room_name": {
+      "state": "null"
+     },
+     "service_name": {
+      "text": "iMessage"
+     },
+     "style": {
+      "int": 45
+     }
+    },
+    "handles": [
+     "handle:synthetic-lineage-1@example.invalid|iMessage"
+    ],
+    "history": {
+     "display_name": [
+      {
+       "text": "SYNTH-LIN-NAME-1"
+      },
+      {
+       "text": "SYNTH-LIN-NAME-B"
+      }
+     ]
+    },
+    "notInLatest": [],
+    "ref": "guid:iMessage;-;synthetic-lineage-1@example.invalid"
+   }
+  ],
+  "excluded": {
+   "attachments": [],
+   "messages": [],
+   "unkeyedAttachmentRows": 0,
+   "unkeyedMessageRows": 0
+  },
+  "handles": [
+   {
+    "columns": {
+     "country": {
+      "text": "us"
+     },
+     "id": {
+      "text": "synthetic-lineage-1@example.invalid"
+     },
+     "person_centric_id": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "uncanonicalized_id": {
+      "state": "null"
+     }
+    },
+    "history": {},
+    "ref": "handle:synthetic-lineage-1@example.invalid|iMessage"
+   }
+  ],
+  "messages": [
+   {
+    "attachments": [],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-LIN-BODY-1"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-lineage-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 0
+     },
+     "date": {
+      "raw": 790000060000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307260000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-LIN-MSG-0001"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-LIN-BODY-1"
+    },
+    "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-LIN-MSG-0001",
+    "sort": {
+     "utcNs": 1768307260000000000
+    }
+   },
+   {
+    "attachments": [],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-LIN-BODY-2"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-lineage-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 0
+     },
+     "date": {
+      "raw": 790000120000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307320000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-LIN-MSG-0002"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-LIN-BODY-2"
+    },
+    "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [
+     "L1"
+    ],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-LIN-MSG-0002",
+    "sort": {
+     "utcNs": 1768307320000000000
+    }
+   },
+   {
+    "attachments": [],
+    "bodies": [
+     {
+      "current": true,
+      "noneReason": "noSource"
+     },
+     {
+      "current": false,
+      "source": "text",
+      "text": "SYNTH-LIN-BODY-3 original"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-lineage-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 0
+     },
+     "date": {
+      "raw": 790000180000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307380000000000
+     },
+     "date_edited": {
+      "raw": 790000240000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307440000000000
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-LIN-MSG-0003"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "noneReason": "noSource"
+    },
+    "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-LIN-MSG-0003",
+    "sort": {
+     "utcNs": 1768307380000000000
+    }
+   },
+   {
+    "attachments": [],
+    "bodies": [
+     {
+      "current": true,
+      "noneReason": "textEmpty"
+     },
+     {
+      "current": false,
+      "source": "text",
+      "text": "SYNTH-LIN-BODY-4 before"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-lineage-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 0
+     },
+     "date": {
+      "raw": 790000240000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307440000000000
+     },
+     "date_edited": {
+      "raw": 790000300000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307500000000000
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-LIN-MSG-0004"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "noneReason": "textEmpty"
+    },
+    "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-LIN-MSG-0004",
+    "sort": {
+     "utcNs": 1768307440000000000
+    }
+   },
+   {
+    "attachments": [],
+    "bodies": [
+     {
+      "current": true,
+      "source": "attributedBody",
+      "text": "SYNTH-LIN-PART-0 SYNTH-LIN-PART-2"
+     },
+     {
+      "current": false,
+      "source": "attributedBody",
+      "text": "SYNTH-LIN-PART-0 SYNTH-LIN-PART-1 SYNTH-LIN-PART-2"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-lineage-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 0
+     },
+     "date": {
+      "raw": 790000300000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307500000000000
+     },
+     "date_edited": {
+      "raw": 790000360000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307560000000000
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-LIN-MSG-0005"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "attributedBody",
+     "text": "SYNTH-LIN-PART-0 SYNTH-LIN-PART-2"
+    },
+    "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-LIN-MSG-0005",
+    "sort": {
+     "utcNs": 1768307500000000000
+    }
+   },
+   {
+    "attachments": [],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-LIN-BODY-6 unchanged"
+     },
+     {
+      "current": false,
+      "source": "text",
+      "text": "SYNTH-LIN-BODY-6 unchanged"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-lineage-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 0
+     },
+     "date": {
+      "raw": 790000360000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307560000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-LIN-MSG-0006"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-LIN-BODY-6 unchanged"
+    },
+    "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-LIN-MSG-0006",
+    "sort": {
+     "utcNs": 1768307560000000000
+    }
+   },
+   {
+    "attachments": [],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-LIN-BODY-7"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-lineage-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 0
+     },
+     "date": {
+      "raw": 790000420000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307620000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-LIN-MSG-0007"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "text": "SYNTH-LIN-SUBJECT-2"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-LIN-BODY-7"
+    },
+    "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+    "history": {
+     "subject": [
+      {
+       "text": "SYNTH-LIN-SUBJECT-1"
+      }
+     ]
+    },
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-LIN-MSG-0007",
+    "sort": {
+     "utcNs": 1768307620000000000
+    }
+   },
+   {
+    "attachments": [],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-LIN-BODY-8"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-lineage-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 0
+     },
+     "date": {
+      "raw": 790000480000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307680000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-LIN-MSG-0008"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 1
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-LIN-BODY-8"
+    },
+    "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-LIN-MSG-0008",
+    "sort": {
+     "utcNs": 1768307680000000000
+    }
+   },
+   {
+    "attachments": [],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-LIN-BODY-9 (new in a2)"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-lineage-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 0
+     },
+     "date": {
+      "raw": 790000540000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307740000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-LIN-MSG-0009"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-LIN-BODY-9 (new in a2)"
+    },
+    "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-LIN-MSG-0009",
+    "sort": {
+     "utcNs": 1768307740000000000
+    }
+   },
+   {
+    "attachments": [],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-LIN-BODY-10 edited"
+     },
+     {
+      "current": false,
+      "source": "text",
+      "text": "SYNTH-LIN-BODY-10 first"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-lineage-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 0
+     },
+     "date": {
+      "raw": 790000600000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307800000000000
+     },
+     "date_edited": {
+      "raw": 790000660000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307860000000000
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-LIN-MSG-0010"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-LIN-BODY-10 edited"
+    },
+    "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-LIN-MSG-0010",
+    "sort": {
+     "utcNs": 1768307800000000000
+    }
+   },
+   {
+    "attachments": [],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-LIN-BODY-11 (later in Recently Deleted)"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-lineage-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 0
+     },
+     "date": {
+      "raw": 790000660000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307860000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-LIN-MSG-0011"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-LIN-BODY-11 (later in Recently Deleted)"
+    },
+    "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [
+     "L1"
+    ],
+    "recentlyDeleted": [
+     "guid:iMessage;-;synthetic-lineage-1@example.invalid"
+    ],
+    "ref": "guid:SYNTH-LIN-MSG-0011",
+    "sort": {
+     "utcNs": 1768307860000000000
+    }
+   },
+   {
+    "attachments": [],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-LIN-BODY-20 (device B only)"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-lineage-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 0
+     },
+     "date": {
+      "raw": 790001200000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768308400000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-LIN-MSG-0020"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-LIN-BODY-20 (device B only)"
+    },
+    "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-LIN-MSG-0020",
+    "sort": {
+     "utcNs": 1768308400000000000
+    }
+   }
+  ]
+ },
+ "format": "oma-viewer-content",
+ "formatVersion": 1,
+ "orders": [
+  [
+   {
+    "copyAttachments": true,
+    "entry": "view-lin-a1-plain",
+    "includeRecentlyDeleted": false,
+    "iosVersionUntested": false,
+    "lineage": "L1"
+   },
+   {
+    "copyAttachments": true,
+    "entry": "view-lin-rd-plain",
+    "includeRecentlyDeleted": false,
+    "iosVersionUntested": false,
+    "lineage": "L1"
+   },
+   {
+    "copyAttachments": true,
+    "entry": "view-lin-b-plain",
+    "includeRecentlyDeleted": false,
+    "iosVersionUntested": false,
+    "lineage": "L2"
+   },
+   {
+    "copyAttachments": true,
+    "entry": "view-lin-a2-plain",
+    "includeRecentlyDeleted": false,
+    "iosVersionUntested": true,
+    "lineage": "L1"
+   },
+   {
+    "copyAttachments": true,
+    "entry": "view-lin-a3-incomplete-plain",
+    "includeRecentlyDeleted": false,
+    "iosVersionUntested": false,
+    "lineage": "L1"
+   }
+  ]
+ ],
+ "sessions": {
+  "view-lin-a1-plain": {
+   "contentDigest": "63fe3d2302f70d2f8096563a0e93a3f26042be8ebe06d0ab0182753edf1d2a42",
+   "fullObservation": true,
+   "orderClass": "dated",
+   "orderKeyNs": 1769940000000000000,
+   "orderKeySource": "statusPlistDate",
+   "qualifiers": [],
+   "rank": "019890170d6dc1400063fe3d2302f70d2f8096563a0e93a3f26042be8ebe06d0ab0182753edf1d2a42"
+  },
+  "view-lin-a2-plain": {
+   "contentDigest": "00c4781b2d111791e052bf321b46082f39e17bcbfaa26d091124acd33a521ed9",
+   "fullObservation": true,
+   "orderClass": "dated",
+   "orderKeyNs": 1775037600000000000,
+   "orderKeySource": "statusPlistDate",
+   "qualifiers": [],
+   "rank": "0198a2334aeaf6400000c4781b2d111791e052bf321b46082f39e17bcbfaa26d091124acd33a521ed9"
+  },
+  "view-lin-a3-incomplete-plain": {
+   "contentDigest": "43a5e6d0408385757ee8ab5c9a4922a21abc98051236adf99cd185ab2d37cfca",
+   "fullObservation": false,
+   "orderClass": "dated",
+   "orderKeyNs": 1777629600000000000,
+   "orderKeySource": "statusPlistDate",
+   "qualifiers": [
+    "walSkipped"
+   ],
+   "rank": "0198ab68b3f238400043a5e6d0408385757ee8ab5c9a4922a21abc98051236adf99cd185ab2d37cfca"
+  },
+  "view-lin-b-plain": {
+   "contentDigest": "07b84da3cd55dc9b99e7ac5c29b2db709bc646f5b87dca5d1aad282095bd87c0",
+   "fullObservation": true,
+   "orderClass": "dated",
+   "orderKeyNs": 1772359200000000000,
+   "orderKeySource": "statusPlistDate",
+   "qualifiers": [],
+   "rank": "019898af4d5265400007b84da3cd55dc9b99e7ac5c29b2db709bc646f5b87dca5d1aad282095bd87c0"
+  },
+  "view-lin-rd-plain": {
+   "contentDigest": "8fbdcb491434480423e797598c32e89b1966d9c5b5d3fa2a5d912fb2cfa4f649",
+   "fullObservation": true,
+   "orderClass": "dated",
+   "orderKeyNs": 1771149600000000000,
+   "orderKeySource": "statusPlistDate",
+   "qualifiers": [],
+   "rank": "019894632d601340008fbdcb491434480423e797598c32e89b1966d9c5b5d3fa2a5d912fb2cfa4f649"
+  }
+ },
+ "viewer": {
+  "attachments": {},
+  "conversations": [
+   {
+    "addresses": 1,
+    "chat": "guid:iMessage;-;synthetic-lineage-1@example.invalid",
+    "earlierDatedItems": 0,
+    "empty": false,
+    "firstDate2007UtcNs": 1768307260000000000,
+    "group": false,
+    "itemsRecorded": 12,
+    "lastDatedUtcNs": 1768308400000000000,
+    "notInLatest": [],
+    "preview": "guid:SYNTH-LIN-MSG-0020",
+    "undatedItems": 0
+   }
+  ],
+  "masked": {
+   "earlierText": [
+    "SYNTH-LIN-BODY-3 original",
+    "SYNTH-LIN-BODY-4 before",
+    "SYNTH-LIN-PART-0 SYNTH-LIN-PART-1 SYNTH-LIN-PART-2"
+   ],
+   "oneTimeCodes": []
+  },
+  "messages": {
+   "guid:SYNTH-LIN-MSG-0001": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 16
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307260000000000
+   },
+   "guid:SYNTH-LIN-MSG-0002": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 16
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [
+     "notInLatest:L1"
+    ],
+    "sender": {
+     "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307320000000000
+   },
+   "guid:SYNTH-LIN-MSG-0003": {
+    "body": {
+     "noneReason": "noSource"
+    },
+    "direction": "received",
+    "edit": {
+     "earlierText": "withheld",
+     "earlierTextReason": "unsent",
+     "label": "unsentParts",
+     "storedVersions": 2,
+     "unsentOf": 1,
+     "unsentParts": [
+      0
+     ],
+     "unsentWhole": true,
+     "versionGroups": [
+      {
+       "hasText": true,
+       "versions": 1
+      },
+      {
+       "hasText": false,
+       "versions": 1
+      }
+     ]
+    },
+    "item": "message",
+    "labels": [
+     "provisional"
+    ],
+    "sender": {
+     "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307380000000000
+   },
+   "guid:SYNTH-LIN-MSG-0004": {
+    "body": {
+     "noneReason": "textEmpty"
+    },
+    "direction": "received",
+    "edit": {
+     "earlierText": "withheld",
+     "earlierTextReason": "earlierVersion",
+     "label": "dateEditedNoBody",
+     "storedVersions": 2,
+     "versionGroups": [
+      {
+       "hasText": true,
+       "versions": 1
+      },
+      {
+       "hasText": false,
+       "versions": 1
+      }
+     ]
+    },
+    "item": "message",
+    "labels": [
+     "provisional"
+    ],
+    "sender": {
+     "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307440000000000
+   },
+   "guid:SYNTH-LIN-MSG-0005": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "attributedBody",
+     "utf16": 33
+    },
+    "direction": "received",
+    "edit": {
+     "earlierText": "withheld",
+     "earlierTextReason": "unsent",
+     "label": "unsentParts",
+     "storedVersions": 2,
+     "unsentOf": 3,
+     "unsentParts": [
+      1
+     ],
+     "unsentWhole": false,
+     "versionGroups": [
+      {
+       "hasText": true,
+       "versions": 1
+      },
+      {
+       "hasText": true,
+       "versions": 1
+      }
+     ]
+    },
+    "formatting": "applied",
+    "item": "message",
+    "labels": [
+     "provisional"
+    ],
+    "sender": {
+     "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307500000000000
+   },
+   "guid:SYNTH-LIN-MSG-0006": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 26
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 2,
+     "versionGroups": [
+      {
+       "hasText": true,
+       "versions": 2
+      }
+     ]
+    },
+    "item": "message",
+    "labels": [
+     "provisional"
+    ],
+    "sender": {
+     "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307560000000000
+   },
+   "guid:SYNTH-LIN-MSG-0007": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 16
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [
+     "provisional"
+    ],
+    "sender": {
+     "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307620000000000
+   },
+   "guid:SYNTH-LIN-MSG-0008": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 16
+    },
+    "direction": "you",
+    "directionAsRecordedBy": {
+     "entry": "view-lin-a2-plain",
+     "lineage": "L1"
+    },
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [
+     "provisional"
+    ],
+    "sender": {
+     "reason": "fromMe"
+    },
+    "service": "imessage",
+    "utcNs": 1768307680000000000
+   },
+   "guid:SYNTH-LIN-MSG-0009": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 28
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [
+     "provisional"
+    ],
+    "sender": {
+     "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307740000000000
+   },
+   "guid:SYNTH-LIN-MSG-0010": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 24
+    },
+    "direction": "received",
+    "edit": {
+     "earlierText": "shown",
+     "ecTexts": [
+      {
+       "ordinal": 0,
+       "part": 0,
+       "text": "SYNTH-LIN-EDIT-ORIGINAL-10"
+      }
+     ],
+     "editedParts": [
+      0
+     ],
+     "label": "editHistory",
+     "storedVersions": 2,
+     "versionGroups": [
+      {
+       "hasText": true,
+       "versions": 1
+      },
+      {
+       "hasText": true,
+       "versions": 1
+      }
+     ]
+    },
+    "item": "message",
+    "labels": [
+     "provisional"
+    ],
+    "sender": {
+     "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307800000000000
+   },
+   "guid:SYNTH-LIN-MSG-0011": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 45
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [
+     "notInLatest:L1"
+    ],
+    "recentlyDeleted": [
+     {
+      "chat": "guid:iMessage;-;synthetic-lineage-1@example.invalid",
+      "entry": "view-lin-rd-plain",
+      "notListedLater": [
+       "view-lin-a2-plain",
+       "view-lin-a3-incomplete-plain"
+      ]
+     }
+    ],
+    "sender": {
+     "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307860000000000
+   },
+   "guid:SYNTH-LIN-MSG-0020": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 33
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-lineage-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768308400000000000
+   }
+  },
+  "threads": {
+   "guid:iMessage;-;synthetic-lineage-1@example.invalid": {
+    "dated": [
+     "guid:SYNTH-LIN-MSG-0001",
+     "guid:SYNTH-LIN-MSG-0002",
+     "guid:SYNTH-LIN-MSG-0003",
+     "guid:SYNTH-LIN-MSG-0004",
+     "guid:SYNTH-LIN-MSG-0005",
+     "guid:SYNTH-LIN-MSG-0006",
+     "guid:SYNTH-LIN-MSG-0007",
+     "guid:SYNTH-LIN-MSG-0008",
+     "guid:SYNTH-LIN-MSG-0009",
+     "guid:SYNTH-LIN-MSG-0010",
+     "guid:SYNTH-LIN-MSG-0011",
+     "guid:SYNTH-LIN-MSG-0020"
+    ],
+    "folded": [],
+    "undated": []
+   }
+  }
+ }
+}

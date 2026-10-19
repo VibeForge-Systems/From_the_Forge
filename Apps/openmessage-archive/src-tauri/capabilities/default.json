@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window may call exactly the application's own commands. No core webview, window, filesystem, shell, HTTP, or plugin APIs are exposed to the frontend: the dialog and opener plugins are driven from Rust only. Backup-check, extraction-check, import and verify progress reaches the webview through an IPC channel passed to open_backup, check_extraction, start_import or verify_archive; channels need no core:* permission.",
+  "description": "The main window may call exactly the application's own commands. No core webview, window, filesystem, shell, HTTP, or plugin APIs are exposed to the frontend: the dialog and opener plugins are driven from Rust only. Backup-check, extraction-check, import and verify progress reaches the webview through an IPC channel passed to open_backup, check_extraction, start_import or verify_archive, and exact-text search progress through one passed to search_messages; channels need no core:* permission.",
   "windows": ["main"],
   "permissions": [
     "allow-get-settings",
@@ -23,6 +23,20 @@
     "allow-get-archive-details",
     "allow-start-import",
     "allow-confirm-import",
-    "allow-verify-archive"
+    "allow-verify-archive",
+    "allow-open-viewer",
+    "allow-close-viewer",
+    "allow-list-conversations",
+    "allow-get-conversations",
+    "allow-get-thread-page",
+    "allow-get-reply-thread",
+    "allow-get-message-detail",
+    "allow-get-message-text",
+    "allow-get-day-counts",
+    "allow-seek-date",
+    "allow-search-messages",
+    "allow-get-search-results",
+    "allow-cancel-search",
+    "allow-inspect-attachment"
   ]
 }

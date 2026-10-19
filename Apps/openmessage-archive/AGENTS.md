@@ -35,14 +35,19 @@ jobs, and the Archive page. Archives are plaintext at rest (encryption is
 M8). All slices pass CI on `ubuntu-22.04` and `windows-2022`. Its sign-off
 is pending the manual checklist in
 `docs/compatibility.md`, and the owner's answers on D69, D70, D71, D79 and
-D82 (D51, D59, D60 and D61 are owner-confirmed). Milestone 5 (the rich
-viewer) is next.
+D82 (D51, D59, D60 and D61 are owner-confirmed). **Milestone 5 (the rich
+viewer) is in progress:** PR A (slices 5a–5f: the viewer catalogue, the
+viewer reads and search in `oma-archive`, media sniffing and checks, the 14
+viewer commands, the `oma-media` protocol, the image decode helper and the
+main window built in Rust) is implemented and tested in a Linux container
+without a window; the UI is PR B. The owner answered the M5 questions
+(`docs/architecture.md`, "Milestone 5 decisions").
 
 Read these before designing anything:
 
 | Doc | Read it for |
 |---|---|
-| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, the archive (layout, threat model, import data flow, one section per M4 slice), and the decision records (D1–D88; D43 is how "do not fabricate" is read for the check) |
+| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, the archive (layout, threat model, import data flow, one section per M4 slice), and the decision records (D1–D117; D43 is how "do not fabricate" is read for the check) |
 | [`docs/supported-formats.md`](docs/supported-formats.md) | Sourced research on the backup format, encryption, the sms.db schema (columns with sources, timestamps, codes, typedstream) and device tooling. Items marked **UNVERIFIED** are hypotheses, not facts. |
 | [`docs/privacy.md`](docs/privacy.md) | What is copied, where and for how long, including the plaintext copies of sms.db, and what an archive holds (plaintext at rest) |
 | [`docs/compatibility.md`](docs/compatibility.md) | What has actually been tested |
@@ -103,6 +108,11 @@ Each one is enforced in code. Keep it that way.
    - Do not add HTTP client crates or CDN-hosted assets, and no telemetry.
    - The CSP in `src-tauri/tauri.conf.json` allows `connect-src` to IPC
      only, with no `unsafe-inline` in production. Do not loosen it.
+   - From M5, `tauri.linux.conf.json` and `tauri.windows.conf.json` each
+     add exactly one scheme source (`oma-media:` on Linux,
+     `http://oma-media.localhost` on Windows) to `img-src` and
+     `media-src`, and nothing else. The `window` tests compare the merged
+     maps exactly; change them only with the spec.
 4. **The webview never supplies filesystem paths.** Paths come from native
    dialogs that Rust opens, or from settings Rust has already validated.
    Input types use `#[serde(deny_unknown_fields)]`.
@@ -324,6 +334,90 @@ Never hand-edit generated files.
   index-dependent statements, taken from the crate through
   `hooks::plan_statements`. A new merge read or lookup goes into that list;
   a changed plan is re-pinned deliberately.
+- **Viewer reads run in phases (`ReadConn::viewing`, M5 slice 5b1).**
+  Each phase has its own op budget, an optional cancel token and a
+  deadline; overruns are `QueryTooBroad`, cancels `Cancelled`, never
+  `Damaged`. Wrap a call's phases in `ReadConn::snapshot` (one read
+  transaction per call), call `Phase::checkpoint` between short
+  statements, and bound every "recent", "newest" or "from a date" read
+  with `sort_key < X'01'` (`sortkey.rs` is the one encoder). Content
+  leaves the crate only as `OptContent`/`ContentText` (`Redacted`), with
+  one-time codes masked unless the caller reveals them. Every viewer
+  statement is listed in `view::plan_statements` and pinned in
+  `tests/query_plans.rs`. Only `conn.rs` may call `interrupt()`.
+- **Thread pages are keysets bounded to one range (M5 slice 5b2).** Page
+  with row-value bounds on `chat_message_timeline`, never `OFFSET`; keep
+  the dated (`< X'01'`) and undated (`>= X'01'`) ranges apart; anchor on
+  message ids and hand sort keys out only as opaque `SortKeyHint`s.
+  Everything a page or the reply thread shows is built by
+  `view/assemble.rs` under `Caps`, masks one-time codes and earlier text
+  unless the request's `Reveal` asks, and never reads read, delivery or
+  sent state (D94).
+- **Details decode edit text at read time and withhold it (M5 slice
+  5b3).** `message_detail` decodes `ec[*].t` through
+  `oma_messages::edit_texts` from the stored `summary_raw` (owner Q3a):
+  never store, index or log it. Earlier versions, decoded edit text and
+  `message_text` chunks of earlier bodies are withheld like the thread
+  pages' earlier text, and one-time codes are masked, unless the
+  request's `Reveal` asks (D115, Q3b). A new viewer statement goes into
+  `view::plan_statements` and `tests/query_plans.rs`; SQL that excludes
+  folded reactions with `NOT (…)` must `coalesce` a NULL `assoc_kind`.
+- **Search never passes user text to `MATCH` (M5 slice 5c).** Build
+  FTS5 expressions only with `search/query.rs` (quoted terms, ` AND `, a
+  prefix `*` only on a last unquoted token of 3+ characters), bound as a
+  parameter. Exact text matches in Rust over keyset batches that bound
+  rows examined; keep texts streamed, never a batch in memory.
+  `highlight()` output is used only after the marker and reconstruction
+  checks, and one-time codes are masked in every snippet. A cancel must
+  reach the statement through `SearchInterrupt` as well as the token:
+  the op budget cannot see work inside one FTS5 call. A new search
+  statement goes into `search::plan_statements` and `tests/query_plans.rs`.
+- **Media in the crate (M5 slice 5d).** The stored type decides nothing:
+  `media/sniff.rs` decides from the first 4 KiB, the only unverified read
+  (`inspect_blob`). Streaming needs the `BlobIdentity` that `verify_blob`
+  returns (`check_container`, `open_range`; a changed file is `Changed`).
+  Images are decoded only by `media::render::render`, a pure function on
+  the buffer `read_blob_verified` read to the end, and only inside the
+  decode helper process (slice 5f): never call it in the main process.
+  `media/` opens no file and only `media/render.rs` names `image` or
+  `heic_rs` (`tests/source_rules.rs`). The `heic` feature (owner Q2) is
+  off by default and must never be enabled by `src-tauri` or a release
+  build; CI only lints and audits it. The structural check and the hash
+  are not safety guarantees; never word them as such.
+- **The shell viewer (M5 slice 5e).** `src-tauri/src/viewer/` is
+  Tauri-free; `commands/viewer.rs` only parses, picks the session by
+  generation and runs on the blocking pool. Content crosses only as
+  `UntrustedText`, raw integers as `DecimalString`, ids as `SafeId` (input
+  ids too, `#[ts(as = "SafeId")]`); a new viewer DTO goes into
+  `M5_VIEWER_TYPES` (the viewer guard fails otherwise) and must keep the
+  archive guard's walk disjoint. Commands with free text take the raw
+  `Request` and `parse_raw` it (never a serde error that could echo it),
+  and their `ipc.ts` wrappers use `callRedacted`. A search cancels the
+  previous one's token and interrupt **before** waiting for the search
+  reader. `inspect_attachment` serves only surfaced attachments and
+  refuses playback in Rust when `mediaPlayback` is `off`. A viewer session
+  blocks location changes (D114). Never log query or filter text, ids or
+  content (`src-tauri/tests/log_hygiene.rs`).
+- **The media protocol and the window (M5 slice 5f).** `oma-media`
+  is a custom scheme, and **custom schemes bypass the capability ACL**: the
+  handler (`src-tauri/src/viewer/media/`, Tauri-free; `lib.rs` only adapts
+  the request and responder) authorises every request itself and refuses
+  anything not exactly `GET`/`HEAD /v1/<token>/<rendition>` from `main`
+  with `404` and an empty body. It must never block (WebKitGTK calls it on
+  the GTK main loop): only parse, authorise, answer cache hits and
+  refusals, and enqueue; every `Reply` is answered once (a dropped one
+  answers `503`). Tokens are per session and minted only for surfaced
+  attachments; `stream` needs both the hash and the structural check in
+  this session. Every response carries nosniff, `no-store` and the
+  `sandbox` CSP; never add `Content-Disposition`. Log outcome kinds,
+  statuses, size buckets and elapsed time only: never a token, URI, range
+  or exact size. **Images are decoded only in the decode helper** (`main`
+  runs `viewer::media::helper::run_helper` for `--oma-decode-helper`
+  before anything else); never call `media::render` in the app process.
+  Keep `protocol-asset` off and Tauri's `tracing` feature off. The main
+  window is built in Rust (`window.rs`, `"create": false`, `incognito`):
+  navigation to the app's origin only, new windows, downloads and
+  permission requests denied; keep those hooks when touching `setup`.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush
@@ -342,8 +436,10 @@ Never hand-edit generated files.
   the FTS rank-1 check runs on the writer under `conn::armed`. A failed
   schema check stops it before any table read and writes nothing. Its
   counts are numbers, booleans, closed states and `v1.sql` table names
-  only. Attachment bytes are read back only through `blobs::open_checked`
-  (`open_blob`, the verifier): add no other reader of store files.
+  only. Attachment bytes are read back only through `blobs.rs`:
+  `open_checked` (`open_blob`, the verifier, `verify_blob`,
+  `read_blob_verified`) and `open_range` (plus the sniff window), both
+  there: add no other reader of store files (`tests/source_rules.rs`).
 - **Crash points are `fault::point(FaultPoint::…)` calls.** They compile
   to nothing without the feature. `tests/crash.rs` re-runs its own binary
   with `OMA_TEST_FAULT=<point>:<n>` and kills the child there; add a point

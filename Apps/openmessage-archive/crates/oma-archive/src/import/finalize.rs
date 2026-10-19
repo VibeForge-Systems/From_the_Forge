@@ -225,6 +225,39 @@ fn complete(
     Ok(())
 }
 
+/// Finalize's statistics and index steps for the test-only bulk writer
+/// (M5 spec §14.2): `chat_stats`, `archive_stats`, then FTS merge steps of
+/// [`MERGE_PAGES`] in their own transactions until the index reports no
+/// more work (or [`MERGE_STEPS_MAX`]), then a `TRUNCATE` checkpoint. The
+/// same SQL as an import's finalize, without a session or its cleanup.
+/// Returns the merge steps and whether the merge completed.
+#[cfg(feature = "fault-injection")]
+pub(crate) fn bulk_finalize(conn: &Connection, now_ns: i64) -> rusqlite::Result<(u32, bool)> {
+    in_tx(conn, |c| {
+        c.execute("DELETE FROM chat_stats", [])?;
+        c.execute(CHAT_STATS_SQL, [])
+    })?;
+    in_tx(conn, |c| c.execute(ARCHIVE_STATS_SQL, [now_ns]))?;
+    let mut steps = 0u32;
+    let mut complete = false;
+    while steps < MERGE_STEPS_MAX {
+        let before = conn.total_changes();
+        in_tx(conn, |c| c.execute(MERGE_SQL, [MERGE_PAGES]))?;
+        steps = steps.saturating_add(1);
+        if conn.total_changes().saturating_sub(before) < 2 {
+            complete = true;
+            break;
+        }
+    }
+    conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {
+        r.get::<_, i64>(0)
+    })?;
+    Ok((steps, complete))
+}
+
+/// One FTS merge step (fts5.html, "The 'merge' Command").
+const MERGE_SQL: &str = "INSERT INTO message_fts(message_fts, rank) VALUES('merge', ?1)";
+
 /// Steps 5 and 6, after the session completed: never an error.
 fn optimize(
     conn: &Connection,
@@ -245,12 +278,7 @@ fn optimize(
         let before = conn.total_changes();
         let cancel = ctx.cancel;
         let step = in_tx(conn, |c| {
-            armed(c, cancel, |c| {
-                c.execute(
-                    "INSERT INTO message_fts(message_fts, rank) VALUES('merge', ?1)",
-                    [MERGE_PAGES],
-                )
-            })
+            armed(c, cancel, |c| c.execute(MERGE_SQL, [MERGE_PAGES]))
         });
         match step {
             Ok(_) => {}

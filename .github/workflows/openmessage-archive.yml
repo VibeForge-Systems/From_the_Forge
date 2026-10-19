@@ -5,7 +5,8 @@
 # .github/workflows/; it is scoped to Apps/openmessage-archive/ by path filters.
 #
 #   checks   Linux: npm license audit, typecheck, unit tests, rustfmt,
-#            clippy, Rust tests, IPC bindings drift, cargo-deny.
+#            clippy (also with oma-archive's optional, never-shipped `heic`
+#            feature), Rust tests, IPC bindings drift, cargo-deny.
 #   build    Linux + Windows: Rust and frontend tests on the target OS, then
 #            unsigned installers uploaded as workflow artifacts.
 #
@@ -83,6 +84,11 @@ jobs:
         run: cargo fmt --all --check
       - name: clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # Owner decision Q2 (M5): the optional `heic` feature is never enabled in
+      # a shipped or CI release build; it is only linted here (tests included)
+      # and audited below, so it does not rot.
+      - name: clippy (optional heic feature, never shipped)
+        run: cargo clippy -p oma-archive --all-targets --locked --features heic -- -D warnings
       - name: Rust tests (also regenerates IPC bindings)
         run: cargo test --workspace --locked
       - name: IPC bindings are up to date
@@ -102,6 +108,8 @@ jobs:
           tool: cargo-deny@0.20.2
       - name: Rust license and advisory audit
         run: cargo deny --locked check
+      - name: Rust license and advisory audit (optional heic feature)
+        run: cargo deny --locked --features oma-archive/heic check
 
   build:
     name: Build (${{ matrix.name }})

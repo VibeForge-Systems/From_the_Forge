@@ -149,7 +149,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 2 Backup discovery and validation | Find backups, read their manifests, detect encryption, unlock, validate | Implemented; sign-off pending (fixture-generator review, manual tests) |
 | 3 Extraction check | Locate sms.db, probe the schema, and check that messages, chats, handles and attachment references can be read (counts only) | Implemented; sign-off pending (Windows CI, the clean-room review of the typedstream decoder and the fixture generators, the manual tests) |
 | 4 Archive database | Extract messages and copy attachments into the archive; versioned SQLite schema, transactional and resumable imports, FTS5, integrity verification | Implemented; sign-off pending (CI of slices 4g–4n, two §18.8 Windows tests that are not written yet (a held partial file, a killed lock holder; see `docs/compatibility.md`), the manual tests, the owner's answers on D69, D70, D71, D79 and D82) |
-| 5 Rich viewer | Conversation list, threads, inline media, search, date navigation | Planned |
+| 5 Rich viewer | Conversation list, threads, inline media, search, date navigation | In progress: PR A (viewer reads, search, media checks, the 14 viewer commands, the `oma-media` protocol, the image decode helper and the window built in Rust) implemented and tested on synthetic data in a Linux container, without a window; the screens are PR B |
 | 6 Exports | TXT, CSV, JSON, HTML, PDF, XLSX, and attachments | Planned |
 | 7 Direct device backup | USB device detection and local backup creation | Planned |
 | 8 Hardening and release | Archive repair, recovery tests, diagnostic log, accessibility, signed packages | Planned |
@@ -335,10 +335,20 @@ and message bodies.
 
 ### Next: milestone 5 (rich viewer)
 
+Its backend (PR A) is implemented; the screens (PR B) are next.
+
 - The conversation list and threads, paged through the archive's
   lock-free reader.
-- Inline media read through the verified blob reader and a scoped asset
-  protocol, with thumbnails.
+- Inline media through the app's own `oma-media` scheme (Tauri's asset
+  protocol stays off): images decoded and re-encoded in a separate helper
+  process, audio and video played from the verified file after a
+  structural check and, by default, your confirmation. HEIC shows as a
+  file card in official builds.
+- **Not verified yet:** nothing of the viewer has run in a window or on
+  Windows. Whether WebKitGTK and WebView2 load media from the scheme,
+  request ranges as expected and honour the window's download and
+  permission refusals is on the manual checklist
+  ([compatibility.md](docs/compatibility.md)).
 - Search over the full-text index, with a bounded fallback for short
   Chinese, Japanese and Korean queries and emoji.
 - Labels: "not in the latest import from this phone", "edited", "unsent;

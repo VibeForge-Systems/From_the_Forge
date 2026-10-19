@@ -8,7 +8,8 @@
 //! budget.
 //!
 //! [`ArchiveReader::open_blob`] is the one way attachment bytes are read
-//! back (spec §4.3, §9.5); M5 adds thread pages and search here.
+//! back in full (spec §4.3, §9.5); M5 adds thread pages and search, and the
+//! viewer's blob readers in `crate::media`.
 
 use rusqlite::types::ValueRef;
 use rusqlite::Connection;
@@ -347,6 +348,11 @@ impl ArchiveReader {
         &self.conn
     }
 
+    /// The archive's directory (the blob readers resolve store files in it).
+    pub(crate) fn dir(&self) -> &ArchiveDir {
+        &self.dir
+    }
+
     pub(crate) fn set_version(&mut self, version: u32) {
         self.inspected.version = version;
     }
@@ -362,7 +368,7 @@ impl ArchiveReader {
     }
 
     /// Reads need the current schema; an older one gives `NeedsMigration`.
-    fn require_current(&self) -> Result<(), ArchiveError> {
+    pub(crate) fn require_current(&self) -> Result<(), ArchiveError> {
         if self.inspected.version < self.build_version {
             Err(ArchiveError::NeedsMigration {
                 found: self.inspected.version,

@@ -13,6 +13,8 @@ pub mod panic_hook;
 pub mod settings;
 #[cfg(test)]
 mod ts_guard;
+pub mod viewer;
+pub mod window;
 
 use std::time::Duration;
 
@@ -44,6 +46,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        // Attachment media (M5 §6). Custom schemes bypass the capability
+        // ACL, so the handler authorises every request itself; it never
+        // blocks (on WebKitGTK it runs on the GTK main loop).
+        .register_asynchronous_uri_scheme_protocol(viewer::media::SCHEME, |ctx, req, responder| {
+            media_request(&ctx, &req, responder);
+        })
         .setup(|app| {
             let config_dir = app.path().app_config_dir()?;
             let store = SettingsStore::load(config_dir.join(SETTINGS_FILE));
@@ -51,7 +59,14 @@ pub fn run() {
             commands::archive_location::sweep_in_background(
                 store.settings().archive_directory.clone(),
             );
+            let viewer_prefs = store.settings().viewer;
             app.manage(AppState::new(store));
+            // The main window is built here, not from the config, so its
+            // navigation, new-window, download and permission hooks are set
+            // (M5 §6.7).
+            let (window, origins) = window::build_main(app)?;
+            app.state::<AppState>().viewer.set_origins(origins);
+            commands::settings::apply_window_effects(&window, &viewer_prefs);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -75,6 +90,20 @@ pub fn run() {
             commands::archives::start_import,
             commands::archives::confirm_import,
             commands::archives::verify_archive,
+            commands::viewer::open_viewer,
+            commands::viewer::close_viewer,
+            commands::viewer::list_conversations,
+            commands::viewer::get_conversations,
+            commands::viewer::get_thread_page,
+            commands::viewer::get_reply_thread,
+            commands::viewer::get_message_detail,
+            commands::viewer::get_message_text,
+            commands::viewer::get_day_counts,
+            commands::viewer::seek_date,
+            commands::viewer::search_messages,
+            commands::viewer::get_search_results,
+            commands::viewer::cancel_search,
+            commands::viewer::inspect_attachment,
         ])
         .build(tauri::generate_context!())
         .expect("the Tauri runtime failed to start")
@@ -86,6 +115,7 @@ pub fn run() {
                 // skips this; the startup sweep and the next write open of
                 // the archive cover that case.
                 if let Some(state) = app.try_state::<AppState>() {
+                    state.viewer.close_any();
                     let clean = state.jobs.cancel_all_and_wait(EXIT_WAIT);
                     tracing::info!(clean, "exit");
                 }
@@ -95,3 +125,58 @@ pub fn run() {
 
 /// How long the exit handler waits for running jobs to clean up.
 const EXIT_WAIT: Duration = Duration::from_secs(5);
+
+/// The `oma-media` adapter: Tauri's request and responder in, the
+/// Tauri-free core (`viewer::media`) does the rest.
+fn media_request<R: tauri::Runtime>(
+    ctx: &tauri::UriSchemeContext<'_, R>,
+    req: &tauri::http::Request<Vec<u8>>,
+    responder: tauri::UriSchemeResponder,
+) {
+    use viewer::media::{MediaRequest, MediaResponse, Reply};
+    let reply = Reply::new(Box::new(move |r: MediaResponse| {
+        let mut b = tauri::http::Response::builder().status(r.status);
+        for (k, v) in &r.headers {
+            b = b.header(*k, v.as_str());
+        }
+        match b.body(r.body) {
+            Ok(resp) => responder.respond(resp),
+            Err(_) => {
+                let empty = tauri::http::Response::builder()
+                    .status(500)
+                    .body(Vec::new())
+                    .unwrap_or_default();
+                responder.respond(empty);
+            }
+        }
+    }));
+    let Some(state) = ctx.app_handle().try_state::<AppState>() else {
+        return reply.send(viewer::media::Outcome::Refused, MediaResponse::refused());
+    };
+    let values = |name: &str| -> Vec<&str> {
+        req.headers()
+            .get_all(name)
+            .iter()
+            .map(|v| v.to_str().unwrap_or(""))
+            .collect()
+    };
+    let ranges = values("range");
+    let origins = values("origin");
+    let playback_allowed = state
+        .settings()
+        .map(|s| s.settings().viewer.media_playback != settings::MediaPlayback::Off)
+        .unwrap_or(false);
+    let target = req.uri().path_and_query().map_or("", |p| p.as_str());
+    viewer::media::dispatch(
+        &state.viewer,
+        &MediaRequest {
+            label: ctx.webview_label(),
+            method: req.method().as_str(),
+            target,
+            ranges: &ranges,
+            origins: &origins,
+            playback_allowed,
+        },
+        reply,
+    );
+}

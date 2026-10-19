@@ -65,6 +65,21 @@ impl ByteLen for zeroize::Zeroizing<String> {
     }
 }
 
+/// Text another crate built from stored content (the archive viewer's
+/// decoded and capped strings, M5 §3.8).
+impl ByteLen for String {
+    fn byte_len(&self) -> usize {
+        self.len()
+    }
+}
+
+/// Bytes another crate read from stored content (M5 §3.4).
+impl ByteLen for Vec<u8> {
+    fn byte_len(&self) -> usize {
+        self.len()
+    }
+}
+
 /// The storage class SQLite reported for a text-bearing cell (M4 R7).
 ///
 /// sms.db's text columns are typeless in places, so a cell may hold a BLOB.
@@ -210,6 +225,11 @@ mod tests {
         let shown = format!("{b:?} {:?}", b.expose());
         assert!(!shown.contains(SENTINEL), "{shown}");
         assert_eq!(b.byte_len(), 17);
+        let s = Redacted::new(SENTINEL.to_owned());
+        let v = Redacted::new(SENTINEL.as_bytes().to_vec());
+        let shown = format!("{s:?} {v:?}");
+        assert!(!shown.contains(SENTINEL), "{shown}");
+        assert_eq!(shown, "<redacted: 17 bytes> <redacted: 17 bytes>");
     }
 
     #[test]

@@ -93,6 +93,8 @@ pub enum Stage {
     Batch,
     /// The verifier's reads and its result rows.
     Verify,
+    /// A viewer read (M5 §3.2).
+    View,
 }
 
 /// Which file-system operation an I/O error came from.
@@ -111,7 +113,8 @@ pub enum IoOp {
     Sync,
 }
 
-/// Why an attachment file could not be opened through `open_blob`.
+/// Why an attachment file could not be opened or read through `open_blob`
+/// or the viewer's blob readers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum BlobProblem {
@@ -130,6 +133,39 @@ pub enum BlobProblem {
     LengthMismatch,
     /// Opening or inspecting the file failed.
     Io(io::ErrorKind),
+    /// The content does not hash to the row's digest (`verify_blob`,
+    /// `read_blob_verified`; M5 §5.4): "the file does not match its recorded
+    /// checksum".
+    DigestMismatch,
+    /// The file is not the one `verify_blob` checked: its identity (on Unix
+    /// device, inode, length and mtime; on Windows length and mtime)
+    /// changed, before `open_range` or while it was being hashed.
+    Changed,
+    /// `open_range` or `check_container` was given the identity of another
+    /// blob: only a blob verified in this session may be streamed.
+    NotVerified,
+    /// The file is larger than the caller's limit (`read_blob_verified`):
+    /// "Too large to preview".
+    OverLimit,
+}
+
+/// Why a search query was refused (M5 spec §4.1). The query text is never
+/// kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum QueryProblem {
+    /// More than 512 bytes.
+    TooLong,
+    /// More than 16 terms.
+    TooManyTerms,
+    /// A term of more than 128 bytes.
+    TermTooLong,
+    /// A NUL or another C0 control character.
+    ControlCharacter,
+    /// No term with a letter or a number (or an empty exact-text needle).
+    NoTerms,
+    /// An exact-text needle of more than 64 code points.
+    NeedleTooLong,
 }
 
 /// An error from the archive library.
@@ -195,6 +231,23 @@ pub enum ArchiveError {
     /// The work was cancelled.
     #[error("cancelled")]
     Cancelled,
+    /// A viewer read needed more work than its budget, or more time than
+    /// its deadline, allows (M5 §3.2). The query was too broad; this never
+    /// means the archive is damaged.
+    #[error("query too broad")]
+    QueryTooBroad,
+    /// A viewer anchor is not a message of the conversation asked for
+    /// (M5 §3.5), or the message does not exist.
+    #[error("anchor not found")]
+    AnchorNotFound,
+    /// A search query was refused (M5 §4.1).
+    #[error("invalid query")]
+    InvalidQuery(QueryProblem),
+    /// The full-text index could not be read (M5 §4.3): search is
+    /// unavailable, browsing still works. Verify reports the damage;
+    /// repair is M8.
+    #[error("search unavailable")]
+    SearchUnavailable,
     /// A bug.
     #[error("internal")]
     Internal(&'static str),
@@ -225,6 +278,8 @@ pub(crate) fn primary_code(e: &rusqlite::Error) -> Option<i32> {
     }
 }
 
+/// `SQLITE_ERROR`.
+pub(crate) const SQLITE_ERROR: i32 = 1;
 /// `SQLITE_INTERRUPT`.
 pub(crate) const SQLITE_INTERRUPT: i32 = 9;
 /// `SQLITE_NOTADB`.

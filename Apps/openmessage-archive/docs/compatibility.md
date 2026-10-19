@@ -795,6 +795,180 @@ continue were not exercised** in the window, nor was a crash during an
 import, the gate's timeout, or a reload while an import waited. The
 manual checklist for milestone 4 below has not been run.
 
+### Milestone 5 viewer fixtures and bulk generator (slice 5a)
+
+Generated and checked in the Linux container on 2026-10-18; not CI, not a
+desktop, synthetic data only:
+
+- `make_viewer_media` (the `image` 0.25.10 encoders plus hand-written
+  files) and `make_synthetic_viewer.py` (Python 3.13.16, `sqlite3` 3.45.1,
+  cryptography 50.0.1) wrote `tests/fixtures/viewer/`. Two generator runs
+  over the same `media/` gave byte-identical trees. The hand-written
+  deflate streams of the three hostile PNGs were inflated with Python's
+  `zlib` in scratch: 144,012,000, 134,287,369 and 180,001 zero bytes, with
+  valid Adler-32 and chunk CRCs.
+- `tests/viewer_fixtures.rs` passed (10 tests): both sums pins; every
+  `media/` file rebuilt byte for byte; the images read back with the
+  `image` decoders (EXIF orientation 6 and the GPS pointer, two GIF frames,
+  the hostile PNGs' header dimensions and colour types against the 128 MiB
+  cap); every entry and every scenario imported by the M4 import into an
+  archive equal to the model's `content` manifest; and the `viewer`
+  statement's self-consistency. **The `viewer` facts themselves are not yet
+  compared with any Rust code** (the viewer reads come in slices 5b–5d).
+- One rule was settled by the import: a body of 10,000 two-character
+  formatting runs exceeds the typedstream decoder's materialisation budget
+  (twice the input plus 64 KiB) and is shown from the text column; the
+  fixture uses 16 characters per run, which decodes.
+- **Calibration of the bulk generator** (`tests/bulk.rs`,
+  `calibrate_bulk_against_import`, release profile, 4 CPUs, one run each)
+  against the import of the M4 perf generator's sms.db, 99,997 messages,
+  2,000 handles, 1,000 chats:
+
+  | Measure | Import-built | Bulk, same bodies | Bulk, mixed text |
+  |---|---|---|---|
+  | Writing the archive | 23.1 s (import) | 8.2 s | 8.9 s |
+  | Finalize (statistics, FTS merge, checkpoint) | in the import | 0.16 s, 2 merge steps | 0.17 s, 2 merge steps |
+  | Database size | 110,034,944 bytes | 75,091,968 bytes | 86,319,104 bytes |
+  | Pages | 26,864 | 18,333 | 21,074 |
+  | FTS data blocks (`message_fts_data`) | 1,443,817 bytes in 377 rows | 1,773,707 bytes in 449 rows | 3,359,340 bytes in 877 rows |
+  | Quick verify | 1.02 s | 0.66 s | 0.83 s |
+
+  The bulk archive is smaller because it writes no `value_issue`,
+  `value_history`, `lineage_seen` or unkeyed rows, one attachment per 100
+  messages instead of one per three, and only the columns it sets. Its FTS
+  index is about 23 % larger on similar bodies: its reaction rows carry
+  "Loved “…”" text, and the import generator's rows repeat one body
+  (`SYNTH-SAME`) for every eighth row and leave others empty or invalid. "Mixed text" is the default
+  data (Latin words, 2 % CJK, 1 % emoji). These are synthetic numbers on
+  one host; the viewer timings of spec §11 are not measured yet.
+
+**Not yet observed:** any of this on Windows. Spike 5s (virtualisation
+and playback on a desktop with audio, WebKitGTK and WebView2) cannot run
+in this container; its results are **UNVERIFIED**, and the designed
+behaviour stays behind feature detection until it is run.
+
+### Milestone 5 media protocol, decode helper and window (slice 5f)
+
+Run in the Linux container on 2026-10-19 (Rust 1.97.0, debug build, 4
+CPUs); not CI, not a desktop, no window, synthetic data only:
+
+- **The protocol's core, without a window** (`viewer::media` tests, on an
+  archive imported from `view-media-plain`, with a fake decoder): every
+  refusal of spec §13.6 except an evicted token answers `404` with an
+  empty body before `dispatch` returns (eviction is tested on the token
+  table only, bound 50,000, not through `dispatch`); renditions are served from the decode workers and then from the
+  memory cache without a queue; a full decode queue drops its oldest entry
+  with `503`; five decoder crashes turn previews off; tokens stop working
+  when the session closes or is reopened, and the session's decoders end;
+  real streams of the catalogue's playable files honour the range rules
+  (`206` chunks with `Content-Range`, `416` with `*/len`, `200` whole only
+  without `Range`, refusals for malformed, multiple and overflowing
+  ranges); a 3 GiB length is checked by arithmetic only (no such file).
+- **The decode helper** (`tests/decode_helper.rs`): the built binary, run
+  with `--oma-decode-helper`, re-encoded the catalogue's PNG (RGB and
+  alpha), EXIF-rotated JPEG and animated GIF, refused the 60000×60000 PNG
+  header and SVG with closed codes, was restarted after dying mid-request
+  (debug-build crash code), and a hung stand-in process was killed after
+  the timeout.
+- **The configuration** (`window` tests): `tauri.conf.json` merged with
+  `tauri.linux.conf.json` and with `tauri.windows.conf.json` (JSON Merge
+  Patch, as tauri-utils does) gives exactly the designed CSP and dev CSP
+  for each platform; `main` has `create: false` and `incognito: true`;
+  `tauri` resolves without `protocol-asset` (`cargo metadata`).
+- **Logs** (`src-tauri/tests/log_hygiene.rs`): the handler, driven for
+  every token of three catalogue archives through the real helper, logged
+  no token, media path, range or exact size.
+
+**Headless smoke test** (2026-10-19, `xvfb-run`, WebKitGTK 2.52.6, a
+debug build whose dev URL served a scratch page instead of the app; not a
+desktop, no audio, not committed): the app built `main` from Rust with
+`incognito` on and loaded the dev URL (allowed by the navigation hook);
+`<img>` and `<video>` sources on `oma-media://localhost/…` reached the
+handler (four refusals logged: no viewer session was open), so WebKitGTK
+2.52.6 registered the **hyphenated scheme under incognito**; a script
+navigation to `https://example.com/` left the page in place (two later
+requests still arrived), consistent with the navigation hook refusing it.
+Not shown by it: images actually rendered, the production CSP (a dev build
+was used), `Range` behaviour, the new-window and download hooks.
+
+**Not tested** (manual checklist; slice 5k and spike 5s): whether WebKitGTK
+loads and renders images from the scheme under the merged production CSP
+on a desktop; the same on WebView2 with
+`http://oma-media.localhost`; whether either engine sends `Range` for
+every media request, seeks with `206` chunks, or keeps anything despite
+`no-store` and incognito; whether the navigation, new-window, download and
+permission hooks fire on either engine (including downloads from native
+`<video>` controls); the `CREATE_NO_WINDOW` helper spawn and the decode
+times on Windows; decode times on real hardware with synthetic photos. No
+row of this section has run on Windows; CI on `windows-2022` will compile
+and run the same tests.
+
+Also **not tested** yet, for either engine (each is a claim in
+`privacy.md`, to be recorded per engine on the M5 manual checklist of
+slice 5k): whether the web engine's own sandbox is on (WebKitGTK's
+bubblewrap sandbox on Linux, WebView2's renderer sandbox on Windows);
+whether print-to-PDF or the engine's print dialog can write what the
+window shows; whether either engine caches media or page data on disk
+despite `no-store` and the incognito profile; whether Windows Recall
+captures the window, with and without capture protection.
+
+### Milestone 5 PR A review fixes
+
+Run in the Linux container on 2026-10-19 (Rust 1.97.0, debug build, 4
+CPUs); not CI, not a desktop, no window, synthetic data only. Each fix has
+a regression test that ran there:
+
+- **Masking:** a `message_text` chunk past an untrusted code range is
+  withheld whole (`chunks_past_an_untrusted_code_range_stay_masked`); an
+  earlier edit text whose runs were cut short is withheld whole
+  (`an_edit_text_with_incomplete_runs_is_withheld_whole`); "Show earlier
+  text" keeps that text's one-time codes masked
+  (`revealed_earlier_text_keeps_its_codes_masked`).
+- **Search:** a hit whose body stopped being current after the search
+  sends no text without `includeEarlier`
+  (`a_hit_whose_body_stopped_being_current_withholds_its_text`); the words
+  cap counts messages in both plans and keeps "current" labels when the
+  cut leaves an earlier body first
+  (`the_words_cap_counts_messages_and_keeps_current_labels`); a new search
+  interrupts the old one before it waits for the search reader
+  (`a_new_search_interrupts_the_old_one_before_waiting_for_the_reader`,
+  which fails when the order is reversed).
+- **Threads and details:** a reaction to a folded reaction, and a cycle of
+  reactions, stay visible and counted
+  (`a_reaction_to_a_folded_reaction_stays_visible`); the reply thread
+  keeps the earliest replies by date
+  (`the_reply_thread_keeps_the_earliest_replies_by_date`); a `Scan` that
+  used up the call's deadline still assembles its items
+  (`a_scan_that_used_up_the_deadline_still_assembles_its_items`, which
+  fails without the fix); the reaction history pages by a remembered
+  keyset, so a row added between calls repeats nothing
+  (`reaction_history_pages_every_row_in_date_order`,
+  `reaction_history_pages_by_remembered_positions`); unsend part counts
+  and the whole-bubble label come only from recorded parts
+  (`an_unsend_with_unknown_parts_is_not_called_whole`); a message whose
+  direction is not recorded has no sender (the viewer catalogue's
+  re-pinned expectations); anchors moved by the page-size cut keep their
+  keys (`oversized_pages_are_cut_to_the_bound`).
+- **Shell and media:** an unreadable viewer preference keeps the others
+  and fails to its most private value with a notice
+  (`an_unreadable_viewer_preference_keeps_the_others_and_gives_a_notice`);
+  the surfaced set evicts least recently surfaced instead of refusing new
+  attachments; two requests for one rendition decode once and count one
+  crash (`concurrent_requests_for_one_rendition_decode_once`); a helper
+  killed between requests is replaced without failing the next image
+  (`a_helper_that_died_between_requests_does_not_fail_the_next_image`,
+  Linux only); the log check asserts that `media` events carry only
+  outcome, status, size bucket and elapsed time, and that no served or
+  fixture size appears as a field value; the `protocol-asset` check reads
+  `cargo metadata --filter-platform <host>`.
+- **Windows:** a test that a junctioned `<hh>` directory (to an identical
+  copy) is refused by `inspect_blob`, `verify_blob`, `open_range` and
+  `read_blob_verified`, and a file symlink where the runner allows one
+  (`store_readers_refuse_a_junctioned_fan_out_directory_on_windows`), was
+  added for `windows-2022` CI. **It has not run yet** (no Windows host
+  here); until a CI run records its `RECORD` lines, the junction refusal of
+  the M5 readers on Windows is untested.
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI

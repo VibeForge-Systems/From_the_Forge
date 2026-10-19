@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-seek-date"
+description = "Enables the seek_date command without any pre-configured scope."
+commands.allow = ["seek_date"]
+
+[[permission]]
+identifier = "deny-seek-date"
+description = "Denies the seek_date command without any pre-configured scope."
+commands.deny = ["seek_date"]

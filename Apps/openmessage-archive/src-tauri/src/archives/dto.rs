@@ -1345,6 +1345,23 @@ pub fn verify_phase(p: oa::VerifyPhase) -> Option<JobPhase> {
     })
 }
 
+/// Every declared type reachable from the archive DTOs (the archive
+/// guard's walk; the viewer's guard checks that the two are disjoint).
+#[cfg(test)]
+pub(crate) fn guard_walk() -> std::collections::BTreeMap<String, String> {
+    let mut w = crate::ts_guard::Walk::new();
+    w.root::<ArchiveListingDto>();
+    w.root::<ArchiveDetailsDto>();
+    w.root::<ArchiveSummaryDto>();
+    w.root::<crate::backups::dto::JobEvent>();
+    w.root::<CreateArchiveRequest>();
+    w.root::<ArchiveRef>();
+    w.root::<StartImportRequest>();
+    w.root::<ConfirmImportRequest>();
+    w.root::<VerifyArchiveRequest>();
+    w.decls()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1527,17 +1544,66 @@ mod tests {
     ];
 
     fn walk() -> BTreeMap<String, String> {
+        guard_walk()
+    }
+
+    /// Field types that name a viewer brand or a viewer type (M5 §7.4):
+    /// `ts_guard::is_string` sees only the word `string`, and
+    /// `#[ts(type = …)]` drops the dependency edge, so the walk alone would
+    /// never reach a viewer type from an archive DTO.
+    fn viewer_leaks(decls: &BTreeMap<String, String>) -> Vec<String> {
+        let viewer = crate::viewer::dto::M5_VIEWER_TYPES;
+        let brands = crate::viewer::dto::BRANDS;
+        let mut out = Vec::new();
+        for (ty, decl) in decls {
+            if ts_guard::M2_M3_TYPES.contains(&ty.as_str()) {
+                continue;
+            }
+            for (key, field_ty) in ts_guard::fields(decl) {
+                let leaks = field_ty
+                    .split(|c: char| !c.is_alphanumeric())
+                    .any(|w| brands.contains(&w) || viewer.contains(&w));
+                if leaks {
+                    out.push(format!("{ty}.{key}"));
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn archive_dtos_name_no_viewer_brand_or_type() {
+        assert_eq!(viewer_leaks(&walk()), Vec::<String>::new());
+    }
+
+    /// A DTO shaped like an archive DTO that carries content.
+    #[derive(Serialize, TS)]
+    #[serde(rename_all = "camelCase")]
+    struct LeakyArchiveDto {
+        archive_id: String,
+        note: crate::viewer::dto::ContentTextDto,
+        first: Option<crate::viewer::dto::SafeId>,
+    }
+
+    #[test]
+    fn the_archive_guard_rejects_a_content_field() {
         let mut w = ts_guard::Walk::new();
-        w.root::<ArchiveListingDto>();
-        w.root::<ArchiveDetailsDto>();
-        w.root::<ArchiveSummaryDto>();
-        w.root::<JobEvent>();
-        w.root::<CreateArchiveRequest>();
-        w.root::<ArchiveRef>();
-        w.root::<StartImportRequest>();
-        w.root::<ConfirmImportRequest>();
-        w.root::<VerifyArchiveRequest>();
-        w.decls()
+        w.root::<LeakyArchiveDto>();
+        let mut decls = w.decls();
+        // Not exported, so the walk skips it: check its declaration too.
+        decls.insert(
+            "LeakyArchiveDto".to_owned(),
+            LeakyArchiveDto::decl(&Config::from_env()),
+        );
+        let leaks = viewer_leaks(&decls);
+        assert!(
+            leaks.contains(&"LeakyArchiveDto.note".to_owned()),
+            "{leaks:?}"
+        );
+        assert!(
+            leaks.contains(&"LeakyArchiveDto.first".to_owned()),
+            "{leaks:?}"
+        );
     }
 
     #[test]

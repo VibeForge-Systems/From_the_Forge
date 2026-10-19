@@ -739,9 +739,9 @@ version.
 | ChatExportKnowledge (S8) | CC BY 4.0 | Facts, restated in our own words, with attribution; no text copied |
 | iLEAPP (S10) | MIT | Facts; could be ported with attribution, but nothing was |
 | plaso `imessage_chat.db` (S12) | Repository Apache-2.0; file terms UNVERIFIED | Observed in scratch and used as an oracle sample; never committed |
-| libheif / libde265 | LGPL-3.0 | Avoid static linking |
+| libheif / libde265 | LGPL-3.0 | Not allowed (owner decision Q2, M5), in any form of linking, including through the MIT `libheif-rs`/`libheif-sys` wrappers (which link the system LGPL libheif; `cargo deny` cannot see that) |
 | `heic` (imazen) | AGPL-3.0 | Not allowed |
-| `heic-rs` | MIT OR Apache-2.0 | Candidate for HEIC thumbnails (M5), behind a feature flag. It is very new and grants no HEVC patent rights. |
+| `heic-rs` | MIT OR Apache-2.0 | Used behind `oma-archive`'s non-default `heic` feature (`=0.1.4`); never in official or CI release builds (owner decision Q2). It is very new and grants no HEVC patent rights. |
 
 ## Questions that require real hardware
 
@@ -859,6 +859,25 @@ Added by milestone 4 (the archive import; spec Appendix B). All are
     moment.
 34. The meaning of `destination_caller_id` (the owner's own address or
     not); the contents of `payload_data` for polls and app messages.
+
+Added by milestone 5 (the viewer's media, slice 5d; M5 spec Appendix B).
+All are **UNVERIFIED**; the checks were built and tested on synthetic files
+only.
+
+35. Whether GStreamer (WebKitGTK) and Media Foundation (WebView2) choose
+    their demuxer from the bytes, the `Content-Type` or both. GStreamer's
+    autoplugging typefinds on its own, so a file the app sniffed as MP4 may
+    still be parsed by another element; the sniff decides only what the
+    app offers (`crates/oma-archive/src/media/sniff.rs`), and is not
+    claimed as a mitigation.
+36. The QuickTime reference-movie atoms (`rmra`, `rmda`, `rdrf`, `rmdr`),
+    the `dref` entry types (`url `, `urn `, `alis`, `rsrc`) and the meaning
+    of their flag 0x000001 ("data in this file"), as the structural check
+    reads them (`media/container.rs`). Taken from the M5 spec's summary of
+    Apple's QuickTime File Format Specification, which was not re-read for
+    slice 5d; and whether either engine would follow a reference movie or
+    an external data reference at all (a manual test with the check
+    bypassed in a debug build, M5 §5.3).
 
 Two questions from the M3 research were settled by tests rather than
 hardware: a schema with double-quoted string literals still loads with

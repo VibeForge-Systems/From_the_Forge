@@ -900,7 +900,7 @@ fn history_json(table: &str, col: &str, v: ValueRef<'_>) -> Value {
 /// `key_kind`, the GUID or address, and a handle's service and its state.
 type KeyCells = (i64, Option<Vec<u8>>, Option<Vec<u8>>, Option<i64>);
 
-fn manifest_ref(table: &str, c: &rusqlite::Connection, id: i64) -> String {
+pub fn manifest_ref(table: &str, c: &rusqlite::Connection, id: i64) -> String {
     let (kind, guid_or_addr, service, service_st): KeyCells = if table == "handle" {
         c.query_row(
             "SELECT key_kind, address, service, service_st FROM handle WHERE id = ?1",

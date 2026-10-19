@@ -33,12 +33,12 @@ fn configured_library(state: &AppState) -> IpcResult<Option<PathBuf>> {
         .map(PathBuf::from))
 }
 
-fn require_library(state: &AppState) -> IpcResult<PathBuf> {
+pub(crate) fn require_library(state: &AppState) -> IpcResult<PathBuf> {
     configured_library(state)?
         .ok_or_else(|| IpcError::new(ErrorCode::NotConfigured, messages::NOT_CONFIGURED))
 }
 
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> IpcResult<T> + Send + 'static,
 ) -> IpcResult<T> {
     tauri::async_runtime::spawn_blocking(f)

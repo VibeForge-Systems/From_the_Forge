@@ -1,0 +1,2 @@
+<!DOCTYPE html>
+<html><head><title>SYNTH</title></head><body><img src="x" onerror="alert('SYNTH-ONERROR')"><script>alert('SYNTH-HTML-SCRIPT')</script></body></html>

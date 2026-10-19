@@ -31,7 +31,13 @@
 //!
 //! [`Archive::verify`] is the report-only integrity verifier (slice 4k,
 //! spec §11), quick or full, and [`ArchiveReader::open_blob`] the one way
-//! attachment bytes are read back.
+//! attachment bytes are read back in full.
+//!
+//! [`media`] (M5 slice 5d) holds the viewer's media rules: the content
+//! sniffer, the structural check of audio and video containers, the
+//! viewer's blob readers (`inspect_blob`, `verify_blob`, `check_container`,
+//! `open_range`, `read_blob_verified`) and [`media::render::render`], the
+//! pure function the decode helper process runs to make image renditions.
 //!
 //! Every connection is opened by one module, with the hardening of spec
 //! §5.5 (`DEFENSIVE`, `TRUSTED_SCHEMA` off, no `ATTACH`, an op budget on
@@ -51,6 +57,8 @@
 
 mod archive;
 mod blobs;
+#[cfg(feature = "fault-injection")]
+mod bulk;
 mod conn;
 mod error;
 mod fault;
@@ -59,21 +67,27 @@ mod import;
 mod layout;
 mod library;
 mod lock;
+pub mod media;
 mod progress;
 mod provenance;
 mod reader;
 pub mod schema;
+mod search;
+mod sortkey;
 pub mod space;
 mod store_fs;
 mod verify;
+mod view;
 
 #[cfg(feature = "fault-injection")]
 pub use fault::hooks;
 
 pub use archive::{Archive, CheckpointOutcome, CloseReport, Recovery, RecoveryReport};
-pub use blobs::BlobReader;
+pub use blobs::{BlobReader, RangeReader};
+pub use conn::SearchInterrupt;
 pub use error::{
-    ArchiveError, BlobProblem, DamageKind, IoOp, LocationRefusal, PermProblem, RefusalKind, Stage,
+    ArchiveError, BlobProblem, DamageKind, IoOp, LocationRefusal, PermProblem, QueryProblem,
+    RefusalKind, Stage,
 };
 pub use id::{ArchiveId, IdError, Label, LabelState, ARCHIVE_ID_LEN, LABEL_MAX_BYTES};
 pub use import::{
@@ -86,6 +100,10 @@ pub use import::{
 };
 pub use library::{ArchiveEntry, Library, SweepReport, LIST_LIMIT, SWEEP_MIN_AGE};
 pub use lock::{LOCK_RETRIES, LOCK_RETRY_WAIT};
+pub use media::{
+    BlobIdentity, ContainerRefusal, ContainerVerdict, MediaClass, RenderError, RenderLimits,
+    Rendered, RenderedFormat, Rendition, Sniffed, SniffedKind, CONTAINER_CHECK_TIME, SNIFF_WINDOW,
+};
 pub use progress::{
     ArchiveCtx, ArchiveEvent, ArchiveSink, CancelToken, Clock, FixedClock, ImportPhase, NoProgress,
     SystemClock, VerifyPhase,
@@ -97,11 +115,40 @@ pub use reader::{
 pub use schema::codes::{BlobVerifyState, Pass, QualifierBit, SessionState, VerifyOutcome};
 pub use schema::migrate::MigrationReport;
 pub use schema::{APPLICATION_ID, DECODER_VERSION, DERIVER_VERSION, SCHEMA_VERSION};
+pub use search::scan::{SCAN_BATCH, SCAN_EXAMINED_LIMIT};
+pub use search::words::{SCOPED_BATCH, SCOPED_CHAT_ROWS};
+pub use search::{
+    Highlight, HitPiece, HitText, HitVersion, NoHighlight, ScanCoverage, ScanProgress, ScanStop,
+    SearchFilters, SearchHit, SearchMode, SearchRan, SearchRequest, SearchResultSet, SenderFilter,
+    SetEntry, WordsPlan, HITS_PER_CALL, HIT_OTHER_CHATS, NEEDLE_CHARS, PREFIX_MIN_CHARS,
+    QUERY_BYTES, QUERY_TERMS, SEARCH_MATCH_CAP, SNIPPET_CHARS, TERM_BYTES,
+};
 pub use space::SpaceEstimate;
 pub use store_fs::{DirSync, Placed, RealFs, StoreFs};
 pub use verify::{
     CheckState, SchemaCheck, VerifyCounts, VerifyDepth, VerifyReport, VerifySummary,
     IMPORTS_SCAN_SLACK, SQLITE_CHECK_ROWS, STORE_WALK_SLACK,
+};
+pub use view::{
+    Anchor, AssembledMessage, AssocVisibility, AssociationFacts, AttachmentId, AttachmentRef,
+    BodyId, BodyText, BodyView, CappedCount, ChatId, ChatLabel, ChatStatsFacts, ChipSender,
+    ChipState, ContentText, Conversation, ConversationIndex, ConversationSort, Direction,
+    DirectionCode, EarlierText, EditFacts, Focus, FocusReason, Formatting, GroupEvent, HandleId,
+    MaskKind, MessageId, MessageLabel, NameFilter, NameFilterError, NoText, OptContent, PageRange,
+    Participant, Preview, PreviewBody, ReactionChip, ReactionKind, ReactionSummary,
+    RecentlyDeletedMarker, RecordedBy, RecordedTime, ReplyRef, Reveal, Segment, SegmentKind,
+    SenderReason, SortKeyHint, TextPiece, ThreadPage, UrlRun, WithheldReason, BODY_PAGE_UTF16,
+    CONVERSATIONS_PER_CALL, CONVERSATION_INDEX_LIMIT, EMOJI_BYTES, IDENTIFIER_UTF16,
+    LABEL_PARTICIPANTS, PAGE_BYTES, PAGE_HANDLES, PAGE_ITEMS, PREVIEW_SCAN_ROWS, PREVIEW_UTF16,
+    QUOTE_UTF16, REPLY_THREAD_LIMIT,
+};
+pub use view::{
+    AttachmentFacts, BlobFacts, BodyVersion, CardState, ChatFlags, ChunkText, DayCounts,
+    DetailTimes, EditEntryText, EditEntryView, EditTextsOutcome, EditTime, HistoryColumn,
+    HistoryValue, IdentifierProbe, MessageDetail, Observation, OlderBackup, RawNumber, RawValue,
+    ReactionCursor, ReactionHistory, ReactionRecord, SeekDir, TextChunk, VerifyFacts, VersionText,
+    DAY_BOUNDS, DETAIL_CHATS, DETAIL_EDIT_ENTRIES, DETAIL_VERSIONS, REACTION_HISTORY_LIMIT,
+    REACTION_HISTORY_PAGE, TEXT_CHUNK_UTF16,
 };
 
 /// The app version recorded in `archive_meta.created_by`,

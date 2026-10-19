@@ -111,8 +111,8 @@ pub use schema::{
     KnownColumnSet, KnownTable, Probe, TableCaps, Unsupported, UnsupportedReason,
 };
 pub use summary::{
-    EditEntry, EditedPart, FieldOutcome, ShapeError, SummaryInfo, SUMMARY_ARRAY_CAP,
-    SUMMARY_MAX_DEPTH,
+    edit_texts, EditBody, EditEntry, EditText, EditTextsError, EditedPart, FieldOutcome,
+    ShapeError, SummaryInfo, SUMMARY_ARRAY_CAP, SUMMARY_MAX_DEPTH,
 };
 pub use time::{
     CocoaTime, SummaryTime, SummaryTimeRaw, TimeInterp, COCOA_EPOCH_UNIX_S, NS_MAX, NS_THRESHOLD,

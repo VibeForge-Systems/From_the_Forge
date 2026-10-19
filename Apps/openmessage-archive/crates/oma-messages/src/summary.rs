@@ -19,8 +19,10 @@
 //!
 //! Every other root key is counted in `unknown_keys` (`ust`, `ams`, `amc`
 //! and `euh` among them; their meanings are **UNVERIFIED**) and its name is
-//! never kept. The layouts of `otr`'s values and of the edit bodies `t` are
-//! not read: decoding `t` is deferred (§23.2).
+//! never kept. The layout of `otr`'s values is not read. The edit bodies
+//! `t` are not decoded by the import; [`edit_texts`] decodes them at read
+//! time for the viewer's edit-history panel (M5 §3.7, owner Q3a), and
+//! nothing it returns is stored or indexed.
 //!
 //! **A bad field spoils only itself.** A wrong type anywhere inside `ec`
 //! makes `ec` [`FieldOutcome::Bad`], and `otr`, `rp` and `tmp` are still
@@ -46,7 +48,9 @@ use oma_backup::bplist::{parse_bounded, PValue, PlistReadError, ReadOpts};
 use oma_backup::LimitKind;
 
 use crate::col::IssueKind;
+use crate::redact::Redacted;
 use crate::time::SummaryTime;
+use crate::typedstream::{decode_attributed_body, AttrFlag, TsBudget, TsErrorKind};
 
 /// The depth `message_summary_info` is read to.
 pub const SUMMARY_MAX_DEPTH: u32 = 16;
@@ -266,6 +270,123 @@ fn rp(v: &PValue) -> Result<Vec<u32>, ShapeError> {
         out.push(n);
     }
     Ok(out)
+}
+
+/// The body `t` of one `ec` entry, decoded at read time ([`edit_texts`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EditBody {
+    /// The entry has no `t`.
+    Absent,
+    /// `t` decoded as an attributed string. `one_time_codes` are the
+    /// half-open UTF-16 ranges of runs flagged as one-time codes; when
+    /// `runs_complete` is false a run fault cut the runs short, so the
+    /// flags of the rest are unknown and a caller that masks codes must
+    /// withhold the whole text if any code was seen or could be missing.
+    Text {
+        text: Redacted<String>,
+        one_time_codes: Vec<(u32, u32)>,
+        runs_complete: bool,
+    },
+    /// `t` did not decode (a fatal typedstream kind).
+    Failed(TsErrorKind),
+}
+
+/// One `ec` entry with its body decoded, at its stored position: `part`
+/// is the dictionary key and `ordinal` the entry's index in that part's
+/// array (stored order; "oldest first" is **UNVERIFIED**). The import
+/// stores `message_edit_entry` rows with the same `(part, ordinal)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct EditText {
+    pub part: u32,
+    pub ordinal: u32,
+    pub body: EditBody,
+}
+
+/// Why [`edit_texts`] decoded nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum EditTextsError {
+    /// The summary does not parse, goes over a budget or has a
+    /// non-dictionary root (as [`SummaryInfo::parse`]).
+    Unreadable(IssueKind),
+    /// There is no `ec` key.
+    NoEditHistory,
+    /// `ec` does not have the expected shape.
+    Bad(ShapeError),
+}
+
+/// Decode the earlier edit texts `ec[part][*].t` of a
+/// `message_summary_info` value (M5 spec §3.7, owner decision Q3a). The
+/// property list is read under the same budgets as [`SummaryInfo::parse`],
+/// and each `t` with the clean-room typedstream decoder under `budget`.
+/// Nothing is stored; the result's text is `Redacted`, so `Debug` prints
+/// lengths only.
+pub fn edit_texts(raw: &[u8], budget: &TsBudget) -> Result<Vec<EditText>, EditTextsError> {
+    let info = parse(raw).map_err(EditTextsError::Unreadable)?;
+    match info.ec {
+        FieldOutcome::Missing => return Err(EditTextsError::NoEditHistory),
+        FieldOutcome::Bad(e) => return Err(EditTextsError::Bad(e)),
+        FieldOutcome::Value(_) => {}
+    }
+    // The shape was checked by `parse`; read the bodies from a second
+    // parse of the same bounded value (the first keeps no bodies).
+    let opts = ReadOpts {
+        skip: &[],
+        max_depth: SUMMARY_MAX_DEPTH,
+        array_cap: Some((SUMMARY_ARRAY_CAP, LimitKind::SummaryArray)),
+    };
+    let root = parse_bounded(raw, opts)
+        .map_err(|_| EditTextsError::Unreadable(IssueKind::PlistInvalid))?;
+    let parts = root
+        .get("ec")
+        .and_then(PValue::as_dict)
+        .ok_or(EditTextsError::Bad(ShapeError::WrongType))?;
+    let mut out = Vec::new();
+    for (k, entries) in parts {
+        let part = part_key(k).map_err(EditTextsError::Bad)?;
+        let PValue::Array(items) = entries else {
+            return Err(EditTextsError::Bad(ShapeError::WrongType));
+        };
+        for (ordinal, item) in (0u32..).zip(items) {
+            let body = match item.get("t") {
+                None => EditBody::Absent,
+                Some(PValue::Data(d)) => decode_edit_body(d, budget),
+                Some(_) => return Err(EditTextsError::Bad(ShapeError::WrongType)),
+            };
+            out.push(EditText {
+                part,
+                ordinal,
+                body,
+            });
+        }
+    }
+    Ok(out)
+}
+
+fn decode_edit_body(data: &[u8], budget: &TsBudget) -> EditBody {
+    match decode_attributed_body(data, budget) {
+        Ok(body) => {
+            let one_time_codes = body
+                .runs
+                .iter()
+                .filter(|r| {
+                    usize::try_from(r.attrs)
+                        .ok()
+                        .and_then(|i| body.attrs.get(i))
+                        .is_some_and(|a| a.flags.contains(AttrFlag::OneTimeCode))
+                })
+                .map(|r| (r.utf16.start, r.utf16.end))
+                .collect();
+            EditBody::Text {
+                text: Redacted::new(body.text.expose().as_str().to_owned()),
+                one_time_codes,
+                runs_complete: body.run_issue.is_none(),
+            }
+        }
+        Err(e) => EditBody::Failed(e.kind()),
+    }
 }
 
 #[cfg(test)]

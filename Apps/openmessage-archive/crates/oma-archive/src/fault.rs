@@ -228,6 +228,32 @@ pub mod hooks {
         pub terminal_error: Option<i32>,
         /// Fail every provenance file write before its `.tmp` is created.
         pub provenance_fails: bool,
+        /// Replace every viewer phase's op budget (VM operations; M5 §3.2).
+        pub view_op_budget: Option<u64>,
+        /// Set a viewer phase's cancel token at the n-th tick of its
+        /// progress handler (counted from 1 per phase): a cancel that
+        /// arrives in the middle of a statement (M5 §13.4).
+        pub cancel_at_view_tick: Option<u64>,
+        /// Replace the largest chat (in timeline rows) that a chat-scoped
+        /// words search walks itself (M5 §4.3); larger chats use the global
+        /// plan with a chat filter. `Some(0)` forces the global plan.
+        pub scoped_search_rows: Option<u64>,
+        /// Replace the most messages one exact-text scan examines
+        /// (M5 §4.4).
+        pub scan_examined_limit: Option<u64>,
+        /// Replace the most messages one words search keeps
+        /// (`SEARCH_MATCH_CAP`, M5 §4.3).
+        pub search_match_cap: Option<usize>,
+        /// Replace the 2 s window of a page call (`thread_page`,
+        /// `reply_thread`; milliseconds).
+        pub page_window_ms: Option<u64>,
+        /// Sleep this long between a page call's `Scan` and `Assembly`
+        /// phases: a `Scan` that used up the call's deadline (M5 §3.2).
+        pub pause_after_scan_ms: Option<u64>,
+        /// Replace the deadline of the `highlight()` phase of
+        /// `search_hits` (milliseconds; M5 §4.5). The op budget cannot see
+        /// work inside FTS5's own calls, so the deadline is what stops it.
+        pub hits_window_ms: Option<u64>,
     }
 
     thread_local! {
@@ -263,6 +289,27 @@ pub mod hooks {
     /// code prepares them (for `tests/query_plans.rs`).
     pub fn plan_statements() -> Vec<(&'static str, String)> {
         crate::import::plan_statements()
+    }
+
+    /// The viewer's index-dependent statements, by name, exactly as the
+    /// code prepares them (for `tests/query_plans.rs`, M5 §3.5).
+    pub fn viewer_statements() -> Vec<(&'static str, String)> {
+        let mut v = crate::view::plan_statements();
+        v.extend(crate::search::plan_statements());
+        v.extend(crate::media::plan_statements());
+        v
+    }
+
+    pub use crate::bulk::{sort_key, BulkFinalize, BulkWriter};
+
+    /// A write handle on `archive` for generating schema-valid v1 rows
+    /// directly (M5 spec §14.2): the archive's own ReadWrite connection,
+    /// after the usual first-write recovery, with the import's transaction
+    /// boundary and finalize steps. Test-only.
+    pub fn bulk_writer(
+        archive: &mut crate::Archive,
+    ) -> Result<BulkWriter<'_>, crate::ArchiveError> {
+        BulkWriter::new(archive)
     }
 
     /// An action run at the n-th hit of a fault point.
@@ -513,6 +560,115 @@ pub(crate) fn read_op_budget(ops: u64) -> u64 {
     #[cfg(not(feature = "fault-injection"))]
     {
         ops
+    }
+}
+
+/// The viewer phase budget to use instead of `ops`, if a test set one.
+#[inline]
+pub(crate) fn view_op_budget(ops: u64) -> u64 {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current().view_op_budget.unwrap_or(ops)
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        ops
+    }
+}
+
+/// The tick of a viewer phase at which its cancel token is set, if a test
+/// set one.
+#[inline]
+pub(crate) fn cancel_at_view_tick() -> Option<u64> {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current().cancel_at_view_tick
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        None
+    }
+}
+
+/// The words search's match cap to use instead of `n`, if a test set one.
+#[inline]
+pub(crate) fn search_match_cap(n: usize) -> usize {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current().search_match_cap.unwrap_or(n)
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        n
+    }
+}
+
+/// The scoped-search threshold to use instead of `rows`, if a test set one.
+#[inline]
+pub(crate) fn scoped_search_rows(rows: u64) -> u64 {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current().scoped_search_rows.unwrap_or(rows)
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        rows
+    }
+}
+
+/// The exact-text scan's examined limit to use instead of `n`, if a test
+/// set one.
+#[inline]
+pub(crate) fn scan_examined_limit(n: u64) -> u64 {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current().scan_examined_limit.unwrap_or(n)
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        n
+    }
+}
+
+/// A page call's window to use instead of `w`, if a test set one.
+#[inline]
+pub(crate) fn page_window(w: std::time::Duration) -> std::time::Duration {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current()
+            .page_window_ms
+            .map_or(w, std::time::Duration::from_millis)
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        w
+    }
+}
+
+/// Sleep between a page call's `Scan` and `Assembly`, if a test asked.
+#[inline]
+pub(crate) fn pause_after_scan() {
+    #[cfg(feature = "fault-injection")]
+    {
+        if let Some(ms) = hooks::current().pause_after_scan_ms {
+            std::thread::sleep(std::time::Duration::from_millis(ms));
+        }
+    }
+}
+
+/// The `highlight()` phase's window to use instead of `w`, if a test set
+/// one.
+#[inline]
+pub(crate) fn hits_window(w: std::time::Duration) -> std::time::Duration {
+    #[cfg(feature = "fault-injection")]
+    {
+        hooks::current()
+            .hits_window_ms
+            .map_or(w, std::time::Duration::from_millis)
+    }
+    #[cfg(not(feature = "fault-injection"))]
+    {
+        w
     }
 }
 

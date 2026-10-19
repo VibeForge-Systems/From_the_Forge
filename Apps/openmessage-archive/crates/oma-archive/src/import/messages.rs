@@ -345,24 +345,15 @@ fn derive_cells(cells: &[Cell]) -> CellDerived {
 }
 
 /// `message.sort_key` (spec §6.5): dated messages by their instant, then
-/// undated ones in the source order of the earliest-ranked session.
+/// undated ones in the source order of the earliest-ranked session. The
+/// one encoder is [`crate::sortkey`], which the bulk generator and the
+/// viewer's seeks share.
 fn sort_key(date: Option<&Cell>, first_rank: &Rank, first_src_rowid: i64) -> Vec<u8> {
-    let bias = |v: i64| (u64::from_be_bytes(v.to_be_bytes()) ^ (1u64 << 63)).to_be_bytes();
-    match date.and_then(Cell::time_utc_ns) {
-        Some(ns) => {
-            let mut k = Vec::with_capacity(9);
-            k.push(0);
-            k.extend_from_slice(&bias(ns));
-            k
-        }
-        None => {
-            let mut k = Vec::with_capacity(50);
-            k.push(1);
-            k.extend_from_slice(first_rank.as_bytes());
-            k.extend_from_slice(&bias(first_src_rowid));
-            k
-        }
-    }
+    crate::sortkey::encode(
+        date.and_then(Cell::time_utc_ns),
+        first_rank.as_bytes(),
+        first_src_rowid,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -424,7 +415,7 @@ struct BodyObs {
     unsent: Vec<i64>,
 }
 
-fn ts_code(k: TsErrorKind) -> TsErrorCode {
+pub(crate) fn ts_code(k: TsErrorKind) -> TsErrorCode {
     match k {
         TsErrorKind::UnsupportedHeader => TsErrorCode::UnsupportedHeader,
         TsErrorKind::Truncated => TsErrorCode::Truncated,
@@ -1511,6 +1502,15 @@ mod tests {
         // Before the Unix epoch still sorts by instant.
         let before = sort_key(Some(&date(1)), &r1, 0);
         assert!(before < early);
+        // The viewer's seek key for the same instant is the import's key
+        // (M5 §3.3): Cocoa seconds plus 978,307,200, in nanoseconds.
+        let ns = (700_000_000i64 + 978_307_200) * 1_000_000_000;
+        assert_eq!(early, crate::sortkey::dated(ns).to_vec());
+        assert_eq!(
+            crate::sortkey::decode_dated(&late),
+            Some(ns + 1_000_000_000)
+        );
+        assert!(!crate::sortkey::is_dated(&undated_a));
     }
 
     fn text(s: &[u8]) -> Cell {

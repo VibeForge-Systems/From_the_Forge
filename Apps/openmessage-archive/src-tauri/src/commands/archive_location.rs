@@ -117,10 +117,17 @@ fn clear_inner(
 }
 
 /// The archive location holds a job's staging directory, so it cannot change
-/// while a job runs.
+/// while a job runs; and a viewer session counts as an open archive (M5
+/// D114, M4 §15.1), so it cannot change while the viewer is open either.
 fn refuse_during_job(state: &AppState) -> IpcResult<()> {
     if state.jobs.any_active() {
         return Err(IpcError::new(ErrorCode::Busy, BUSY_LOCATION));
+    }
+    if state.viewer.is_open() {
+        return Err(IpcError::new(
+            ErrorCode::Busy,
+            crate::viewer::messages::BUSY_VIEWER_LOCATION,
+        ));
     }
     Ok(())
 }
@@ -173,6 +180,29 @@ mod tests {
         assert!(refuse_during_job(&state).is_err());
         state.jobs.finish(&r.job_id, Default::default());
         assert!(refuse_during_job(&state).is_ok());
+    }
+
+    #[test]
+    fn location_changes_are_refused_while_the_viewer_is_open() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let library = tmp.path().join("lib");
+        fs::create_dir(&library).expect("mkdir");
+        let state = state_with_library(tmp.path(), &library);
+        let (_lib_tmp, id) = crate::viewer::tests::synthetic_archive(&library);
+        let opened = crate::viewer::open(
+            &state.viewer,
+            &library,
+            &state.archive_env,
+            &state.jobs,
+            id.as_str(),
+        )
+        .expect("open");
+        let err = clear_inner(&state).expect_err("busy");
+        assert_eq!(err.code, ErrorCode::Busy);
+        assert_eq!(err.message, crate::viewer::messages::BUSY_VIEWER_LOCATION);
+        state.viewer.close(opened.viewer).expect("close");
+        let (snapshot, _) = clear_inner(&state).expect("cleared once closed");
+        assert!(snapshot.settings.archive_directory.is_none());
     }
 
     #[test]

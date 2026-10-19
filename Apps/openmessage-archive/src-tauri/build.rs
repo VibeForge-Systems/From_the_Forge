@@ -23,6 +23,20 @@ const COMMANDS: &[&str] = &[
     "start_import",
     "confirm_import",
     "verify_archive",
+    "open_viewer",
+    "close_viewer",
+    "list_conversations",
+    "get_conversations",
+    "get_thread_page",
+    "get_reply_thread",
+    "get_message_detail",
+    "get_message_text",
+    "get_day_counts",
+    "seek_date",
+    "search_messages",
+    "get_search_results",
+    "cancel_search",
+    "inspect_attachment",
 ];
 
 fn main() {

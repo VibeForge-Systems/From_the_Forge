@@ -55,6 +55,24 @@ tauri-plugin-opener = "=2.7.2"
 fs4 = { version = "=1.1.0", default-features = false }
 rustix = { version = "=1.1.5", features = ["fs", "process"] }
 
+# Milestone 5: images. A dependency of oma-archive from slice 5d
+# (`media::render`, run only inside the decode helper process), and of its
+# fixture generator `make_viewer_media`. Only the four decoders/encoders M5 serves:
+# no `avif` (an encoder through ravif, not needed) and no `avif-native`
+# (the decoder: MPL-2.0 `mp4parse` and C `dav1d`); no TIFF, EXR or rayon.
+image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
+# Owner decision Q2 (M5): an optional HEIC decoder behind oma-archive's `heic`
+# feature, OFF by default and never enabled in official or CI release
+# builds (HEVC is pooled-patent technology; see docs/privacy.md). Pure Rust,
+# `forbid(unsafe_code)`, MIT OR Apache-2.0; without its default `parallel`
+# feature it has no dependencies at all.
+heic-rs = { version = "=0.1.4", default-features = false, features = ["std"] }
+
+# Milestone 5: media tokens in the shell (src-tauri/src/viewer/media/tokens.rs):
+# 128 random bits from the OS. Already in the lockfile through Tauri; default
+# features only (no `wasm_js`, no custom backend).
+getrandom = "=0.3.4"
+
 oma-fs = { path = "crates/oma-fs" }
 oma-backup = { path = "crates/oma-backup" }
 oma-messages = { path = "crates/oma-messages" }

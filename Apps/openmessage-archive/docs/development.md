@@ -97,6 +97,19 @@ connect to localhost".
 Diagnostic logging goes to stderr: `OMA_LOG=debug npm run tauri dev`
 (PowerShell: `$env:OMA_LOG="debug"; npm run tauri dev`).
 
+**The decode helper (M5).** The viewer decodes images in helper processes:
+the app's own binary started with the single argument
+`--oma-decode-helper`, which reads length-prefixed requests on stdin and
+writes renditions on stdout (`src-tauri/src/viewer/media/helper.rs`). It is
+not meant to be run by hand; it exits on any malformed input. Its tests
+start the binary Cargo builds:
+
+```sh
+cargo test -p openmessage-archive --test decode_helper
+cargo test -p openmessage-archive --lib viewer::media   # the protocol, with a fake decoder
+cargo test -p openmessage-archive --lib window          # merged CSP files, window policies
+```
+
 ## IPC types
 
 IPC request and response types are defined once, in Rust, with
@@ -259,6 +272,51 @@ A model change that leaves the inputs alone changes only
 `EXPECTED.SHA256SUMS` (re-pin it in `import_fixtures.rs` and say which rule
 changed); if `SHA256SUMS` changes, the generator changed an input, and the
 pin in `import_fixtures.rs` fails on purpose.
+
+### Synthetic viewer fixtures (M5)
+
+`tests/fixtures/viewer/` (M5 spec §14.1) is written in two steps. The media
+files come from a Rust example that uses the `image` crate's encoders and
+writes the hostile PNGs and the containers by hand; the backups and the
+model's expectations come from `scripts/fixtures/make_synthetic_viewer.py`,
+in the reference environment (it refuses any SQLite but 3.45.1 and has no
+override). The script imports the M2, M3 and M4 generators as modules and
+changes none of them.
+
+```sh
+rm -rf /tmp/viewer
+cargo run -p oma-archive --example make_viewer_media -- /tmp/viewer/media
+.venv-fixtures/bin/python -I scripts/fixtures/make_synthetic_viewer.py /tmp/viewer --seed 1
+rm -rf tests/fixtures/viewer && cp -r /tmp/viewer tests/fixtures/viewer
+sha256sum tests/fixtures/viewer/SHA256SUMS tests/fixtures/viewer/EXPECTED.SHA256SUMS
+cargo test -p oma-archive --test viewer_fixtures
+```
+
+| File | Covers | Pinned |
+|---|---|---|
+| `SHA256SUMS` | `media/` and every file of every backup (the inputs) | Its SHA-256 is pinned in `crates/oma-archive/tests/viewer_fixtures.rs`; the inputs are frozen |
+| `EXPECTED.SHA256SUMS` | Every file under `*.expected/` and `scenarios/`: the `content` the import must leave and the `viewer` facts the viewer must derive | Its own hash is pinned in the same test and is re-pinned when a viewer slice settles a rule (say which) |
+
+`viewer_fixtures.rs` also rebuilds every `media/` file with the example's
+code (`examples/make_viewer_media/media.rs`) and compares the bytes, so an
+`image` upgrade that changes an encoder's output fails there first. On
+Windows, run the example the same way from PowerShell (it writes plain
+files); the Python step is not run on Windows.
+
+### The bulk generator (M5)
+
+`crates/oma-archive/tests/common/bulk.rs` writes a schema-valid v1 archive
+of any size directly (M5 spec §14.2), through the test-only hook
+`oma_archive::hooks::bulk_writer` (the `fault-injection` feature, enabled
+only by the crate's own tests). It commits import-sized batches, runs the
+import's finalize statistics and FTS merge steps, and the result passes a
+quick verify (`tests/bulk.rs`). It replaces the import-based generator for
+performance work; the calibration against an import-built archive is an
+ignored test:
+
+```sh
+OMA_PERF_MESSAGES=100000 cargo test -p oma-archive --release --test bulk -- --ignored --nocapture
+```
 
 ### Import core tests (M4)
 
@@ -427,6 +485,29 @@ milestone is recorded. The Windows crash plan is smaller on purpose
 catalogue's `README.md` is generated and documents the manifest format and
 the readings the model makes.
 
+**Milestone 5 (spec §0.1: at most 3 more minutes of Rust test time per
+Linux job, 6 on Windows), measured in slice 5f** after the decode, protocol
+and shell tests exist, in the same container (4 CPUs, debug build, after
+compiling; 1,220 Rust tests passed, 10 ignored):
+
+| What | Time |
+|---|---|
+| `cargo test --workspace`, wall clock | 2 min 2 s |
+| Sum of all test binaries' run times | 118.6 s |
+| Added since M4 (slice 4n: 57.2 s) | about 61 s |
+| of which the shell's unit tests (the viewer session, commands and protocol tests import viewer catalogue entries; 0.6 s in M4) | 36.1 s |
+| of which `oma-archive`'s viewer binaries (`viewer_conversations`, `viewer_threads`, `viewer_details`, `viewer_search`, `viewer_fixtures`, `viewer_media`, `media_corpus`) | 16.1 s |
+| of which the protocol tests alone (`viewer::media`, `window`; 35 tests) | 1.1 s |
+| of which `decode_helper.rs` (three helper processes) | 0.3 s |
+| the shell's `log_hygiene.rs` (now also the viewer and the protocol through the real helper) | 2.6 s |
+
+The ignored performance tests (`perf_search.rs`, the bulk calibration) are
+not counted. So M5 so far adds about 1 minute per Linux job here, inside
+its 3-minute budget. **Windows has not been measured:** PR A has not run
+on CI yet. With the 4× factor seen for slices 4a–4f, the M5 tests would add
+about 4 minutes on `windows-2022`, inside the 6-minute budget; that is an
+extrapolation until a CI run is recorded. Slice 5k measures again.
+
 **Optional oracles** (manual; nothing enters the repository or CI; each
 run is recorded in `docs/compatibility.md` with the checksum it tested):
 
@@ -453,6 +534,9 @@ No GPL or LGPL tool or wrapper is committed.
 | Synthetic performance: 1,000,000 messages, 2,000 chats, 50,000 attachments | `cargo test -p oma-messages --release -- --ignored perf_synthetic_large --nocapture` |
 | The archive's growth factor `K`, the time of each import phase, the FTS size and the time of a quick and a full verify, on a synthetic import (`OMA_PERF_MESSAGES` messages, default 20,000; generating 100,000 takes about 4 minutes) | `OMA_PERF_MESSAGES=100000 cargo test -p oma-archive --release --test perf -- --ignored --nocapture` |
 | The check on a backup outside the repository (oracle run 4) | `OMA_EXTERNAL_BACKUP=<backup dir> cargo test -p oma-messages --test external_sample -- --ignored --nocapture` |
+| One large photo made into both image renditions (M5 slice 5d: a 4032 × 3024 noise JPEG through `media::render`) | `cargo test -p oma-archive --release --test media_corpus -- --ignored --nocapture` |
+| The media code with the optional, never-shipped HEIC decoder (owner decision Q2; CI runs only clippy and `cargo deny` with it) | `cargo clippy -p oma-archive --all-targets --features heic -- -D warnings`, `cargo test -p oma-archive --features heic --test viewer_media --test media_corpus` and `cargo deny --features oma-archive/heic check` |
+| A self-built app with HEIC previews (owner decision Q2: **at your own legal risk**, HEVC is pooled-patent technology; never for official or CI release builds). The app's package does not forward the feature, so name the crate's feature | `npx tauri build --features oma-archive/heic` (the release binary, through the Tauri CLI as always), or `cargo build -p openmessage-archive --features oma-archive/heic` for a debug build; `--features heic` alone fails ("the package 'openmessage-archive' does not contain this feature"). Only the feature resolution was checked (`cargo tree -p openmessage-archive --features oma-archive/heic -i heic-rs`); no HEIC-enabled app build has been run |
 
 Record performance results in `docs/compatibility.md` as **synthetic**,
 with the profile, OS and CPU count.

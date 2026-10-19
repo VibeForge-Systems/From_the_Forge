@@ -1,0 +1,6897 @@
+{
+ "content": {
+  "attachments": [
+   {
+    "blobs": [
+     "1e8c139364aea31d1f2f0eb5aca00d28aa45da1d2a6aec9e329146fe2b5235d7"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m01/01/SYNTH-MEDIA-0001/png-rgb-6x4.png"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0001"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/png"
+     },
+     "total_bytes": {
+      "int": 144
+     },
+     "transfer_name": {
+      "text": "png-rgb-6x4.png"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0001",
+    "sha256": "1e8c139364aea31d1f2f0eb5aca00d28aa45da1d2a6aec9e329146fe2b5235d7"
+   },
+   {
+    "blobs": [
+     "0ef3e34829763cd22a4d9cb6259610b8c701e7790ac70ccb25f874fd4d240654",
+     "634d9d6da7bda023e1e8967f7fb461dd2ca962fee8d55c7416636b73c078c212"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m02/02/SYNTH-MEDIA-0002/png-alpha-4x4.png"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0002"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/png"
+     },
+     "total_bytes": {
+      "int": 136
+     },
+     "transfer_name": {
+      "text": "png-alpha-4x4.png"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0002",
+    "sha256": "0ef3e34829763cd22a4d9cb6259610b8c701e7790ac70ccb25f874fd4d240654"
+   },
+   {
+    "blobs": [
+     "4226f55b9109141b5dba6bab94d108274c49782ddc3e7fe1b706a755e7d17b9e"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m03/03/SYNTH-MEDIA-0003/jpeg-exif6-gps-8x6.jpg"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0003"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/jpeg"
+     },
+     "total_bytes": {
+      "int": 838
+     },
+     "transfer_name": {
+      "text": "jpeg-exif6-gps-8x6.jpg"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0003",
+    "sha256": "4226f55b9109141b5dba6bab94d108274c49782ddc3e7fe1b706a755e7d17b9e"
+   },
+   {
+    "blobs": [
+     "427c369cfe32cc3d3a8831bbab06029e44289d14583798a012459c4dbc2af820"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m04/04/SYNTH-MEDIA-0004/jpeg-truncated.jpg"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0004"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/jpeg"
+     },
+     "total_bytes": {
+      "int": 1890
+     },
+     "transfer_name": {
+      "text": "jpeg-truncated.jpg"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0004",
+    "sha256": "427c369cfe32cc3d3a8831bbab06029e44289d14583798a012459c4dbc2af820"
+   },
+   {
+    "blobs": [
+     "03cfa5d2843b14e708ae77deb72faf8a84e837dee9d0d775ad50e4a860cf4177"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m05/05/SYNTH-MEDIA-0005/gif-2frames-4x4.gif"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0005"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/gif"
+     },
+     "total_bytes": {
+      "int": 101
+     },
+     "transfer_name": {
+      "text": "gif-2frames-4x4.gif"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0005",
+    "sha256": "03cfa5d2843b14e708ae77deb72faf8a84e837dee9d0d775ad50e4a860cf4177"
+   },
+   {
+    "blobs": [
+     "0ef3e34829763cd22a4d9cb6259610b8c701e7790ac70ccb25f874fd4d240654"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m06/06/SYNTH-MEDIA-0006/webp-lossless-4x4.webp"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0006"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/webp"
+     },
+     "total_bytes": {
+      "int": 162
+     },
+     "transfer_name": {
+      "text": "webp-lossless-4x4.webp"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0006",
+    "sha256": "0ef3e34829763cd22a4d9cb6259610b8c701e7790ac70ccb25f874fd4d240654"
+   },
+   {
+    "blobs": [
+     "3aee02adbd7a10c9e6b36f3b570d119d9a2dd7f9547d796dc41c36768a4e9031"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m07/07/SYNTH-MEDIA-0007/png-bomb-12000.png"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0007"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/png"
+     },
+     "total_bytes": {
+      "int": 139626
+     },
+     "transfer_name": {
+      "text": "png-bomb-12000.png"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0007",
+    "sha256": "3aee02adbd7a10c9e6b36f3b570d119d9a2dd7f9547d796dc41c36768a4e9031"
+   },
+   {
+    "blobs": [
+     "3530e814a387df0468c61b0ebfa5c81d998619603fb61f0c4be734bce52bf850"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m08/08/SYNTH-MEDIA-0008/png-rgba16-4097.png"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0008"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/png"
+     },
+     "total_bytes": {
+      "int": 130244
+     },
+     "transfer_name": {
+      "text": "png-rgba16-4097.png"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0008",
+    "sha256": "3530e814a387df0468c61b0ebfa5c81d998619603fb61f0c4be734bce52bf850"
+   },
+   {
+    "blobs": [
+     "e5aa1325df46ffe793fb96011fd921c1d27af4e02b42f2622a226347c74b66ef"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m09/09/SYNTH-MEDIA-0009/png-ihdr-60000.png"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0009"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/png"
+     },
+     "total_bytes": {
+      "int": 295
+     },
+     "transfer_name": {
+      "text": "png-ihdr-60000.png"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0009",
+    "sha256": "e5aa1325df46ffe793fb96011fd921c1d27af4e02b42f2622a226347c74b66ef"
+   },
+   {
+    "blobs": [
+     "df9a3ebff23b8dfdebf5715f654d1e64d67b70a95b74eaf03b4e82c073de2548"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m10/10/SYNTH-MEDIA-0010/mp4-minimal.mp4"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0010"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "video/mp4"
+     },
+     "total_bytes": {
+      "int": 474
+     },
+     "transfer_name": {
+      "text": "mp4-minimal.mp4"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0010",
+    "sha256": "df9a3ebff23b8dfdebf5715f654d1e64d67b70a95b74eaf03b4e82c073de2548"
+   },
+   {
+    "blobs": [
+     "f77de9facdde399e1d87a01a1abf4d5d6f0281df122dfa46ddad1c9302a3f917"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m11/11/SYNTH-MEDIA-0011/mov-minimal.mov"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0011"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "video/quicktime"
+     },
+     "total_bytes": {
+      "int": 466
+     },
+     "transfer_name": {
+      "text": "mov-minimal.mov"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0011",
+    "sha256": "f77de9facdde399e1d87a01a1abf4d5d6f0281df122dfa46ddad1c9302a3f917"
+   },
+   {
+    "blobs": [
+     "70d7908a932ffaa0c0e383843b5b4b493f096ef4724db54bccaf3f21151fcf28"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m12/12/SYNTH-MEDIA-0012/m4a-minimal.m4a"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0012"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "audio/x-m4a"
+     },
+     "total_bytes": {
+      "int": 474
+     },
+     "transfer_name": {
+      "text": "m4a-minimal.m4a"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0012",
+    "sha256": "70d7908a932ffaa0c0e383843b5b4b493f096ef4724db54bccaf3f21151fcf28"
+   },
+   {
+    "blobs": [
+     "86b5f5a4a69b226cef532cb4019df8ff0c08a804fa919af5d116e6e257cd9eac"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m13/13/SYNTH-MEDIA-0013/wav-minimal.wav"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0013"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "audio/wav"
+     },
+     "total_bytes": {
+      "int": 60
+     },
+     "transfer_name": {
+      "text": "wav-minimal.wav"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0013",
+    "sha256": "86b5f5a4a69b226cef532cb4019df8ff0c08a804fa919af5d116e6e257cd9eac"
+   },
+   {
+    "blobs": [
+     "a30a39a04a5abf514a64364be6eb90c9ec727b50c7f946a452f0cd68113a04f5"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m14/14/SYNTH-MEDIA-0014/caf-header.caf"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0014"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "audio/x-caf"
+     },
+     "total_bytes": {
+      "int": 84
+     },
+     "transfer_name": {
+      "text": "caf-header.caf"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0014",
+    "sha256": "a30a39a04a5abf514a64364be6eb90c9ec727b50c7f946a452f0cd68113a04f5"
+   },
+   {
+    "blobs": [
+     "17379855047f042f3bd1c41a9f91c54b76db2bb3ccae1cfc3893b7d62920a42f"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m15/15/SYNTH-MEDIA-0015/heic-header.heic"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0015"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/heic"
+     },
+     "total_bytes": {
+      "int": 74
+     },
+     "transfer_name": {
+      "text": "heic-header.heic"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0015",
+    "sha256": "17379855047f042f3bd1c41a9f91c54b76db2bb3ccae1cfc3893b7d62920a42f"
+   },
+   {
+    "blobs": [
+     "285d245951d196aec929d53fbd73dab8f32268bff589041c41b0e3523ae1f1ca"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m16/16/SYNTH-MEDIA-0016/mov-refmovie-rmra.mov"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0016"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "video/quicktime"
+     },
+     "total_bytes": {
+      "int": 97
+     },
+     "transfer_name": {
+      "text": "mov-refmovie-rmra.mov"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0016",
+    "sha256": "285d245951d196aec929d53fbd73dab8f32268bff589041c41b0e3523ae1f1ca"
+   },
+   {
+    "blobs": [
+     "3d404eba49e051e5dc1cded48991197c377da669081127ed2d3391d8860d19a7"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m17/17/SYNTH-MEDIA-0017/mov-dref-external.mov"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0017"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "video/quicktime"
+     },
+     "total_bytes": {
+      "int": 504
+     },
+     "transfer_name": {
+      "text": "mov-dref-external.mov"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0017",
+    "sha256": "3d404eba49e051e5dc1cded48991197c377da669081127ed2d3391d8860d19a7"
+   },
+   {
+    "blobs": [
+     "dd47a767f3bdedfad92074f3f9eb8e4899343352317e66726d608c6ba01526d5"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m18/18/SYNTH-MEDIA-0018/mp4-box-past-eof.mp4"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0018"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "video/mp4"
+     },
+     "total_bytes": {
+      "int": 458
+     },
+     "transfer_name": {
+      "text": "mp4-box-past-eof.mp4"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0018",
+    "sha256": "dd47a767f3bdedfad92074f3f9eb8e4899343352317e66726d608c6ba01526d5"
+   },
+   {
+    "blobs": [
+     "6ea15ebf3a66d1a80c967693f21f63dcad09af2beb29006ae27ef7d9d12dac4d"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m19/19/SYNTH-MEDIA-0019/mp4-box-64bit-overflow.mp4"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0019"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "video/mp4"
+     },
+     "total_bytes": {
+      "int": 482
+     },
+     "transfer_name": {
+      "text": "mp4-box-64bit-overflow.mp4"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0019",
+    "sha256": "6ea15ebf3a66d1a80c967693f21f63dcad09af2beb29006ae27ef7d9d12dac4d"
+   },
+   {
+    "blobs": [
+     "029bbdb766944282a9d296752314fb29c142002d1731e792074521bb1188d725"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m20/20/SYNTH-MEDIA-0020/wav-chunk-past-eof.wav"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0020"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "audio/wav"
+     },
+     "total_bytes": {
+      "int": 60
+     },
+     "transfer_name": {
+      "text": "wav-chunk-past-eof.wav"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0020",
+    "sha256": "029bbdb766944282a9d296752314fb29c142002d1731e792074521bb1188d725"
+   },
+   {
+    "blobs": [
+     "fedae1413ea64c335ca6f939c4f3b4239835bed1e24d36823a4d6e6963923d36"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m21/21/SYNTH-MEDIA-0021/svg-script.svg"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0021"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/svg+xml"
+     },
+     "total_bytes": {
+      "int": 196
+     },
+     "transfer_name": {
+      "text": "svg-script.svg"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0021",
+    "sha256": "fedae1413ea64c335ca6f939c4f3b4239835bed1e24d36823a4d6e6963923d36"
+   },
+   {
+    "blobs": [
+     "2bb3b14e9c6ed5f2cc444dd7431945110d5c8de107974dd43700fd3435849183"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m22/22/SYNTH-MEDIA-0022/html-named-jpg.jpg"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0022"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/jpeg"
+     },
+     "total_bytes": {
+      "int": 165
+     },
+     "transfer_name": {
+      "text": "html-named-jpg.jpg"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0022",
+    "sha256": "2bb3b14e9c6ed5f2cc444dd7431945110d5c8de107974dd43700fd3435849183"
+   },
+   {
+    "blobs": [
+     "e1d4a37eb17cbd44df2e3f44e3faaa4a3811e3987914b1bf500bb6053e07151b"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m23/23/SYNTH-MEDIA-0023/gif-html-polyglot.gif"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0023"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/gif"
+     },
+     "total_bytes": {
+      "int": 233
+     },
+     "transfer_name": {
+      "text": "gif-html-polyglot.gif"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0023",
+    "sha256": "e1d4a37eb17cbd44df2e3f44e3faaa4a3811e3987914b1bf500bb6053e07151b"
+   },
+   {
+    "blobs": [
+     "e5b574098494a840614431c1ee3f70b5d6fd4e84cda8a16fd65ec7b5687b933b"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m24/24/SYNTH-MEDIA-0024/pdf-minimal.pdf"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0024"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "application/pdf"
+     },
+     "total_bytes": {
+      "int": 149
+     },
+     "transfer_name": {
+      "text": "pdf-minimal.pdf"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0024",
+    "sha256": "e5b574098494a840614431c1ee3f70b5d6fd4e84cda8a16fd65ec7b5687b933b"
+   },
+   {
+    "blobs": [
+     "b018832e28aff3b2a9f7e52b98ecfcd8e84453c24ac800a7884aa60e024dc842"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m25/25/SYNTH-MEDIA-0025/vcard-synthetic.vcf"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0025"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "text/vcard"
+     },
+     "total_bytes": {
+      "int": 99
+     },
+     "transfer_name": {
+      "text": "vcard-synthetic.vcf"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0025",
+    "sha256": "b018832e28aff3b2a9f7e52b98ecfcd8e84453c24ac800a7884aa60e024dc842"
+   },
+   {
+    "blobs": [
+     "2f21a73705d89324a31747bda68226b9e972f5bb5601f77d8e7e33482f962dce"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m26/26/SYNTH-MEDIA-0026/text-plain.txt"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0026"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "text/plain"
+     },
+     "total_bytes": {
+      "int": 33
+     },
+     "transfer_name": {
+      "text": "text-plain.txt"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0026",
+    "sha256": "2f21a73705d89324a31747bda68226b9e972f5bb5601f77d8e7e33482f962dce"
+   },
+   {
+    "blobs": [
+     "94eb5de4943613fd048dc93393ab06877405faa39c11f53e9386083339833e7e"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m27/27/SYNTH-MEDIA-0027/unknown-bytes.bin"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0027"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "application/octet-stream"
+     },
+     "total_bytes": {
+      "int": 64
+     },
+     "transfer_name": {
+      "text": "unknown-bytes.bin"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0027",
+    "sha256": "94eb5de4943613fd048dc93393ab06877405faa39c11f53e9386083339833e7e"
+   },
+   {
+    "blobs": [
+     "e9b0c031f0493d3fd6b0b668260c79e7efe734bfd4b4115f9d82bc3be609c294"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m28/28/SYNTH-MEDIA-0028/one-byte.bin"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0028"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "state": "null"
+     },
+     "total_bytes": {
+      "int": 1
+     },
+     "transfer_name": {
+      "text": "one-byte.bin"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0028",
+    "sha256": "e9b0c031f0493d3fd6b0b668260c79e7efe734bfd4b4115f9d82bc3be609c294"
+   },
+   {
+    "blobs": [
+     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m29/29/SYNTH-MEDIA-0029/empty.bin"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0029"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "state": "null"
+     },
+     "total_bytes": {
+      "int": 0
+     },
+     "transfer_name": {
+      "text": "empty.bin"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0029",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   },
+   {
+    "blobs": [],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m30/30/SYNTH-MEDIA-0030/missing.png"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0030"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/png"
+     },
+     "total_bytes": {
+      "int": 144
+     },
+     "transfer_name": {
+      "text": "SYNTH-MEDIA-blob-missing.png"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0030",
+    "sha256": null
+   },
+   {
+    "blobs": [],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m31/31/SYNTH-MEDIA-0031/absent.png"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0031"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/png"
+     },
+     "total_bytes": {
+      "int": 144
+     },
+     "transfer_name": {
+      "text": "SYNTH-MEDIA-not-in-backup.png"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0031",
+    "sha256": null
+   },
+   {
+    "blobs": [
+     "1e8c139364aea31d1f2f0eb5aca00d28aa45da1d2a6aec9e329146fe2b5235d7"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/StickerCache/m32/SYNTH-MEDIA-0032/sticker.png"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0032"
+     },
+     "is_sticker": {
+      "int": 1
+     },
+     "mime_type": {
+      "text": "image/png"
+     },
+     "total_bytes": {
+      "int": 144
+     },
+     "transfer_name": {
+      "text": "SYNTH-MEDIA-sticker-present.png"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0032",
+    "sha256": "1e8c139364aea31d1f2f0eb5aca00d28aa45da1d2a6aec9e329146fe2b5235d7"
+   },
+   {
+    "blobs": [],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/StickerCache/m33/SYNTH-MEDIA-0033/sticker.png"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0033"
+     },
+     "is_sticker": {
+      "int": 1
+     },
+     "mime_type": {
+      "text": "image/png"
+     },
+     "total_bytes": {
+      "int": 144
+     },
+     "transfer_name": {
+      "text": "SYNTH-MEDIA-sticker-not-found.png"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0033",
+    "sha256": null
+   },
+   {
+    "blobs": [],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0034"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/png"
+     },
+     "total_bytes": {
+      "int": 144
+     },
+     "transfer_name": {
+      "text": "SYNTH-MEDIA-null-filename.png"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0034",
+    "sha256": null
+   },
+   {
+    "blobs": [],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/Messages/Attachments/SYNTH-MEDIA-CLASS.png"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0035"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/png"
+     },
+     "total_bytes": {
+      "int": 144
+     },
+     "transfer_name": {
+      "text": "SYNTH-MEDIA-class-not-looked-up.png"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0035",
+    "sha256": null
+   },
+   {
+    "blobs": [
+     "1e8c139364aea31d1f2f0eb5aca00d28aa45da1d2a6aec9e329146fe2b5235d7"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m36/36/SYNTH-MEDIA-0036/size.png"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0036"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/png"
+     },
+     "total_bytes": {
+      "int": 144
+     },
+     "transfer_name": {
+      "text": "SYNTH-MEDIA-size-mismatch.png"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0036",
+    "sha256": "1e8c139364aea31d1f2f0eb5aca00d28aa45da1d2a6aec9e329146fe2b5235d7"
+   },
+   {
+    "blobs": [
+     "1e8c139364aea31d1f2f0eb5aca00d28aa45da1d2a6aec9e329146fe2b5235d7"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m37/37/SYNTH-MEDIA-0037/hidden.png"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0037"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/png"
+     },
+     "total_bytes": {
+      "int": 144
+     },
+     "transfer_name": {
+      "text": "SYNTH-MEDIA-hidden.png"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0037",
+    "sha256": "1e8c139364aea31d1f2f0eb5aca00d28aa45da1d2a6aec9e329146fe2b5235d7"
+   },
+   {
+    "blobs": [
+     "1e8c139364aea31d1f2f0eb5aca00d28aa45da1d2a6aec9e329146fe2b5235d7"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "text": "SYNTH-GENMOJI-PROMPT-MEDIA"
+     },
+     "filename": {
+      "text": "~/Library/SMS/StickerCache/m38/SYNTH-MEDIA-0038/genmoji.png"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0038"
+     },
+     "is_sticker": {
+      "int": 1
+     },
+     "mime_type": {
+      "text": "image/png"
+     },
+     "total_bytes": {
+      "int": 144
+     },
+     "transfer_name": {
+      "text": "SYNTH-MEDIA-genmoji.png"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0038",
+    "sha256": "1e8c139364aea31d1f2f0eb5aca00d28aa45da1d2a6aec9e329146fe2b5235d7"
+   },
+   {
+    "blobs": [
+     "1e8c139364aea31d1f2f0eb5aca00d28aa45da1d2a6aec9e329146fe2b5235d7"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m39/39/SYNTH-MEDIA-0039/same.png"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0039"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/png"
+     },
+     "total_bytes": {
+      "int": 144
+     },
+     "transfer_name": {
+      "text": "SYNTH-MEDIA-same-bytes.png"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0039",
+    "sha256": "1e8c139364aea31d1f2f0eb5aca00d28aa45da1d2a6aec9e329146fe2b5235d7"
+   },
+   {
+    "blobs": [
+     "1e8c139364aea31d1f2f0eb5aca00d28aa45da1d2a6aec9e329146fe2b5235d7"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m40/40/SYNTH-MEDIA-0040/inline-a.png"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0040"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/png"
+     },
+     "total_bytes": {
+      "int": 144
+     },
+     "transfer_name": {
+      "text": "SYNTH-MEDIA-inline-a.png"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0040",
+    "sha256": "1e8c139364aea31d1f2f0eb5aca00d28aa45da1d2a6aec9e329146fe2b5235d7"
+   },
+   {
+    "blobs": [
+     "03cfa5d2843b14e708ae77deb72faf8a84e837dee9d0d775ad50e4a860cf4177"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m40/40/SYNTH-MEDIA-0040/inline-b.gif"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0041"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/png"
+     },
+     "total_bytes": {
+      "int": 101
+     },
+     "transfer_name": {
+      "text": "SYNTH-MEDIA-inline-b.png"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0041",
+    "sha256": "03cfa5d2843b14e708ae77deb72faf8a84e837dee9d0d775ad50e4a860cf4177"
+   },
+   {
+    "blobs": [
+     "1e8c139364aea31d1f2f0eb5aca00d28aa45da1d2a6aec9e329146fe2b5235d7"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m41/41/SYNTH-MEDIA-0041/unmatched.png"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0042"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/png"
+     },
+     "total_bytes": {
+      "int": 144
+     },
+     "transfer_name": {
+      "text": "SYNTH-MEDIA-unmatched.png"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0042",
+    "sha256": "1e8c139364aea31d1f2f0eb5aca00d28aa45da1d2a6aec9e329146fe2b5235d7"
+   },
+   {
+    "blobs": [
+     "1e8c139364aea31d1f2f0eb5aca00d28aa45da1d2a6aec9e329146fe2b5235d7"
+    ],
+    "columns": {
+     "emoji_image_short_description": {
+      "state": "null"
+     },
+     "filename": {
+      "text": "~/Library/SMS/Attachments/m42/42/SYNTH-MEDIA-0042/declared.png"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-ATT-0043"
+     },
+     "is_sticker": {
+      "int": 0
+     },
+     "mime_type": {
+      "text": "image/png"
+     },
+     "total_bytes": {
+      "int": 999999
+     },
+     "transfer_name": {
+      "text": "SYNTH-MEDIA-declared-differs.png"
+     }
+    },
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:SYNTH-MEDIA-ATT-0043",
+    "sha256": "1e8c139364aea31d1f2f0eb5aca00d28aa45da1d2a6aec9e329146fe2b5235d7"
+   }
+  ],
+  "blobs": [
+   {
+    "byteLen": 60,
+    "sha256": "029bbdb766944282a9d296752314fb29c142002d1731e792074521bb1188d725"
+   },
+   {
+    "byteLen": 101,
+    "sha256": "03cfa5d2843b14e708ae77deb72faf8a84e837dee9d0d775ad50e4a860cf4177"
+   },
+   {
+    "byteLen": 162,
+    "sha256": "0ef3e34829763cd22a4d9cb6259610b8c701e7790ac70ccb25f874fd4d240654"
+   },
+   {
+    "byteLen": 74,
+    "sha256": "17379855047f042f3bd1c41a9f91c54b76db2bb3ccae1cfc3893b7d62920a42f"
+   },
+   {
+    "byteLen": 144,
+    "sha256": "1e8c139364aea31d1f2f0eb5aca00d28aa45da1d2a6aec9e329146fe2b5235d7"
+   },
+   {
+    "byteLen": 97,
+    "sha256": "285d245951d196aec929d53fbd73dab8f32268bff589041c41b0e3523ae1f1ca"
+   },
+   {
+    "byteLen": 165,
+    "sha256": "2bb3b14e9c6ed5f2cc444dd7431945110d5c8de107974dd43700fd3435849183"
+   },
+   {
+    "byteLen": 33,
+    "sha256": "2f21a73705d89324a31747bda68226b9e972f5bb5601f77d8e7e33482f962dce"
+   },
+   {
+    "byteLen": 130244,
+    "sha256": "3530e814a387df0468c61b0ebfa5c81d998619603fb61f0c4be734bce52bf850"
+   },
+   {
+    "byteLen": 139626,
+    "sha256": "3aee02adbd7a10c9e6b36f3b570d119d9a2dd7f9547d796dc41c36768a4e9031"
+   },
+   {
+    "byteLen": 504,
+    "sha256": "3d404eba49e051e5dc1cded48991197c377da669081127ed2d3391d8860d19a7"
+   },
+   {
+    "byteLen": 838,
+    "sha256": "4226f55b9109141b5dba6bab94d108274c49782ddc3e7fe1b706a755e7d17b9e"
+   },
+   {
+    "byteLen": 1890,
+    "sha256": "427c369cfe32cc3d3a8831bbab06029e44289d14583798a012459c4dbc2af820"
+   },
+   {
+    "byteLen": 136,
+    "sha256": "634d9d6da7bda023e1e8967f7fb461dd2ca962fee8d55c7416636b73c078c212"
+   },
+   {
+    "byteLen": 482,
+    "sha256": "6ea15ebf3a66d1a80c967693f21f63dcad09af2beb29006ae27ef7d9d12dac4d"
+   },
+   {
+    "byteLen": 474,
+    "sha256": "70d7908a932ffaa0c0e383843b5b4b493f096ef4724db54bccaf3f21151fcf28"
+   },
+   {
+    "byteLen": 60,
+    "sha256": "86b5f5a4a69b226cef532cb4019df8ff0c08a804fa919af5d116e6e257cd9eac"
+   },
+   {
+    "byteLen": 64,
+    "sha256": "94eb5de4943613fd048dc93393ab06877405faa39c11f53e9386083339833e7e"
+   },
+   {
+    "byteLen": 84,
+    "sha256": "a30a39a04a5abf514a64364be6eb90c9ec727b50c7f946a452f0cd68113a04f5"
+   },
+   {
+    "byteLen": 99,
+    "sha256": "b018832e28aff3b2a9f7e52b98ecfcd8e84453c24ac800a7884aa60e024dc842"
+   },
+   {
+    "byteLen": 458,
+    "sha256": "dd47a767f3bdedfad92074f3f9eb8e4899343352317e66726d608c6ba01526d5"
+   },
+   {
+    "byteLen": 474,
+    "sha256": "df9a3ebff23b8dfdebf5715f654d1e64d67b70a95b74eaf03b4e82c073de2548"
+   },
+   {
+    "byteLen": 233,
+    "sha256": "e1d4a37eb17cbd44df2e3f44e3faaa4a3811e3987914b1bf500bb6053e07151b"
+   },
+   {
+    "byteLen": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   },
+   {
+    "byteLen": 295,
+    "sha256": "e5aa1325df46ffe793fb96011fd921c1d27af4e02b42f2622a226347c74b66ef"
+   },
+   {
+    "byteLen": 149,
+    "sha256": "e5b574098494a840614431c1ee3f70b5d6fd4e84cda8a16fd65ec7b5687b933b"
+   },
+   {
+    "byteLen": 1,
+    "sha256": "e9b0c031f0493d3fd6b0b668260c79e7efe734bfd4b4115f9d82bc3be609c294"
+   },
+   {
+    "byteLen": 466,
+    "sha256": "f77de9facdde399e1d87a01a1abf4d5d6f0281df122dfa46ddad1c9302a3f917"
+   },
+   {
+    "byteLen": 196,
+    "sha256": "fedae1413ea64c335ca6f939c4f3b4239835bed1e24d36823a4d6e6963923d36"
+   }
+  ],
+  "chats": [
+   {
+    "columns": {
+     "chat_identifier": {
+      "text": "synthetic-media-1@example.invalid"
+     },
+     "display_name": {
+      "state": "null"
+     },
+     "group_id": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "iMessage;-;synthetic-media-1@example.invalid"
+     },
+     "is_archived": {
+      "int": 0
+     },
+     "room_name": {
+      "state": "null"
+     },
+     "service_name": {
+      "text": "iMessage"
+     },
+     "style": {
+      "int": 45
+     }
+    },
+    "handles": [
+     "handle:synthetic-media-1@example.invalid|iMessage"
+    ],
+    "history": {},
+    "notInLatest": [],
+    "ref": "guid:iMessage;-;synthetic-media-1@example.invalid"
+   }
+  ],
+  "excluded": {
+   "attachments": [],
+   "messages": [],
+   "unkeyedAttachmentRows": 0,
+   "unkeyedMessageRows": 0
+  },
+  "handles": [
+   {
+    "columns": {
+     "country": {
+      "text": "us"
+     },
+     "id": {
+      "text": "synthetic-media-1@example.invalid"
+     },
+     "person_centric_id": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "uncanonicalized_id": {
+      "state": "null"
+     }
+    },
+    "history": {},
+    "ref": "handle:synthetic-media-1@example.invalid|iMessage"
+   }
+  ],
+  "messages": [
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0001"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-1"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790000060000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307260000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0001"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-1"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0001",
+    "sort": {
+     "utcNs": 1768307260000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0002"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-2"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790000120000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307320000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0002"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-2"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0002",
+    "sort": {
+     "utcNs": 1768307320000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0003"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-3"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790000180000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307380000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0003"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-3"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0003",
+    "sort": {
+     "utcNs": 1768307380000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0004"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-4"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790000240000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307440000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0004"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-4"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0004",
+    "sort": {
+     "utcNs": 1768307440000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0005"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-5"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790000300000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307500000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0005"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-5"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0005",
+    "sort": {
+     "utcNs": 1768307500000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0006"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-6"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790000360000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307560000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0006"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-6"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0006",
+    "sort": {
+     "utcNs": 1768307560000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0007"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-7"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790000420000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307620000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0007"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-7"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0007",
+    "sort": {
+     "utcNs": 1768307620000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0008"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-8"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790000480000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307680000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0008"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-8"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0008",
+    "sort": {
+     "utcNs": 1768307680000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0009"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-9"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790000540000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307740000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0009"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-9"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0009",
+    "sort": {
+     "utcNs": 1768307740000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0010"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-10"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790000600000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307800000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0010"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-10"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0010",
+    "sort": {
+     "utcNs": 1768307800000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0011"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-11"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790000660000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307860000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0011"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-11"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0011",
+    "sort": {
+     "utcNs": 1768307860000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0012"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-12"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790000720000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307920000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0012"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-12"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0012",
+    "sort": {
+     "utcNs": 1768307920000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0013"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-13"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790000780000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768307980000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0013"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-13"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0013",
+    "sort": {
+     "utcNs": 1768307980000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0014"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-14"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790000840000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768308040000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0014"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-14"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0014",
+    "sort": {
+     "utcNs": 1768308040000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0015"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-15"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790000900000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768308100000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0015"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-15"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0015",
+    "sort": {
+     "utcNs": 1768308100000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0016"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-16"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790000960000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768308160000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0016"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-16"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0016",
+    "sort": {
+     "utcNs": 1768308160000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0017"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-17"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790001020000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768308220000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0017"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-17"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0017",
+    "sort": {
+     "utcNs": 1768308220000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0018"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-18"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790001080000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768308280000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0018"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-18"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0018",
+    "sort": {
+     "utcNs": 1768308280000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0019"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-19"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790001140000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768308340000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0019"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-19"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0019",
+    "sort": {
+     "utcNs": 1768308340000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0020"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-20"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790001200000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768308400000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0020"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-20"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0020",
+    "sort": {
+     "utcNs": 1768308400000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0021"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-21"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790001260000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768308460000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0021"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-21"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0021",
+    "sort": {
+     "utcNs": 1768308460000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0022"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-22"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790001320000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768308520000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0022"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-22"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0022",
+    "sort": {
+     "utcNs": 1768308520000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0023"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-23"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790001380000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768308580000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0023"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-23"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0023",
+    "sort": {
+     "utcNs": 1768308580000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0024"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-24"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790001440000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768308640000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0024"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-24"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0024",
+    "sort": {
+     "utcNs": 1768308640000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0025"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-25"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790001500000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768308700000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0025"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-25"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0025",
+    "sort": {
+     "utcNs": 1768308700000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0026"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-26"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790001560000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768308760000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0026"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-26"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0026",
+    "sort": {
+     "utcNs": 1768308760000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0027"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-27"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790001620000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768308820000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0027"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-27"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0027",
+    "sort": {
+     "utcNs": 1768308820000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0028"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-28"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790001680000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768308880000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0028"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-28"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0028",
+    "sort": {
+     "utcNs": 1768308880000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0029"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-29"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790001740000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768308940000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0029"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-29"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0029",
+    "sort": {
+     "utcNs": 1768308940000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0030"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-30"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790001800000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768309000000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0030"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-30"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0030",
+    "sort": {
+     "utcNs": 1768309000000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0031"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-31"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790001860000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768309060000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0031"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-31"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0031",
+    "sort": {
+     "utcNs": 1768309060000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0032"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-32"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790001920000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768309120000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0032"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-32"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0032",
+    "sort": {
+     "utcNs": 1768309120000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0033"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-33"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790001980000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768309180000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0033"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-33"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0033",
+    "sort": {
+     "utcNs": 1768309180000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0034"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-34"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790002040000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768309240000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0034"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-34"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0034",
+    "sort": {
+     "utcNs": 1768309240000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0035"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-35"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790002100000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768309300000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0035"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-35"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0035",
+    "sort": {
+     "utcNs": 1768309300000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0036"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-36"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790002160000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768309360000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0036"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-36"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0036",
+    "sort": {
+     "utcNs": 1768309360000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0037"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-37"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790002220000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768309420000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0037"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-37"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0037",
+    "sort": {
+     "utcNs": 1768309420000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0038"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-38"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790002280000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768309480000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0038"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-38"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0038",
+    "sort": {
+     "utcNs": 1768309480000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0039"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-39"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790002340000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768309540000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0039"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-39"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0039",
+    "sort": {
+     "utcNs": 1768309540000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0040",
+     "guid:SYNTH-MEDIA-ATT-0041"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "attributedBody",
+      "text": "SYNTH-MEDIA-INLINE \ufffc then \ufffc emoji \ufffc"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790002400000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768309600000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0040"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "attributedBody",
+     "text": "SYNTH-MEDIA-INLINE \ufffc then \ufffc emoji \ufffc"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0040",
+    "sort": {
+     "utcNs": 1768309600000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0042"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "attributedBody",
+      "text": "SYNTH-MEDIA-UNMATCHED \ufffc"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790002460000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768309660000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0041"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "attributedBody",
+     "text": "SYNTH-MEDIA-UNMATCHED \ufffc"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0041",
+    "sort": {
+     "utcNs": 1768309660000000000
+    }
+   },
+   {
+    "attachments": [
+     "guid:SYNTH-MEDIA-ATT-0043"
+    ],
+    "bodies": [
+     {
+      "current": true,
+      "source": "text",
+      "text": "SYNTH-MEDIA-BODY-42"
+     }
+    ],
+    "chats": [
+     "guid:iMessage;-;synthetic-media-1@example.invalid"
+    ],
+    "columns": {
+     "associated_message_guid": {
+      "state": "null"
+     },
+     "associated_message_type": {
+      "int": 0
+     },
+     "cache_has_attachments": {
+      "int": 1
+     },
+     "date": {
+      "raw": 790002520000000000,
+      "unit": "nanoseconds",
+      "utcNs": 1768309720000000000
+     },
+     "date_edited": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "date_retracted": {
+      "raw": 0,
+      "unit": "zero",
+      "utcNs": null
+     },
+     "destination_caller_id": {
+      "state": "null"
+     },
+     "group_action_type": {
+      "int": 0
+     },
+     "group_title": {
+      "state": "null"
+     },
+     "guid": {
+      "text": "SYNTH-MEDIA-MSG-0042"
+     },
+     "is_delivered": {
+      "int": 1
+     },
+     "is_from_me": {
+      "int": 0
+     },
+     "is_read": {
+      "int": 1
+     },
+     "item_type": {
+      "int": 0
+     },
+     "payload_data": {
+      "state": "null"
+     },
+     "service": {
+      "text": "iMessage"
+     },
+     "subject": {
+      "state": "null"
+     }
+    },
+    "display": {
+     "source": "text",
+     "text": "SYNTH-MEDIA-BODY-42"
+    },
+    "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+    "history": {},
+    "notInLatest": [],
+    "recentlyDeleted": [],
+    "ref": "guid:SYNTH-MEDIA-MSG-0042",
+    "sort": {
+     "utcNs": 1768309720000000000
+    }
+   }
+  ]
+ },
+ "format": "oma-viewer-content",
+ "formatVersion": 1,
+ "orders": [
+  [
+   {
+    "copyAttachments": true,
+    "entry": "view-media-plain",
+    "includeRecentlyDeleted": false,
+    "iosVersionUntested": false,
+    "lineage": "L1"
+   },
+   {
+    "copyAttachments": true,
+    "entry": "view-media2-plain",
+    "includeRecentlyDeleted": false,
+    "iosVersionUntested": false,
+    "lineage": "L1"
+   }
+  ]
+ ],
+ "sessions": {
+  "view-media-plain": {
+   "contentDigest": "16f60232e977bf7f1d8403269e17c1dd2d414d492a51075c209175e27aa4a620",
+   "fullObservation": true,
+   "orderClass": "dated",
+   "orderKeyNs": 1780567200000000000,
+   "orderKeySource": "statusPlistDate",
+   "qualifiers": [],
+   "rank": "0198b5d86f3eb6400016f60232e977bf7f1d8403269e17c1dd2d414d492a51075c209175e27aa4a620"
+  },
+  "view-media2-plain": {
+   "contentDigest": "16f60232e977bf7f1d8403269e17c1dd2d414d492a51075c209175e27aa4a620",
+   "fullObservation": true,
+   "orderClass": "dated",
+   "orderKeyNs": 1780653600000000000,
+   "orderKeySource": "statusPlistDate",
+   "qualifiers": [],
+   "rank": "0198b62703d005400016f60232e977bf7f1d8403269e17c1dd2d414d492a51075c209175e27aa4a620"
+  }
+ },
+ "viewer": {
+  "attachments": {
+   "guid:SYNTH-MEDIA-ATT-0001": {
+    "card": "image",
+    "declaredBytes": 144,
+    "declaredType": "image/png",
+    "fromOlderBackup": true,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "blob:missing"
+    ],
+    "sniff": "png",
+    "storedBytes": 144
+   },
+   "guid:SYNTH-MEDIA-ATT-0002": {
+    "card": "image",
+    "declaredBytes": 136,
+    "declaredType": "image/png",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "webp",
+    "storedBytes": 162
+   },
+   "guid:SYNTH-MEDIA-ATT-0003": {
+    "card": "image",
+    "declaredBytes": 838,
+    "declaredType": "image/jpeg",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "jpeg",
+    "storedBytes": 838
+   },
+   "guid:SYNTH-MEDIA-ATT-0004": {
+    "card": "image",
+    "declaredBytes": 1890,
+    "declaredType": "image/jpeg",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "jpeg",
+    "storedBytes": 1890
+   },
+   "guid:SYNTH-MEDIA-ATT-0005": {
+    "card": "image",
+    "declaredBytes": 101,
+    "declaredType": "image/gif",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "gif",
+    "storedBytes": 101
+   },
+   "guid:SYNTH-MEDIA-ATT-0006": {
+    "card": "image",
+    "declaredBytes": 162,
+    "declaredType": "image/webp",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "webp",
+    "storedBytes": 162
+   },
+   "guid:SYNTH-MEDIA-ATT-0007": {
+    "card": "image",
+    "declaredBytes": 139626,
+    "declaredType": "image/png",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "png",
+    "storedBytes": 139626
+   },
+   "guid:SYNTH-MEDIA-ATT-0008": {
+    "card": "image",
+    "declaredBytes": 130244,
+    "declaredType": "image/png",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "png",
+    "storedBytes": 130244
+   },
+   "guid:SYNTH-MEDIA-ATT-0009": {
+    "card": "image",
+    "declaredBytes": 295,
+    "declaredType": "image/png",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "png",
+    "storedBytes": 295
+   },
+   "guid:SYNTH-MEDIA-ATT-0010": {
+    "card": "play",
+    "declaredBytes": 474,
+    "declaredType": "video/mp4",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "mp4",
+    "storedBytes": 474,
+    "structure": {
+     "state": "ok"
+    }
+   },
+   "guid:SYNTH-MEDIA-ATT-0011": {
+    "card": "play",
+    "declaredBytes": 466,
+    "declaredType": "video/quicktime",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "quicktime",
+    "storedBytes": 466,
+    "structure": {
+     "state": "ok"
+    }
+   },
+   "guid:SYNTH-MEDIA-ATT-0012": {
+    "card": "play",
+    "declaredBytes": 474,
+    "declaredType": "audio/x-m4a",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "m4a",
+    "storedBytes": 474,
+    "structure": {
+     "state": "ok"
+    }
+   },
+   "guid:SYNTH-MEDIA-ATT-0013": {
+    "card": "play",
+    "declaredBytes": 60,
+    "declaredType": "audio/wav",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "wav",
+    "storedBytes": 60,
+    "structure": {
+     "state": "ok"
+    }
+   },
+   "guid:SYNTH-MEDIA-ATT-0014": {
+    "card": "file:caf",
+    "declaredBytes": 84,
+    "declaredType": "audio/x-caf",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "caf",
+    "storedBytes": 84
+   },
+   "guid:SYNTH-MEDIA-ATT-0015": {
+    "card": "file:heif",
+    "declaredBytes": 74,
+    "declaredType": "image/heic",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "heif",
+    "storedBytes": 74
+   },
+   "guid:SYNTH-MEDIA-ATT-0016": {
+    "card": "play",
+    "declaredBytes": 97,
+    "declaredType": "video/quicktime",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "quicktime",
+    "storedBytes": 97,
+    "structure": {
+     "reason": "referenceMovie",
+     "state": "refused"
+    }
+   },
+   "guid:SYNTH-MEDIA-ATT-0017": {
+    "card": "play",
+    "declaredBytes": 504,
+    "declaredType": "video/quicktime",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "quicktime",
+    "storedBytes": 504,
+    "structure": {
+     "reason": "externalDataReference",
+     "state": "refused"
+    }
+   },
+   "guid:SYNTH-MEDIA-ATT-0018": {
+    "card": "play",
+    "declaredBytes": 458,
+    "declaredType": "video/mp4",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "mp4",
+    "storedBytes": 458,
+    "structure": {
+     "reason": "boxPastEnd",
+     "state": "refused"
+    }
+   },
+   "guid:SYNTH-MEDIA-ATT-0019": {
+    "card": "play",
+    "declaredBytes": 482,
+    "declaredType": "video/mp4",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "mp4",
+    "storedBytes": 482,
+    "structure": {
+     "reason": "sizeOverflow",
+     "state": "refused"
+    }
+   },
+   "guid:SYNTH-MEDIA-ATT-0020": {
+    "card": "play",
+    "declaredBytes": 60,
+    "declaredType": "audio/wav",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "wav",
+    "storedBytes": 60,
+    "structure": {
+     "reason": "chunkPastEnd",
+     "state": "refused"
+    }
+   },
+   "guid:SYNTH-MEDIA-ATT-0021": {
+    "card": "file:xml",
+    "declaredBytes": 196,
+    "declaredType": "image/svg+xml",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "xml",
+    "storedBytes": 196
+   },
+   "guid:SYNTH-MEDIA-ATT-0022": {
+    "card": "file:html",
+    "declaredBytes": 165,
+    "declaredType": "image/jpeg",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "html",
+    "storedBytes": 165
+   },
+   "guid:SYNTH-MEDIA-ATT-0023": {
+    "card": "image",
+    "declaredBytes": 233,
+    "declaredType": "image/gif",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "gif",
+    "storedBytes": 233
+   },
+   "guid:SYNTH-MEDIA-ATT-0024": {
+    "card": "file:pdf",
+    "declaredBytes": 149,
+    "declaredType": "application/pdf",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "pdf",
+    "storedBytes": 149
+   },
+   "guid:SYNTH-MEDIA-ATT-0025": {
+    "card": "file:vcard",
+    "declaredBytes": 99,
+    "declaredType": "text/vcard",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "vcard",
+    "storedBytes": 99
+   },
+   "guid:SYNTH-MEDIA-ATT-0026": {
+    "card": "file:text",
+    "declaredBytes": 33,
+    "declaredType": "text/plain",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "text",
+    "storedBytes": 33
+   },
+   "guid:SYNTH-MEDIA-ATT-0027": {
+    "card": "unrecognised",
+    "declaredBytes": 64,
+    "declaredType": "application/octet-stream",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "unknown",
+    "storedBytes": 64
+   },
+   "guid:SYNTH-MEDIA-ATT-0028": {
+    "card": "unrecognised",
+    "declaredBytes": 1,
+    "declaredType": null,
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "unknown",
+    "storedBytes": 1
+   },
+   "guid:SYNTH-MEDIA-ATT-0029": {
+    "card": "unrecognised",
+    "declaredBytes": 0,
+    "declaredType": null,
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "unknown",
+    "storedBytes": 0
+   },
+   "guid:SYNTH-MEDIA-ATT-0030": {
+    "card": "couldNotBeRead",
+    "declaredBytes": 144,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "blob:missing",
+     "blob:missing"
+    ],
+    "storedBytes": null
+   },
+   "guid:SYNTH-MEDIA-ATT-0031": {
+    "card": "notInBackup",
+    "declaredBytes": 144,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "notListedAtSourcedKey",
+     "notListedAtSourcedKey"
+    ],
+    "storedBytes": null
+   },
+   "guid:SYNTH-MEDIA-ATT-0032": {
+    "card": "image",
+    "declaredBytes": 144,
+    "declaredType": "image/png",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": true,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "png",
+    "storedBytes": 144
+   },
+   "guid:SYNTH-MEDIA-ATT-0033": {
+    "card": "notFoundAtAssumedKey",
+    "declaredBytes": 144,
+    "hideAttachment": false,
+    "isSticker": true,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "notFoundAtAssumedKey",
+     "notFoundAtAssumedKey"
+    ],
+    "storedBytes": null
+   },
+   "guid:SYNTH-MEDIA-ATT-0034": {
+    "card": "locationUnusable",
+    "declaredBytes": 144,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "notAttempted:null",
+     "notAttempted:null"
+    ],
+    "storedBytes": null
+   },
+   "guid:SYNTH-MEDIA-ATT-0035": {
+    "card": "classNotLookedUp",
+    "declaredBytes": 144,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "notAttempted:class",
+     "notAttempted:class"
+    ],
+    "storedBytes": null
+   },
+   "guid:SYNTH-MEDIA-ATT-0036": {
+    "card": "image",
+    "declaredBytes": 144,
+    "declaredType": "image/png",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "png",
+    "storedBytes": 144
+   },
+   "guid:SYNTH-MEDIA-ATT-0037": {
+    "card": "image",
+    "declaredBytes": 144,
+    "declaredType": "image/png",
+    "fromOlderBackup": false,
+    "hideAttachment": true,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "png",
+    "storedBytes": 144
+   },
+   "guid:SYNTH-MEDIA-ATT-0038": {
+    "card": "image",
+    "declaredBytes": 144,
+    "declaredType": "image/png",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": true,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "png",
+    "storedBytes": 144
+   },
+   "guid:SYNTH-MEDIA-ATT-0039": {
+    "card": "image",
+    "declaredBytes": 144,
+    "declaredType": "image/png",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "png",
+    "storedBytes": 144
+   },
+   "guid:SYNTH-MEDIA-ATT-0040": {
+    "card": "image",
+    "declaredBytes": 144,
+    "declaredType": "image/png",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "png",
+    "storedBytes": 144
+   },
+   "guid:SYNTH-MEDIA-ATT-0041": {
+    "card": "image",
+    "declaredBytes": 101,
+    "declaredType": "image/png",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "gif",
+    "storedBytes": 101
+   },
+   "guid:SYNTH-MEDIA-ATT-0042": {
+    "card": "image",
+    "declaredBytes": 144,
+    "declaredType": "image/png",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "png",
+    "storedBytes": 144
+   },
+   "guid:SYNTH-MEDIA-ATT-0043": {
+    "card": "image",
+    "declaredBytes": 999999,
+    "declaredType": "image/png",
+    "fromOlderBackup": false,
+    "hideAttachment": false,
+    "isSticker": false,
+    "nameBidiControls": false,
+    "nameInvisible": false,
+    "observations": [
+     "present",
+     "present"
+    ],
+    "sniff": "png",
+    "storedBytes": 144
+   }
+  },
+  "conversations": [
+   {
+    "addresses": 1,
+    "chat": "guid:iMessage;-;synthetic-media-1@example.invalid",
+    "earlierDatedItems": 0,
+    "empty": false,
+    "firstDate2007UtcNs": 1768307260000000000,
+    "group": false,
+    "itemsRecorded": 42,
+    "lastDatedUtcNs": 1768309720000000000,
+    "notInLatest": [],
+    "preview": "guid:SYNTH-MEDIA-MSG-0042",
+    "undatedItems": 0
+   }
+  ],
+  "masked": {
+   "earlierText": [],
+   "oneTimeCodes": []
+  },
+  "messages": {
+   "guid:SYNTH-MEDIA-MSG-0001": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 18
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307260000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0002": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 18
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307320000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0003": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 18
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307380000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0004": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 18
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307440000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0005": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 18
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307500000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0006": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 18
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307560000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0007": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 18
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307620000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0008": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 18
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307680000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0009": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 18
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307740000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0010": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307800000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0011": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307860000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0012": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307920000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0013": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768307980000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0014": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768308040000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0015": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768308100000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0016": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768308160000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0017": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768308220000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0018": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768308280000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0019": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768308340000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0020": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768308400000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0021": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768308460000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0022": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768308520000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0023": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768308580000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0024": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768308640000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0025": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768308700000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0026": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768308760000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0027": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768308820000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0028": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768308880000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0029": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768308940000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0030": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768309000000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0031": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768309060000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0032": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768309120000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0033": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768309180000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0034": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768309240000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0035": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768309300000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0036": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768309360000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0037": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768309420000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0038": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768309480000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0039": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768309540000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0040": {
+    "body": {
+     "bidiControls": false,
+     "invisible": true,
+     "source": "attributedBody",
+     "utf16": 35
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "formatting": "applied",
+    "inline": [
+     {
+      "attachment": "guid:SYNTH-MEDIA-ATT-0041",
+      "kind": "attachment"
+     },
+     {
+      "attachment": "guid:SYNTH-MEDIA-ATT-0040",
+      "kind": "attachment"
+     },
+     {
+      "kind": "inlineEmoji"
+     }
+    ],
+    "item": "message",
+    "labels": [],
+    "listedBelow": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768309600000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0041": {
+    "body": {
+     "bidiControls": false,
+     "invisible": true,
+     "source": "attributedBody",
+     "utf16": 23
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "formatting": "applied",
+    "inline": [
+     {
+      "kind": "unmatched"
+     }
+    ],
+    "item": "message",
+    "labels": [],
+    "listedBelow": [
+     "guid:SYNTH-MEDIA-ATT-0042"
+    ],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768309660000000000
+   },
+   "guid:SYNTH-MEDIA-MSG-0042": {
+    "body": {
+     "bidiControls": false,
+     "invisible": false,
+     "source": "text",
+     "utf16": 19
+    },
+    "direction": "received",
+    "edit": {
+     "label": "noEditRecorded",
+     "storedVersions": 1
+    },
+    "item": "message",
+    "labels": [],
+    "sender": {
+     "handle": "handle:synthetic-media-1@example.invalid|iMessage",
+     "reason": "resolved"
+    },
+    "service": "imessage",
+    "utcNs": 1768309720000000000
+   }
+  },
+  "threads": {
+   "guid:iMessage;-;synthetic-media-1@example.invalid": {
+    "dated": [
+     "guid:SYNTH-MEDIA-MSG-0001",
+     "guid:SYNTH-MEDIA-MSG-0002",
+     "guid:SYNTH-MEDIA-MSG-0003",
+     "guid:SYNTH-MEDIA-MSG-0004",
+     "guid:SYNTH-MEDIA-MSG-0005",
+     "guid:SYNTH-MEDIA-MSG-0006",
+     "guid:SYNTH-MEDIA-MSG-0007",
+     "guid:SYNTH-MEDIA-MSG-0008",
+     "guid:SYNTH-MEDIA-MSG-0009",
+     "guid:SYNTH-MEDIA-MSG-0010",
+     "guid:SYNTH-MEDIA-MSG-0011",
+     "guid:SYNTH-MEDIA-MSG-0012",
+     "guid:SYNTH-MEDIA-MSG-0013",
+     "guid:SYNTH-MEDIA-MSG-0014",
+     "guid:SYNTH-MEDIA-MSG-0015",
+     "guid:SYNTH-MEDIA-MSG-0016",
+     "guid:SYNTH-MEDIA-MSG-0017",
+     "guid:SYNTH-MEDIA-MSG-0018",
+     "guid:SYNTH-MEDIA-MSG-0019",
+     "guid:SYNTH-MEDIA-MSG-0020",
+     "guid:SYNTH-MEDIA-MSG-0021",
+     "guid:SYNTH-MEDIA-MSG-0022",
+     "guid:SYNTH-MEDIA-MSG-0023",
+     "guid:SYNTH-MEDIA-MSG-0024",
+     "guid:SYNTH-MEDIA-MSG-0025",
+     "guid:SYNTH-MEDIA-MSG-0026",
+     "guid:SYNTH-MEDIA-MSG-0027",
+     "guid:SYNTH-MEDIA-MSG-0028",
+     "guid:SYNTH-MEDIA-MSG-0029",
+     "guid:SYNTH-MEDIA-MSG-0030",
+     "guid:SYNTH-MEDIA-MSG-0031",
+     "guid:SYNTH-MEDIA-MSG-0032",
+     "guid:SYNTH-MEDIA-MSG-0033",
+     "guid:SYNTH-MEDIA-MSG-0034",
+     "guid:SYNTH-MEDIA-MSG-0035",
+     "guid:SYNTH-MEDIA-MSG-0036",
+     "guid:SYNTH-MEDIA-MSG-0037",
+     "guid:SYNTH-MEDIA-MSG-0038",
+     "guid:SYNTH-MEDIA-MSG-0039",
+     "guid:SYNTH-MEDIA-MSG-0040",
+     "guid:SYNTH-MEDIA-MSG-0041",
+     "guid:SYNTH-MEDIA-MSG-0042"
+    ],
+    "folded": [],
+    "undated": []
+   }
+  }
+ }
+}
