@@ -16,6 +16,7 @@ pub mod backups;
 pub mod jobs;
 pub mod settings;
 pub mod system;
+pub mod viewer;
 
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -24,6 +25,7 @@ use crate::archives::ArchiveEnv;
 use crate::backups::{BackupRegistry, Jobs};
 use crate::error::{IpcError, IpcResult};
 use crate::settings::SettingsStore;
+use crate::viewer::ViewerHost;
 
 /// Application state. No lock is held across file I/O, a dialog, a blocking
 /// call or an await: each command clones what it needs and drops the guard.
@@ -38,6 +40,8 @@ pub struct AppState {
     pub jobs: Arc<Jobs>,
     /// How archive libraries are built (a fake free-space probe in tests).
     pub archive_env: ArchiveEnv,
+    /// The viewer session, if one is open (M5).
+    pub viewer: Arc<ViewerHost>,
 }
 
 impl AppState {
@@ -48,6 +52,7 @@ impl AppState {
             listing: AtomicBool::new(false),
             jobs: Arc::new(Jobs::default()),
             archive_env: ArchiveEnv::default(),
+            viewer: Arc::new(ViewerHost::default()),
         }
     }
 

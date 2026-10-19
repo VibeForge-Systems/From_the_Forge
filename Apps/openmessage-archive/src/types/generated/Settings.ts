@@ -2,6 +2,7 @@
 import type { AddedFolderEntry } from "./AddedFolderEntry";
 import type { LayoutPreferences } from "./LayoutPreferences";
 import type { Theme } from "./Theme";
+import type { ViewerPreferences } from "./ViewerPreferences";
 
 export type Settings = { schemaVersion: number, 
 /**
@@ -17,4 +18,9 @@ archiveDirectory: string | null, theme: Theme, layout: LayoutPreferences,
  * malformed value or element is dropped with a notice instead of making
  * the whole file count as corrupt, which would lose `archiveDirectory`.
  */
-backupFolders: Array<AddedFolderEntry>, };
+backupFolders: Array<AddedFolderEntry>, 
+/**
+ * The viewer's preferences (M5). Read leniently: a malformed object
+ * falls back to the defaults.
+ */
+viewer: ViewerPreferences, };

@@ -374,6 +374,20 @@ Never hand-edit generated files.
   off by default and must never be enabled by `src-tauri` or a release
   build; CI only lints and audits it. The structural check and the hash
   are not safety guarantees; never word them as such.
+- **The shell viewer (M5 slice 5e).** `src-tauri/src/viewer/` is
+  Tauri-free; `commands/viewer.rs` only parses, picks the session by
+  generation and runs on the blocking pool. Content crosses only as
+  `UntrustedText`, raw integers as `DecimalString`, ids as `SafeId` (input
+  ids too, `#[ts(as = "SafeId")]`); a new viewer DTO goes into
+  `M5_VIEWER_TYPES` (the viewer guard fails otherwise) and must keep the
+  archive guard's walk disjoint. Commands with free text take the raw
+  `Request` and `parse_raw` it (never a serde error that could echo it),
+  and their `ipc.ts` wrappers use `callRedacted`. A search cancels the
+  previous one's token and interrupt **before** waiting for the search
+  reader. `inspect_attachment` serves only surfaced attachments and
+  refuses playback in Rust when `mediaPlayback` is `off`. A viewer session
+  blocks location changes (D114). Never log query or filter text, ids or
+  content (`src-tauri/tests/log_hygiene.rs`).
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush

@@ -99,6 +99,11 @@ converts between IPC types and library calls.
 - **Inputs validated by deserialization.** Input types use
   `deny_unknown_fields`, and enums are closed. For example, `SettingsUpdate`
   has no `archiveDirectory` field, so the webview cannot set one.
+- **Free text and ids from the viewer (M5).** The two viewer commands that
+  take free text (a conversation filter, a search query) parse the raw
+  request in Rust, so a malformed body is `invalidInput` with a fixed
+  sentence and is never echoed; viewer ids are checked in Rust to be
+  integers in `1..=2^53 − 1` (slice 5e).
 - **Uniform errors.** Every failure crosses as `IpcError { code, message }`.
   `code` is a closed enum. `message` is a user-facing sentence. Errors never
   carry message content or secrets.
@@ -2145,6 +2150,139 @@ rendition. No schema change; nothing is written.
   its results stay **UNVERIFIED** and the designed behaviour stays behind
   feature detection (`canPlayType`, slice 5h3).
 
+### The shell viewer: session, commands and DTOs (M5 slice 5e)
+
+`src-tauri/src/viewer/` (no Tauri types, like `archives/`) and
+`src-tauri/src/commands/viewer.rs`: the viewer session, the 14 viewer
+commands, their DTOs and guards, the viewer settings and their window
+effects. No UI yet (PR B); the media protocol, the decode helper and the
+window built in Rust are slice 5f.
+
+- **One session (§7.1, D89).** `ViewerHost` (in `AppState`) holds at most
+  one `ViewerSession` with a generation number; every request names it,
+  and a stale one is `viewerClosed`. `open_viewer` closes any open session
+  first, then opens three `ArchiveReader`s through `Library::open_read`
+  (each repeats the M4 checks: permissions, volume, header, fingerprint,
+  meta; `NeedsMigration`, `NewerSchema`, `Damaged` and `Refused` map to
+  their M4 codes): `pages` (list, pages, details, text, dates, attachment
+  facts and sniffing), `search` (search only; its `SearchInterrupt` is
+  kept outside the mutex) and `verify` (hashing and the structural check
+  for playback). Each reader call is one snapshot; nothing is held across
+  calls. The stream and decode readers come with slice 5f. The session
+  keeps the attachments it surfaced (`inspect_attachment` refuses any
+  other with `attachmentUnavailable`), the sort keys served for page
+  anchors (at most 20,000, evicted oldest first; keys never cross IPC),
+  one search slot (the running search's token and the last finished set
+  with its `Redacted` request), and the identities of files that passed
+  both playback checks (for slice 5f's streaming). An answer of
+  `archiveNotFound` (the archive's directory went away) closes the session
+  and becomes `viewerClosed`. The exit handler closes the session.
+- **D114.** A session counts as an open archive: changing or clearing the
+  archive location is refused with `busy` and "Close the viewer to change
+  the archive location" (`refuse_during_job` now checks the viewer too).
+- **Commands (§7.2).** `open_viewer`, `close_viewer`,
+  `list_conversations`, `get_conversations`, `get_thread_page`,
+  `get_reply_thread`, `get_message_detail`, `get_message_text`,
+  `get_day_counts`, `seek_date`, `search_messages`, `get_search_results`,
+  `cancel_search` and `inspect_attachment`, each through the five steps
+  (a test reads `lib.rs`, `build.rs`, the capability and `ipc.ts`). Reads
+  run on the blocking pool. Inputs refuse unknown fields; ids are any JSON
+  number checked in Rust to be an integer in `1..=2^53 − 1` (a fraction,
+  0, a negative or 2^53 is `invalidInput`, never rounded); instants are
+  UTC milliseconds whose nanosecond product fits. The two commands with
+  free text (`list_conversations`'s filter, `search_messages`'s query)
+  take the raw `tauri::ipc::Request` and parse its `request` member in
+  Rust: any failure is `invalidInput` with one fixed sentence that echoes
+  nothing; their `ipc.ts` wrappers use `callRedacted`. `search_messages`
+  also takes a progress `Channel<ScanProgressDto>` (no `core:*`
+  permission, as for the jobs).
+- **Search (§7.1).** `search_messages` validates the query, then sets the
+  running search's token and calls `SearchInterrupt::interrupt` **before**
+  it waits for the search reader; a search whose token was set ends as
+  `searchSuperseded` (as does `get_search_results` for any id but the
+  live one), which the UI drops. `cancel_search` sets the token, then
+  interrupts. Hits are read with the request the set was made with.
+- **DTOs and guards (§7.3, §7.4, D95).** Content crosses only as
+  `UntrustedText` (`string & { readonly __untrusted: unique symbol }`)
+  inside `ContentTextDto`/`OptContentDto`; raw source integers as
+  `DecimalString`; ids as `SafeId` (`number & { readonly __id: unique
+  symbol }`); input ids are declared `SafeId` too, so the frontend can only
+  send ids it was given. Each brand has one Rust newtype with a validating
+  constructor. A row whose id is out of range is skipped and counted in
+  `skippedRows`. Closed schema codes are mirrored by a macro with an
+  exhaustive match. The viewer guard walks every viewer output and input
+  type: no `bigint`, no `string` field but the three inputs (the archive
+  id, the filter, the query), every id field `SafeId`, and none of the
+  banned keys (`guid`, `rank`, `sortKey`, `path`, `sha256`, … and every
+  read, delivery or sent key, D94); `M5_VIEWER_TYPES` must equal the walk.
+  The archive guard now rejects any field type naming a brand or a viewer
+  type (with a negative test on a content-carrying archive-shaped type),
+  and the two walks are disjoint.
+- **Size bound (§7.3).** The crate bounds a page's estimated size; the
+  shell checks the real serialised size of every page and detail against
+  1 MiB and, over it, drops the items farthest from where the page was
+  read (moving that anchor, setting `hasOlder`/`hasNewer` and
+  `cutForSize`), or a detail's oldest non-current versions (counted in
+  `moreVersions`). Every page and detail built from the catalogue,
+  `view-hostile-text-plain` included, is under the bound.
+- **Masking (D115).** The DTOs carry exactly what the crate assembled:
+  one-time codes and earlier text cross only when the request's `reveal`
+  asks. A test runs every read command over four catalogue entries
+  without `reveal` and finds none of the model's `masked` strings in any
+  output, then finds every one with `reveal`.
+- **Playback in Rust (owner Q4).** `inspect_attachment` sniffs the stored
+  file; with `forPlayback` it refuses when `mediaPlayback` is `off`,
+  otherwise (for a playable kind only) it hashes the whole file on the
+  `verify` reader (integrity only, cancelled when the session closes),
+  runs the structural check, and remembers the file's identity only when
+  both pass. The confirmation dialog of `confirm` is the UI's (slice 5h3).
+- **Errors (§7.5).** `ErrorCode` gains `viewerClosed`, `queryTooBroad`,
+  `invalidQuery`, `searchUnavailable`, `searchSuperseded`,
+  `messageNotFound`, `anchorNotFound` and `attachmentUnavailable`, each
+  with a fixed sentence (`viewer/messages.rs`) and listed in `ipc.ts`.
+  `AnchorNotFound` from the crate is `anchorNotFound` for a page anchor
+  and `messageNotFound` for a message, body or attachment id.
+- **Settings (§7.6).** `Settings.viewer: ViewerPreferences` and
+  `SettingsUpdate.viewer` (whole-object replace, unknown fields refused;
+  `uiZoom` 100–400 in steps of 10 and `idleHideMinutes` 0, 1, 5, 15 or 30
+  checked by `try_from`). `SETTINGS_SCHEMA_VERSION` stays 1: an old file
+  loads with the defaults, and a malformed `viewer` object falls back to
+  the defaults instead of setting the whole file aside.
+  `mediaPlayback` defaults to `confirm` (**owner-confirmed 2026-10-18,
+  Q4**) and `revealEarlierText` to off (Q3b). `uiZoom` is applied with
+  `Webview::set_zoom` and `captureProtection` (Windows only) with
+  `WebviewWindow::set_content_protected`, at startup and whenever an
+  update carries `viewer` (D116); no webview permission is granted.
+  `listPreviews` off makes `get_conversations` send `hidden` instead of
+  preview text.
+- **Logging (§7.7).** `info`: viewer open and close (outcome kind) and
+  each search (mode, plan, match-count bucket, capped, elapsed ms).
+  `debug`: page and hit buckets, partial and size flags, the conversation
+  index bucket. Never query or filter text, ids, labels, addresses, names,
+  text or exact byte counts. `src-tauri/tests/log_hygiene.rs` imports
+  three viewer catalogue entries and runs every viewer operation,
+  refusals included, with a filter and a query that carry sentinels, and
+  checks every log line for the catalogue's sentinels, the filter and
+  query sentinels and the archive ids.
+- **Deviations.** `searchId` is a number, not an allowlisted string.
+  `get_day_counts` returns the visible counts only (the crate has no
+  `basis` or undated count; the conversation row has the undated count).
+  `ViewerSessionDto` carries the import sessions (id, state, start and
+  end) instead of lineages, and no `mediaBase` (slice 5f, with the
+  protocol). The details panel's UTC ISO string is not built in Rust: the
+  DTO carries the floored milliseconds, the raw value as digits and its
+  unit. Message DTOs carry no media token yet (slice 5f). `skippedRows`
+  has no test with a real out-of-range id (the catalogue has none); the
+  conversion is unit-tested.
+- **Not verified here.** Nothing has run on Windows (`set_content_protected`
+  and the zoom included), and no command has been invoked from a webview:
+  that a command taking both the raw `Request` and a `Channel` receives
+  both from Tauri 2.12.4 is checked by the compiler only, and stays
+  **UNVERIFIED** at run time until the UI (PR B) calls it. Spike 5s
+  (playback and the virtualiser) cannot run in this environment; its
+  results stay **UNVERIFIED**, and the designed behaviour stays behind
+  feature detection (slice 5h3).
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`
@@ -2358,6 +2496,13 @@ fingerprints, content digests, ranks, attachment hashes or storage names,
 source rowids and cursors, device names or product types, display text,
 values from `value_issue` or `value_history`, or SQLite error text (only
 the primary code).
+
+The viewer (M5 slice 5e) logs, at `info`, viewer open and close by
+outcome kind and each search's mode, plan, match-count bucket and elapsed
+time; at `debug`, page and hit buckets and flags. It never logs query or
+filter text, ids, labels, addresses, names, text or exact byte counts;
+`src-tauri/tests/log_hygiene.rs` runs every viewer operation over the
+viewer catalogue with sentinel filters and queries and checks the log.
 
 The persistent, redacted diagnostic log file was deferred to M4 (D15); M4
 defers it again, to M8 (D71, a lean awaiting the owner).

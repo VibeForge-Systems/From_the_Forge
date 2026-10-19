@@ -19,6 +19,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   },
 }));
 import { ERROR_CODES, IpcError, ipc, toIpcError } from '@/services/ipc';
+import type { SafeId } from '@/types';
 
 const PASSWORD = 'synthetic-test-password-sentinel';
 
@@ -248,6 +249,110 @@ describe('archive wrappers (M4)', () => {
     const err = await ipc.confirmImport('job-1', false, null).catch((e) => e);
     expect(err.code).toBe('jobNotWaiting');
     for (const code of ['archiveLocked', 'insufficientSpace', 'invalidInput'] as const) {
+      expect(ERROR_CODES).toContain(code);
+    }
+  });
+});
+
+describe('viewer wrappers (M5)', () => {
+  beforeEach(() => {
+    fake.calls.length = 0;
+    fake.respond = () => Promise.resolve(null);
+  });
+
+  const ID = `a${'0'.repeat(32)}`;
+  // Ids are SafeIds the backend gave; tests stand in for them.
+  const sid = (n: number) => n as unknown as SafeId;
+  const QUERY = 'synthetic-query-sentinel';
+
+  it('call the 14 commands with requests wrapped as specified', async () => {
+    await ipc.openViewer(ID);
+    await ipc.listConversations(3, 'recent', null);
+    await ipc.listConversations(3, 'name', QUERY);
+    await ipc.getConversations(3, [sid(1), sid(2)]);
+    await ipc.getThreadPage({ viewer: 3, chatId: sid(1), anchor: { kind: 'newest' }, direction: 'older', limit: 50 });
+    await ipc.getReplyThread({ viewer: 3, messageId: sid(9) });
+    await ipc.getMessageDetail({ viewer: 3, messageId: sid(9), reactionPage: 0 });
+    await ipc.getMessageText({ viewer: 3, bodyId: sid(4), fromUtf16: 0 });
+    await ipc.getDayCounts({ viewer: 3, chatId: sid(1), boundsUtcMs: [0, 86_400_000] });
+    await ipc.seekDate({ viewer: 3, chatId: sid(1), utcMs: 0, dir: 'onOrAfter' });
+    await ipc.searchMessages(
+      { viewer: 3, query: QUERY, mode: 'auto', filters: {}, includeEarlier: false, includeEvents: false },
+      () => undefined,
+    );
+    await ipc.getSearchResults({ viewer: 3, searchId: 1, offset: 0, limit: 50 });
+    await ipc.cancelSearch({ viewer: 3, searchId: 1 });
+    await ipc.inspectAttachment({ viewer: 3, attachmentId: sid(7), forPlayback: false });
+    await ipc.closeViewer(3);
+    expect(fake.calls.map(([c]) => c)).toEqual([
+      'open_viewer',
+      'list_conversations',
+      'list_conversations',
+      'get_conversations',
+      'get_thread_page',
+      'get_reply_thread',
+      'get_message_detail',
+      'get_message_text',
+      'get_day_counts',
+      'seek_date',
+      'search_messages',
+      'get_search_results',
+      'cancel_search',
+      'inspect_attachment',
+      'close_viewer',
+    ]);
+    const args = fake.calls.map(([, a]) => a);
+    expect(args[0]).toEqual({ request: { archiveId: ID } });
+    expect(args[1]).toEqual({ request: { viewer: 3, sort: 'recent' } });
+    expect(args[2]).toEqual({ request: { viewer: 3, sort: 'name', filter: QUERY } });
+    const search = args[10] as { request: { query: string }; onProgress: unknown };
+    expect(search.request.query).toBe(QUERY);
+    expect(search.onProgress).toBeDefined();
+    expect(args[14]).toEqual({ request: { viewer: 3 } });
+    for (const a of args) {
+      for (const s of strings(a)) {
+        expect(s).not.toMatch(/^([A-Za-z]:[\\/]|\/)/);
+      }
+    }
+  });
+
+  it('never copy a raw rejection of the free-text commands', async () => {
+    fake.respond = () => Promise.reject(`invalid args \`request\`: "${QUERY}" is wrong`);
+    for (const call of [
+      () => ipc.listConversations(3, 'name', QUERY),
+      () =>
+        ipc.searchMessages(
+          { viewer: 3, query: QUERY, mode: 'exact', filters: {}, includeEarlier: false, includeEvents: false },
+          () => undefined,
+        ),
+    ]) {
+      const err = (await call().catch((e: unknown) => e)) as IpcError;
+      expect(err).toBeInstanceOf(IpcError);
+      expect(err.code).toBe('internal');
+      expect(err.message).not.toContain(QUERY);
+      expect(JSON.stringify(err)).not.toContain(QUERY);
+    }
+    fake.respond = () => Promise.reject({ code: 'searchSuperseded', message: 'A newer search replaced this one.' });
+    const superseded = (await ipc
+      .searchMessages(
+        { viewer: 3, query: QUERY, mode: 'auto', filters: {}, includeEarlier: false, includeEvents: false },
+        () => undefined,
+      )
+      .catch((e: unknown) => e)) as IpcError;
+    expect(superseded.code).toBe('searchSuperseded');
+  });
+
+  it('know the viewer error codes', () => {
+    for (const code of [
+      'viewerClosed',
+      'queryTooBroad',
+      'invalidQuery',
+      'searchUnavailable',
+      'searchSuperseded',
+      'messageNotFound',
+      'anchorNotFound',
+      'attachmentUnavailable',
+    ] as const) {
       expect(ERROR_CODES).toContain(code);
     }
   });

@@ -11,6 +11,7 @@ by milestone and are commitments the design is built around.
 |---|---|---|
 | Preferences (theme, panel layout) and the archive library path | `settings.json` in the OS config directory. Linux: `~/.config/com.vibeforgesystems.openmessagearchive/`. Windows: `%APPDATA%\com.vibeforgesystems.openmessagearchive\` | M1 |
 | Backup folders you added (`backupFolders`: each folder's path and whether it is one backup or a folder of backups) | The same `settings.json`. A folder's path often ends in the device's identifier (UDID). | M2 |
+| Viewer preferences (`viewer`: time format and zone, motion, list previews, revealing earlier text by default, the playback choice, hidden characters, blur, idle hide, capture protection and zoom). Choices and numbers only. | The same `settings.json`. | M5 |
 | Temporary copy of a backup's file index (Manifest.db, decrypted for an encrypted backup) | `<archive folder>/.oma-staging/`, only while a check runs; see below | M2 |
 | Temporary copy of the Messages database (`sms.db` and its `-wal`, decrypted for an encrypted backup) | `<archive folder>/.oma-staging/`, only during an extraction check, and deleted as soon as its rows have been read; see "The extraction check (M3)" | M3 |
 | The last extraction report (counts and a date range) | **Memory only**, until the app closes. It is never written to disk and never logged. | M3 |

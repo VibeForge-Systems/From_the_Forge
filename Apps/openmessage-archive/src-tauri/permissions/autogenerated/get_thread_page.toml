@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-thread-page"
+description = "Enables the get_thread_page command without any pre-configured scope."
+commands.allow = ["get_thread_page"]
+
+[[permission]]
+identifier = "deny-get-thread-page"
+description = "Denies the get_thread_page command without any pre-configured scope."
+commands.deny = ["get_thread_page"]

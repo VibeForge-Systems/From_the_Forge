@@ -22,6 +22,31 @@ import type {
   JobStarted,
   SettingsSnapshot,
   SettingsUpdate,
+  AttachmentInspectionDto,
+  CancelSearchRequest,
+  ConversationIndexDto,
+  ConversationRowsDto,
+  ConversationSortInput,
+  DayCountsDto,
+  GetDayCountsRequest,
+  GetMessageDetailRequest,
+  GetMessageTextRequest,
+  GetReplyThreadRequest,
+  GetSearchResultsRequest,
+  GetThreadPageRequest,
+  InspectAttachmentRequest,
+  ListConversationsRequest,
+  MessageDetailDto,
+  SafeId,
+  ScanProgressDto,
+  SearchHitsDto,
+  SearchMessagesRequest,
+  SearchStartedDto,
+  SeekDateRequest,
+  SeekResultDto,
+  TextChunkDto,
+  ThreadPageDto,
+  ViewerSessionDto,
 } from '@/types';
 
 /**
@@ -60,6 +85,15 @@ export const ERROR_CODES = [
   'sourceTooLarge',
   'jobNotWaiting',
   'invalidInput',
+  // Milestone 5: the viewer.
+  'viewerClosed',
+  'queryTooBroad',
+  'invalidQuery',
+  'searchUnavailable',
+  'searchSuperseded',
+  'messageNotFound',
+  'anchorNotFound',
+  'attachmentUnavailable',
 ] as const satisfies readonly ErrorCode[];
 
 export class IpcError extends Error {
@@ -116,13 +150,19 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
  * is not a structured IpcError never has its raw text copied anywhere,
  * because a deserialization error could echo the arguments.
  */
-async function callRedacted<T>(command: string, args: Record<string, unknown>): Promise<T> {
+async function callRedacted<T>(
+  command: string,
+  args: Record<string, unknown>,
+  fallback = 'The check could not be started.',
+): Promise<T> {
   try {
     return await invoke<T>(command, args);
   } catch (raw) {
-    throw structured(command, raw) ?? new IpcError(command, 'internal', 'The check could not be started.');
+    throw structured(command, raw) ?? new IpcError(command, 'internal', fallback);
   }
 }
+
+const VIEWER_FALLBACK = 'The viewer request could not be completed.';
 
 export const ipc = {
   getSettings: () => call<SettingsSnapshot>('get_settings'),
@@ -203,6 +243,55 @@ export const ipc = {
       onEvent: channel,
     });
   },
+
+  // Milestone 5: the viewer. Content arrives as `UntrustedText` and must be
+  // rendered by interpolation only, never with v-html or in an attribute.
+  // Ids are `SafeId`s the backend gave; every request names the session's
+  // generation (`viewer`), and a stale one rejects with `viewerClosed`.
+  /** Open an archive in the viewer (closes any open session first). */
+  openViewer: (archiveId: string) =>
+    call<ViewerSessionDto>('open_viewer', { request: { archiveId } }),
+  closeViewer: (viewer: number) => call<null>('close_viewer', { request: { viewer } }),
+  /** Carries free text (the filter): rejections never echo raw text. */
+  listConversations: (viewer: number, sort: ConversationSortInput, filter: string | null) => {
+    const request: ListConversationsRequest = filter ? { viewer, sort, filter } : { viewer, sort };
+    return callRedacted<ConversationIndexDto>('list_conversations', { request }, VIEWER_FALLBACK);
+  },
+  /** At most 200 ids. */
+  getConversations: (viewer: number, ids: SafeId[]) =>
+    call<ConversationRowsDto>('get_conversations', { request: { viewer, ids } }),
+  getThreadPage: (request: GetThreadPageRequest) =>
+    call<ThreadPageDto>('get_thread_page', { request }),
+  getReplyThread: (request: GetReplyThreadRequest) =>
+    call<ThreadPageDto>('get_reply_thread', { request }),
+  getMessageDetail: (request: GetMessageDetailRequest) =>
+    call<MessageDetailDto>('get_message_detail', { request }),
+  getMessageText: (request: GetMessageTextRequest) =>
+    call<TextChunkDto>('get_message_text', { request }),
+  getDayCounts: (request: GetDayCountsRequest) =>
+    call<DayCountsDto>('get_day_counts', { request }),
+  seekDate: (request: SeekDateRequest) => call<SeekResultDto>('seek_date', { request }),
+  /**
+   * Search. Carries free text (the query): rejections never echo raw text.
+   * An exact-text scan reports progress through `onProgress`. A superseded
+   * search rejects with `searchSuperseded`, which the UI drops silently.
+   */
+  searchMessages: (request: SearchMessagesRequest, onProgress: (p: ScanProgressDto) => void) => {
+    const channel = new Channel<ScanProgressDto>();
+    channel.onmessage = onProgress;
+    return callRedacted<SearchStartedDto>(
+      'search_messages',
+      { request, onProgress: channel },
+      VIEWER_FALLBACK,
+    );
+  },
+  /** At most 50 hits. */
+  getSearchResults: (request: GetSearchResultsRequest) =>
+    call<SearchHitsDto>('get_search_results', { request }),
+  cancelSearch: (request: CancelSearchRequest) => call<null>('cancel_search', { request }),
+  /** Only for attachments a page or detail of this session showed. */
+  inspectAttachment: (request: InspectAttachmentRequest) =>
+    call<AttachmentInspectionDto>('inspect_attachment', { request }),
 };
 
 export type Ipc = typeof ipc;

@@ -8,6 +8,7 @@
 mod folders;
 mod location;
 mod store;
+mod viewer;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -17,6 +18,10 @@ pub use location::{
     inspect_location, ArchiveLocationStatus, CheckLevel, LocationCheck, LocationState,
 };
 pub use store::{SettingsPersistence, SettingsSnapshot, SettingsStore};
+pub use viewer::{
+    IdleHideMinutes, MediaPlayback, MotionChoice, TimeFormat, TimeZoneChoice, UiZoom,
+    ViewerPreferences, WindowEffects,
+};
 
 /// Bumped whenever the on-disk shape changes incompatibly. A file with a
 /// higher number was written by a newer build and is never overwritten.
@@ -71,6 +76,10 @@ pub struct Settings {
     #[serde(default)]
     #[ts(as = "Vec<AddedFolderEntry>")]
     pub backup_folders: BackupFolders,
+    /// The viewer's preferences (M5). Read leniently: a malformed object
+    /// falls back to the defaults.
+    #[serde(default, deserialize_with = "viewer::lenient")]
+    pub viewer: ViewerPreferences,
 }
 
 impl Default for Settings {
@@ -81,6 +90,7 @@ impl Default for Settings {
             theme: Theme::default(),
             layout: LayoutPreferences::default(),
             backup_folders: BackupFolders::default(),
+            viewer: ViewerPreferences::default(),
         }
     }
 }
@@ -97,6 +107,10 @@ pub struct SettingsUpdate {
     pub theme: Option<Theme>,
     #[ts(optional)]
     pub layout: Option<LayoutPreferences>,
+    /// Replaces the viewer's preferences as a whole (unknown fields and
+    /// out-of-range values are refused).
+    #[ts(optional)]
+    pub viewer: Option<ViewerPreferences>,
 }
 
 impl SettingsUpdate {
@@ -106,6 +120,9 @@ impl SettingsUpdate {
         }
         if let Some(layout) = self.layout {
             settings.layout = layout;
+        }
+        if let Some(viewer) = self.viewer {
+            settings.viewer = viewer;
         }
     }
 }
@@ -123,6 +140,7 @@ mod tests {
         SettingsUpdate {
             theme: Some(Theme::Dark),
             layout: None,
+            viewer: None,
         }
         .apply_to(&mut settings);
         assert_eq!(settings.theme, Theme::Dark);
@@ -146,6 +164,44 @@ mod tests {
     fn update_cannot_set_backup_folders() {
         let attempt = r#"{"backupFolders":[{"path":"/etc","kind":"parent"}]}"#;
         assert!(serde_json::from_str::<SettingsUpdate>(attempt).is_err());
+    }
+
+    #[test]
+    fn viewer_preferences_load_leniently_and_update_strictly() {
+        // An old file without `viewer` loads with the defaults.
+        let old: Settings = serde_json::from_str(r#"{"schemaVersion":1,"archiveDirectory":"/a"}"#)
+            .expect("old file");
+        assert_eq!(old.viewer, ViewerPreferences::default());
+        // A malformed `viewer` keeps the rest of the file.
+        let bad: Settings = serde_json::from_str(
+            r#"{"schemaVersion":1,"archiveDirectory":"/a","viewer":{"uiZoom":9000}}"#,
+        )
+        .expect("lenient");
+        assert_eq!(bad.archive_directory.as_deref(), Some("/a"));
+        assert_eq!(bad.viewer, ViewerPreferences::default());
+        // An update is strict.
+        for attempt in [
+            r#"{"viewer":{"uiZoom":410}}"#,
+            r#"{"viewer":{"uiZoom":90}}"#,
+            r#"{"viewer":{"surprise":true}}"#,
+            r#"{"viewer":{"mediaPlayback":"auto"}}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<SettingsUpdate>(attempt).is_err(),
+                "{attempt}"
+            );
+        }
+        let ok: SettingsUpdate =
+            serde_json::from_str(r#"{"viewer":{"mediaPlayback":"off","uiZoom":150}}"#)
+                .expect("valid");
+        let mut s = Settings::default();
+        ok.apply_to(&mut s);
+        assert_eq!(s.viewer.media_playback, MediaPlayback::Off);
+        assert_eq!(s.viewer.ui_zoom.get(), 150);
+        // The round trip keeps every field.
+        let json = serde_json::to_string(&s).expect("json");
+        let back: Settings = serde_json::from_str(&json).expect("parse");
+        assert_eq!(back, s);
     }
 
     #[test]

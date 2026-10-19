@@ -14,6 +14,11 @@
 //! the archive details and the listing are checked like the reports, and
 //! no log line carries an archive id or the archive's label.
 //!
+//! M5 (§7.7): every viewer operation over archives imported from the
+//! synthetic viewer catalogue, with filter and query strings that carry
+//! sentinels, refusals included: no content, filter or query text and no
+//! archive id reaches a log line.
+//!
 //! Its own test binary with one global capturing subscriber: a thread-local
 //! subscriber would miss events from worker threads.
 
@@ -242,8 +247,14 @@ impl JobEventSink for Confirming<'_> {
 /// Import `name` into a fresh labelled archive, then verify it. Returns
 /// the archive id; `texts` receives the events, the details and the list.
 fn import_and_verify(name: &str, tmp: &Path, texts: &mut Vec<String>) -> String {
+    import_and_verify_from(&imports_fixtures(), name, tmp, texts)
+}
+
+/// [`import_and_verify`] for an entry of the catalogue at `root`. The
+/// library is `tmp/implib-<name>`.
+fn import_and_verify_from(root: &Path, name: &str, tmp: &Path, texts: &mut Vec<String>) -> String {
     let dir = tmp.join(format!("imp-{name}")).join(UDID);
-    copy_tree(&imports_fixtures().join(name).join(UDID), &dir);
+    copy_tree(&root.join(name).join(UDID), &dir);
     let library = tmp.join(format!("implib-{name}"));
     std::fs::create_dir_all(&library).expect("mkdir");
     let env = ArchiveEnv {
@@ -404,6 +415,170 @@ fn run_job_in(
     sink.0
 }
 
+fn viewer_fixtures() -> PathBuf {
+    PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../tests/fixtures/viewer"
+    ))
+}
+
+/// Values planted in the viewer catalogue (its README), and the filter
+/// and query sentinels this test sends.
+const VIEWER_SENTINELS: &[&str] = &[
+    "SYNTH-VIEW",
+    "SYNTH-HX",
+    "SYNTH-MEDIA",
+    "SYNTH-LIN",
+    "SYNTH-OLD",
+    "SYNTH-OTC",
+    "example.invalid",
+    "+1555",
+    FILTER_SENTINEL,
+    QUERY_SENTINEL,
+];
+const FILTER_SENTINEL: &str = "SYNTH-FILTER-SENTINEL";
+const QUERY_SENTINEL: &str = "SYNTH-QUERY-SENTINEL";
+
+fn req<T: serde::de::DeserializeOwned>(v: serde_json::Value) -> T {
+    serde_json::from_value(v).expect("request")
+}
+
+/// Run every viewer operation on one archive, refusals included. Returns
+/// the DTOs as JSON (they carry content, so they are never added to the
+/// content-free texts).
+fn exercise_viewer(library: &Path, id: &str) -> Vec<String> {
+    use openmessage_archive_lib::settings::MediaPlayback;
+    use openmessage_archive_lib::viewer::{self, ViewerHost};
+    use serde_json::json;
+    let env = ArchiveEnv {
+        space: Some(std::sync::Arc::new(FakeSpace)),
+    };
+    let host = ViewerHost::default();
+    let jobs = Jobs::default();
+    let opened = viewer::open(&host, library, &env, &jobs, id).expect("open viewer");
+    let v = opened.viewer;
+    let mut out = vec![serde_json::to_string(&opened).expect("json")];
+    let all = json!({ "earlierText": true, "oneTimeCode": true });
+    viewer::with_session(&host, v, |s| {
+        let mut push = |j: String| out.push(j);
+        for filter in [None, Some(FILTER_SENTINEL), Some("SYNTH")] {
+            let mut r = json!({ "viewer": v, "sort": "name" });
+            if let Some(f) = filter {
+                r["filter"] = json!(f);
+            }
+            push(serde_json::to_string(&viewer::list_conversations(s, &req(r))?).expect("json"));
+        }
+        let long = format!("{FILTER_SENTINEL}{}", "x".repeat(200));
+        let refused =
+            viewer::list_conversations(s, &req(json!({ "viewer": v, "sort": "name", "filter": long })));
+        assert!(refused.is_err());
+        let index = viewer::list_conversations(s, &req(json!({ "viewer": v, "sort": "recent" })))?;
+        let ids: Vec<i64> = index.ids.iter().map(|i| i.get()).collect();
+        push(
+            serde_json::to_string(&viewer::get_conversations(
+                s,
+                &req(json!({ "viewer": v, "ids": ids })),
+                true,
+            )?)
+            .expect("json"),
+        );
+        for chat in &ids {
+            for anchor in [json!({ "kind": "newest" }), json!({ "kind": "undated" })] {
+                let page = viewer::thread_page(
+                    s,
+                    &req(json!({ "viewer": v, "chatId": chat, "anchor": anchor,
+                                 "direction": "older", "limit": 100, "reveal": all })),
+                )?;
+                for m in page.items.iter().take(5) {
+                    let d = viewer::message_detail(
+                        s,
+                        &req(json!({ "viewer": v, "messageId": m.id.get(), "reveal": all, "reactionPage": 0 })),
+                    )?;
+                    for b in &d.versions {
+                        push(
+                            serde_json::to_string(&viewer::message_text(
+                                s,
+                                &req(json!({ "viewer": v, "bodyId": b.body.get(), "fromUtf16": 3, "reveal": all })),
+                            )?)
+                            .expect("json"),
+                        );
+                    }
+                    push(serde_json::to_string(&d).expect("json"));
+                    push(
+                        serde_json::to_string(&viewer::reply_thread(
+                            s,
+                            &req(json!({ "viewer": v, "messageId": m.id.get() })),
+                        )?)
+                        .expect("json"),
+                    );
+                }
+                for m in &page.items {
+                    for a in &m.attachments {
+                        for playback in [MediaPlayback::Confirm, MediaPlayback::Off] {
+                            push(
+                                serde_json::to_string(&viewer::inspect(
+                                    s,
+                                    &req(json!({ "viewer": v, "attachmentId": a.id.get(), "forPlayback": true })),
+                                    playback,
+                                )?)
+                                .expect("json"),
+                            );
+                        }
+                    }
+                }
+                push(serde_json::to_string(&page).expect("json"));
+            }
+            push(
+                serde_json::to_string(&viewer::day_counts(
+                    s,
+                    &req(json!({ "viewer": v, "chatId": chat, "boundsUtcMs": [-1_000_000_000_000_i64, 0, 4_000_000_000_000_i64] })),
+                )?)
+                .expect("json"),
+            );
+            push(
+                serde_json::to_string(&viewer::seek_date(
+                    s,
+                    &req(json!({ "viewer": v, "chatId": chat, "utcMs": 0, "dir": "onOrAfter" })),
+                )?)
+                .expect("json"),
+            );
+        }
+        for (query, mode) in [
+            ("SYNTH", "auto"),
+            ("SYNTH", "exact"),
+            (QUERY_SENTINEL, "auto"),
+            (QUERY_SENTINEL, "exact"),
+        ] {
+            let started = viewer::search(
+                s,
+                &req(json!({ "viewer": v, "query": query, "mode": mode, "includeEarlier": true, "includeEvents": true })),
+                &mut |_| {},
+            )?;
+            if started.total > 0 {
+                push(
+                    serde_json::to_string(&viewer::search_results(
+                        s,
+                        &req(json!({ "viewer": v, "searchId": started.search_id, "offset": 0, "limit": 50 })),
+                    )?)
+                    .expect("json"),
+                );
+            }
+            viewer::cancel_search(s, started.search_id)?;
+        }
+        let bad = format!("{QUERY_SENTINEL}\u{1}");
+        assert!(viewer::search(
+            s,
+            &req(json!({ "viewer": v, "query": bad, "mode": "auto" })),
+            &mut |_| {}
+        )
+        .is_err());
+        Ok(())
+    })
+    .expect("viewer operations");
+    host.close(v).expect("close");
+    out
+}
+
 #[test]
 fn nothing_identifying_is_logged() {
     let capture = Capture::default();
@@ -480,6 +655,25 @@ fn nothing_identifying_is_logged() {
     }
     texts.extend(archive_texts);
 
+    // M5: every viewer operation over the viewer catalogue.
+    let mut viewer_outputs = Vec::new();
+    for name in [
+        "view-main-plain",
+        "view-hostile-text-plain",
+        "view-media-plain",
+    ] {
+        let mut viewer_texts = Vec::new();
+        let id = import_and_verify_from(&viewer_fixtures(), name, tmp.path(), &mut viewer_texts);
+        let library = tmp.path().join(format!("implib-{name}"));
+        viewer_outputs.extend(exercise_viewer(&library, &id));
+        archive_ids.push(id);
+        texts.extend(viewer_texts);
+    }
+    assert!(
+        viewer_outputs.iter().any(|o| o.contains("SYNTH-")),
+        "the viewer returned content (so the log check means something)"
+    );
+
     openmessage_archive_lib::panic_hook::install();
     let panicked = std::panic::catch_unwind(|| {
         panic!("SYNTH-BODY panic payload sentinel");
@@ -543,6 +737,9 @@ fn nothing_identifying_is_logged() {
         }
         for id in &archive_ids {
             assert!(!e.contains(id.as_str()), "an archive id was logged: {e}");
+        }
+        for sentinel in VIEWER_SENTINELS {
+            assert!(!e.contains(sentinel), "{sentinel:?} logged in {e}");
         }
         assert!(!has_40_hex(e), "a fileID-like value was logged: {e}");
     }

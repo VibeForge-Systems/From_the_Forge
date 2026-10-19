@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-reply-thread"
+description = "Enables the get_reply_thread command without any pre-configured scope."
+commands.allow = ["get_reply_thread"]
+
+[[permission]]
+identifier = "deny-get-reply-thread"
+description = "Denies the get_reply_thread command without any pre-configured scope."
+commands.deny = ["get_reply_thread"]

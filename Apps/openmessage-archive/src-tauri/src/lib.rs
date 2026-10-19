@@ -13,6 +13,7 @@ pub mod panic_hook;
 pub mod settings;
 #[cfg(test)]
 mod ts_guard;
+pub mod viewer;
 
 use std::time::Duration;
 
@@ -51,7 +52,11 @@ pub fn run() {
             commands::archive_location::sweep_in_background(
                 store.settings().archive_directory.clone(),
             );
+            let viewer_prefs = store.settings().viewer;
             app.manage(AppState::new(store));
+            if let Some(window) = app.get_webview_window("main") {
+                commands::settings::apply_window_effects(&window, &viewer_prefs);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -75,6 +80,20 @@ pub fn run() {
             commands::archives::start_import,
             commands::archives::confirm_import,
             commands::archives::verify_archive,
+            commands::viewer::open_viewer,
+            commands::viewer::close_viewer,
+            commands::viewer::list_conversations,
+            commands::viewer::get_conversations,
+            commands::viewer::get_thread_page,
+            commands::viewer::get_reply_thread,
+            commands::viewer::get_message_detail,
+            commands::viewer::get_message_text,
+            commands::viewer::get_day_counts,
+            commands::viewer::seek_date,
+            commands::viewer::search_messages,
+            commands::viewer::get_search_results,
+            commands::viewer::cancel_search,
+            commands::viewer::inspect_attachment,
         ])
         .build(tauri::generate_context!())
         .expect("the Tauri runtime failed to start")
@@ -86,6 +105,7 @@ pub fn run() {
                 // skips this; the startup sweep and the next write open of
                 // the archive cover that case.
                 if let Some(state) = app.try_state::<AppState>() {
+                    state.viewer.close_any();
                     let clean = state.jobs.cancel_all_and_wait(EXIT_WAIT);
                     tracing::info!(clean, "exit");
                 }

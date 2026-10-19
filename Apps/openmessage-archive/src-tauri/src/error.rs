@@ -83,6 +83,25 @@ pub enum ErrorCode {
     JobNotWaiting,
     /// An input failed validation (a label, an id, a lineage).
     InvalidInput,
+    // Milestone 5: the viewer (spec §7.5). Each has a fixed sentence in
+    // `viewer::messages`.
+    /// The viewer session named by the request is no longer open.
+    ViewerClosed,
+    /// A viewer read needed more work or time than its budget allows.
+    QueryTooBroad,
+    /// A search query was refused.
+    InvalidQuery,
+    /// The full-text index cannot be read; browsing still works.
+    SearchUnavailable,
+    /// A newer search, or a cancel, replaced this one. The UI drops it.
+    SearchSuperseded,
+    /// No such message in this archive.
+    MessageNotFound,
+    /// A page anchor is not a message of that conversation.
+    AnchorNotFound,
+    /// The attachment was not shown in this session, or its file cannot be
+    /// read.
+    AttachmentUnavailable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS, thiserror::Error)]
