@@ -539,6 +539,25 @@ pub fn export_with(
     zone: &ExportZone,
     writers: Vec<Box<dyn oma_export::writer::ExportWriter>>,
 ) -> Result<oma_export::pipeline::ExportReport, ExportError> {
+    export_with_previews(
+        i, parent, scope, formats, tweak, target, attach, zone, writers, None,
+    )
+}
+
+/// [`export_with`], with a preview feed in the run (slice 6h2).
+#[allow(clippy::too_many_arguments)]
+pub fn export_with_previews(
+    i: &Imported,
+    parent: &Path,
+    scope: oma_export::plan::ScopePlan,
+    formats: &[oma_export::plan::Format],
+    tweak: &dyn Fn(&mut oma_export::plan::ExportOptions),
+    target: &str,
+    attach: Option<oma_export::attach::AttachPolicy>,
+    zone: &ExportZone,
+    writers: Vec<Box<dyn oma_export::writer::ExportWriter>>,
+    previews: Option<oma_export::preview::PreviewFeed>,
+) -> Result<oma_export::pipeline::ExportReport, ExportError> {
     use oma_export::plan::{ExportOptions, ExportPlan};
     let mut o = ExportOptions::defaults(&scope, formats);
     tweak(&mut o);
@@ -560,6 +579,7 @@ pub fn export_with(
             replace: oma_export::stage::Replace::Never,
             attach,
             search: None,
+            previews,
         };
         oma_export::pipeline::run(snap, &run, writers, &CancelToken::new(), &mut |_| {})
     })

@@ -198,6 +198,7 @@ pub const M6_EXPORT_TYPES: &[&str] = &[
     "ChooseExportDestinationRequest",
     "ClockInput",
     "CsvProfileInput",
+    "DestinationToken",
     "DraftId",
     "DraftRef",
     "ExcludedHitsDto",

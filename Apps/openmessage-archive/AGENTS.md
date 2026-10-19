@@ -53,13 +53,21 @@ release binary on WebKitGTK 2.52.6 in a Linux container
 manual checklist there (no desktop, audio, screen-reader or WebView2 run
 yet, so no engine floor is established).
 The owner answered the M5 questions (`docs/architecture.md`, "Milestone 5
-decisions").
+decisions"). **Milestone 6 (exports) is in progress: PR A of M6 (the
+engine; no export UI yet) is built** on `feat/oma-m6-export-engine`
+(slices 6a–6h2): the archive's export reads, `crates/oma-export` with
+the TXT, CSV, JSON and HTML writers, the shell's export job, its five
+IPC commands and the export's decode-helper pool. It has run only in a
+Linux container (not on CI, not on Windows). No export can be made from
+the UI until PR B (PDF, XLSX, the Export dialog, slices 6i–6l). The owner
+answered M6's Q1–Q4 on 2026-10-19 (Q5 is a lean awaiting confirmation;
+`docs/architecture.md`, "Milestone 6 decisions").
 
 Read these before designing anything:
 
 | Doc | Read it for |
 |---|---|
-| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, the archive (layout, threat model, import data flow, one section per M4 and M5 slice), the viewer, and the decision records (D1–D122; D43 is how "do not fabricate" is read for the check) |
+| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, the archive (layout, threat model, import data flow, one section per M4 and M5 slice), the viewer, the exports (M6), and the decision records (D1–D147; D43 is how "do not fabricate" is read for the check) |
 | [`docs/supported-formats.md`](docs/supported-formats.md) | Sourced research on the backup format, encryption, the sms.db schema (columns with sources, timestamps, codes, typedstream) and device tooling. Items marked **UNVERIFIED** are hypotheses, not facts. |
 | [`docs/privacy.md`](docs/privacy.md) | What is copied, where and for how long, including the plaintext copies of sms.db, and what an archive holds (plaintext at rest) |
 | [`docs/compatibility.md`](docs/compatibility.md) | What has actually been tested |
@@ -156,13 +164,14 @@ Each one is enforced in code. Keep it that way.
   `oma-export` (M6) has its record core from slice 6d, its files core
   (names, staging, the manifest, the writer trait) from 6e1, and the
   attachment copy, the TXT writer and the pipeline from 6e2, the JSON
-  and CSV writers from 6f, and the HTML writer from 6g; `oma-device` (M7)
-  is planned. Each must build and test without
+  and CSV writers from 6f, the HTML writer from 6g and the preview feed
+  from 6h2; `oma-device` (M7) is planned. Each must build and test without
   Tauri. The shell's `src-tauri/src/backups/` (registry, job table, worker,
   DTOs, messages), `src-tauri/src/archives/` (listing, details, the
   gate, the import and verify workers, DTOs, sentences) and
-  `src-tauri/src/exports/` (drafts, destination checks, the export job,
-  DTOs, sentences; slice 6h1) have no Tauri types either, so they are
+  `src-tauri/src/exports/` (drafts, destination checks and tokens, the
+  export job, the decode-helper pool, DTOs, sentences; slices 6h1, 6h2)
+  have no Tauri types either, so they are
   tested without a window.
 - **Frontend:**
   - Views live in `src/views/`, components in `src/components/`, and Pinia
@@ -720,7 +729,7 @@ Never hand-edit generated files.
   `cancelled` or `failed`, each with `stagingRemoved`). `close_viewer` and
   `hide_viewer` go through `AppState::{close_viewer, hide_viewer}`, which
   discard the draft first; keep it so. What PR A does not build (PDF,
-  XLSX, previews, the attachment scope, events off) is refused at the
+  XLSX, the attachment scope, events off) is refused at the
   draft with `exportUnavailable`, never faked. Export DTOs live in
   `exports/dto.rs`: a new one goes into `ts_guard::M6_EXPORT_TYPES` (or
   `M6_EVENT_TYPES` if `JobEvent` reaches it, which the archive guard then
@@ -728,6 +737,36 @@ Never hand-edit generated files.
   only `string`s are `archiveId`, `jobId` and the brands (`DraftId`,
   `LocalDate`, `ZoneName`, `UntrustedText` for `displayName` only). The
   path never crosses IPC and is never logged.
+- **Destinations, the preview pool and log hygiene (M6 slice 6h2).**
+  `start_export` takes `{ draftId, destinationToken, confirmations }`:
+  `ExportHost::take_for_start` consumes the draft and refuses a token
+  that is not the latest `choose_export_destination`'s
+  (`exportConfirmationStale`); keep the token a brand in the export walk
+  and never derive anything from it. Previews come only from the
+  export's own `exports::previews::HelperPool` (never a viewer
+  session's helpers) through `oma_export::preview::PreviewFeed`: the
+  pipeline offers each mapped item's included attachments (copy-stream
+  bytes, else `attach::read_preview_input`), the HTML writer waits on the
+  feed with the cancel token, and the pool is shut down by the job
+  (killing helpers on cancel or failure, never joining them then). A
+  decode request that needs both renditions is one `RenditionPair`
+  (helper code 3, two reply frames); add a new request kind to
+  `helper.rs`'s parser, the host and `decode_helper.rs` together. Helper
+  stderr is piped into a counting thread only; log its size as a bucket,
+  never its text, and keep log field names free of `bytes=`
+  (`log_hygiene.rs` treats it as a range). `exercise_export` in
+  `src-tauri/tests/log_hygiene.rs` runs every in-process format into a
+  folder named by a sentinel; a new export log line or format goes
+  through it.
+- **`oma-export` in one place (M6 PR A).** One record model and ledger;
+  masking happens in `oma-archive` before any writer sees text; paths
+  only from `naming.rs`; on Linux every write relative to the staging
+  directory handles; no temporary file outside staging (and no
+  `std::env::temp_dir`); the reserved `⟨` marker; a no-replace publish
+  with the marker locked until after it; previews only from checked
+  decode-helper renditions; PDF and XLSX only in the export-render
+  helper (PR B; XLSX rows ascending); logs carry kinds, buckets and
+  outcomes only. The per-slice entries above say how each is enforced.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush

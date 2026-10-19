@@ -544,8 +544,28 @@ python3 -I scripts/oracles/html_oracle.py --exports /tmp/oma-html
   the PR's CI runs.
 - A change to the stylesheet changes its hash: re-pin `STYLE_SHA256` in
   `writer/html.rs` (the unit test prints the new value) and regenerate
-  the goldens. The previews in the tests come from a test
-  `PreviewSource` (a real 1 × 1 PNG); the decode-helper pool is slice 6h.
+  the goldens. The previews in `html.rs`'s writer tests come from a
+  test `PreviewSource` (a real 1 × 1 PNG); its feed tests use a fake
+  `RenditionPool`.
+
+### The export job, destinations and the preview pool (M6 slices 6h1, 6h2)
+
+```sh
+cargo test -p openmessage-archive --lib exports::        # drafts, destinations and tokens, the job, the pool, cancel latency
+cargo test -p openmessage-archive --test decode_helper   # RenditionPair through the real helper; stderr counted
+cargo test -p openmessage-archive --test log_hygiene     # exercise_export: no sentinel, path or exact size logged
+cargo test -p oma-export --test html -- --nocapture      # prints the RECORD lines of the feed and cancel tests
+```
+
+- The shell's export tests run without a window, against fake
+  destination probes and fake decode-helper backends; the job test with
+  real helpers is `log_hygiene.rs`. Cancel latency is asserted under one
+  second in two tests (a wait for a rendition that never comes, and a
+  helper that hangs); they print `RECORD cancel_latency_…_ms=` lines (53 ms
+  and well under a second here).
+- On Windows, `cargo test -p oma-export --test stage -- --nocapture`
+  also runs the held-handle publish test and prints `RECORD
+  publish_with_open_handle`; it has not run yet.
 
 ### The bulk generator (M5)
 
@@ -622,8 +642,8 @@ and 8 minutes on Windows. Measured on 2026-10-18 in a Linux container
 
 | What | Time |
 |---|---|
-| `cargo test --workspace`, wall clock | 32 s | not timed alone (7 min 29 s with the rebuild) |
-| Sum of all test binaries' run times | 30.1 s | 173.7 s |
+| `cargo test --workspace`, wall clock | 32 s |
+| Sum of all test binaries' run times | 30.1 s |
 | `oma-archive`, all binaries | 13.3 s |
 | of which `crash.rs` (29 child processes) | 4.2 s |
 | of which `resume.rs` | 2.5 s |
@@ -644,8 +664,8 @@ Slice 4h (same container; after compiling, as for slice 4f):
 
 | What | Time |
 |---|---|
-| `cargo test --workspace`, wall clock | 50 s | not timed alone (7 min 29 s with the rebuild) |
-| Sum of all test binaries' run times | 47.9 s | 173.7 s |
+| `cargo test --workspace`, wall clock | 50 s |
+| Sum of all test binaries' run times | 47.9 s |
 | `oma-archive`, all binaries | 34.8 s |
 | of which `crash.rs` (the main kill test runs 56 child processes) | 17.5 s |
 | of which `resume.rs` | 5.7 s |
@@ -657,8 +677,8 @@ Slice 4i (same container and method):
 
 | What | Time |
 |---|---|
-| `cargo test --workspace`, wall clock | 57 s | not timed alone (7 min 29 s with the rebuild) |
-| Sum of all test binaries' run times | 54.3 s | 173.7 s |
+| `cargo test --workspace`, wall clock | 57 s |
+| Sum of all test binaries' run times | 54.3 s |
 | `oma-archive`, all binaries | 38.3 s |
 | of which `crash.rs` (the main kill test runs 56 child processes, the store kill test 10) | 18.0 s |
 | of which `resume.rs` | 5.6 s |
@@ -669,8 +689,8 @@ Slice 4j (same container and method):
 
 | What | Time |
 |---|---|
-| `cargo test --workspace`, wall clock | 55 s | not timed alone (7 min 29 s with the rebuild) |
-| Sum of all test binaries' run times | 53.1 s | 173.7 s |
+| `cargo test --workspace`, wall clock | 55 s |
+| Sum of all test binaries' run times | 53.1 s |
 | `oma-archive`, all binaries | 36.7 s |
 | of which `crash.rs` (78 child processes in all) | 17.0 s |
 | of which `resume.rs` | 5.4 s |
@@ -681,8 +701,8 @@ Slice 4k (same container and method):
 
 | What | Time |
 |---|---|
-| `cargo test --workspace`, wall clock | 63 s | not timed alone (7 min 29 s with the rebuild) |
-| Sum of all test binaries' run times | 59.7 s | 173.7 s |
+| `cargo test --workspace`, wall clock | 63 s |
+| Sum of all test binaries' run times | 59.7 s |
 | `oma-archive`, all binaries | 41.1 s |
 | of which `crash.rs` (78 child processes in all; unchanged) | 18.5 s |
 | of which `resume.rs` | 6.0 s |
@@ -692,8 +712,8 @@ Slice 4l (same container and method):
 
 | What | Time |
 |---|---|
-| `cargo test --workspace`, wall clock | 68 s | not timed alone (7 min 29 s with the rebuild) |
-| Sum of all test binaries' run times | 65.1 s | 173.7 s |
+| `cargo test --workspace`, wall clock | 68 s |
+| Sum of all test binaries' run times | 65.1 s |
 | The shell's unit tests (240, the archive jobs over the import catalogue included) | 0.6 s |
 | The shell's `log_hygiene.rs` (now also an import and a full verify of every import catalogue entry) | 2.4 s |
 
@@ -704,8 +724,8 @@ tests passed, 7 ignored):
 
 | What | Time |
 |---|---|
-| `cargo test --workspace`, wall clock | 60 s | not timed alone (7 min 29 s with the rebuild) |
-| Sum of all test binaries' run times | 57.2 s | 173.7 s |
+| `cargo test --workspace`, wall clock | 60 s |
+| Sum of all test binaries' run times | 57.2 s |
 | `oma-archive`, all binaries (all of it M4 test time) | 38.7 s |
 | of which `crash.rs` | 16.9 s |
 | of which `resume.rs` | 5.9 s |
@@ -740,8 +760,8 @@ compiling; 1,220 Rust tests passed, 10 ignored):
 
 | What | Time |
 |---|---|
-| `cargo test --workspace`, wall clock | 2 min 2 s | not timed alone (7 min 29 s with the rebuild) |
-| Sum of all test binaries' run times | 118.6 s | 173.7 s |
+| `cargo test --workspace`, wall clock | 2 min 2 s |
+| Sum of all test binaries' run times | 118.6 s |
 | Added since M4 (slice 4n: 57.2 s) | about 61 s |
 | of which the shell's unit tests (the viewer session, commands and protocol tests import viewer catalogue entries; 0.6 s in M4) | 36.1 s |
 | of which `oma-archive`'s viewer binaries (`viewer_conversations`, `viewer_threads`, `viewer_details`, `viewer_search`, `viewer_fixtures`, `viewer_media`, `media_corpus`) | 16.1 s |
@@ -763,8 +783,8 @@ ignored, the two new ignored ones being `perf_viewer.rs` and
 
 | What | Time |
 |---|---|
-| `cargo test --workspace`, wall clock | 2 min 2 s | not timed alone (7 min 29 s with the rebuild) |
-| Sum of all test binaries' run times | 119.0 s | 173.7 s |
+| `cargo test --workspace`, wall clock | 2 min 2 s |
+| Sum of all test binaries' run times | 119.0 s |
 | Added since M4 (slice 4n: 57.2 s) | about 62 s |
 | of which the shell's unit tests | 37.4 s |
 | of which `oma-archive`'s viewer binaries (the seven of slice 5f) | 14.7 s |
@@ -796,22 +816,22 @@ Linux job, 6 on Windows), measured from slice 6a.** The baseline is `main`
 at `9883217` (milestones 1–5), run in a Linux container (4 CPUs, debug
 build, `CARGO_INCREMENTAL=0`, after compiling), then again with slice 6a:
 
-| What | Baseline (`9883217`) | Slice 6a | Slice 6b1 | Slice 6b2 | Slice 6c | Slice 6d | Slice 6e1 | Slice 6e2 | Slice 6f | Slice 6g | Slice 6h1 |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| `cargo test --workspace`, wall clock | 2 min 8 s | 2 min 6 s | 2 min 26 s | 2 min 38 s | 2 min 42 s | 2 min 42 s | 2 min 41 s | 2 min 46 s | 2 min 59 s | 2 min 54 s | not timed alone (7 min 29 s with the rebuild) |
-| Sum of all test binaries' run times | 124.2 s | 123.1 s | 142.9 s | 153.9 s | 158.5 s | 159.0 s | 150.0 s | 161.7 s | 174.9 s | 169.9 s | 173.7 s |
-| Rust tests passed | 1,241 (12 ignored) | 1,251 (12 ignored) | 1,270 (12 ignored) | 1,284 (15 ignored) | 1,290 (16 ignored) | 1,332 (16 ignored) | 1,371 (16 ignored) | 1,392 (18 ignored) | 1,415 (21 ignored) | 1,436 (22 ignored) | 1,489 (22 ignored) |
-| `oma-archive`'s `export_caps.rs` | — | 2.4 s (4 tests) | 3.0 s | 2.7 s | 3.3 s | 3.3 s | 2.6 s | 2.6 s | 2.8 s | — | — |
-| `oma-archive`'s `export_reads.rs` | — | — | 5.4 s (12 tests) | 5.5 s | 5.3 s | 5.7 s | 5.6 s | 5.2 s | 5.6 s | — | — |
-| `oma-archive`'s `export_scope.rs` | — | — | — | 2.0 s (7 tests) | 2.6 s (the oracle also reads the export catalogue) | 2.4 s | 2.6 s | 2.2 s | 2.5 s | — | 2.4 s |
-| `oma-archive`'s `export_memory.rs` | — | — | — | 10.6 s (1 test; Linux only) | 9.8 s | 10.1 s | 8.9 s | 9.4 s | 10.1 s | — | — |
-| `oma-archive`'s `export_fixtures.rs` | — | — | — | — | 0.7 s (5 tests, 1 ignored) | 0.7 s | 0.7 s | 0.6 s | 0.7 s | — | — |
-| `oma-archive`'s `bulk.rs` | — | — | — | — | 0.9 s (2 tests; the blob option's test is new) | 0.8 s | 0.8 s | 1.0 s | 0.9 s | — | — |
-| `oma-export`'s `record_catalogue.rs` | — | — | — | — | — | 8.1 s (7 tests) | 7.7 s | 8.2 s | 7.4 s | — | — |
-| `oma-export`'s `stage.rs`, `crash.rs`, `fanout.rs` | — | — | — | — | — | — | 0.1 s, 0.1 s, 0.6 s (15, 4 and 3 tests) | 0.1 s, 0.3 s (5 tests), 0.5 s | 0.1 s, 0.3 s, 0.5 s | — | — |
-| `oma-export`'s `txt.rs`, `attach.rs`, `golden_txt.rs` | — | — | — | — | — | — | — | 3.4 s (7 tests, 1 ignored), 0.8 s (6 tests), 3.1 s (1 test) | 3.3 s, 0.7 s, 2.5 s | 3.0 s, —, 2.0 s | — |
-| `oma-export`'s `json.rs`, `csv.rs`, `golden_data.rs`, `perf_smoke.rs` | — | — | — | — | — | — | — | — | 3.3 s (5 tests, 1 ignored), 3.2 s (7 tests), 3.2 s (1 test), 6.2 s (1 test, 2 ignored; Linux only) | — | — |
-| `oma-export`'s `html.rs`, `golden_html.rs` | — | — | — | — | — | — | — | — | — | 3.6 s (11 tests, 1 ignored), 2.4 s (1 test) | — |
+| What | Baseline (`9883217`) | Slice 6a | Slice 6b1 | Slice 6b2 | Slice 6c | Slice 6d | Slice 6e1 | Slice 6e2 | Slice 6f | Slice 6g | Slice 6h1 | Slice 6h2 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `cargo test --workspace`, wall clock | 2 min 8 s | 2 min 6 s | 2 min 26 s | 2 min 38 s | 2 min 42 s | 2 min 42 s | 2 min 41 s | 2 min 46 s | 2 min 59 s | 2 min 54 s | not timed alone (7 min 29 s with the rebuild) | 3 min 7 s |
+| Sum of all test binaries' run times | 124.2 s | 123.1 s | 142.9 s | 153.9 s | 158.5 s | 159.0 s | 150.0 s | 161.7 s | 174.9 s | 169.9 s | 173.7 s | 182.7 s |
+| Rust tests passed | 1,241 (12 ignored) | 1,251 (12 ignored) | 1,270 (12 ignored) | 1,284 (15 ignored) | 1,290 (16 ignored) | 1,332 (16 ignored) | 1,371 (16 ignored) | 1,392 (18 ignored) | 1,415 (21 ignored) | 1,436 (22 ignored) | 1,489 (22 ignored) | 1,502 (22 ignored) |
+| `oma-archive`'s `export_caps.rs` | — | 2.4 s (4 tests) | 3.0 s | 2.7 s | 3.3 s | 3.3 s | 2.6 s | 2.6 s | 2.8 s | — | — | 3.1 s |
+| `oma-archive`'s `export_reads.rs` | — | — | 5.4 s (12 tests) | 5.5 s | 5.3 s | 5.7 s | 5.6 s | 5.2 s | 5.6 s | — | — | 5.0 s |
+| `oma-archive`'s `export_scope.rs` | — | — | — | 2.0 s (7 tests) | 2.6 s (the oracle also reads the export catalogue) | 2.4 s | 2.6 s | 2.2 s | 2.5 s | — | 2.4 s | 2.3 s |
+| `oma-archive`'s `export_memory.rs` | — | — | — | 10.6 s (1 test; Linux only) | 9.8 s | 10.1 s | 8.9 s | 9.4 s | 10.1 s | — | — | 9.7 s |
+| `oma-archive`'s `export_fixtures.rs` | — | — | — | — | 0.7 s (5 tests, 1 ignored) | 0.7 s | 0.7 s | 0.6 s | 0.7 s | — | — | 0.6 s |
+| `oma-archive`'s `bulk.rs` | — | — | — | — | 0.9 s (2 tests; the blob option's test is new) | 0.8 s | 0.8 s | 1.0 s | 0.9 s | — | — | 0.9 s |
+| `oma-export`'s `record_catalogue.rs` | — | — | — | — | — | 8.1 s (7 tests) | 7.7 s | 8.2 s | 7.4 s | — | — | 7.3 s |
+| `oma-export`'s `stage.rs`, `crash.rs`, `fanout.rs` | — | — | — | — | — | — | 0.1 s, 0.1 s, 0.6 s (15, 4 and 3 tests) | 0.1 s, 0.3 s (5 tests), 0.5 s | 0.1 s, 0.3 s, 0.5 s | — | — | 0.1 s, 0.3 s, 0.6 s |
+| `oma-export`'s `txt.rs`, `attach.rs`, `golden_txt.rs` | — | — | — | — | — | — | — | 3.4 s (7 tests, 1 ignored), 0.8 s (6 tests), 3.1 s (1 test) | 3.3 s, 0.7 s, 2.5 s | 3.0 s, —, 2.0 s | — | 2.9 s, 0.6 s, 2.6 s |
+| `oma-export`'s `json.rs`, `csv.rs`, `golden_data.rs`, `perf_smoke.rs` | — | — | — | — | — | — | — | — | 3.3 s (5 tests, 1 ignored), 3.2 s (7 tests), 3.2 s (1 test), 6.2 s (1 test, 2 ignored; Linux only) | — | — | 3.0 s, 3.5 s, 3.0 s, 6.6 s |
+| `oma-export`'s `html.rs`, `golden_html.rs` | — | — | — | — | — | — | — | — | — | 3.6 s (11 tests, 1 ignored), 2.4 s (1 test) | — | 3.9 s (14 tests, 1 ignored), 2.8 s |
 
 The difference between the two runs is inside the run-to-run noise: a
 first, cold run of the baseline in the same container took 3 min 58 s
@@ -859,7 +879,23 @@ Slice 6h1 adds 18 shell tests (`src-tauri/src/exports/tests.rs`, about
 ts-rs binding tests for the new export types; `export_scope.rs` gains the
 search-preview check. Its run was timed with the rebuild included, so
 only the summed run time is comparable.
-Windows has not been measured for M6. Slices 6h2 and 6l record the figures again, with CI's.
+Slice 6h2 (the column above; the whole of PR A) was timed alone after
+`cargo test --workspace --no-run`: 1,502 Rust tests passed, 22 ignored,
+3 min 7 s wall clock and 182.7 s summed. It adds 13 tests: the pair
+rendition (`oma-archive`), two `decode_helper.rs` tests, three `html.rs`
+feed tests, six shell tests and one ts-rs binding; the shell's unit tests
+took 38.4 s (37.7 s in 6h1), `decode_helper.rs` 0.5 s and
+`log_hygiene.rs`, now also running `exercise_export`, 3.7 s. The
+Windows-only `stage.rs` test is not compiled here.
+
+**PR A as a whole, on Linux here:** 182.7 s summed against the baseline's
+124.2 s, so M6's PR A adds about 58 s of Rust test time (inside the
+3-minute budget), plus the CI oracle step outside `cargo test` (about
+70 s here for the four writers' exports and Python runs, measured per
+slice). **Windows has not been measured for M6:** PR A has not run on
+CI. With the 4× factor seen in M4 and M5, it would add about 4 minutes on
+`windows-2022`, inside the 6-minute budget; that is an extrapolation
+until CI's run is recorded (slice 6l records it again).
 
 **Export read measurements (slice 6b2; synthetic, one host, no timing
 asserted).** In the same container, debug test build with `oma-archive`

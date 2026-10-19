@@ -145,7 +145,9 @@ pub async fn start_export(
     on_event: Channel<JobEvent>,
 ) -> IpcResult<JobStarted> {
     let req: StartExportRequest = parse_raw(json_body(&request))?;
-    let draft = state.exports.take(&req.draft_id)?;
+    let draft = state
+        .exports
+        .take_for_start(&req.draft_id, &req.destination_token)?;
     let prepared = worker::prepare(draft, &req.confirmations)?;
     let configured = state.settings()?.settings().archive_directory.clone();
     let library = require_library(&state)?;
@@ -196,6 +198,7 @@ pub async fn start_export(
         hold,
         cancel: reservation.cancel,
         host: Arc::clone(&state.exports),
+        renderers: crate::viewer::media::helper::process_factory(),
     };
     if job_worker::spawn_with(
         &job_id,

@@ -477,6 +477,7 @@ fn a_cancelled_export_leaves_nothing() {
             replace: Replace::Never,
             attach: None,
             search: None,
+            previews: None,
         };
         let c = cancel.clone();
         let mut seen = 0;

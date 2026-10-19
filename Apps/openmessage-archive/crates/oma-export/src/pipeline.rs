@@ -38,9 +38,17 @@
 //! Not yet here: the "events" option off (refused with
 //! `OptionDoesNotApply` until the scope index can leave events out without
 //! a gap; the shell refuses it before a draft exists), `importSessions`
-//! (the session facts need a new snapshot read), the decode-helper pool
-//! behind the HTML writer's `PreviewSource` (slice 6h2; the caller hands
-//! the writers in) and the export-render helper's formats (6i, 6j). The writers' own counts (`neutralisedCells` from
+//! (the session facts need a new snapshot read) and the export-render
+//! helper's formats (6i, 6j).
+//!
+//! **Previews (slice 6h2).** With a [`PreviewFeed`] in the run (the
+//! caller builds the HTML writer over [`PreviewFeed::source`]), every
+//! mapped item's included attachments with a stored file are offered to
+//! the feed before the item reaches the writers: the copy stream's
+//! verified bytes when the file was copied, else one verified read
+//! ([`crate::attach::read_preview_input`]); the feed sends images to the
+//! decode-helper pool at once, and the writer waits for them. What the
+//! writer did not ask for is dropped after the item. The writers' own counts (`neutralisedCells` from
 //! CSV, the marker counts from TXT, CSV and HTML, the preview counts from
 //! HTML) reach the bundle's manifest; a
 //! single file's "About this export" is written before the writers finish
@@ -54,7 +62,7 @@ use oma_archive::{
     PreviewOptions, TimeRange,
 };
 
-use crate::attach::{AttachCounts, AttachPolicy, Attacher};
+use crate::attach::{read_preview_input, AttachCounts, AttachPolicy, Attacher};
 use crate::error::{ExportError, LimitKind, PlanRefusal};
 use crate::ids::Ordinals;
 use crate::manifest::{
@@ -63,6 +71,7 @@ use crate::manifest::{
 use crate::map::{AttachmentFiles, ExportZone, FileOutcome, Mapper, Placement};
 use crate::naming::{EntryId, TargetName};
 use crate::plan::{ExportPlan, Packaging, ScopePlan};
+use crate::preview::{PreviewFeed, PreviewInput};
 use crate::record::{ConversationRecord, ItemRecord};
 use crate::stage::{Published, Replace, Staging};
 use crate::writer::{
@@ -88,6 +97,9 @@ pub struct ExportRun<'a> {
     /// `None`: the policy follows the plan ([`AttachPolicy::for_plan`]).
     pub attach: Option<AttachPolicy>,
     pub search: Option<SearchFacts>,
+    /// The previews' feed (slice 6h2), when the plan has previews on and
+    /// the HTML writer reads them from [`PreviewFeed::source`].
+    pub previews: Option<PreviewFeed>,
 }
 
 /// What one run did.
@@ -378,14 +390,41 @@ impl Job<'_, '_, '_> {
         Ok(rec)
     }
 
+    /// Offer the item just mapped to the preview feed (slice 6h2).
+    fn offer_previews(&mut self) -> Result<(), ExportError> {
+        let Some(feed) = self.run.previews.as_ref() else {
+            return Ok(());
+        };
+        for (n, blob) in self.mapper.take_preview_wants() {
+            let input = match self
+                .attacher
+                .as_mut()
+                .and_then(|a| a.take_preview_bytes(blob))
+            {
+                Some(bytes) => PreviewInput::Bytes(bytes),
+                None => read_preview_input(self.snap, blob, self.cancel)?,
+            };
+            feed.offer(n, input)?;
+        }
+        if let Some(a) = self.attacher.as_mut() {
+            a.clear_preview_bytes();
+        }
+        Ok(())
+    }
+
     fn emit(&mut self, m: &ExportMessage, at: Placement) -> Result<(), ExportError> {
         let rec = self.map(m, at)?;
+        self.offer_previews()?;
         self.flush_handles()?;
         let fan = self
             .fan
             .as_mut()
             .ok_or(ExportError::Limit(LimitKind::RowOrder))?;
-        fan.item(&rec, &mut self.staging, self.cancel)?;
+        let written = fan.item(&rec, &mut self.staging, self.cancel);
+        if let Some(feed) = self.run.previews.as_ref() {
+            feed.clear();
+        }
+        written?;
         self.progress.rows += 1;
         let id = m.item.message.id;
         if self.streamed.insert(id) {
@@ -587,12 +626,19 @@ pub fn run_detailed(
         Ok(f) => f,
         Err(e) => return Err(Removed::now(staging, progress, e)),
     };
+    let mut attacher = attach.map(Attacher::new);
+    if run.previews.is_some() {
+        mapper.collect_preview_wants();
+        if let Some(a) = attacher.as_mut() {
+            a.keep_preview_bytes();
+        }
+    }
     let mut job = Job {
         run,
         snap,
         cancel,
         mapper,
-        attacher: attach.map(Attacher::new),
+        attacher,
         fan: Some(fan),
         staging,
         handles_sent: 0,
@@ -728,6 +774,10 @@ fn body(
     counts.continuation_rows = sum(&reports, "continuationRows");
     counts.attachments.previews_embedded = sum(&reports, "previewsEmbedded");
     counts.attachments.previews_unavailable = sum(&reports, "previewsUnavailable");
+    counts.attachments.previews_skipped_after_helper_failures = run
+        .previews
+        .as_ref()
+        .map_or(0, PreviewFeed::skipped_after_helper_failures);
     counts.check_identities()?;
     let body = ManifestBody::new(input(counts.clone(), job))?;
     if plan.packaging() == Packaging::Bundle {

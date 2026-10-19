@@ -927,3 +927,227 @@ fn write_oracle_html() {
     )
     .expect("write");
 }
+
+// ------------------------------------------------------- the preview feed
+
+/// A pool for the tests (slice 6h2): it records what it was given and
+/// answers with `answer` (`None`: never answers, keeping the senders).
+struct FakePool {
+    given: Mutex<Vec<(Vec<u8>, bool)>>,
+    answer: Option<oma_export::preview::PoolOutcome>,
+    parked: Mutex<Vec<std::sync::mpsc::Sender<oma_export::preview::PoolOutcome>>>,
+}
+
+impl FakePool {
+    fn new(answer: Option<oma_export::preview::PoolOutcome>) -> Arc<FakePool> {
+        Arc::new(FakePool {
+            given: Mutex::new(Vec::new()),
+            answer,
+            parked: Mutex::new(Vec::new()),
+        })
+    }
+}
+
+impl oma_export::preview::RenditionPool for FakePool {
+    fn submit(&self, bytes: Vec<u8>, display: bool) -> oma_export::preview::RenditionTicket {
+        use oma_export::preview::RenditionTicket;
+        self.given.lock().expect("lock").push((bytes, display));
+        match &self.answer {
+            Some(a) => RenditionTicket::ready(a.clone()),
+            None => {
+                let (tx, t) = RenditionTicket::channel();
+                self.parked.lock().expect("lock").push(tx);
+                t
+            }
+        }
+    }
+}
+
+fn ready_png() -> oma_export::preview::PoolOutcome {
+    oma_export::preview::PoolOutcome::Ready {
+        thumb: RenditionBytes(png()),
+        display: Some(RenditionBytes(png())),
+    }
+}
+
+/// Export `doc` to HTML with previews through a feed over `pool`.
+fn export_fed(
+    i: &Imported,
+    parent: &Path,
+    copy: bool,
+    larger: bool,
+    pool: Arc<FakePool>,
+    cancel: oma_archive::CancelToken,
+) -> (
+    Result<ExportReport, ExportError>,
+    oma_export::preview::PreviewFeed,
+) {
+    let feed = oma_export::preview::PreviewFeed::new(pool, larger, cancel);
+    let tweak = move |o: &mut ExportOptions| {
+        o.attachments = if copy {
+            AttachmentMode::CopyOriginals
+        } else {
+            AttachmentMode::None
+        };
+        o.previews = true;
+        o.larger_previews = larger;
+    };
+    let r = export_with_previews(
+        i,
+        parent,
+        ScopePlan::Archive,
+        &[Format::Html],
+        &tweak,
+        BUNDLE,
+        None,
+        &ExportZone::Utc,
+        vec![Box::new(HtmlWriter::with_previews(feed.source())) as Box<dyn ExportWriter>],
+        Some(feed.clone()),
+    );
+    (r, feed)
+}
+
+/// The feed gives the pool the verified bytes of each included image,
+/// from the copy stream or from one verified read without a copy, and the
+/// same images either way; the writer embeds what the pool made.
+#[test]
+fn the_feed_sends_verified_image_bytes_with_or_without_copies() {
+    let mut total = 0;
+    for doc in media_docs() {
+        let what = doc.name.clone();
+        let i = imported(&doc);
+        let mut seen: Vec<Vec<Vec<u8>>> = Vec::new();
+        for copy in [true, false] {
+            let d = files::dest();
+            let pool = FakePool::new(Some(ready_png()));
+            let (r, feed) = export_fed(
+                &i,
+                &d.parent,
+                copy,
+                copy,
+                Arc::clone(&pool),
+                oma_archive::CancelToken::new(),
+            );
+            let report = r.unwrap_or_else(|e| panic!("{what} copy={copy}: {e:?}"));
+            let given = pool.given.lock().expect("lock").clone();
+            for (b, display) in &given {
+                let kind = oma_archive::media::sniff(b, b.len() as u64);
+                assert!(oma_export::attach::is_previewable(kind), "{what}: {kind:?}");
+                assert_eq!(*display, copy, "{what}");
+            }
+            let r = &report.writers[0].counts;
+            assert_eq!(r["previewsEmbedded"], given.len() as u64, "{what} {copy}");
+            assert_eq!(feed.submitted(), given.len() as u64);
+            assert_eq!(feed.skipped_after_helper_failures(), 0);
+            let m = json(&d.parent.join(BUNDLE).join("manifest.json"));
+            assert_eq!(
+                m["counts"]["attachments"]["previewsSkippedAfterHelperFailures"],
+                0
+            );
+            files::verify_sums(&d.parent.join(BUNDLE));
+            let mut bytes: Vec<Vec<u8>> = given.into_iter().map(|(b, _)| b).collect();
+            bytes.sort();
+            seen.push(bytes);
+        }
+        assert_eq!(seen[0], seen[1], "{what}: the same images either way");
+        total += seen[0].len();
+    }
+    assert!(total >= 2, "{total}");
+}
+
+/// After three helper crashes in a row previews are off: the rest are
+/// cards, counted as skipped in the manifest, and nothing more is sent.
+#[test]
+fn helper_crashes_turn_previews_off_and_are_counted() {
+    for doc in media_docs() {
+        let what = doc.name.clone();
+        let i = imported(&doc);
+        // How many images the export offers.
+        let d = files::dest();
+        let ok = FakePool::new(Some(ready_png()));
+        let (r, _) = export_fed(
+            &i,
+            &d.parent,
+            true,
+            false,
+            Arc::clone(&ok),
+            oma_archive::CancelToken::new(),
+        );
+        r.expect("export");
+        let images = ok.given.lock().expect("lock").len() as u64;
+        let d = files::dest();
+        let crash = FakePool::new(Some(oma_export::preview::PoolOutcome::Crashed));
+        let (r, feed) = export_fed(
+            &i,
+            &d.parent,
+            true,
+            false,
+            Arc::clone(&crash),
+            oma_archive::CancelToken::new(),
+        );
+        let report = r.unwrap_or_else(|e| panic!("{what}: {e:?}"));
+        let sent = crash.given.lock().expect("lock").len() as u64;
+        let skipped = feed.skipped_after_helper_failures();
+        assert_eq!(sent + skipped, images, "{what}");
+        assert_eq!(feed.is_off(), images >= 3, "{what}");
+        println!("RECORD {what} images={images} sent={sent} skipped={skipped}");
+        let c = &report.writers[0].counts;
+        assert_eq!(c["previewsEmbedded"], 0);
+        assert_eq!(c["previewsUnavailable"], images, "{what}");
+        assert_eq!(
+            report
+                .counts
+                .attachments
+                .previews_skipped_after_helper_failures,
+            skipped
+        );
+        let m = json(&d.parent.join(BUNDLE).join("manifest.json"));
+        assert_eq!(
+            m["counts"]["attachments"]["previewsSkippedAfterHelperFailures"],
+            skipped
+        );
+    }
+}
+
+/// Cancel latency while the writer waits for a rendition that never comes
+/// (spec §8.5, §12): the export stops within the wait's 50 ms slices, and
+/// the unfinished output is removed.
+#[test]
+fn a_cancel_stops_a_wait_for_a_rendition_and_removes_the_partial() {
+    let doc = media_docs().into_iter().next().expect("a media entry");
+    let i = imported(&doc);
+    let d = files::dest();
+    let pool = FakePool::new(None);
+    let cancel = oma_archive::CancelToken::new();
+    let c = cancel.clone();
+    let given = Arc::clone(&pool);
+    let canceller = std::thread::spawn(move || {
+        // Cancel once the first image waits in the pool.
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while given.given.lock().expect("lock").is_empty() {
+            assert!(std::time::Instant::now() < until, "an image was submitted");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let at = std::time::Instant::now();
+        c.cancel();
+        at
+    });
+    let (r, _) = export_fed(&i, &d.parent, true, false, pool, cancel);
+    let ended = std::time::Instant::now();
+    let cancelled_at = canceller.join().expect("canceller");
+    assert!(matches!(r, Err(ExportError::Cancelled)), "{r:?}");
+    let latency = ended.saturating_duration_since(cancelled_at);
+    println!(
+        "RECORD cancel_latency_preview_wait_ms={}",
+        latency.as_millis()
+    );
+    assert!(
+        latency < std::time::Duration::from_secs(1),
+        "no new output within 1 s of the cancel: {latency:?}"
+    );
+    assert_eq!(
+        std::fs::read_dir(&d.parent).expect("dir").count(),
+        0,
+        "nothing left in the destination"
+    );
+}

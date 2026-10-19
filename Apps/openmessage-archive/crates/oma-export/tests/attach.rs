@@ -451,6 +451,7 @@ fn cancelled_export(
             replace: oma_export::stage::Replace::Never,
             attach: None,
             search: None,
+            previews: None,
         };
         oma_export::pipeline::run(
             snap,

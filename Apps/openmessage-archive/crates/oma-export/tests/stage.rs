@@ -758,3 +758,50 @@ fn debug_output_names_no_path_or_name() {
     let _ = ExportZone::Utc;
     assert!(s.remove());
 }
+
+/// Windows (§8.6, §14.7): a handle another program holds on a file inside
+/// the staging folder (an antivirus scan, the indexer) is released after
+/// a while. Whether an open handle blocks the directory rename at all is
+/// what this checks on `windows-2022`; either way the publish must end in
+/// a published bundle (after the bounded retries) or a clean error with
+/// the staging intact for removal, never a half-published folder. The
+/// elapsed time is printed as a `RECORD` line (`--nocapture`).
+#[cfg(windows)]
+#[test]
+fn a_publish_with_a_handle_held_open_retries_then_succeeds() {
+    let d = dest();
+    let mut s = Staging::bundle(&d.parent).expect("staging");
+    let staging_name = s.entry().to_name();
+    write(&mut s, &txt(1), b"held\n");
+    // Find the staged file by walking the staging folder (no `/`).
+    let staging = d.parent.join(&staging_name);
+    let mut stack = vec![staging.clone()];
+    let mut held_path = None;
+    while let Some(dir) = stack.pop() {
+        for e in std::fs::read_dir(&dir).expect("read_dir").flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.extension().is_some_and(|x| x == "txt") {
+                held_path = Some(p);
+            }
+        }
+    }
+    let held = std::fs::File::open(held_path.expect("a staged file")).expect("open");
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(700));
+        drop(held);
+    });
+    let started = std::time::Instant::now();
+    let published = s.publish(&name("Held"), Replace::Never);
+    let elapsed = started.elapsed();
+    release.join().expect("release");
+    println!(
+        "RECORD publish_with_open_handle ok={} elapsed_ms={}",
+        published.is_ok(),
+        elapsed.as_millis()
+    );
+    published.expect("published after the handle was released");
+    assert!(d.parent.join("Held").is_dir());
+    assert!(!staging.exists());
+}

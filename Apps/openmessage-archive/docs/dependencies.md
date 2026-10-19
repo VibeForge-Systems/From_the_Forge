@@ -110,6 +110,35 @@ is published on crates.io. The NOTICE file says so.
 They are allowed by name in `deny.toml`, not by adding MPL-2.0 to the
 global allowlist. Any new MPL dependency still fails CI. Avoiding them would
 mean leaving Tauri.
+### Milestone 6 owner decisions for PR B (recorded; not applied in PR A)
+
+The owner answered the M6 spec's questions on 2026-10-19. Two of them
+change dependencies and the licence policy in PR B (slices 6i and 6j);
+**PR A adds none of this**: its only new crate is `csv` (slice 6f), and
+`deny.toml` and the workspace `rust-version` are unchanged.
+
+- **Q1, the PDF engine (owner-confirmed):** krilla 0.8.2 with parley
+  0.12.0 (both MIT OR Apache-2.0). krilla's `tiny-skia-path` 0.12.0
+  pulls in `arrayref` 0.3.9, which is **BSD-2-Clause**. It will be
+  allowed as a **per-crate exception for `arrayref` only**, named in
+  `deny.toml` the way the MPL-2.0 crates above are, and **not** added to
+  the global allowlist, so any other BSD-2-Clause crate still fails CI.
+  The reason: krilla gives tagged PDF, bidi, complex scripts, colour
+  emoji and subsetting with ToUnicode, against an estimated 1,000–1,500
+  lines (**UNVERIFIED**) of our own writer with no tagged structure.
+  krilla's MSRV is 1.92, so the workspace `rust-version` rises from 1.90
+  to 1.92 (the pinned toolchain is already 1.97.0). Both changes are
+  recorded in the upgrade log when slice 6j makes them.
+- **Q2, the PDF fonts (owner-confirmed):** the base scripts (Noto Sans,
+  Arabic, Hebrew, Devanagari, Thai, Symbols 2) plus Noto Sans CJK and
+  Noto Color Emoji, about 32 MB raw, OFL-1.1, shipped under
+  `src-tauri/resources/fonts/` with `OFL.txt`. Each file is fetched only
+  from its official upstream (the Google Fonts / notofonts GitHub
+  releases), pinned by a SHA-256 computed from that download and checked
+  in code before the bytes reach the helper. The exact upstream URLs and
+  versions are recorded here by slice 6j; none is chosen or downloaded
+  yet.
+
 The release binary contains no HTTP client crate (`reqwest`, `hyper`,
 `ureq`). Re-check with
 `cargo tree -e normal | grep -iE 'reqwest|hyper|ureq'`.
@@ -280,3 +309,4 @@ changed no dependency.
 | on merge (M6, slice 6g) | No dependency change | The HTML writer uses only the standard library and existing pins (`sha2` for the stylesheet hash in its test; base64 for `data:` URIs and the CSP hash is a few lines of our own in `preview.rs`, not a crate). The HTML oracle (`scripts/oracles/html_oracle.py`) uses the standard library and html5lib 1.1, already pinned with hashes in `scripts/oracles/requirements.txt` since slice 6c. `Cargo.lock`, `deny.toml`, `package.json`, `package-lock.json` and `requirements.txt` are unchanged; `cargo deny check` passes |
 | on merge (M6, slice 6h1) | No third-party dependency change. The shell (`src-tauri`) gains a dependency on the workspace crate `oma-export` | The export job and its commands (`src-tauri/src/exports/`) drive `oma-export`'s pipeline and writers. `Cargo.lock` changes only in the shell's own dependency list; `deny.toml`, `package.json`, `package-lock.json` and `requirements.txt` are unchanged; `cargo deny check` passes |
 | on merge (M6, slice 6d) | No third-party dependency change. The new workspace crate `oma-export` (`crates/oma-export`, Apache-2.0 like the workspace) is added to `[workspace.dependencies]` and depends only on existing pins: `oma-archive`, `serde`, `serde_json` and `thiserror`; for its tests `oma-backup`, `tempfile`, `rusqlite` and `dunce` | The export record core (M6 spec §4). The only `Cargo.lock` change is the new `oma-export` package with those existing dependencies; no new crate is resolved. `deny.toml`, `package.json` and `package-lock.json` are unchanged. `cargo deny check` passes. The csv crate (=1.4.0) is not added yet: no writer exists until slice 6f |
+| on merge (M6, slice 6h2) | No dependency change | The destination token, `RenditionPair` (with `oma-archive`'s existing `image`), the export's decode-helper pool and its stderr counting use the standard library and existing pins (`getrandom` for the token). `Cargo.lock`, `deny.toml`, `package.json`, `package-lock.json` and `scripts/oracles/requirements.txt` are unchanged; `cargo deny check` passes. PR A's dependency changes in all: csv 1.4.0 (with `csv-core` 0.1.13 and `ryu` 1.0.23) and the hash-pinned oracle packages of slice 6c; the owner decisions above for PR B are recorded, not applied |

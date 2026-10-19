@@ -19,6 +19,13 @@
 //!    sent: `exportFinished` (counts only), `cancelled` or `failed`, each
 //!    saying whether the unfinished output was removed.
 //!
+//! **Previews (slice 6h2).** With previews on, the export starts its own
+//! decode-helper pool ([`super::previews::HelperPool`], from
+//! [`ExportSpec::renderers`]) and a feed the HTML writer reads; the pool
+//! is shut down when the pipeline returns (its helpers killed on cancel or
+//! failure), and only the byte count of the helpers' stderr is logged, as
+//! a bucket.
+//!
 //! Phases: `preparingExport`, `writingMessages` (timeline rows),
 //! `finishingExport`, and `removingPartial` while a cancelled or failed
 //! export's staging is removed (the job keeps its slot and the lock until
@@ -35,6 +42,7 @@ use oma_archive::{
 };
 use oma_export::manifest::SearchFacts;
 use oma_export::pipeline::{self, ExportFailure, ExportProgress, ExportReport, ExportStep};
+use oma_export::preview::{PreviewFeed, RenditionPool};
 use oma_export::writer::csv::CsvWriter;
 use oma_export::writer::html::HtmlWriter;
 use oma_export::writer::json::JsonWriter;
@@ -49,6 +57,7 @@ use super::dto::{
     ExportSummaryDto,
 };
 use super::messages as em;
+use super::previews::HelperPool;
 use super::{Draft, DraftSearch, ExportHost};
 use crate::archives::ArchiveEnv;
 use crate::backups::dto::{clamp, JobEvent, JobPhase};
@@ -56,6 +65,7 @@ use crate::backups::worker::Throttle;
 use crate::backups::{JobEventSink, Jobs, LastOutcome};
 use crate::error::{ErrorCode, IpcError, IpcResult};
 use crate::viewer::bucket;
+use crate::viewer::media::helper::BackendFactory;
 
 /// A draft that passed `start_export`'s checks.
 pub struct Prepared {
@@ -191,11 +201,18 @@ pub struct ExportSpec {
     pub hold: ExportHold,
     pub cancel: CancelToken,
     pub host: Arc<ExportHost>,
+    /// The decode helpers' backends (the app's: this binary with
+    /// `--oma-decode-helper`; tests give fakes).
+    pub renderers: BackendFactory,
 }
 
-/// One writer per format of the plan. PDF and XLSX never reach here
-/// (refused when the draft was made).
-fn writers(plan: &ExportPlan) -> Result<Vec<Box<dyn ExportWriter>>, ExportError> {
+/// One writer per format of the plan; HTML reads previews from `feed`
+/// when there is one. PDF and XLSX never reach here (refused when the
+/// draft was made).
+fn writers(
+    plan: &ExportPlan,
+    feed: Option<&PreviewFeed>,
+) -> Result<Vec<Box<dyn ExportWriter>>, ExportError> {
     plan.formats()
         .iter()
         .map(|f| -> Result<Box<dyn ExportWriter>, ExportError> {
@@ -203,7 +220,10 @@ fn writers(plan: &ExportPlan) -> Result<Vec<Box<dyn ExportWriter>>, ExportError>
                 Format::Txt => Box::new(TxtWriter::new()),
                 Format::Csv => Box::new(CsvWriter::new()),
                 Format::Json => Box::new(JsonWriter::new()),
-                Format::Html => Box::new(HtmlWriter::new()),
+                Format::Html => match feed {
+                    Some(feed) => Box::new(HtmlWriter::with_previews(feed.source())),
+                    None => Box::new(HtmlWriter::new()),
+                },
                 Format::Pdf | Format::Xlsx => {
                     return Err(ExportError::Limit(LimitKind::UnmappedVariant))
                 }
@@ -308,6 +328,21 @@ fn export(
             }
         };
         let export_id = EntryId::random()?;
+        // The previews' pool and feed, started only now that the scope is
+        // settled (§6.5).
+        let pool = p.plan.options().previews.then(|| {
+            Arc::new(HelperPool::start(
+                &spec.renderers,
+                super::previews::default_pool_size(),
+            ))
+        });
+        let feed = pool.as_ref().map(|pool| {
+            PreviewFeed::new(
+                Arc::clone(pool) as Arc<dyn RenditionPool>,
+                p.plan.options().larger_previews,
+                spec.cancel.clone(),
+            )
+        });
         let run = pipeline::ExportRun {
             plan: &p.plan,
             zone: &p.zone,
@@ -320,9 +355,22 @@ fn export(
             replace: p.replace,
             attach: None,
             search: facts,
+            previews: feed.clone(),
         };
-        let report = pipeline::run_detailed(snap, &run, writers(&p.plan)?, &spec.cancel, progress)?;
-        Ok((report, excluded))
+        let result = match writers(&p.plan, feed.as_ref()) {
+            Ok(w) => pipeline::run_detailed(snap, &run, w, &spec.cancel, progress),
+            Err(e) => Err(e.into()),
+        };
+        drop(run);
+        drop(feed);
+        if let Some(pool) = pool.and_then(|p| Arc::try_unwrap(p).ok()) {
+            let stderr = pool.shutdown(result.is_err());
+            tracing::debug!(
+                stderr_size = bucket(usize::try_from(stderr).unwrap_or(usize::MAX)),
+                "export previews"
+            );
+        }
+        Ok((result?, excluded))
     })
 }
 

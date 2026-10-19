@@ -281,6 +281,7 @@ export type { ChooseExportDestinationRequest } from './generated/ChooseExportDes
 export type { ClockInput } from './generated/ClockInput';
 export type { CsvProfileInput } from './generated/CsvProfileInput';
 export type { DraftId } from './generated/DraftId';
+export type { DestinationToken } from './generated/DestinationToken';
 export type { DraftRef } from './generated/DraftRef';
 export type { ExcludedHitsDto } from './generated/ExcludedHitsDto';
 export type { ExportConfirmationsInput } from './generated/ExportConfirmationsInput';

@@ -41,8 +41,8 @@ use oma_export::time::{CivilTime, Localized};
 use oma_export::{ExportPlan, ExportZone, Format, Leftover, Packaging, TargetName};
 
 use super::dto::{
-    ExportDestinationDto, ExportWarningDto, FreeSpaceDto, PackagingDto, SpaceVerdictDto,
-    SyncProviderDto,
+    DestinationToken, ExportDestinationDto, ExportWarningDto, FreeSpaceDto, PackagingDto,
+    SpaceVerdictDto, SyncProviderDto,
 };
 use super::messages as em;
 use crate::error::{ErrorCode, IpcError, IpcResult};
@@ -104,6 +104,8 @@ pub struct SpaceNeeds {
 /// draft. `Debug` prints no path or name.
 #[derive(Clone)]
 pub struct Chosen {
+    /// The token the webview echoes in `start_export` (§8.1).
+    pub token: DestinationToken,
     /// The canonical folder the export is written into.
     pub parent: PathBuf,
     /// The name it is published under (a bundle's base name: the publish
@@ -323,7 +325,9 @@ pub fn inspect(
         Some(_) if warnings.contains(&ExportWarningDto::MayNotFit) => SpaceVerdictDto::No,
         Some(_) => SpaceVerdictDto::Yes,
     };
+    let token = DestinationToken::random().ok_or_else(|| IpcError::internal("token"))?;
     let dto = ExportDestinationDto {
+        destination_token: token.clone(),
         packaging: PackagingDto::from(packaging),
         display_name: UntrustedText::of_name(shown.as_str()),
         target_exists,
@@ -334,6 +338,7 @@ pub fn inspect(
         leftovers: u32::try_from(leftovers.len()).unwrap_or(u32::MAX),
     };
     Ok(Chosen {
+        token,
         parent,
         target,
         packaging,

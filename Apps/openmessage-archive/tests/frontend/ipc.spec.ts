@@ -19,7 +19,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   },
 }));
 import { ERROR_CODES, IpcError, ipc, toIpcError } from '@/services/ipc';
-import type { DraftId, PreviewExportRequest, SafeId } from '@/types';
+import type { DestinationToken, DraftId, PreviewExportRequest, SafeId } from '@/types';
 
 const PASSWORD = 'synthetic-test-password-sentinel';
 
@@ -397,7 +397,8 @@ describe('export wrappers (M6)', () => {
       keepRiskyExtension: false,
       removeLeftovers: false,
     };
-    await ipc.startExport({ draftId, confirmations }, () => undefined);
+    const destinationToken = 'fedcba9876543210fedcba9876543210' as DestinationToken;
+    await ipc.startExport({ draftId, destinationToken, confirmations }, () => undefined);
     await ipc.discardExportDraft(draftId);
     await ipc.showExportInFolder('job-3');
     expect(fake.calls.map(([c]) => c)).toEqual([

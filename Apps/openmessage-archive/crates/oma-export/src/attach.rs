@@ -44,8 +44,16 @@
 //!   is removed and the export carries on). A full volume is not an
 //!   exclusion: it stops the export (`NoSpace`).
 //!
-//! Previews from the copy stream (§6.1, §6.5) arrive with the HTML and PDF
-//! writers' preview pool (slices 6g, 6h). Nothing here logs.
+//! - **Previews from the copy stream (§6.1, §6.5; slice 6h2).** With
+//!   previews on ([`Attacher::keep_preview_bytes`]), the copy of an image
+//!   (sniffed PNG, JPEG, GIF, WebP or HEIF) of at most 64 MiB also fills a
+//!   buffer, kept only once the reader verified the whole file; the
+//!   pipeline takes it for the preview feed right after the item is
+//!   mapped ([`Attacher::take_preview_bytes`]) and drops what is left.
+//!   Without a copy, [`read_preview_input`] reads the file once through
+//!   the same verifying reader.
+//!
+//! Nothing here logs.
 
 use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
@@ -62,6 +70,7 @@ use crate::ids::Ordinal;
 use crate::map::{AttachmentFiles, FileDecision, FileOutcome};
 use crate::naming::{self, BundlePath, TargetName};
 use crate::plan::{AttachmentMode, ExportPlan};
+use crate::preview::{PreviewInput, MAX_PREVIEW_INPUT};
 use crate::stage::{StagedFile, Staging};
 
 /// The copy's chunk (spec §6.1): the cancel token is checked per chunk.
@@ -177,6 +186,9 @@ pub struct Attacher {
     slots: BTreeMap<BlobId, Slot>,
     next_file: Ordinal,
     counts: AttachCounts,
+    /// Previews on: the verified bytes of images copied for the current
+    /// item, by blob.
+    tee: Option<BTreeMap<BlobId, Vec<u8>>>,
 }
 
 impl std::fmt::Debug for Attacher {
@@ -219,6 +231,24 @@ impl Attacher {
             slots: BTreeMap::new(),
             next_file: 1,
             counts: AttachCounts::default(),
+            tee: None,
+        }
+    }
+
+    /// Keep the copy stream of images for previews (spec §6.1).
+    pub fn keep_preview_bytes(&mut self) {
+        self.tee = Some(BTreeMap::new());
+    }
+
+    /// The verified bytes of `blob`, if its copy kept them (once).
+    pub fn take_preview_bytes(&mut self, blob: BlobId) -> Option<Vec<u8>> {
+        self.tee.as_mut()?.remove(&blob)
+    }
+
+    /// Drop every kept buffer (after each item).
+    pub fn clear_preview_bytes(&mut self) {
+        if let Some(t) = self.tee.as_mut() {
+            t.clear();
         }
     }
 
@@ -262,6 +292,65 @@ fn at_volume_limit(e: &io::Error, written: u64) -> bool {
     }
     let _ = written;
     false
+}
+
+/// The kinds the export previews (the decode helper decides the rest).
+pub fn is_previewable(kind: SniffedKind) -> bool {
+    matches!(
+        kind,
+        SniffedKind::Png
+            | SniffedKind::Jpeg
+            | SniffedKind::Gif
+            | SniffedKind::Webp
+            | SniffedKind::Heif
+    )
+}
+
+/// One verified read of `blob` for its preview when the export copies no
+/// file (spec §6.1, §6.5): the first 4 KiB are sniffed (a file that is not
+/// an image is not read further); an image over [`MAX_PREVIEW_INPUT`] is
+/// `Unavailable` unread; otherwise the whole file is read through the
+/// verifying reader, checking `cancel` per 1 MiB, and a read that fails
+/// its length or digest check is `Unavailable`. A store file that cannot
+/// be opened gives no preview card (its record says why).
+pub fn read_preview_input(
+    snap: &ExportSnapshot<'_>,
+    blob: BlobId,
+    cancel: &CancelToken,
+) -> Result<PreviewInput, ExportError> {
+    let mut reader = match snap.open_blob(blob) {
+        Ok(r) => r,
+        Err(ArchiveError::Blob(_)) => return Ok(PreviewInput::NotAnImage),
+        Err(e) => return Err(e.into()),
+    };
+    let mut buf = Vec::with_capacity(SNIFF_WINDOW);
+    if fill(&mut reader, &mut buf, SNIFF_WINDOW).is_err() {
+        return Ok(PreviewInput::NotAnImage);
+    }
+    if !is_previewable(oma_archive::media::sniff(&buf, reader.len())) {
+        return Ok(PreviewInput::NotAnImage);
+    }
+    if reader.len() > MAX_PREVIEW_INPUT {
+        return Ok(PreviewInput::Unavailable);
+    }
+    let total = usize::try_from(reader.len()).unwrap_or(usize::MAX);
+    buf.reserve(total.saturating_sub(buf.len()));
+    let mut chunk = vec![0u8; COPY_CHUNK];
+    loop {
+        if cancel.is_cancelled() {
+            return Err(ExportError::Cancelled);
+        }
+        match reader.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => buf.extend_from_slice(chunk.get(..n).unwrap_or(&[])),
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(_) => return Ok(PreviewInput::Unavailable),
+        }
+    }
+    Ok(match reader.verified_digest() {
+        Some(_) => PreviewInput::Bytes(buf),
+        None => PreviewInput::Unavailable,
+    })
 }
 
 /// Read until `buf` holds `want` bytes or the reader ends.
@@ -355,8 +444,15 @@ impl AttachSession<'_, '_> {
             Err(e) => return Err(e),
         };
         let expected = reader.len();
-        match self.stream(&mut reader, out, &head)? {
+        let mut tee = (self.attacher.tee.is_some()
+            && is_previewable(sniffed)
+            && expected <= MAX_PREVIEW_INPUT)
+            .then(|| Vec::with_capacity(usize::try_from(expected).unwrap_or(0)));
+        match self.stream(&mut reader, out, &head, tee.as_mut())? {
             Copied::Done(f, sha) => {
+                if let (Some(t), Some(bytes)) = (self.attacher.tee.as_mut(), tee) {
+                    t.insert(blob, bytes);
+                }
                 let entry = self.staging.close_verified(f, sha, expected)?;
                 let n = entry.bytes();
                 self.attacher.next_file += 1;
@@ -435,9 +531,13 @@ impl AttachSession<'_, '_> {
         reader: &mut BlobReader,
         mut out: StagedFile,
         head: &[u8],
+        mut tee: Option<&mut Vec<u8>>,
     ) -> Result<Copied, ExportError> {
         if let Err(e) = out.write_all(head) {
             return Ok(Copied::WriteError(out, e));
+        }
+        if let Some(t) = tee.as_mut() {
+            t.extend_from_slice(head);
         }
         fault::point(FaultPoint::MidAttachmentCopy);
         let mut buf = vec![0u8; COPY_CHUNK];
@@ -454,8 +554,12 @@ impl AttachSession<'_, '_> {
                 // any other read error means the copy cannot be verified.
                 Err(_) => return Ok(Copied::Mismatch(out)),
             };
-            if let Err(e) = out.write_all(buf.get(..n).unwrap_or(&[])) {
+            let got = buf.get(..n).unwrap_or(&[]);
+            if let Err(e) = out.write_all(got) {
                 return Ok(Copied::WriteError(out, e));
+            }
+            if let Some(t) = tee.as_mut() {
+                t.extend_from_slice(got);
             }
         }
         if let Err(e) = out.flush() {

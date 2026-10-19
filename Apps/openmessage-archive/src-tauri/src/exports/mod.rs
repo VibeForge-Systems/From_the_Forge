@@ -1,4 +1,4 @@
-//! Exports: the shell side of milestone 6 (spec §9), slice 6h1.
+//! Exports: the shell side of milestone 6 (spec §9), slices 6h1 and 6h2.
 //!
 //! Nothing here depends on Tauri, so drafts, the destination checks, the
 //! job and the DTOs are tested without a window; `commands::exports` adds
@@ -19,6 +19,11 @@
 //!   cleanup is over; its reader is its own, so damaged, older or newer
 //!   archives are refused with their existing codes. It survives the
 //!   viewer closing.
+//! - **Destinations** ([`destination`], slice 6h2's token): each checked
+//!   choice gets a random `DestinationToken`, kept in the draft;
+//!   `start_export` must echo the latest one ([`ExportHost::take_for_start`]).
+//! - **Previews** ([`previews`], slice 6h2): the job's own decode-helper
+//!   pool behind `oma_export`'s preview feed.
 //! - **Logs** carry kinds, buckets and outcomes only (I6): never a path, a
 //!   name, an id, a zone, a query, an exact count or content.
 
@@ -26,6 +31,7 @@ pub mod destination;
 pub mod dto;
 pub mod input;
 pub mod messages;
+pub mod previews;
 #[cfg(test)]
 mod tests;
 pub mod worker;
@@ -196,10 +202,21 @@ impl ExportHost {
         }
     }
 
-    /// Take draft `id` out of the slot (`start_export`).
+    /// Take draft `id` out of the slot.
     pub fn take(&self, id: &DraftId) -> IpcResult<Draft> {
         self.with_draft(id, |_| Ok(()))?;
         self.lock()?.take().ok_or_else(em::expired)
+    }
+
+    /// `start_export`: take draft `id` (consumed whatever follows) and
+    /// check that `token` is its latest destination's. A token of an
+    /// earlier choice, or none chosen, is `exportConfirmationStale`.
+    pub fn take_for_start(&self, id: &DraftId, token: &dto::DestinationToken) -> IpcResult<Draft> {
+        let draft = self.take(id)?;
+        match &draft.destination {
+            Some(c) if c.token == *token => Ok(draft),
+            _ => Err(em::stale()),
+        }
     }
 
     /// Drop draft `id` and stop its count. False when it is not the

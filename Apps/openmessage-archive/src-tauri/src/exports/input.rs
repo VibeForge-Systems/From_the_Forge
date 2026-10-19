@@ -3,8 +3,9 @@
 //! Every combination that does not apply is refused (`invalidInput`), never
 //! ignored, through `oma_export::ExportPlan::new`. What this version does
 //! not build is refused with `exportUnavailable` and its own sentence:
-//! PDF and XLSX (slices 6i and 6j), image previews (the decode-helper pool,
-//! slice 6h2), "Save a copy" of one attachment, and leaving events out.
+//! PDF and XLSX (slices 6i and 6j), "Save a copy" of one attachment, and
+//! leaving events out. Image previews are built (slice 6h2: the export's
+//! decode-helper pool) and apply to HTML only in this version.
 //! Nothing is faked.
 
 use oma_archive::{ArchiveId, ChatId};
@@ -158,17 +159,14 @@ fn options(o: &ExportOptionsInput) -> IpcResult<ExportOptions> {
     if !o.events {
         return Err(em::unavailable(em::UNAVAILABLE_EVENTS));
     }
-    if o.previews || o.larger_previews {
-        return Err(em::unavailable(em::UNAVAILABLE_PREVIEWS));
-    }
     Ok(ExportOptions {
         attachments: match o.attachments {
             AttachmentModeInput::None => AttachmentMode::None,
             AttachmentModeInput::CopyOriginals => AttachmentMode::CopyOriginals,
         },
         keep_extensions: o.keep_extensions,
-        previews: false,
-        larger_previews: false,
+        previews: o.previews,
+        larger_previews: o.larger_previews,
         history: o.history,
         reactions: o.reactions,
         events: o.events,

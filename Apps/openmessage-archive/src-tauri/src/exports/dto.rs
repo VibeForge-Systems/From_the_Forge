@@ -78,6 +78,45 @@ impl<'de> Deserialize<'de> for DraftId {
     }
 }
 
+/// The token of a chosen destination (M6 spec §8.1, D127): 128 random
+/// bits as 32 lowercase hex digits, made in Rust when the folder is
+/// checked, held in the draft and expiring with it. `start_export` must
+/// carry the token of the **latest** choice, so confirmations made for an
+/// earlier folder never start an export elsewhere. It names nothing; the
+/// path stays in Rust. `Debug` prints no digits.
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, TS)]
+#[serde(transparent)]
+#[ts(
+    export,
+    type = "string & { readonly __destinationToken: unique symbol }"
+)]
+pub struct DestinationToken(String);
+
+impl DestinationToken {
+    /// A fresh token from the operating system's generator.
+    pub fn random() -> Option<DestinationToken> {
+        DraftId::random().map(|d| DestinationToken(d.0))
+    }
+
+    /// `Some` only for exactly 32 lowercase hex digits.
+    pub fn parse(s: &str) -> Option<DestinationToken> {
+        DraftId::parse(s).map(|d| DestinationToken(d.0))
+    }
+}
+
+impl std::fmt::Debug for DestinationToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DestinationToken(..)")
+    }
+}
+
+impl<'de> Deserialize<'de> for DestinationToken {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        DestinationToken::parse(&s).ok_or_else(|| de::Error::custom("not a destination token"))
+    }
+}
+
 /// A local calendar date `YYYY-MM-DD` (years 1900 to 9999), parsed in
 /// Rust ([`LocalDate::civil`]).
 #[derive(Clone, PartialEq, Eq, Deserialize, TS)]
@@ -351,6 +390,9 @@ pub struct ExportConfirmationsInput {
 #[ts(export)]
 pub struct StartExportRequest {
     pub draft_id: DraftId,
+    /// The token `choose_export_destination` returned for the latest
+    /// choice (§8.1).
+    pub destination_token: DestinationToken,
     pub confirmations: ExportConfirmationsInput,
 }
 
@@ -662,6 +704,8 @@ pub enum SpaceVerdictDto {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct ExportDestinationDto {
+    /// Bound to this choice and its draft; `start_export` echoes it.
+    pub destination_token: DestinationToken,
     pub packaging: PackagingDto,
     /// The name the export will be published under (a single file's name
     /// with its format's extension appended when needed, or the bundle's

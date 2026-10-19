@@ -181,6 +181,10 @@ pub struct Mapper {
     /// record's intrinsic part is the same in every conversation file
     /// (spec §4.9) and the copy is asked once.
     shared_files: BTreeMap<(MessageId, oma_archive::AttachmentId), FileRecord>,
+    /// With previews on (slice 6h2): the included attachments with a
+    /// stored file of the item mapped last, as (ordinal, blob), for the
+    /// pipeline to offer to the preview feed.
+    preview_wants: Option<Vec<(Ordinal, BlobId)>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -358,7 +362,22 @@ impl Mapper {
             options,
             counts: RecordCounts::default(),
             shared_files: BTreeMap::new(),
+            preview_wants: None,
         }
+    }
+
+    /// Collect each mapped item's previewable attachments (previews on).
+    pub fn collect_preview_wants(&mut self) {
+        self.preview_wants = Some(Vec::new());
+    }
+
+    /// The previewable attachments of the items mapped since the last
+    /// call, as (attachment ordinal, blob), in record order.
+    pub fn take_preview_wants(&mut self) -> Vec<(Ordinal, BlobId)> {
+        self.preview_wants
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
     }
 
     pub fn ordinals(&self) -> &Ordinals {
@@ -1105,6 +1124,11 @@ impl Mapper {
                 _ => return Err(unmapped()),
             };
             let card = self.card(f.card)?;
+            if let (Some(w), AttachmentAccess::Included, Some(b)) =
+                (self.preview_wants.as_mut(), &x.access, f.blob)
+            {
+                w.push((n, b.id));
+            }
             let file = if shared {
                 let key = (m.item.message.id, f.id);
                 match self.shared_files.get(&key).cloned() {

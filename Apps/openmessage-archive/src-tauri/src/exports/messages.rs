@@ -44,8 +44,6 @@ pub const HELPER_FAILED: &str =
     "A helper process of the export failed, or its output was refused. Nothing was published.";
 pub const UNAVAILABLE_FORMAT: &str =
     "PDF and spreadsheet (XLSX) exports are not available in this version.";
-pub const UNAVAILABLE_PREVIEWS: &str =
-    "Image previews in exports are not available in this version.";
 pub const UNAVAILABLE_ATTACHMENT: &str =
     "Saving a copy of one attachment is not available in this version.";
 pub const UNAVAILABLE_EVENTS: &str =
@@ -165,7 +163,6 @@ pub(crate) const ALL: &[&str] = &[
     NO_SPACE_FOR_FILES,
     HELPER_FAILED,
     UNAVAILABLE_FORMAT,
-    UNAVAILABLE_PREVIEWS,
     UNAVAILABLE_ATTACHMENT,
     UNAVAILABLE_EVENTS,
     INVALID_EXPORT_INPUT,

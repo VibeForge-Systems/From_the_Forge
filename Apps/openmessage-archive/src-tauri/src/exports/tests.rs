@@ -101,12 +101,23 @@ struct Fx {
 }
 
 fn fx() -> Fx {
+    fx_of(None)
+}
+
+/// [`fx`] with viewer catalogue entry `entry` instead of the main one.
+fn fx_of(entry: Option<&str>) -> Fx {
     let tmp = tempfile::tempdir().expect("tempdir");
     let library = tmp.path().join("lib");
     let dest = tmp.path().join("out");
     std::fs::create_dir(&library).expect("lib");
     std::fs::create_dir(&dest).expect("out");
-    let (keep, id) = synthetic_archive(&library);
+    let (keep, id) = match entry {
+        None => synthetic_archive(&library),
+        Some(e) => (
+            tempfile::tempdir().expect("tempdir"),
+            crate::viewer::tests::import_order(&library, e),
+        ),
+    };
     let dest = dunce::canonicalize(&dest).expect("canonical");
     Fx {
         _tmp: tmp,
@@ -209,7 +220,26 @@ fn run_job(
     c: ExportConfirmationsInput,
     cancel_on_rows: bool,
 ) -> IpcResult<Vec<JobEvent>> {
-    let draft = host.take(id)?;
+    run_job_with(host, jobs, f, id, c, cancel_on_rows, fake_renderers(), None)
+}
+
+/// A hook that gets the job's cancel token before the worker runs.
+type Canceller = Box<dyn FnOnce(CancelToken) + Send>;
+
+/// [`run_job`] with the decode helpers' backends and a canceller.
+#[allow(clippy::too_many_arguments)]
+fn run_job_with(
+    host: &Arc<ExportHost>,
+    jobs: &Jobs,
+    f: &Fx,
+    id: &DraftId,
+    c: ExportConfirmationsInput,
+    cancel_on_rows: bool,
+    renderers: crate::viewer::media::helper::BackendFactory,
+    canceller: Option<Canceller>,
+) -> IpcResult<Vec<JobEvent>> {
+    let token = token_of(host, id);
+    let draft = host.take_for_start(id, &token)?;
     let prepared = worker::prepare(draft, &c)?;
     worker::recheck(
         &prepared,
@@ -239,11 +269,72 @@ fn run_job(
         hold,
         cancel: r.cancel.clone(),
         host: Arc::clone(host),
+        renderers,
     };
+    if let Some(c) = canceller {
+        c(r.cancel.clone());
+    }
     worker::run_export(spec, jobs, &mut sink);
     drop(r.done);
     let out = events.lock().expect("events").clone();
     Ok(out)
+}
+
+/// The token of draft `id`'s latest destination.
+fn token_of(host: &ExportHost, id: &DraftId) -> DestinationToken {
+    host.with_draft(id, |d| {
+        Ok(d.destination
+            .as_ref()
+            .map(|c| c.token.clone())
+            .expect("a destination"))
+    })
+    .expect("draft")
+}
+
+/// A decode-helper backend for the tests: a real 1 × 1 PNG for every
+/// image (both renditions), counting what it was asked.
+#[derive(Clone, Default)]
+struct FakeBackend {
+    asked: Arc<AtomicU64>,
+}
+
+/// A real 1 × 1 PNG (every chunk's CRC is right).
+const PNG_1X1: &str = "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da636460f85f0f0002870180eb47ba920000000049454e44ae426082";
+
+fn png_1x1() -> Vec<u8> {
+    (0..PNG_1X1.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&PNG_1X1[i..i + 2], 16).expect("hex"))
+        .collect()
+}
+
+impl crate::viewer::media::helper::RenderBackend for FakeBackend {
+    fn render(
+        &mut self,
+        _bytes: &[u8],
+        _rendition: oma_archive::Rendition,
+        _limits: &oma_archive::RenderLimits,
+    ) -> crate::viewer::media::helper::RenderOutcome {
+        self.asked.fetch_add(1, Ordering::SeqCst);
+        crate::viewer::media::helper::RenderOutcome::Image(
+            crate::viewer::media::helper::HelperImage {
+                format: oma_archive::RenderedFormat::Png,
+                width: 1,
+                height: 1,
+                source_width: 1,
+                source_height: 1,
+                has_alpha: true,
+                animated: false,
+                bytes: png_1x1(),
+            },
+        )
+    }
+}
+
+fn fake_renderers() -> crate::viewer::media::helper::BackendFactory {
+    Arc::new(|| {
+        Box::new(FakeBackend::default()) as Box<dyn crate::viewer::media::helper::RenderBackend>
+    })
 }
 
 fn entries(dir: &Path) -> Vec<String> {
@@ -385,11 +476,6 @@ fn unbuilt_formats_and_bad_combinations_are_refused() {
             messages::UNAVAILABLE_FORMAT,
         ),
         (
-            json!(["html"]),
-            json!({ "previews": true }),
-            messages::UNAVAILABLE_PREVIEWS,
-        ),
-        (
             json!(["txt"]),
             json!({ "events": false }),
             messages::UNAVAILABLE_EVENTS,
@@ -418,6 +504,9 @@ fn unbuilt_formats_and_bad_combinations_are_refused() {
             json!({ "includeIdentifiers": true }),
         ),
         (json!(["txt"]), json!({ "pageSize": "letter" })),
+        // Previews apply to HTML (and PDF) only; larger ones need them.
+        (json!(["txt"]), json!({ "previews": true })),
+        (json!(["html"]), json!({ "largerPreviews": true })),
         (
             json!(["txt", "csv", "json", "html", "txt", "csv", "json"]),
             json!({}),
@@ -434,6 +523,14 @@ fn unbuilt_formats_and_bad_combinations_are_refused() {
     )
     .expect("parses");
     input::parse(&ok).expect("valid");
+    // Previews are built (slice 6h2).
+    let previews = preview_req(
+        archive_scope(&f),
+        json!(["html"]),
+        json!({ "previews": true, "largerPreviews": true }),
+    )
+    .expect("parses");
+    input::parse(&previews).expect("previews are available");
 }
 
 // ---------------------------------------------------------------- drafts
@@ -958,6 +1055,7 @@ fn an_export_holds_the_lock_and_publishes() {
         hold,
         cancel: r.cancel.clone(),
         host: Arc::clone(&host),
+        renderers: fake_renderers(),
     };
     worker::run_export(spec, &state.jobs, &mut sink);
     drop(r.done);
@@ -1213,6 +1311,7 @@ fn a_search_scope_exports_the_live_set() {
             hold,
             cancel: r.cancel.clone(),
             host: Arc::clone(&state.exports),
+            renderers: fake_renderers(),
         },
         &state.jobs,
         &mut sink,
@@ -1534,4 +1633,261 @@ fn every_export_command_is_wired_through_the_five_steps() {
         9,
         "the nine export codes are listed"
     );
+}
+
+// ------------------------------------------------- slice 6h2: destinations
+
+/// `start_export` carries the token of the latest destination: an earlier
+/// choice's token (or a made-up one) is refused and consumes the draft.
+#[test]
+fn only_the_latest_destination_token_starts_an_export() {
+    let f = fx();
+    let host = Arc::new(ExportHost::default());
+    let req = preview_req(archive_scope(&f), json!(["txt", "json"]), json!({})).expect("req");
+    let (id, _) = chosen(&host, &f, &req);
+    let first = token_of(&host, &id);
+    // Choose again: a new token replaces the first.
+    let plan = prepare_destination(&host, &id, None, NOW_MS).expect("plan");
+    let again = attach_destination(
+        &host,
+        &id,
+        &f.dest,
+        &plan,
+        Some(&f.library),
+        &FakeProbe::default(),
+    )
+    .expect("again");
+    assert_ne!(again.destination_token, first);
+    assert_eq!(token_of(&host, &id), again.destination_token);
+    let e = host.take_for_start(&id, &first).expect_err("stale token");
+    assert_eq!(e.code, ErrorCode::ExportConfirmationStale);
+    assert!(!host.has_draft(), "the draft is consumed");
+    // A draft without a destination refuses any token.
+    let (id, _) = counted(&host, &f, &req);
+    let e = host
+        .take_for_start(&id, &again.destination_token)
+        .expect_err("none chosen");
+    assert_eq!(e.code, ErrorCode::ExportConfirmationStale);
+    // The token is a 32-hex brand; `Debug` prints no digits.
+    let text = serde_json::to_string(&again.destination_token).expect("json");
+    assert_eq!(text.len(), 34, "{text}");
+    assert_eq!(
+        format!("{:?}", again.destination_token),
+        "DestinationToken(..)"
+    );
+    assert!(parse_raw::<StartExportRequest>(Some(&body(json!({
+        "draftId": "0".repeat(32), "destinationToken": "XYZ",
+        "confirmations": {
+            "warnings": [], "replace": false, "reveal": null,
+            "keepRiskyExtension": false, "removeLeftovers": false,
+        },
+    }))))
+    .is_err());
+}
+
+// ---------------------------------------------- slice 6h2: the helper pool
+
+#[test]
+fn the_pool_has_at_most_two_helpers_and_at_least_one() {
+    use super::previews::pool_size;
+    assert_eq!([0, 1, 2, 3, 4, 64].map(pool_size), [1, 1, 1, 2, 2, 2]);
+}
+
+/// The pool answers each submission once, with both renditions when the
+/// display rendition was asked; a closed pool answers "crashed".
+#[test]
+fn the_pool_answers_every_submission() {
+    use oma_export::preview::{PoolOutcome, RenditionPool};
+    let backend = FakeBackend::default();
+    let asked = Arc::clone(&backend.asked);
+    let factory: crate::viewer::media::helper::BackendFactory = Arc::new(move || {
+        Box::new(backend.clone()) as Box<dyn crate::viewer::media::helper::RenderBackend>
+    });
+    let pool = super::previews::HelperPool::start(&factory, 2);
+    assert_eq!(pool.workers(), 2);
+    let token = CancelToken::new();
+    let tickets: Vec<_> = (0..6)
+        .map(|i| pool.submit(vec![1, 2, 3], i % 2 == 0))
+        .collect();
+    for (i, t) in tickets.into_iter().enumerate() {
+        match t.wait(&token).expect("answered") {
+            PoolOutcome::Ready { thumb, display } => {
+                assert_eq!(thumb.0, png_1x1());
+                assert_eq!(display.is_some(), i % 2 == 0);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+    // Three pairs (two renders each through the default) and three thumbs.
+    assert_eq!(asked.load(Ordering::SeqCst), 9);
+    assert_eq!(pool.shutdown(false), 0);
+}
+
+/// Cancel kills a helper in the middle of a render (it would otherwise
+/// run until the 20 s timeout): the request ends as a crash at once.
+#[cfg(unix)]
+#[test]
+fn a_killing_shutdown_ends_a_hung_helper_at_once() {
+    use crate::viewer::media::helper::{HelperCommand, HelperHost, RenderBackend};
+    use oma_export::preview::{PoolOutcome, RenditionPool};
+    let factory: crate::viewer::media::helper::BackendFactory = Arc::new(|| {
+        Box::new(
+            HelperHost::new(Some(HelperCommand::new(
+                PathBuf::from("/bin/sh"),
+                vec!["-c".into(), "cat >/dev/null".into()],
+            )))
+            .with_timeout(Duration::from_secs(60)),
+        ) as Box<dyn RenderBackend>
+    });
+    let pool = super::previews::HelperPool::start(&factory, 1);
+    let ticket = pool.submit(vec![0u8; 64], true);
+    // Let the worker start the helper and send the request.
+    std::thread::sleep(Duration::from_millis(300));
+    let at = std::time::Instant::now();
+    pool.shutdown(true);
+    let outcome = ticket.wait(&CancelToken::new()).expect("answered");
+    assert_eq!(outcome, PoolOutcome::Crashed);
+    assert!(at.elapsed() < Duration::from_secs(5), "{:?}", at.elapsed());
+}
+
+/// An HTML export with previews runs the pool: every embedded image is a
+/// rendition the helpers made (here the fake's 1 × 1 PNG), never an
+/// original, and the larger ones are written beside the pages.
+#[test]
+fn an_html_export_with_previews_embeds_the_pools_renditions() {
+    let f = fx_of(Some("view-media-plain"));
+    let host = Arc::new(ExportHost::default());
+    let jobs = Jobs::default();
+    let req = preview_req(
+        archive_scope(&f),
+        json!(["html"]),
+        json!({ "attachments": "copyOriginals", "previews": true, "largerPreviews": true }),
+    )
+    .expect("req");
+    let (id, _) = chosen(&host, &f, &req);
+    let backend = FakeBackend::default();
+    let asked = Arc::clone(&backend.asked);
+    let factory: crate::viewer::media::helper::BackendFactory = Arc::new(move || {
+        Box::new(backend.clone()) as Box<dyn crate::viewer::media::helper::RenderBackend>
+    });
+    let events = run_job_with(
+        &host,
+        &jobs,
+        &f,
+        &id,
+        confirmations(json!({})),
+        false,
+        factory,
+        None,
+    )
+    .expect("ran");
+    assert!(
+        matches!(events.last(), Some(JobEvent::ExportFinished { .. })),
+        "{events:?}"
+    );
+    assert!(asked.load(Ordering::SeqCst) > 0, "the pool rendered");
+    let names = entries(&f.dest);
+    let bundle = f.dest.join(&names[0]);
+    let mut pages = String::new();
+    for e in std::fs::read_dir(bundle.join("html")).expect("html") {
+        let p = e.expect("entry").path();
+        if p.extension().is_some_and(|x| x == "html") {
+            pages.push_str(&std::fs::read_to_string(&p).expect("page"));
+        }
+    }
+    let b64 = oma_export::preview::base64(&png_1x1());
+    assert!(pages.contains(&format!("data:image/png;base64,{b64}")));
+    let m: Value =
+        serde_json::from_slice(&std::fs::read(bundle.join("manifest.json")).expect("manifest"))
+            .expect("json");
+    assert!(m["counts"]["attachments"]["previewsEmbedded"].as_u64() > Some(0));
+    assert_eq!(
+        m["counts"]["attachments"]["previewsSkippedAfterHelperFailures"],
+        0
+    );
+}
+
+/// A backend whose render hangs (a helper that never answers, with no
+/// process to kill): it flags that it started and sleeps.
+#[derive(Clone, Default)]
+struct HangingBackend {
+    started: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl crate::viewer::media::helper::RenderBackend for HangingBackend {
+    fn render(
+        &mut self,
+        _bytes: &[u8],
+        _rendition: oma_archive::Rendition,
+        _limits: &oma_archive::RenderLimits,
+    ) -> crate::viewer::media::helper::RenderOutcome {
+        self.started.store(true, Ordering::SeqCst);
+        std::thread::sleep(Duration::from_secs(10));
+        crate::viewer::media::helper::RenderOutcome::Crashed
+    }
+}
+
+/// Cancel latency (spec §8.5, §12) while the writer waits for a helper
+/// that hangs: the job sends `cancelled` with the staging removed within
+/// a second of the cancel, without waiting for the helper.
+#[test]
+fn a_cancel_during_a_hung_preview_ends_the_job_within_a_second() {
+    let f = fx_of(Some("view-media-plain"));
+    let host = Arc::new(ExportHost::default());
+    let jobs = Jobs::default();
+    let req = preview_req(
+        archive_scope(&f),
+        json!(["html"]),
+        json!({ "previews": true }),
+    )
+    .expect("req");
+    let (id, _) = chosen(&host, &f, &req);
+    let backend = HangingBackend::default();
+    let started = Arc::clone(&backend.started);
+    let factory: crate::viewer::media::helper::BackendFactory = Arc::new(move || {
+        Box::new(backend.clone()) as Box<dyn crate::viewer::media::helper::RenderBackend>
+    });
+    let cancelled_at = Arc::new(Mutex::new(None));
+    let at = Arc::clone(&cancelled_at);
+    let canceller: Canceller = Box::new(move |token| {
+        drop(std::thread::spawn(move || {
+            let until = std::time::Instant::now() + Duration::from_secs(60);
+            while !started.load(Ordering::SeqCst) {
+                assert!(std::time::Instant::now() < until, "a render started");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            *at.lock().expect("at") = Some(std::time::Instant::now());
+            token.cancel();
+        }));
+    });
+    let events = run_job_with(
+        &host,
+        &jobs,
+        &f,
+        &id,
+        confirmations(json!({})),
+        false,
+        factory,
+        Some(canceller),
+    )
+    .expect("ran");
+    let ended = std::time::Instant::now();
+    let at = cancelled_at.lock().expect("at").expect("cancelled");
+    let latency = ended.saturating_duration_since(at);
+    println!(
+        "RECORD cancel_latency_hung_preview_ms={}",
+        latency.as_millis()
+    );
+    assert!(
+        matches!(
+            events.last(),
+            Some(JobEvent::Cancelled {
+                staging_removed: true,
+                ..
+            })
+        ),
+        "{events:?}"
+    );
+    assert!(latency < Duration::from_secs(1), "{latency:?}");
+    assert!(entries(&f.dest).is_empty(), "{:?}", entries(&f.dest));
 }

@@ -17,9 +17,32 @@
 //! is embedded as a `data:` URI ([`data_uri`]), so it works however a
 //! browser treats `file:` origins.
 //!
+//! **The feed (slice 6h2).** [`PreviewFeed`] connects the pipeline to the
+//! writer. While an item is mapped the pipeline offers, for each of its
+//! attachments whose access is `included`, what it read: the verified
+//! bytes of an image (from the copy stream when the file is copied, else
+//! one verified read of at most [`MAX_PREVIEW_INPUT`]), "not an image",
+//! or "unavailable" (over 64 MiB, or a read that failed its checks). Bytes
+//! go to a [`RenditionPool`] at once (the shell's decode-helper pool, which
+//! renders them in parallel off this thread); the HTML writer's
+//! [`PreviewSource`] ([`PreviewFeed::source`]) then waits for each result,
+//! checking the cancel token every 50 ms. After
+//! [`HELPER_FAILURE_CAP`] helper crashes in a row, previews are off for the
+//! rest of the export: later images are "Preview unavailable" and counted
+//! ([`PreviewFeed::skipped_after_helper_failures`], within
+//! `previewsUnavailable`).
+//!
 //! Nothing here logs; `Debug` prints sizes only.
 
+use std::collections::BTreeMap;
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use oma_archive::CancelToken;
+
 use crate::error::ExportError;
+use crate::ids::Ordinal;
 use crate::naming::ImageExt;
 use crate::record::AttachmentRecord;
 
@@ -269,6 +292,240 @@ pub fn base64_len(n: usize) -> usize {
 /// `data:<mime>;base64,<…>` for a checked rendition.
 pub fn data_uri(r: &CheckedRendition) -> String {
     format!("data:{};base64,{}", r.mime(), base64(r.bytes()))
+}
+
+// ---------------------------------------------------------------------------
+// The feed between the pipeline and the writer (slice 6h2)
+// ---------------------------------------------------------------------------
+
+/// The largest input decoded for a preview (M5's 64 MiB, spec §6.5).
+pub const MAX_PREVIEW_INPUT: u64 = 64 << 20;
+/// Helper crashes in a row after which previews are off (spec §6.5).
+pub const HELPER_FAILURE_CAP: u32 = 3;
+/// How often a wait for a rendition checks the cancel token.
+const WAIT_SLICE: Duration = Duration::from_millis(50);
+
+/// What the pool made of one image.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PoolOutcome {
+    /// The renditions, unchecked (the writer checks them).
+    Ready {
+        thumb: RenditionBytes,
+        display: Option<RenditionBytes>,
+    },
+    /// The helper refused the bytes (over a limit, not decodable, HEIC
+    /// without the feature): "Preview unavailable".
+    Unavailable,
+    /// The helper died, hung or answered garbage.
+    Crashed,
+}
+
+/// A rendition on its way: the pool answers on the channel once.
+#[derive(Debug)]
+pub struct RenditionTicket(mpsc::Receiver<PoolOutcome>);
+
+impl RenditionTicket {
+    /// A ticket and the sender its worker answers on.
+    pub fn channel() -> (mpsc::Sender<PoolOutcome>, RenditionTicket) {
+        let (tx, rx) = mpsc::channel();
+        (tx, RenditionTicket(rx))
+    }
+
+    /// A ticket that is already answered.
+    pub fn ready(outcome: PoolOutcome) -> RenditionTicket {
+        let (tx, t) = RenditionTicket::channel();
+        let _ = tx.send(outcome);
+        t
+    }
+
+    /// Wait for the answer, checking `cancel` every 50 ms. A worker that
+    /// went away without answering is a crash.
+    pub fn wait(self, cancel: &CancelToken) -> Result<PoolOutcome, ExportError> {
+        loop {
+            if cancel.is_cancelled() {
+                return Err(ExportError::Cancelled);
+            }
+            match self.0.recv_timeout(WAIT_SLICE) {
+                Ok(o) => return Ok(o),
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return Ok(PoolOutcome::Crashed),
+            }
+        }
+    }
+}
+
+/// The decode-helper pool (spec §6.5, D113): renders verified image bytes
+/// into checked-later renditions, off the export's thread. The shell's
+/// implementation runs `min(2, cores − 1)` helpers; tests give their own.
+pub trait RenditionPool: Send + Sync {
+    /// Queue `bytes` (verified, at most [`MAX_PREVIEW_INPUT`]) for its
+    /// thumbnail and, with `display`, its display rendition from the same
+    /// decode (`RenditionPair`). Returns at once.
+    fn submit(&self, bytes: Vec<u8>, display: bool) -> RenditionTicket;
+}
+
+/// What the export read for one attachment's preview.
+#[derive(Clone, PartialEq, Eq)]
+pub enum PreviewInput {
+    /// The file is not an image the export previews (by its sniffed kind):
+    /// no preview card.
+    NotAnImage,
+    /// An image whose bytes cannot be used (over 64 MiB, or its read
+    /// failed the checksum): "Preview unavailable".
+    Unavailable,
+    /// The verified bytes of an image.
+    Bytes(Vec<u8>),
+}
+
+impl std::fmt::Debug for PreviewInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PreviewInput::NotAnImage => f.write_str("NotAnImage"),
+            PreviewInput::Unavailable => f.write_str("Unavailable"),
+            PreviewInput::Bytes(b) => write!(f, "Bytes({} bytes)", b.len()),
+        }
+    }
+}
+
+enum Entry {
+    Pending(RenditionTicket),
+    Done(Preview),
+}
+
+#[derive(Default)]
+struct FeedState {
+    entries: BTreeMap<Ordinal, Entry>,
+    crashes_in_a_row: u32,
+    off: bool,
+    skipped: u64,
+    submitted: u64,
+}
+
+/// The pipeline's side and the writer's side of one export's previews
+/// (see the module docs). Cloning shares the state.
+#[derive(Clone)]
+pub struct PreviewFeed {
+    state: Arc<Mutex<FeedState>>,
+    pool: Arc<dyn RenditionPool>,
+    display: bool,
+    cancel: CancelToken,
+}
+
+impl std::fmt::Debug for PreviewFeed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PreviewFeed")
+            .field("display", &self.display)
+            .finish_non_exhaustive()
+    }
+}
+
+fn feed_poisoned() -> ExportError {
+    ExportError::Limit(crate::error::LimitKind::RowOrder)
+}
+
+impl PreviewFeed {
+    /// A feed over `pool`; `display` asks for display renditions too
+    /// ("Larger previews"); waits stop at `cancel`.
+    pub fn new(pool: Arc<dyn RenditionPool>, display: bool, cancel: CancelToken) -> PreviewFeed {
+        PreviewFeed {
+            state: Arc::new(Mutex::new(FeedState::default())),
+            pool,
+            display,
+            cancel,
+        }
+    }
+
+    /// The pipeline offers attachment `n`'s input (bytes go to the pool at
+    /// once, unless previews are off after helper failures).
+    pub fn offer(&self, n: Ordinal, input: PreviewInput) -> Result<(), ExportError> {
+        let mut st = self.state.lock().map_err(|_| feed_poisoned())?;
+        let entry = match input {
+            PreviewInput::NotAnImage => Entry::Done(Preview::None),
+            PreviewInput::Unavailable => Entry::Done(Preview::Unavailable),
+            PreviewInput::Bytes(_) if st.off => {
+                st.skipped += 1;
+                Entry::Done(Preview::Unavailable)
+            }
+            PreviewInput::Bytes(b) => {
+                st.submitted += 1;
+                Entry::Pending(self.pool.submit(b, self.display))
+            }
+        };
+        st.entries.insert(n, entry);
+        Ok(())
+    }
+
+    /// Drop whatever the writer did not ask for (after each item).
+    pub fn clear(&self) {
+        if let Ok(mut st) = self.state.lock() {
+            st.entries.clear();
+        }
+    }
+
+    /// Images left without a preview because previews were off after
+    /// [`HELPER_FAILURE_CAP`] helper crashes in a row.
+    pub fn skipped_after_helper_failures(&self) -> u64 {
+        self.state.lock().map(|s| s.skipped).unwrap_or(0)
+    }
+
+    /// Images sent to the pool.
+    pub fn submitted(&self) -> u64 {
+        self.state.lock().map(|s| s.submitted).unwrap_or(0)
+    }
+
+    /// Whether previews were turned off by helper failures.
+    pub fn is_off(&self) -> bool {
+        self.state.lock().map(|s| s.off).unwrap_or(true)
+    }
+
+    /// The writer's side.
+    pub fn source(&self) -> Box<dyn PreviewSource> {
+        Box::new(FeedSource(self.clone()))
+    }
+
+    fn take(&self, a: &AttachmentRecord, display: bool) -> Result<Preview, ExportError> {
+        let entry = self
+            .state
+            .lock()
+            .map_err(|_| feed_poisoned())?
+            .entries
+            .remove(&a.n);
+        let outcome = match entry {
+            None => return Ok(Preview::None),
+            Some(Entry::Done(p)) => return Ok(p),
+            Some(Entry::Pending(t)) => t.wait(&self.cancel)?,
+        };
+        let mut st = self.state.lock().map_err(|_| feed_poisoned())?;
+        Ok(match outcome {
+            PoolOutcome::Ready { thumb, display: d } => {
+                st.crashes_in_a_row = 0;
+                Preview::Ready {
+                    thumb,
+                    display: if display { d } else { None },
+                }
+            }
+            PoolOutcome::Unavailable => {
+                st.crashes_in_a_row = 0;
+                Preview::Unavailable
+            }
+            PoolOutcome::Crashed => {
+                st.crashes_in_a_row = st.crashes_in_a_row.saturating_add(1);
+                if st.crashes_in_a_row >= HELPER_FAILURE_CAP {
+                    st.off = true;
+                }
+                Preview::Unavailable
+            }
+        })
+    }
+}
+
+/// The HTML writer's [`PreviewSource`] over a [`PreviewFeed`].
+struct FeedSource(PreviewFeed);
+
+impl PreviewSource for FeedSource {
+    fn renditions(&mut self, a: &AttachmentRecord, display: bool) -> Result<Preview, ExportError> {
+        self.0.take(a, display)
+    }
 }
 
 #[cfg(test)]

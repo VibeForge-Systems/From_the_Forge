@@ -59,7 +59,9 @@ flowchart LR
     Shell --> Backup["oma-backup ✔"]
     Shell --> Messages["oma-messages ✔"]
     Shell --> Archive["oma-archive ✔"]
-    Shell -.-> Export["oma-export (M6, record core)"]
+    Shell --> Export["oma-export (M6 PR A: TXT, CSV, JSON, HTML)"]
+    Shell --> Decode["decode helper processes (M5; export pool M6)"]
+    Shell -.-> Render["export-render helper (M6 PR B: PDF, XLSX)"]
     Shell -.-> Device["oma-device (M7)"]
     Backup --> FS
     Messages --> Backup
@@ -67,7 +69,9 @@ flowchart LR
     Archive --> FS
     Archive --> Backup
     Export --> Archive
+    Decode --> Archive
   end
+  Export -- "staging, no-replace publish" --> OUT[("Export destination")]
   Backup -. read-only .-> SRC[("iPhone backup")]
   Archive --> LIB[("Archive library")]
 ```
@@ -75,12 +79,12 @@ flowchart LR
 | Unit | Responsibility | State |
 |---|---|---|
 | `src/` | Vue 3 UI: views, Pinia stores, the typed IPC client, the shortcut registry, and the capability roadmap | M1, M2 (Backups page), M3 (extraction report), M4 slice 4m (Archive page), M5 slices 5g–5j (the viewer) |
-| `src-tauri/` | Tauri shell. Holds IPC commands, application state, settings persistence, archive-location validation, the backup registry, job table and DTOs, (M3) the report mapping and the panic hook, (M4 slice 4l) the archive commands, the import gate and the import and verify jobs, and (M5 slices 5e, 5f) the viewer session and commands, the `oma-media` protocol handler, the decode helper host and the main window built in Rust. Contains no domain logic. | M1, M2, M3, M4 (slice 4l), M5 (slices 5e, 5f) |
+| `src-tauri/` | Tauri shell. Holds IPC commands, application state, settings persistence, archive-location validation, the backup registry, job table and DTOs, (M3) the report mapping and the panic hook, (M4 slice 4l) the archive commands, the import gate and the import and verify jobs, and (M5 slices 5e, 5f) the viewer session and commands, the `oma-media` protocol handler, the decode helper host and the main window built in Rust, and (M6 slices 6h1, 6h2) the export drafts, destination checks and tokens, the export job and its five commands, and the export's decode-helper pool. Contains no domain logic. | M1, M2, M3, M4 (slice 4l), M5 (slices 5e, 5f), M6 PR A (slices 6h1, 6h2) |
 | `crates/oma-fs` | Filesystem safety: filename sanitization, contained path resolution, and guards for backups, MobileSync, iMazing's default store and cloud sync. From M4: volume facts (`volume`: free space, network/virtualised/FAT detection), the Unix private-permission check (`perm::check_private`), and durable placement (`place`: `fsync_dir`, `create_dir_durable`, `place_noreplace`, `open_nofollow`). From slice 4d: `check_owned_unshared` (the library folder), `rename_dir_noreplace`, `create_new_private` and `total_space` | M1, M4 (slices 4a, 4d) |
 | `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them. From M4: `copy_file_to` streams one listed file's plaintext into a caller's writer, hashing it, under `Limits::attachment_bytes` and per-file stamps | ✔ M2, M3, M4 (slice 4b) |
 | `crates/oma-messages` | Scans and probes the sms.db schema by capability, streams typed records (handles, chats, the joins, messages, attachments, Recently Deleted links) as `Col<T>` values, decodes `attributedBody` with a clean-room typedstream decoder, and produces the aggregate `ExtractionReport`. Persists nothing. From M4: stable `KnownColumn` codes, raw values of unreadable cells (`raw_issues`), `payload_data` on request, the raw association columns, key-only passes and the storage class of text cells | ✔ M3, M4 (slice 4c) |
 | `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep; slices 4e–4j the import; slice 4k the report-only verifier and `open_blob`. Used by the shell since slice 4l. From M5: the viewer reads (`view/`, `sortkey.rs`, phased budgets), search (`search/`) and media sniffing, checks and rendering (`media/`, `blobs::open_range`) | ✔ M4 (slices 4d–4k), M5 (slices 5a–5d) |
-| `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX. Tauri-free and SQLite-free: it reads only through `oma-archive`'s export APIs. Slice 6d ships the record core: the validated plan, the code registry, the column ledger, the canonical record and its mapping, export-local ordinals, the Rust word tables, time zones and local-day bounds, and the hidden-character markers. Slice 6e1 adds the files core: names, staging and publish, leftovers, the manifest and the writer trait. Slice 6e2 adds the attachment copy, the TXT writer and the pipeline (`pipeline::run`). No shell command yet | M6 slices 6d (record core), 6e1 (files core), 6e2 (attachments, TXT, pipeline); writers 6f–6j |
+| `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX. Tauri-free and SQLite-free: it reads only through `oma-archive`'s export APIs. Slice 6d ships the record core: the validated plan, the code registry, the column ledger, the canonical record and its mapping, export-local ordinals, the Rust word tables, time zones and local-day bounds, and the hidden-character markers. Slice 6e1 adds the files core: names, staging and publish, leftovers, the manifest and the writer trait. Slice 6e2 adds the attachment copy, the TXT writer and the pipeline (`pipeline::run`); 6f the JSON and CSV writers; 6g the HTML writer; 6h2 the preview feed between the pipeline and the decode-helper pool. Driven by the shell's export job (slice 6h1). PDF and XLSX are PR B | ✔ M6 PR A (slices 6d–6h2); PDF and XLSX in PR B (6i, 6j); no Export dialog until 6k |
 | `crates/oma-device` | Detects devices and creates backups behind a platform trait | planned, M7 |
 
 Each library crate can be built and tested without Tauri. The shell only
@@ -2950,6 +2954,42 @@ checklist. Nothing in the crate or the shell changed.
   QuickTime and WAV only, and the one file played through the scheme got
   one `206` response and then failed for lack of an audio device.
 
+### Exports (M6): what PR A builds
+
+M6's PR A is the export engine without a user interface (spec §18): the
+archive's export reads (slices 6a, 6b1, 6b2), the fixtures and the
+independent oracles (6c), the `oma-export` crate (6d–6g) and the shell's
+job and commands (6h1, 6h2). The sections below describe each slice; in
+short:
+
+- **One record model, one ledger.** `oma-export` maps every timeline
+  item to one canonical record (`record.rs`) from the uncapped assembly
+  layer, with tagged absence and unknown codes kept, and every v1 column
+  has a disposition in `ledger.rs` (D123, D142). Masking and withholding
+  happen in `oma-archive` before a record exists (D125).
+- **Writers** render records only: TXT, JSON (Lines and arrays, with
+  strict and open schemas), CSV (two profiles, default-deny
+  neutralisation) and HTML (a static, CSP-locked template). PDF and XLSX
+  run in the export-render helper in PR B (D131, D133).
+- **Staging and placement.** Everything is written inside the
+  destination: a `.oma-export-<hex>.partial` folder or `.partial-file`,
+  created relative to `O_DIRECTORY | O_NOFOLLOW` handles on Linux, held
+  by a locked marker until after the one no-replace publish rename; a
+  replace happens only for a regular file after the app's confirmation
+  (D126, D143, D144). Nothing is written to a system temporary folder.
+- **The job and its lock.** `JobKind::Export` reserves the archive's
+  subject and holds the archive lock file for the whole job, so imports
+  and verifies in any instance are refused; the job reads through its own
+  reader in one read transaction (`with_export_snapshot`), so `conn.rs`'s
+  rule that no read transaction outlives a call holds with the call being
+  the job (D124, D139).
+- **Helpers.** HTML previews come from the export's own pool of decode
+  helper processes (slice 6h2, D113's isolation); PDF layout and XLSX
+  writing will run in the export-render helper (PR B).
+- **M8 note.** Exports are plaintext outside the app's control; M8's
+  archive encryption will not cover them, and an encrypted export format
+  is an M8 candidate (spec §13).
+
 ### Export caps and raw codes (M6 slice 6a)
 
 Slice 6a prepares the assembly layer for exports (M6 spec §3.1, §3.3,
@@ -4033,9 +4073,9 @@ Slice 6h1 is the shell's first half of the export (spec §9.1–§9.5):
 **Deviations from the spec**, all recorded here:
 
 - `exportUnavailable` is a tenth code (not in §9.5): PDF and XLSX (6i,
-  6j), image previews (the decode-helper pool, 6h2), the `attachment`
-  scope (save a copy) and `events: false` are refused with it when the
-  draft is made, never faked.
+  6j), image previews (until slice 6h2 built the decode-helper pool), the
+  `attachment` scope (save a copy) and `events: false` are refused with
+  it when the draft is made, never faked.
 - `preview_export` takes an optional `zone`, for a date range only
   (its local days need the table before anything can be counted); the
   spec's flow sends the table only with the destination.
@@ -4071,6 +4111,93 @@ unfinished export; a search scope exported after the viewer closed, with
 no query in the manifest; `exportFinished` under 1 KiB; the guards and
 the wiring. `oma-archive`'s `export_scope.rs` checks the search preview
 against the snapshot's steps.
+
+### Destinations, the preview pool and log hygiene (M6 slice 6h2)
+
+Slice 6h2 finishes the shell of PR A (spec §6.5, §8.1, §8.2, §8.6, §9.6).
+
+- **The destination token** (§8.1, D127). `choose_export_destination`
+  returns, with the checked destination, a `destinationToken`: 128
+  random bits as 32 hex digits (`dto::DestinationToken`, a branded string
+  in the export walk), kept in the draft with the canonical folder.
+  `start_export` takes `{ draftId, destinationToken, confirmations }`;
+  `ExportHost::take_for_start` consumes the draft and refuses
+  (`exportConfirmationStale`) a token that is not the latest choice's, so
+  warnings confirmed for one folder can never start an export into
+  another. The dialog titles, the canonical checks (`dunce`; refusals per
+  I1 plus the archive folder; `.oma-export-*` names; warnings to confirm,
+  re-run at start) are slice 6h1's and unchanged.
+- **`RenditionPair`** (§6.5). `oma_archive::media::render::render_pair`
+  decodes once and makes the display rendition (2048 px) from the
+  decoded image and the thumbnail (640 px) from the display rendition,
+  each oriented and encoded as `render` does, under the same limits. The
+  decode helper protocol gains rendition code 3, answered with two reply
+  frames (or one refusal frame); `HelperHost::request_pair` reads them
+  under the same 20 s watchdog. `RenderBackend::render_pair` defaults to
+  two `render` calls for fakes.
+- **The pool** (`src-tauri/src/exports/previews.rs`). An export with
+  previews starts `min(2, available_parallelism − 1)` workers (at least
+  one), each owning a `HelperHost` (this binary with
+  `--oma-decode-helper`, `CREATE_NO_WINDOW` on Windows), separate from
+  any viewer session's. It implements `oma_export::preview::RenditionPool`.
+  At the end the job shuts it down: after a publish it joins the workers;
+  on cancel or failure it stops them and kills every running helper
+  through a `KillSwitch` (the child handle the host registers), without
+  waiting, so a hung helper never delays the terminal event.
+- **The feed** (`oma_export::preview::PreviewFeed`). While an item is
+  mapped, the mapper lists its `included` attachments with a stored file
+  (`Mapper::collect_preview_wants`); the pipeline offers each to the feed
+  before the item reaches the writers: the copy stream's verified bytes
+  when the file was copied (`Attacher::keep_preview_bytes`, images of at
+  most 64 MiB, kept only after the reader verified the whole file), else
+  one verified read through `ExportSnapshot::open_blob`
+  (`attach::read_preview_input`: sniff the first 4 KiB, refuse over
+  64 MiB, read to the end). Bytes go to the pool at once; the HTML
+  writer's `PreviewSource` (`PreviewFeed::source`) waits for each answer,
+  checking the cancel token every 50 ms, and checks every rendition
+  before use (slice 6g). A refusal is "Preview unavailable"; after three
+  helper crashes in a row the feed is off, later images are cards, and
+  `previewsSkippedAfterHelperFailures` counts them (they are within
+  `previewsUnavailable` too). What the writer did not ask for is dropped
+  after each item.
+- **Helper stderr** (§9.6). `HelperHost` now pipes each helper's stderr
+  into a thread that keeps only the byte count; the pool sums it and the
+  job logs it at `debug` as a bucket (`stderr_size`). The text is never
+  read into a log or an event.
+- **Windows sharing violations** (§8.6). The retries themselves are
+  slice 6e1's (`stage::retry_with`: 100 ms doubling to 2 s, 9.1 s in all,
+  on raw OS errors 5 and 32). This slice adds
+  `a_publish_with_a_handle_held_open_retries_then_succeeds` to
+  `crates/oma-export/tests/stage.rs`, Windows only: a handle held on a
+  staged file for 700 ms while the bundle is published. It has **not run
+  yet** (it needs `windows-2022` CI); whether an open handle blocks the
+  directory rename at all stays **UNVERIFIED** until it does.
+
+**Deviations:** previews come from the copy stream only for files the
+export copies; otherwise the file is read once more through the
+verifying reader (spec §6.1 allows it for names-only exports). The pool
+is fed per item, so parallelism is across an item's images (an item
+rarely has more than one); a deeper prefetch was not built. Skipped
+previews are not yet stated in a single file's "About this export"
+(that section is written before the writers finish); the bundle's
+manifest records them. Previews apply to HTML only until PDF exists.
+
+**Tests:** `crates/oma-archive/src/media/render.rs`
+(`a_pair_is_both_renditions_from_one_decode`); `src-tauri/tests/decode_helper.rs`
+(the pair through the real helper; stderr counted, never kept);
+`crates/oma-export/tests/html.rs` (the feed sends the same verified
+image bytes with and without copies; three crashes turn previews off and
+are counted in the manifest; a cancel stops a wait for a rendition within
+a second and leaves nothing); `src-tauri/src/exports/tests.rs` (only the
+latest destination token starts an export; pool sizes; the pool answers
+every submission; a killing shutdown ends a hung helper at once; an HTML
+export through the job embeds the pool's renditions; a cancel during a
+hung preview ends the job, staging removed, within a second);
+`src-tauri/tests/log_hygiene.rs` (`exercise_export`: the export commands'
+work and every in-process format, HTML with previews from the real
+decode helper, over the hostile and media archives into a folder named
+by a sentinel: no sentinel, destination component, bundle name or exact
+output size in a log line, event or error message).
 
 ### Status and qualifiers (D43)
 
@@ -4272,17 +4399,19 @@ D104, D107–D109, D112's UI side) are implemented in PR B.
 | D122 | The right panel when another conversation opens (slice 5k) | Details and the reply thread close; search stays open | Keep the details open | They describe a message of the conversation that was open and resolve its addresses from that conversation's window; kept open, they showed "Sender" instead of the address (seen in the smoke test) |
 | D118 | Play order (slice 5h3) | Rust's structural check and full hash run on the first Play, **before** the confirmation, so the confirmation's "It has checked the file's structure" is true and a refused file never asks | The spec's §2 order: confirm, then check | A full hash of a file the user may then cancel; no attachment byte reaches the engine before the confirmation either way |
 
-### Milestone 6 decisions (so far)
+### Milestone 6 decisions
 
-D123–D147 are the M6 spec's (§19). The rows below are the ones the
-slices implemented so far record; the rest are added by the slice that
-implements each. **The owner answered the spec's five questions on
-2026-10-19:** Q1 to Q4 confirm the leans (Q1 and Q2 apply to PR B; Q3 to
-slice 6e; Q4 is D125 below). Q5 (identifiers, D141) was not put to the
-owner: its lean is applied and awaits confirmation.
+D123–D147 are the M6 spec's (§19). **The owner answered the spec's
+questions on 2026-10-19:** Q1 to Q4 confirm the leans (Q1 and Q2, the PDF
+engine and fonts, apply to PR B: D133; Q3 is D134; Q4 is D125). Q5
+(identifiers, D141) was not put to the owner: its lean is applied and
+awaits confirmation. Every other row is the spec's engineering lean,
+applied as the decision; the owner may still override any of them. Rows
+marked PR B are decided but not built in PR A.
 
 | # | Topic | Choice | Main alternative | Trade-off |
 |---|---|---|---|---|
+| D123 | Export architecture (lean; slices 6d–6g) | A Tauri-free `oma-export` with one canonical record (dedicated structs) and one streaming writer per format behind `ExportWriter`; reads only through `oma-archive`'s export APIs | Writers reading the archive themselves | One place for fidelity and masking; no `rusqlite` outside `oma-archive` |
 | D124 | Reads, snapshot and lock (slices 6a, 6b1) | `Caps::EXPORT` with a check that runs in release builds; byte-sized batches; one closure-scoped read transaction per job; the archive lock held for the job; cursors materialised before nested calls | Per-batch transactions; trusting the job slot | A consistent snapshot that is a checked fact across instances; `conn.rs`'s contracts kept |
 | D125 | Masking in exports (**owner-confirmed, Q4**; slices 6b1, 6b2) | D115 applied in `oma-archive` before records exist, widened to the attachments of unsent parts, the subject history and the alternative text of such messages; two per-export opt-ins (codes, earlier content), off, reset on every open, never remembered, each confirmed against an exact count; the viewer's `revealEarlierText` is not inherited | Inherit the viewer setting | An export is bulk and outlives the app's control |
 | D137 | Search scope (slice 6b2) | The live set by default; "all matches" re-runs in the job with a cap of 1,000,000 and honest `capped` and coverage booleans; hits matched only in hidden content are excluded unless revealed, re-checked against the masked text the export writes; a multi-conversation hit is written under its lowest conversation | Always the shown 10,000; exporting membership as is | Faithful to what the user saw, with no disclosure through membership |
@@ -4298,11 +4427,13 @@ owner: its lean is applied and awaits confirmation.
 | D143 | Destination integrity (slice 6e1) | Canonical destination; on Linux every write relative to `O_DIRECTORY\|O_NOFOLLOW` handles and a `(dev, ino)` check before publish; the Windows residual disclosed | String paths | Closes the staging-swap path into a backup (I1) |
 | D144 | Leftovers (slice 6e1) | The marker kept until after publish and held with `try_lock`; fixed, content-free names; probes swept; locked and recent entries skipped; removal of the pinned list only; bounded retries on Windows | Removing the marker before the rename; a fresh glob | Every crash leftover is findable, and a live export is never deleted |
 | D130 | CSV (slice 6f) | RFC 4180 with CRLF and every field quoted; default-deny OWASP neutralisation (White_Space and default-ignorables skipped, full-width and small forms, after escaping), listed per row and counted; "for data tools" raw except U+27E8; every file always present; the column contract pinned and only appended; always a bundle | Never neutralise; a leading-character blocklist | Spreadsheet safety by default, raw values on request, and a reversible prefix |
-| D132 | HTML (slice 6g) | A static template; escaping into text nodes; markers as elements; CSP meta first; one hashed style; inline thumbnails as `data:` from checked decode-helper renditions through a `PreviewSource`; display previews opt-in; originals never linked; no media elements; nav after main; backward-only links | Linking originals; `img-src 'self'` | D113's isolation; independence from browsers' `file:` origin rules; streamable |
+| D132 | HTML (lean; slices 6g, 6h2) | A static template; escaping into text nodes; markers as elements; CSP meta first; one hashed style; inline thumbnails as `data:` from checked renditions of the export's own decode-helper pool (`RenditionPair`, at most two helpers, off after three crashes in a row) through a `PreviewSource`; display previews opt-in; originals never linked; no media elements; nav after main; backward-only links | Linking originals; `img-src 'self'` | D113's isolation; independence from browsers' `file:` origin rules; streamable |
 | D146 | Independent oracles (slices 6c, 6e2, 6f, 6g) | A projection from the archive with stdlib `sqlite3`; JSON against the projection and both schemas; CSV against JSON under `T`; local times against `zoneinfo`; TXT through its own grammar parser; HTML through `html.parser` and strict html5lib against JSON under `T`; masking scanned in every byte | Oracles against our own records | A mapping bug cannot pass every test |
 | D147 | Consent and drift (slice 6b2; compared from slice 6h1) | Exact, cancellable counts; the archive generation in the draft, compared at start and again inside the job's snapshot; a recount under the lock before writing; reveal counts that never understate | Budgeted "at least" counts | "N messages" is never an understatement |
-| D127 | Destination (slice 6h1) | Rust-opened dialogs whose titles name sensitive options; the folder kept in the draft, never crossing IPC; names generated in Rust; the format's extension enforced; `.oma-export-*` names refused; refusals per I1 plus the archive folder; warnings to confirm, checked again at start; no remembered destination | A name or path from the webview | I4, I3; `settings.json` stays content-free |
+| D127 | Destination (lean; slices 6h1, 6h2) | Rust-opened dialogs whose titles name sensitive options; the folder kept in the draft, never crossing IPC, behind an opaque destination token bound to the draft (the latest choice's token starts the export); names generated in Rust; the format's extension enforced; `.oma-export-*` names refused; refusals per I1 plus the archive folder; warnings to confirm, checked again at start; no remembered destination | A name or path from the webview | I4, I3; `settings.json` stays content-free |
 | D136 | Export DTOs (slice 6h1) | A new export walk disjoint from the others but for three shared types; `exportFinished` inside the archive guard's walk, counts only; warnings and providers as closed codes | Reuse the viewer walk | Walks stay disjoint and events small |
+| D131 | XLSX (lean; **PR B**, slice 6i) | rust_xlsxwriter in constant-memory mode in the export-render helper; `quotePrefix`; our own 32,767 UTF-16 limit with continuation rows; temp directory in staging | In-process | A panic on temp-file I/O cannot end the app; exact values |
+| D133 | Export-render helper (**owner-confirmed Q1, Q2**; **PR B**, slices 6i, 6j) | PDF layout and XLSX writing in `--oma-export-helper`; bounded frames; main-process output checks; PDF with krilla 0.8.2 + parley 0.12.0 (a per-crate BSD-2-Clause exception for `arrayref` only; `rust-version` 1.92); fonts: the base scripts, Noto Sans CJK and Noto Color Emoji, pinned by SHA-256 | In-process; our own PDF writer | Hostile text and full disks cannot end the app |
 | D139 | Job (slice 6h1) | `JobKind::Export` on the archive subject, holding the archive lock until its cleanup ends; its own reader, so damaged or migrating archives are refused; survives the viewer closing; `removingPartial` keeps the slot | A viewer-session task | One job model; excludes writers in every instance |
 
 ## Logging
