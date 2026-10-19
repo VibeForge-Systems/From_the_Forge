@@ -522,6 +522,31 @@ cargo test -p oma-export --test perf_smoke -- --ignored --exact \
   hash is pinned against `schemaVersion`, so a change without a version
   bump fails `tests/json.rs`.
 
+### HTML and the HTML oracle (M6 slice 6g)
+
+```sh
+cargo test -p oma-export --test html         # every catalogue entry to HTML read by the strict reader; previews, splits, hostile text
+cargo test -p oma-export --test golden_html  # names-only HTML bundles against tests/fixtures/export/expected-html/
+OMA_REGEN_GOLDENS=1 cargo test -p oma-export --test golden_html   # regenerate them (then re-pin the hash it prints)
+
+# The independent HTML oracle (Linux; in the oracle virtual environment):
+OMA_ORACLE_HTML_OUT=/tmp/oma-html cargo test -p oma-export --test html -- --ignored --exact write_oracle_html
+python3 -I scripts/oracles/html_oracle.py --exports /tmp/oma-html
+```
+
+- `html_oracle.py` reads every page with the standard library's
+  `html.parser` and with html5lib in strict mode, checks the template's
+  rules and compares each article with the same bundle's JSON item.
+  Run here (Python 3.13.16, html5lib 1.1): 42 bundles, 106 pages, 968
+  articles, 71 images, 115,719 checks, 0 failed; the export step took
+  3.4 s and the Python run 2.7 s. With `<` left unescaped by hand it
+  reported failures. Its run on CI's Python 3.10 is **UNVERIFIED** until
+  the PR's CI runs.
+- A change to the stylesheet changes its hash: re-pin `STYLE_SHA256` in
+  `writer/html.rs` (the unit test prints the new value) and regenerate
+  the goldens. The previews in the tests come from a test
+  `PreviewSource` (a real 1 × 1 PNG); the decode-helper pool is slice 6h.
+
 ### The bulk generator (M5)
 
 `crates/oma-archive/tests/common/bulk.rs` writes a schema-valid v1 archive
@@ -771,21 +796,22 @@ Linux job, 6 on Windows), measured from slice 6a.** The baseline is `main`
 at `9883217` (milestones 1–5), run in a Linux container (4 CPUs, debug
 build, `CARGO_INCREMENTAL=0`, after compiling), then again with slice 6a:
 
-| What | Baseline (`9883217`) | Slice 6a | Slice 6b1 | Slice 6b2 | Slice 6c | Slice 6d | Slice 6e1 | Slice 6e2 | Slice 6f |
-|---|---|---|---|---|---|---|---|---|---|
-| `cargo test --workspace`, wall clock | 2 min 8 s | 2 min 6 s | 2 min 26 s | 2 min 38 s | 2 min 42 s | 2 min 42 s | 2 min 41 s | 2 min 46 s | 2 min 59 s |
-| Sum of all test binaries' run times | 124.2 s | 123.1 s | 142.9 s | 153.9 s | 158.5 s | 159.0 s | 150.0 s | 161.7 s | 174.9 s |
-| Rust tests passed | 1,241 (12 ignored) | 1,251 (12 ignored) | 1,270 (12 ignored) | 1,284 (15 ignored) | 1,290 (16 ignored) | 1,332 (16 ignored) | 1,371 (16 ignored) | 1,392 (18 ignored) | 1,415 (21 ignored) |
-| `oma-archive`'s `export_caps.rs` | — | 2.4 s (4 tests) | 3.0 s | 2.7 s | 3.3 s | 3.3 s | 2.6 s | 2.6 s | 2.8 s |
-| `oma-archive`'s `export_reads.rs` | — | — | 5.4 s (12 tests) | 5.5 s | 5.3 s | 5.7 s | 5.6 s | 5.2 s | 5.6 s |
-| `oma-archive`'s `export_scope.rs` | — | — | — | 2.0 s (7 tests) | 2.6 s (the oracle also reads the export catalogue) | 2.4 s | 2.6 s | 2.2 s | 2.5 s |
-| `oma-archive`'s `export_memory.rs` | — | — | — | 10.6 s (1 test; Linux only) | 9.8 s | 10.1 s | 8.9 s | 9.4 s | 10.1 s |
-| `oma-archive`'s `export_fixtures.rs` | — | — | — | — | 0.7 s (5 tests, 1 ignored) | 0.7 s | 0.7 s | 0.6 s | 0.7 s |
-| `oma-archive`'s `bulk.rs` | — | — | — | — | 0.9 s (2 tests; the blob option's test is new) | 0.8 s | 0.8 s | 1.0 s | 0.9 s |
-| `oma-export`'s `record_catalogue.rs` | — | — | — | — | — | 8.1 s (7 tests) | 7.7 s | 8.2 s | 7.4 s |
-| `oma-export`'s `stage.rs`, `crash.rs`, `fanout.rs` | — | — | — | — | — | — | 0.1 s, 0.1 s, 0.6 s (15, 4 and 3 tests) | 0.1 s, 0.3 s (5 tests), 0.5 s | 0.1 s, 0.3 s, 0.5 s |
-| `oma-export`'s `txt.rs`, `attach.rs`, `golden_txt.rs` | — | — | — | — | — | — | — | 3.4 s (7 tests, 1 ignored), 0.8 s (6 tests), 3.1 s (1 test) | 3.3 s, 0.7 s, 2.5 s |
-| `oma-export`'s `json.rs`, `csv.rs`, `golden_data.rs`, `perf_smoke.rs` | — | — | — | — | — | — | — | — | 3.3 s (5 tests, 1 ignored), 3.2 s (7 tests), 3.2 s (1 test), 6.2 s (1 test, 2 ignored; Linux only) |
+| What | Baseline (`9883217`) | Slice 6a | Slice 6b1 | Slice 6b2 | Slice 6c | Slice 6d | Slice 6e1 | Slice 6e2 | Slice 6f | Slice 6g |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `cargo test --workspace`, wall clock | 2 min 8 s | 2 min 6 s | 2 min 26 s | 2 min 38 s | 2 min 42 s | 2 min 42 s | 2 min 41 s | 2 min 46 s | 2 min 59 s | 2 min 54 s |
+| Sum of all test binaries' run times | 124.2 s | 123.1 s | 142.9 s | 153.9 s | 158.5 s | 159.0 s | 150.0 s | 161.7 s | 174.9 s | 169.9 s |
+| Rust tests passed | 1,241 (12 ignored) | 1,251 (12 ignored) | 1,270 (12 ignored) | 1,284 (15 ignored) | 1,290 (16 ignored) | 1,332 (16 ignored) | 1,371 (16 ignored) | 1,392 (18 ignored) | 1,415 (21 ignored) | 1,436 (22 ignored) |
+| `oma-archive`'s `export_caps.rs` | — | 2.4 s (4 tests) | 3.0 s | 2.7 s | 3.3 s | 3.3 s | 2.6 s | 2.6 s | 2.8 s | — |
+| `oma-archive`'s `export_reads.rs` | — | — | 5.4 s (12 tests) | 5.5 s | 5.3 s | 5.7 s | 5.6 s | 5.2 s | 5.6 s | — |
+| `oma-archive`'s `export_scope.rs` | — | — | — | 2.0 s (7 tests) | 2.6 s (the oracle also reads the export catalogue) | 2.4 s | 2.6 s | 2.2 s | 2.5 s | — |
+| `oma-archive`'s `export_memory.rs` | — | — | — | 10.6 s (1 test; Linux only) | 9.8 s | 10.1 s | 8.9 s | 9.4 s | 10.1 s | — |
+| `oma-archive`'s `export_fixtures.rs` | — | — | — | — | 0.7 s (5 tests, 1 ignored) | 0.7 s | 0.7 s | 0.6 s | 0.7 s | — |
+| `oma-archive`'s `bulk.rs` | — | — | — | — | 0.9 s (2 tests; the blob option's test is new) | 0.8 s | 0.8 s | 1.0 s | 0.9 s | — |
+| `oma-export`'s `record_catalogue.rs` | — | — | — | — | — | 8.1 s (7 tests) | 7.7 s | 8.2 s | 7.4 s | — |
+| `oma-export`'s `stage.rs`, `crash.rs`, `fanout.rs` | — | — | — | — | — | — | 0.1 s, 0.1 s, 0.6 s (15, 4 and 3 tests) | 0.1 s, 0.3 s (5 tests), 0.5 s | 0.1 s, 0.3 s, 0.5 s | — |
+| `oma-export`'s `txt.rs`, `attach.rs`, `golden_txt.rs` | — | — | — | — | — | — | — | 3.4 s (7 tests, 1 ignored), 0.8 s (6 tests), 3.1 s (1 test) | 3.3 s, 0.7 s, 2.5 s | 3.0 s, —, 2.0 s |
+| `oma-export`'s `json.rs`, `csv.rs`, `golden_data.rs`, `perf_smoke.rs` | — | — | — | — | — | — | — | — | 3.3 s (5 tests, 1 ignored), 3.2 s (7 tests), 3.2 s (1 test), 6.2 s (1 test, 2 ignored; Linux only) | — |
+| `oma-export`'s `html.rs`, `golden_html.rs` | — | — | — | — | — | — | — | — | — | 3.6 s (11 tests, 1 ignored), 2.4 s (1 test) |
 
 The difference between the two runs is inside the run-to-run noise: a
 first, cold run of the baseline in the same container took 3 min 58 s
@@ -822,6 +848,12 @@ import every catalogue entry (about 3 s each), and `perf_smoke.rs`
 generates and exports 20,000 messages (6.2 s). The other binaries' times
 moved within the noise. The Linux CI oracle step gains the data oracle
 (about 10 s for the exports and about 50 s for the Python run here).
+Slice 6g adds 21 tests (9 unit tests, 11 in `html.rs` and the golden
+test) and one ignored (`write_oracle_html`); in its column a dash means a
+binary that was not timed on its own in this slice (the `txt.rs` and
+`golden_txt.rs` figures are from a separate run of those binaries). The
+Linux CI oracle step gains the HTML oracle (about 3 s for the exports and
+3 s for the Python run here).
 Windows has not been measured for M6. Slices 6h and 6l record the figures again, with CI's.
 
 **Export read measurements (slice 6b2; synthetic, one host, no timing

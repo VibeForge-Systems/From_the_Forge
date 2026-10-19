@@ -126,6 +126,15 @@ jobs:
           for b in "$data"/*/ids/*/ "$data"/*/ordinals/*/ "$data"/*/zone-*/*/; do
             (cd "$b" && sha256sum --quiet -c SHA256SUMS)
           done
+          # Slice 6g: every catalogue entry exported to HTML + JSON twice
+          # (files copied with the test's preview renditions and markers
+          # on; names only and markers off); every page is read with
+          # html.parser and html5lib (strict) and compared with the JSON.
+          html="$RUNNER_TEMP/oracle-html"
+          OMA_ORACLE_HTML_OUT="$html" cargo test -p oma-export --locked --test html -- \
+            --ignored --exact write_oracle_html
+          "$RUNNER_TEMP/venv-oracles/bin/python" -I scripts/oracles/html_oracle.py --exports "$html"
+          for b in "$html"/*/files/*/ "$html"/*/names/*/; do (cd "$b" && sha256sum --quiet -c SHA256SUMS); done
       - name: IPC bindings are up to date
         run: |
           if ! git diff --exit-code -- src/types/generated; then

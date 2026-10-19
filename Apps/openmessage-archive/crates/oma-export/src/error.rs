@@ -3,8 +3,9 @@
 //!
 //! Slice 6d defined the errors the record core can return; slice 6e adds
 //! the file and placement errors (`Write`, `NoSpace`, `TargetExists`,
-//! `NameRefused`, `DestinationChanged`). The helper errors of §4.4
-//! (`HelperFailed`, `HelperOutputRejected`) arrive with slice 6i.
+//! `NameRefused`, `DestinationChanged`). Slice 6g adds
+//! `HelperOutputRejected` for a decode-helper rendition that fails the
+//! checks of §5.7; `HelperFailed` arrives with slice 6i.
 
 use std::io;
 
@@ -64,6 +65,11 @@ pub enum ExportError {
     /// no longer the one the export created.
     #[error("the destination changed while the export was written")]
     DestinationChanged,
+    /// A helper's output failed the main process's checks (spec §5.7): a
+    /// decode-helper rendition that is not a well-formed JPEG or PNG
+    /// within its size limits. Nothing of it was written.
+    #[error("a helper's output was refused")]
+    HelperOutputRejected,
 }
 
 impl ExportError {

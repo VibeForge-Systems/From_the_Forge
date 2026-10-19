@@ -3815,6 +3815,117 @@ Rust tests failed; with the separator escapes off, the JSON round-trip
 test failed. Nothing was run on Windows; the new code has no
 platform-specific part.
 
+### The HTML writer (M6 slice 6g)
+
+Slice 6g adds the HTML writer (`writer/html.rs`, spec §5.5, D132), the
+`preview` module that hands it images, its goldens, a strict Rust reader
+of its grammar and the independent HTML oracle.
+
+- **Files.** A bundle gets `html/c0001.html` per conversation file
+  (`html/no-conversation.html` for the messages in none) and
+  `html/index.html`, which lists the files by ordinal with each name in
+  the body only. A page is split into `c0001-2.html`, `c0001-3.html` …
+  before an item that would take it past 5,000 items or 20 MiB, the
+  embedded `data:` bytes included (`PageLimits::SPEC`; 256 KiB is kept
+  for the navigation and footer). A single file is one page and is never
+  split. Titles are generic ("Messages export — conversation 1, part 2",
+  D112).
+- **One fixed template.** `<!doctype html>`, `<html lang="en">`, `<meta
+  charset>`, then the CSP meta first (`default-src 'none'; img-src data:;
+  style-src 'sha256-…'; base-uri 'none'; form-action 'none'`), the
+  referrer, viewport and colour-scheme metas, the title and the one
+  stylesheet (`STYLE`, hash pinned in `STYLE_SHA256` by a unit test).
+  The body is two skip links, a header (the plaintext notice, the one
+  `h1`, the address count, other recorded names, the zone), `main` with
+  one `section` and `h2` per day (then "Undated"), one `article` per item
+  labelled by its `h3` (sender, time with an HTML `datetime`, item
+  number), then `nav#days` **after** `main` (the page's days, the other
+  parts, `index.html`), then `footer#about` (counts, the legend, and in
+  a single file "About this export"; in a bundle a pointer to the
+  manifest, README and index, whose footer lists About).
+- **Escaping is the control.** All content goes through one function
+  (`H::content`): `& < > " '` become `&amp; &lt; &gt; &quot; &#x27;`,
+  each run sits in `<bdi dir="auto">` with `white-space: pre-wrap`, CR
+  and CRLF become LF, and controls, noncharacters and (in header fields
+  always, in recorded text when the option is on) hidden characters
+  become `<span class="mark">U+XXXX</span>` elements. Placeholders
+  (`<span class="ph">`) and labels are elements, so a literal `⟨` stays
+  literal (§4.7's table). Attribute values are only ours: ordinal ids,
+  dates, image sizes, `data:` URIs of checked renditions, class tokens
+  and links of the closed grammar. Styles are classes on the run's `bdi`
+  (M5's rule); URLs are text. Every `article` has `overflow: hidden;
+  contain: paint`, and combining marks are all kept.
+- **Images (D113).** The writer never decodes or reads a file. With
+  previews on it asks a `preview::PreviewSource` for each included
+  attachment's renditions (the decode-helper pool behind it is slice
+  6h's) and checks each one (`check_rendition`, §5.7: JPEG SOI/EOI and a
+  frame header before the scan, or the PNG signature, a valid first
+  `IHDR` and a final `IEND`; at most 640 px for a thumbnail and 2,048 px
+  for a display rendition; at most 16 MiB); a failed check fails the
+  export with the new `HelperOutputRejected` and the staging is removed.
+  A thumbnail is embedded as `data:` while the page's 16 MiB of base64
+  lasts, otherwise the card says "Preview not embedded (size limit)"; a
+  source's "unavailable" is a card too; both are counted in the
+  manifest's `previewsUnavailable`, embeddings in `previewsEmbedded`. With
+  "Larger previews" (bundles only) the display rendition is written once
+  per attachment record as `html/previews/p<n>.jpg|png` and linked. A
+  copied original is named by its path as text and never linked or
+  embedded. A plan with previews on and no source is refused
+  (`OptionDoesNotApply`).
+- **Backward links only.** A reply or a reaction links to `#m<n>` only
+  when that item is already on the same page; otherwise the text names
+  "item n, elsewhere in this conversation", "in another conversation of
+  this export" or "not in this export".
+- **Shared with TXT.** The tag, sender, time and About helpers moved from
+  `txt.rs` to `writer/shared.rs` unchanged (the TXT goldens did not
+  move). Both writers now skip the stored versions of a folded reaction
+  row (a chip, not an item): TXT used to write them under the item
+  before it. They stay in JSON. README gains an HTML paragraph.
+
+**Deviations from the spec**, all recorded here:
+
+- Bodies are rendered whole, with edits and unsends as tags, not per
+  part: the record's segments carry no part index (as in TXT).
+- Noncharacters are marked like controls: raw, they are HTML parse errors
+  (html5lib's strict mode refused two in the hostile catalogue).
+- A thumbnail over the page's budget is counted in
+  `previewsUnavailable` (the report keeps `previewsSizeLimited` apart);
+  the manifest has no field of its own for it.
+- Larger previews are named by the attachment record's ordinal
+  (`p<n>`), not the file ordinal: a names-only bundle has no file
+  ordinals.
+- The `datetime` attribute carries at most three fraction digits and is
+  left out for years HTML cannot write; the visible time is unchanged.
+- No `h2` outside the day sections: the navigation and the footer use
+  labelled paragraphs, so "one `h2` per day" holds exactly.
+
+**Tests:** `crates/oma-export/tests/{html,golden_html}.rs` with the strict
+reader `tests/htmlgrammar/`, unit tests in `writer/html.rs`, `preview.rs`
+and `naming.rs`, and the oracle `scripts/oracles/html_oracle.py`. Every
+entry and scenario of both catalogues exports to pages the reader accepts
+(the template's head order with the CSP second, the style and its hash,
+only the template's elements and attributes, links of the grammar,
+backward-only item links, one `h1`, one `h2` per section, labelled
+articles, `nav` after `main`, no control, noncharacter or (markers on)
+hidden character in any text node); items per file and page equal the
+manifest; masked content stays out of every byte and every decoded text
+unless revealed; every hostile body of the export catalogue reads back
+exactly (CR as LF); names and senders keep their marks; with markers off
+only bodies keep hidden characters raw; previews from a test source are
+embedded within the budget and counted, larger previews written and
+linked, a bad rendition (an SVG, a JPEG without a frame, a 4,097 px PNG)
+fails the export and leaves nothing; pages split by items and by bytes
+and link their parts; a single file carries About. The goldens compare
+21 HTML bundles byte for byte (116 files; the two over 64 KiB, the hostile pages, by digest only).
+The HTML oracle, run here (Python 3.13.16, html5lib 1.1): 42 bundles
+(files copied with previews and markers on; names only with markers off),
+106 pages, 968 articles against the JSON items, 71 images; 115,719
+checks, 0 failed. With `<` left unescaped by hand, three Rust tests and
+the oracle failed; with hidden characters never marked, nine of the
+eleven `html.rs` tests and the golden test failed. Nothing was run on
+Windows, and no page was opened in a browser in this slice (the
+WebKitGTK observation in the spec is the research run's).
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`
@@ -4031,7 +4142,7 @@ owner: its lean is applied and awaits confirmation.
 | D137 | Search scope (slice 6b2) | The live set by default; "all matches" re-runs in the job with a cap of 1,000,000 and honest `capped` and coverage booleans; hits matched only in hidden content are excluded unless revealed, re-checked against the masked text the export writes; a multi-conversation hit is written under its lowest conversation | Always the shown 10,000; exporting membership as is | Faithful to what the user saw, with no disclosure through membership |
 | D128, D145 | Time zones and the window (slice 6d) | The webview's offset table, validated in Rust; a window clamped to 1900 … now + 366 days; outliers written in UTC and counted; a stale table refused; local-day bounds and formatting in Rust's own civil arithmetic | jiff with a bundled tzdb | One zone source (D104); nothing approximated |
 | D129 | Words (slice 6d) | Exhaustive Rust tables; `export-words.json` generated and checked against `viewerText.ts`; third-party wording | Codes only | Readable outputs without drift |
-| D138 | Readability safety, the classifier and markers (slice 6d; the TXT writer applies it from 6e2, with `[` and `]` also escaped in its header fields) | D121's rule inverted, checked against the shared vectors; the reserved `⟨` marker form; header fields always marked; combining runs limited in TXT and PDF | Raw everywhere | Prevents marker forgery, header forgery and bidi spoofing |
+| D138 | Readability safety, the classifier and markers (slice 6d; the TXT writer applies it from 6e2, with `[` and `]` also escaped in its header fields; HTML from 6g, as elements) | D121's rule inverted, checked against the shared vectors; the reserved `⟨` marker form; header fields always marked; combining runs limited in TXT and PDF | Raw everywhere | Prevents marker forgery, header forgery and bidi spoofing |
 | D141 | Identifiers (**owner Q5: lean applied, awaiting confirmation**; slice 6d) | Export-local ordinals by default; archive ids as decimal strings and source identifiers only under an opt-in for JSON, CSV and XLSX, off | Archive ids by default | No archive-size disclosure by default; joining exports is possible on request |
 | D142 | Record fidelity and the ledger (slice 6d) | Dedicated record structs; segments kept; unknown codes and states kept; tagged absence; every v1 column given a disposition, exported columns checked at their paths; `exclusions` generated; never less than the viewer, with the documented exceptions; `extras == false` refused | Flattened bodies; hand-picked fields | Rule 3 holds by construction, and drift fails a test |
 | D126 | Packaging and placement (slices 6d, 6e1) | A bundle for multi-file, CSV, attachments or multi-conversation exports, a single file otherwise; staging inside the destination; a no-replace rename publishes (` (2)` … ` (99)`); a single file replaces only a regular file, only after the app's confirmation | Always a folder; trusting native overwrite prompts | Atomic per output, never a silent overwrite, nothing outside the destination |
@@ -4041,7 +4152,8 @@ owner: its lean is applied and awaits confirmation.
 | D143 | Destination integrity (slice 6e1) | Canonical destination; on Linux every write relative to `O_DIRECTORY\|O_NOFOLLOW` handles and a `(dev, ino)` check before publish; the Windows residual disclosed | String paths | Closes the staging-swap path into a backup (I1) |
 | D144 | Leftovers (slice 6e1) | The marker kept until after publish and held with `try_lock`; fixed, content-free names; probes swept; locked and recent entries skipped; removal of the pinned list only; bounded retries on Windows | Removing the marker before the rename; a fresh glob | Every crash leftover is findable, and a live export is never deleted |
 | D130 | CSV (slice 6f) | RFC 4180 with CRLF and every field quoted; default-deny OWASP neutralisation (White_Space and default-ignorables skipped, full-width and small forms, after escaping), listed per row and counted; "for data tools" raw except U+27E8; every file always present; the column contract pinned and only appended; always a bundle | Never neutralise; a leading-character blocklist | Spreadsheet safety by default, raw values on request, and a reversible prefix |
-| D146 | Independent oracles (slices 6c, 6e2, 6f) | A projection from the archive with stdlib `sqlite3`; JSON against the projection and both schemas; CSV against JSON under `T`; local times against `zoneinfo`; TXT through its own grammar parser; masking scanned in every byte | Oracles against our own records | A mapping bug cannot pass every test |
+| D132 | HTML (slice 6g) | A static template; escaping into text nodes; markers as elements; CSP meta first; one hashed style; inline thumbnails as `data:` from checked decode-helper renditions through a `PreviewSource`; display previews opt-in; originals never linked; no media elements; nav after main; backward-only links | Linking originals; `img-src 'self'` | D113's isolation; independence from browsers' `file:` origin rules; streamable |
+| D146 | Independent oracles (slices 6c, 6e2, 6f, 6g) | A projection from the archive with stdlib `sqlite3`; JSON against the projection and both schemas; CSV against JSON under `T`; local times against `zoneinfo`; TXT through its own grammar parser; HTML through `html.parser` and strict html5lib against JSON under `T`; masking scanned in every byte | Oracles against our own records | A mapping bug cannot pass every test |
 | D147 | Consent and drift (slice 6b2; the comparison is slice 6h's) | Exact, cancellable counts; the archive generation in the draft; a recount under the lock before writing; reveal counts that never understate | Budgeted "at least" counts | "N messages" is never an understatement |
 
 ## Logging

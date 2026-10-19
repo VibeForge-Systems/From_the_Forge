@@ -493,6 +493,7 @@ pub fn writers(
                 Format::Txt => Box::new(oma_export::writer::txt::TxtWriter::new()),
                 Format::Json => Box::new(oma_export::writer::json::JsonWriter::new()),
                 Format::Csv => Box::new(oma_export::writer::csv::CsvWriter::new()),
+                Format::Html => Box::new(oma_export::writer::html::HtmlWriter::new()),
                 other => panic!("no in-process writer for {other:?}"),
             }
         })

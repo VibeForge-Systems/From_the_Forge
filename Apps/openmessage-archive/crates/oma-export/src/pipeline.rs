@@ -35,9 +35,11 @@
 //! Not yet here: the "events" option off (refused with
 //! `OptionDoesNotApply` until the scope index can leave events out without
 //! a gap, slice 6h), `importSessions` (the session facts need a new
-//! snapshot read, 6h), previews (6g, 6h) and the export-render helper's
-//! formats (6i, 6j). The writers' own counts (`neutralisedCells` from
-//! CSV, the marker counts from TXT and CSV) reach the bundle's manifest; a
+//! snapshot read, 6h), the decode-helper pool behind the HTML writer's
+//! `PreviewSource` (6h; the caller hands the writers in) and the
+//! export-render helper's formats (6i, 6j). The writers' own counts (`neutralisedCells` from
+//! CSV, the marker counts from TXT, CSV and HTML, the preview counts from
+//! HTML) reach the bundle's manifest; a
 //! single file's "About this export" is written before the writers finish
 //! and so carries the record counts only.
 
@@ -602,6 +604,8 @@ fn body(
     counts.combining_runs_limited = sum(&reports, "combiningRunsLimited");
     counts.neutralised_cells = sum(&reports, "neutralisedCells");
     counts.continuation_rows = sum(&reports, "continuationRows");
+    counts.attachments.previews_embedded = sum(&reports, "previewsEmbedded");
+    counts.attachments.previews_unavailable = sum(&reports, "previewsUnavailable");
     counts.check_identities()?;
     let body = ManifestBody::new(input(counts.clone(), job))?;
     if plan.packaging() == Packaging::Bundle {

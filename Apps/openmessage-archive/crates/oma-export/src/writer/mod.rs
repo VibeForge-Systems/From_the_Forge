@@ -27,7 +27,9 @@
 //! form are shared by the writers that print words (TXT, CSV).
 
 pub mod csv;
+pub mod html;
 pub mod json;
+mod shared;
 pub mod txt;
 
 use std::collections::BTreeMap;

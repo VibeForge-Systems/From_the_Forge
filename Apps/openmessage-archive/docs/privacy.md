@@ -709,6 +709,33 @@ LibreOffice):
   the CSV's `source_*` columns are present and empty, and JSON's
   `source` says the option left them out.
 
+What the HTML writer does (slice 6g, tested on Linux through the export
+pipeline on the synthetic catalogues and read back by two HTML parsers;
+no export can be started from the app yet; no page was opened in a
+browser in this slice, and nothing was run on Windows):
+
+- **Pages are static and hold no script.** Each page starts with a
+  Content-Security-Policy that forbids loading anything except the
+  images embedded in it, and every message, name and address is written
+  as escaped text. The policy is a second line of defence; whether
+  browsers other than WebKitGTK honour it from a local file is
+  **UNVERIFIED** (the M6 manual checklist).
+- **Images in HTML are previews the app re-encoded, never the original
+  files**: thumbnails embedded in the page and, with "Larger previews",
+  larger copies beside it under `html/previews/`. They come only from
+  the decode helper's renditions and are checked before they are
+  written. Original files, when copied, are named by their path but not
+  linked, so opening a page never hands sender bytes to the browser's
+  image, audio or video decoders. Web addresses in messages are text,
+  not links. Until the export job (slice 6h) provides the decode helper,
+  an export with previews on is refused.
+- **Hidden characters are shown as framed codes** (`U+202E`), always in
+  names, addresses and file names, and in message text unless the
+  markers option is off; control characters are always shown so.
+- **Titles are generic** ("Messages export — conversation 1"): a
+  conversation's name appears only in the page body, not in a browser's
+  tab, history or window title.
+
 ## Device identifiers (M2)
 
 The app never stores or keeps these fields from a backup: `Unique
@@ -846,7 +873,8 @@ Backups and their contents are treated as hostile:
   self-builder's own legal risk**; the project gives no assurance about
   patents (see `dependencies.md`).
 - Message text is rendered as text, never as HTML. The UI does not use
-  `v-html` with untrusted content, and HTML exports will escape everything.
+  `v-html` with untrusted content, and HTML exports escape everything
+  (slice 6g; see "What the HTML writer does" above).
 
 ## Logging
 

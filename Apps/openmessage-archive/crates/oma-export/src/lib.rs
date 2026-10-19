@@ -64,8 +64,19 @@
 //!   `WriterBuilder::from_writer`, both profiles, default-deny formula
 //!   neutralisation listed per row and counted.
 //!
-//! HTML follows in 6g, XLSX and PDF in 6i and 6j. Nothing here logs;
-//! errors carry kinds only (I6).
+//! Slice 6g, HTML:
+//!
+//! - [`writer::html`]: static pages from one fixed template (escaping
+//!   into text nodes only, markers as elements, the CSP meta first with
+//!   the one hashed stylesheet, the days' navigation after `main`,
+//!   backward-only reply links, pages split by items and bytes) and the
+//!   bundle's `html/index.html`;
+//! - [`preview`]: the [`preview::PreviewSource`] the HTML writer asks for
+//!   decode-helper renditions, and the checks every rendition passes
+//!   before it is embedded as `data:` or written as a larger preview.
+//!
+//! XLSX and PDF follow in 6i and 6j. Nothing here logs; errors carry kinds
+//! only (I6).
 #![cfg_attr(
     not(test),
     deny(
@@ -89,6 +100,7 @@ pub mod map;
 pub mod naming;
 pub mod pipeline;
 pub mod plan;
+pub mod preview;
 pub mod record;
 pub mod stage;
 pub mod time;

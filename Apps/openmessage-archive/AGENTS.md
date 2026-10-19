@@ -155,8 +155,8 @@ Each one is enforced in code. Keep it that way.
   import and verify jobs (slice 4l), and the Archive page (slice 4m).
   `oma-export` (M6) has its record core from slice 6d, its files core
   (names, staging, the manifest, the writer trait) from 6e1, and the
-  attachment copy, the TXT writer and the pipeline from 6e2, and the JSON
-  and CSV writers from 6f; `oma-device` (M7)
+  attachment copy, the TXT writer and the pipeline from 6e2, the JSON
+  and CSV writers from 6f, and the HTML writer from 6g; `oma-device` (M7)
   is planned. Each must build and test without
   Tauri. The shell's `src-tauri/src/backups/` (registry, job table, worker,
   DTOs, messages) and `src-tauri/src/archives/` (listing, details, the
@@ -577,8 +577,9 @@ Never hand-edit generated files.
   `VmHWM` (Linux only); keep its versions above the bound's size.
 - **Export fixtures and oracles (M6 slice 6c).** `tests/fixtures/export/`
   is written only by `scripts/fixtures/make_synthetic_exports.py` (SQLite
-  3.45.1 only), except `expected/` and `expected-data/` (the writers'
-  goldens, slices 6e2 and 6f) and `zones/` (the zone oracle's tables), and
+  3.45.1 only), except `expected/`, `expected-data/` and `expected-html/`
+  (the writers' goldens, slices 6e2, 6f and 6g) and `zones/` (the zone
+  oracle's tables), and
   has two pins in `tests/export_fixtures.rs`: the inputs
   (backups and `hidden-vectors.json`) are frozen; `*.expected/` and
   `scenarios/` (`content.json`, `export.json`) may be re-pinned when a
@@ -672,6 +673,31 @@ Never hand-edit generated files.
   (`tests/fixtures/export/zones/`) come only from
   `scripts/make-export-zone-tables.mjs`. The mapper repeats a shared
   message's attachment outcome at its later placements; keep it so.
+- **HTML (M6 slice 6g, `oma-export`, `writer/html.rs`).** One fixed
+  template: `<meta charset>`, then the CSP meta (`default-src 'none';
+  img-src data:; style-src 'sha256-…'`), and the one stylesheet `STYLE`,
+  whose hash `STYLE_SHA256` a unit test pins (change the style, then
+  re-pin it; the contrast test reads its colour properties). Content goes
+  **only** into text nodes through `H::content` (escapes `& < > " '`,
+  wraps each run in `<bdi dir="auto">`, CR/CRLF as LF) and marks hidden
+  characters, controls and noncharacters as `<span class="mark">U+XXXX
+  </span>` elements; placeholders and labels are elements too, so a
+  literal `⟨` stays literal. Never put content in an attribute, never add
+  `<script>`, `style=`, events, forms, frames, `<link>`, `<audio>` or
+  `<video>`, and never link or embed an original file; URLs stay text.
+  Item links (`#m<n>`) point **backward** on the same page only. Pages
+  split at `PageLimits::SPEC` (5,000 items or 20 MiB with `data:` bytes;
+  16 MiB of base64 per page); tests lower the limits with
+  `HtmlWriter::with_limits`. Images come only from a `preview::PreviewSource`
+  (the decode-helper pool in 6h) and pass `preview::check_rendition`
+  before they are embedded or written as `html/previews/p<n>.*`; a
+  failed check fails the export (`HelperOutputRejected`), and previews
+  without a source are refused. Words come from `words::html_text`. A
+  grammar change goes into `tests/htmlgrammar`, `scripts/oracles/html_oracle.py`
+  and the goldens together (`OMA_REGEN_GOLDENS=1 cargo test -p oma-export
+  --test golden_html`, then re-pin `GOLDEN_SUMS_SHA256`). The tag and
+  time helpers shared with TXT are in `writer/shared.rs`; a change there
+  must leave the TXT goldens unchanged unless a TXT rule changes too.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush

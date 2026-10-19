@@ -108,15 +108,19 @@ fn every_file_is_pinned_by_one_of_the_two_sums() {
     assert!(expected.iter().all(|r| is_expectation(r)));
     let mut all = BTreeSet::new();
     walk(&export_root(), &export_root(), &mut all);
-    // `expected/` and `expected-data/` hold the writers' golden outputs
-    // (M6 spec §14.3), written by oma-export's golden tests and pinned
+    // `expected/`, `expected-data/` and `expected-html/` hold the writers'
+    // golden outputs (M6 spec §14.3), written by oma-export's golden tests
+    // and pinned
     // there by their own `SHA256SUMS`; `zones/` holds the zone oracle's
     // fixed zone tables (slice 6f), written by
     // `scripts/make-export-zone-tables.mjs` and pinned by `zones/SHA256SUMS`
     // in oma-export's `tests/common` (`zone_fixtures`). None is the
     // generator's.
     all.retain(|r| {
-        !r.starts_with("expected/") && !r.starts_with("expected-data/") && !r.starts_with("zones/")
+        !r.starts_with("expected/")
+            && !r.starts_with("expected-data/")
+            && !r.starts_with("expected-html/")
+            && !r.starts_with("zones/")
     });
     for extra in ["SHA256SUMS", "EXPECTED.SHA256SUMS", "README.md"] {
         assert!(all.remove(extra), "{extra} missing");

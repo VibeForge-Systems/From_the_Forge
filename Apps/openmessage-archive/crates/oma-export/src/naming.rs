@@ -58,6 +58,9 @@ pub const ZONE_IDENTIFIER: &str = ":Zone.Identifier";
 pub const ATTACHMENTS_DIR: &str = "attachments";
 /// The folder of a JSON bundle's copies of its schemas (spec §5.1).
 pub const SCHEMA_DIR: &str = "schema";
+/// The folder of an HTML bundle's larger previews, inside `html/`
+/// (spec §5.5).
+pub const PREVIEWS_DIR: &str = "previews";
 /// The most bytes an attachment's `<name>` part may take (§6.2).
 pub const MAX_ATTACHMENT_NAME_BYTES: usize = 120;
 /// Below this budget an attachment's name is its ordinal only (§6.2).
@@ -339,6 +342,22 @@ impl FileExt {
     }
 }
 
+/// The file type of a decode-helper rendition (spec §6.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ImageExt {
+    Jpeg,
+    Png,
+}
+
+impl ImageExt {
+    pub fn token(self) -> &'static str {
+        match self {
+            ImageExt::Jpeg => "jpg",
+            ImageExt::Png => "png",
+        }
+    }
+}
+
 /// A file's place inside a bundle, `/`-separated in the manifest and
 /// `SHA256SUMS`. Built only by this module's constructors.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -389,6 +408,59 @@ impl BundlePath {
             dirs: vec![format.token().to_owned()],
             file: format!("{stem}.{}", ext.token()),
         }
+    }
+
+    /// An HTML page of a conversation file (spec §5.5): `html/c0001.html`,
+    /// then `html/c0001-2.html` … for the parts after a split
+    /// (`no-conversation.html`, `no-conversation-2.html` …). `part` counts
+    /// from 1.
+    pub fn html_page(stem: FileStem, part: u32) -> BundlePath {
+        let base = BundlePath::format_file(Format::Html, stem, FileExt::Html);
+        if part <= 1 {
+            return base;
+        }
+        let file = match base.file.strip_suffix(".html") {
+            Some(s) => format!("{s}-{part}.html"),
+            None => base.file.clone(),
+        };
+        BundlePath {
+            dirs: base.dirs,
+            file,
+        }
+    }
+
+    /// `html/index.html`: the bundle's list of conversations.
+    pub fn html_index() -> BundlePath {
+        BundlePath {
+            dirs: vec![Format::Html.token().to_owned()],
+            file: "index.html".to_owned(),
+        }
+    }
+
+    /// `html/previews/p<n>.<jpg|png>`: the larger preview of attachment
+    /// record `n` (spec §6.5; bundles only).
+    pub fn html_preview(n: Ordinal, ext: ImageExt) -> BundlePath {
+        BundlePath {
+            dirs: vec![Format::Html.token().to_owned(), PREVIEWS_DIR.to_owned()],
+            file: format!("p{n}.{}", ext.token()),
+        }
+    }
+
+    /// This path relative to the top-level folder `dir` (`html`),
+    /// `/`-separated, for a relative link between files of that folder;
+    /// `None` when the path is not below it.
+    pub fn href_from(&self, dir: &str) -> Option<String> {
+        let (first, rest) = self.dirs.split_first()?;
+        if first != dir {
+            return None;
+        }
+        let mut s = String::new();
+        for d in rest {
+            s.push_str(d);
+            s.push('/');
+        }
+        s.push_str(&self.file);
+        Some(s)
     }
 
     /// `schema/<file>`.
@@ -682,6 +754,30 @@ mod tests {
 
     fn id(n: u8) -> EntryId {
         EntryId::from_bytes([n; 16])
+    }
+
+    #[test]
+    fn html_pages_parts_previews_and_links() {
+        let c = FileStem::Conversation(1);
+        assert_eq!(BundlePath::html_page(c, 1).to_slash(), "html/c0001.html");
+        assert_eq!(BundlePath::html_page(c, 2).to_slash(), "html/c0001-2.html");
+        assert_eq!(
+            BundlePath::html_page(FileStem::NoConversation, 3).to_slash(),
+            "html/no-conversation-3.html"
+        );
+        assert_eq!(BundlePath::html_index().to_slash(), "html/index.html");
+        let p = BundlePath::html_preview(45, ImageExt::Jpeg);
+        assert_eq!(p.to_slash(), "html/previews/p45.jpg");
+        assert_eq!(p.href_from("html").as_deref(), Some("previews/p45.jpg"));
+        assert_eq!(
+            BundlePath::html_page(c, 2).href_from("html").as_deref(),
+            Some("c0001-2.html")
+        );
+        assert_eq!(BundlePath::readme().href_from("html"), None);
+        assert_eq!(
+            BundlePath::schema(SchemaFile::Export).href_from("html"),
+            None
+        );
     }
 
     #[test]

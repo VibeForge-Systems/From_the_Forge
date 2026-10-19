@@ -61,12 +61,7 @@
 use std::collections::BTreeMap;
 use std::io::Write;
 
-use oma_archive::schema::codes::EditLabelCode;
-
-use crate::codes::{
-    AttachmentAccessCode, CardStateCode, ChipSenderCode, Code, Direction, MessageLabelCode,
-    SegmentKindCode, SenderReasonCode,
-};
+use crate::codes::{AttachmentAccessCode, CardStateCode, ChipSenderCode, SegmentKindCode};
 use crate::error::{ExportError, LimitKind};
 use crate::hidden::{self, MarkCounts, MarkPolicy};
 use crate::ids::Ordinal;
@@ -75,9 +70,12 @@ use crate::naming::{BundlePath, FileExt, FileStem};
 use crate::plan::{Clock, Format, LineEndings, Packaging};
 use crate::record::*;
 use crate::stage::{StagedFile, Staging};
-use crate::time::{self, format_human, CivilDate, HumanStyle, Localized};
+use crate::time::{CivilDate, HumanStyle};
 use crate::words::txt_legend;
 
+use super::shared::{
+    date_text, flatten, is_undated, item_tags, sender_tags, time_text, Comma, SenderTags,
+};
 use super::{
     is, phrase, placeholder, AboutDraft, ConversationFile, ConversationTotals, ExportContext,
     ExportWriter, Words, WriterReport,
@@ -126,6 +124,9 @@ pub struct TxtWriter {
     counts: MarkCounts,
     brackets_escaped: u64,
     report: WriterReport,
+    /// The last item written (folded rows are not items): the item a
+    /// stored version belongs under.
+    last_item: Option<Ordinal>,
 }
 
 impl std::fmt::Debug for TxtWriter {
@@ -179,25 +180,6 @@ fn split_lines(text: &str) -> Vec<&str> {
     out
 }
 
-/// `a, b, c` (strings are joined here without `.join`, which the source
-/// rules keep for path building in `naming.rs`).
-trait Comma {
-    fn comma(&self) -> String;
-}
-
-impl Comma for [String] {
-    fn comma(&self) -> String {
-        let mut out = String::new();
-        for (i, s) in self.iter().enumerate() {
-            if i > 0 {
-                out.push_str(", ");
-            }
-            out.push_str(s);
-        }
-        out
-    }
-}
-
 /// A piece of a recorded text: text to mark, or a placeholder of ours.
 enum Run<'a> {
     Text(&'a str),
@@ -222,6 +204,7 @@ impl TxtWriter {
             counts: MarkCounts::default(),
             brackets_escaped: 0,
             report: WriterReport::new(Format::Txt),
+            last_item: None,
         }
     }
 
@@ -327,182 +310,12 @@ impl TxtWriter {
     // The item line
     // -----------------------------------------------------------------------
 
-    fn time_text(&self, d: &TimeRecord) -> Option<(String, CivilDate)> {
-        let ns = d.utc_ns?;
-        let offset = if d.outside_zone_window {
-            None
-        } else {
-            d.offset_seconds
-        };
-        let at = match offset {
-            Some(o) => Localized::Local { offset_seconds: o },
-            None => Localized::OutsideWindow,
-        };
-        Some((
-            format_human(ns, offset, self.style),
-            time::local_date(ns, at),
-        ))
-    }
-
-    fn sender_and_tags(&mut self, it: &ItemRecord) -> (Option<String>, Vec<String>) {
-        let w = &self.words;
-        let mut tags = Vec::new();
-        let mut sender = None;
-        let d = &it.direction;
-        if is(d.token, Direction::FromMe) {
-            tags.push(w.say("direction", d.token));
-        } else {
-            let resolved = is(it.sender.reason, SenderReasonCode::Resolved);
-            if is(d.token, Direction::NotRecorded) {
-                tags.push(w.say("direction", d.token));
-            } else if is(d.token, Direction::UnknownValue) {
-                let raw = d.raw.as_ref().map_or("", |r| r.as_str());
-                tags.push(w.say("direction", d.token).replace("{raw}", raw));
-            } else if !resolved {
-                tags.push(w.say("direction", d.token));
-            }
-            if resolved {
-                sender = Some(
-                    it.sender
-                        .handle
-                        .and_then(|h| self.handles.get(&h).cloned())
-                        .unwrap_or_else(|| self.words.say("senderReason", it.sender.reason)),
-                );
-            } else if !is(it.sender.reason, SenderReasonCode::DirectionNotRecorded)
-                || !is(d.token, Direction::NotRecorded)
-            {
-                tags.push(self.words.say("senderReason", it.sender.reason));
-            }
-        }
-        if let RecordedByRecord::Lineage { lineage, .. } = d.recorded_by {
-            tags.push(phrase("directionRecordedBy").replace("{lineage}", &lineage.to_string()));
-        }
-        (sender, tags)
-    }
-
-    fn item_tags(&mut self, it: &ItemRecord, tags: &mut Vec<String>) {
-        let w = &self.words;
-        let date = &it.date;
-        if date.utc_ns.is_none() {
-            if let Some(s) = date.state {
-                tags.push(w.say("timeState", s));
-            } else if let Some(u) = date.unit {
-                let raw = date.raw.as_ref().map_or("", |r| r.as_str());
-                tags.push(w.say("timeUnit", u).replace("{raw}", raw));
-            }
-        }
-        let strip = |p: &str| p.trim_start_matches('[').trim_end_matches(']').to_owned();
-        if date.outside_zone_window {
-            tags.push(strip(phrase("outsideZoneWindow")));
-        }
-        if date.planned {
-            tags.push(strip(phrase("plannedSendTime")));
-        }
-        if it.context.order_tie {
-            tags.push(strip(phrase("orderTie")));
-        }
-        if let Some(s) = it.service {
-            tags.push(w.say("serviceClass", s));
-        }
-        if it.item.token != "message" {
-            tags.push(w.say("itemKind", it.item));
-        }
-        let e = &it.edit;
-        let parts = |v: &[Decimal]| {
-            v.iter()
-                .map(|d| d.as_str().to_owned())
-                .collect::<Vec<_>>()
-                .as_slice()
-                .comma()
-        };
-        if !e.edited_parts.is_empty() {
-            let n = e.edited_parts.len();
-            tags.push(format!(
-                "Edited: {} {}",
-                if n == 1 { "part" } else { "parts" },
-                parts(&e.edited_parts)
-            ));
-        }
-        if e.unsent_whole {
-            tags.push("Unsent by the sender".to_owned());
-        } else if !e.unsent_parts.is_empty() {
-            let n = e.unsent_parts.len();
-            let of = e.part_count.map(|c| format!(" of {c}")).unwrap_or_default();
-            tags.push(format!(
-                "Unsent by the sender: {} {}{of}",
-                if n == 1 { "part" } else { "parts" },
-                parts(&e.unsent_parts)
-            ));
-        }
-        if let Some(l) = e.label {
-            let quiet = [
-                EditLabelCode::NotRecorded,
-                EditLabelCode::NoEditRecorded,
-                EditLabelCode::UnsentParts,
-            ]
-            .into_iter()
-            .any(|q| is(l, q));
-            let edited = [
-                EditLabelCode::EditHistory,
-                EditLabelCode::UnsentPartsAndEditHistory,
-            ]
-            .into_iter()
-            .any(|q| is(l, q));
-            if edited {
-                if e.edited_parts.is_empty() {
-                    tags.push(w.say("editLabel", Code::of(EditLabelCode::EditHistory)));
-                }
-            } else if !quiet {
-                tags.push(w.say("editLabel", l));
-            }
-        }
-        for l in &it.labels {
-            if is(l.kind, MessageLabelCode::Undated) {
-                continue;
-            }
-            let mut s = w.say("messageLabel", l.kind);
-            if let Some(v) = &l.value {
-                s = s.replace("{value}", v.as_str());
-            }
-            tags.push(s);
-        }
-        if !it.recently_deleted.is_empty() {
-            tags.push(phrase("recentlyDeleted").to_owned());
-        }
-        let a = &it.context.also_in;
-        if !a.in_export.is_empty() || a.elsewhere > 0 {
-            let mut s = String::from("Also in");
-            if !a.in_export.is_empty() {
-                let list: Vec<String> = a.in_export.iter().map(|n| n.to_string()).collect();
-                s.push_str(&format!(" conversation {}", list.as_slice().comma()));
-            }
-            if a.elsewhere > 0 {
-                if !a.in_export.is_empty() {
-                    s.push(';');
-                }
-                s.push_str(&format!(
-                    " {} {} not in this export",
-                    a.elsewhere,
-                    if a.elsewhere == 1 {
-                        "conversation"
-                    } else {
-                        "conversations"
-                    }
-                ));
-            }
-            tags.push(s);
-        }
-    }
-
     fn item_line(&mut self, it: &ItemRecord) -> Result<(), ExportError> {
         // The undated section is the items the archive sorts as undated
         // (their `undated` label); an item in the dated range whose own
         // time is not usable stays in place as `[No usable time]`.
-        let undated = it
-            .labels
-            .iter()
-            .any(|l| is(l.kind, MessageLabelCode::Undated));
-        let time = match (self.time_text(&it.date), undated) {
+        let undated = is_undated(it);
+        let time = match (time_text(&it.date, self.style), undated) {
             (_, true) => {
                 if !self.state.undated {
                     self.line("")?;
@@ -514,12 +327,7 @@ impl TxtWriter {
             (Some((t, day)), false) => {
                 if self.state.day != Some(day) || self.state.undated {
                     self.line("")?;
-                    self.line(&format!(
-                        "==== {}-{:02}-{:02} ====",
-                        time::year_text(day.year),
-                        day.month,
-                        day.day
-                    ))?;
+                    self.line(&format!("==== {} ====", date_text(day)))?;
                     self.state.day = Some(day);
                     self.state.undated = false;
                 }
@@ -527,8 +335,14 @@ impl TxtWriter {
             }
             (None, false) => NO_TIME.to_owned(),
         };
-        let (sender, mut tags) = self.sender_and_tags(it);
-        self.item_tags(it, &mut tags);
+        let SenderTags { resolved, mut tags } = sender_tags(&self.words, it);
+        let sender = resolved.then(|| {
+            it.sender
+                .handle
+                .and_then(|h| self.handles.get(&h).cloned())
+                .unwrap_or_else(|| self.words.say("senderReason", it.sender.reason))
+        });
+        item_tags(&self.words, it, &mut tags);
         let mut s = format!("[{time}] [item {}]", it.n);
         if let Some(a) = sender {
             s.push(' ');
@@ -861,43 +675,6 @@ impl TxtWriter {
     }
 }
 
-/// `key: value` lines of a JSON value, nested keys joined with `.`; a long
-/// list (the zone's transitions) is summarised by its length.
-fn flatten(prefix: &str, v: &serde_json::Value, out: &mut Vec<String>) {
-    use serde_json::Value as V;
-    match v {
-        V::Object(m) => {
-            for (k, x) in m {
-                let key = if prefix.is_empty() {
-                    k.clone()
-                } else {
-                    format!("{prefix}.{k}")
-                };
-                flatten(&key, x, out);
-            }
-        }
-        V::Array(a) if a.len() > 16 => out.push(format!("{prefix}: {} entries", a.len())),
-        V::Array(a) if a.iter().all(|x| !x.is_object() && !x.is_array()) => {
-            let list: Vec<String> = a.iter().map(scalar).collect();
-            out.push(format!("{prefix}: {}", list.as_slice().comma()));
-        }
-        V::Array(a) => {
-            for (i, x) in a.iter().enumerate() {
-                flatten(&format!("{prefix}.{}", i + 1), x, out);
-            }
-        }
-        other => out.push(format!("{prefix}: {}", scalar(other))),
-    }
-}
-
-fn scalar(v: &serde_json::Value) -> String {
-    match v {
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Null => "none".to_owned(),
-        other => other.to_string(),
-    }
-}
-
 impl ExportWriter for TxtWriter {
     fn format(&self) -> Format {
         Format::Txt
@@ -990,8 +767,10 @@ impl ExportWriter for TxtWriter {
         if it.context.folded_into.is_some() {
             self.state.folded += 1;
             self.report.folded_rows += 1;
+            self.last_item = None;
             return Ok(());
         }
+        self.last_item = Some(it.n);
         self.item_line(it)?;
         self.body(it)?;
         self.details(it)?;
@@ -1006,6 +785,12 @@ impl ExportWriter for TxtWriter {
     fn version(&mut self, v: &VersionRecord, _out: &mut Staging) -> Result<(), ExportError> {
         if self.file.is_none() {
             return Err(order());
+        }
+        // A folded reaction row's versions (the row is a chip of its
+        // target, not an item) are in the structured formats only; before
+        // slice 6g they were written under the item before it.
+        if self.last_item != Some(v.message) {
+            return Ok(());
         }
         let label = format!(
             "Stored version{}, kept by imports {} to {}:",

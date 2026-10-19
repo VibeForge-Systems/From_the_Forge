@@ -28,9 +28,9 @@ Slice 6c checks the expectation chain's first link, archive -> projection:
   each vector's text is its pieces.
 
 Writers (TXT, JSON, CSV, HTML and later XLSX and PDF) add their links of
-the chain in their slices; TXT's (slice 6e2) is txt_grammar.py, and
-JSON's, CSV's and the zone check (slice 6f) are data_oracle.py, each run
-as its own step. Output is counts and check names only.
+the chain in their slices; TXT's (slice 6e2) is txt_grammar.py,
+JSON's, CSV's and the zone check (slice 6f) are data_oracle.py, and
+HTML's (slice 6g) is html_oracle.py, each run as its own step. Output is counts and check names only.
 """
 import argparse
 import hashlib

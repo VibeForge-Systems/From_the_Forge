@@ -813,6 +813,8 @@ pub mod readme {
 
     pub const JSON: &str = "The JSON files (json/) keep values as recorded, with codes instead of sentences, and follow the schema in schema/export-v1.schema.json, named by 'schemaVersion'. Each conversation is a JSON Lines file, one record per line; conversations.json and handles.json list the conversations and addresses. Numbers that can be too large for some readers, such as raw times, are written as strings. Line and paragraph separators and other characters that some tools treat as line ends are written as \\u escapes. 'Raw' there means as stored in the archive, which is not always the bytes the phone stored: bytes that were not valid text show as U+FFFD and are flagged, and text is not normalised. The files are JSON (RFC 8259), not I-JSON.";
 
+    pub const HTML: &str = "The HTML pages (html/) open in a web browser from this folder, without a network and without scripts: each page forbids loading anything but the images embedded in it. html/index.html lists the conversations; a long conversation is split into parts (c0001.html, c0001-2.html ...). Images shown there are previews the app re-encoded, never the original files: original files, when they were copied, are named by their path in this folder but not linked. Web addresses in messages are text, not links, and a reply links only to a message earlier on the same page.";
+
     pub const CONTRACT: &str = "Columns and keys are only ever added in a minor version; a key is never removed or renamed within a major version. The versions are in manifest.json.";
 
     /// The paragraphs of an export's `README.txt`, in order.
@@ -828,7 +830,8 @@ pub mod readme {
                 Format::Xlsx => out.push(XLSX),
                 Format::Pdf => out.push(PDF),
                 Format::Json => out.push(JSON),
-                Format::Txt | Format::Html => {}
+                Format::Html => out.push(HTML),
+                Format::Txt => {}
             }
         }
         out.push(CONTRACT);
@@ -851,6 +854,44 @@ pub mod txt_legend {
         "Values and tags marked 'derived' were worked out by the archive from what the phone recorded, not recorded by the phone itself.",
         "Text in angle brackets \u{27E8}\u{2026}\u{27E9} is written by the export, never by a message: \u{27E8}U+200B\u{27E9} stands for a character that does not show when printed or that controls the terminal or the text direction, \u{27E8}U+005B\u{27E9} and \u{27E8}U+005D\u{27E9} for square brackets in an address or a name, \u{27E8}+N combining marks\u{27E9} for marks left out of a very long run of accents, and \u{27E8}one-time code hidden\u{27E9} or \u{27E8}Attachment N\u{27E9} for what stood at that place in the text. A literal \u{27E8} in a message is itself written as \u{27E8}U+27E8\u{27E9}.",
         "Line breaks inside a message become new indented lines. In addresses, names and other fields on a tag line, every line break and control is written as a code instead.",
+    ];
+}
+
+/// The fixed text of the HTML format (spec §5.5): the page furniture,
+/// the preview cards and the legend at the end of every page. No sentence
+/// names a path, a conversation, a search or a device, and none says
+/// "you". Window titles stay generic (D112): content is only in the body.
+pub mod html_text {
+    pub const TITLE: &str = "Messages export";
+    pub const NOTICE: &str = "OpenMessage Archive export \u{2014} plaintext copy: anyone who can open this file can read it. What the marks mean and how the export was made are at the end of this page.";
+    pub const SKIP_MAIN: &str = "Skip to messages";
+    pub const SKIP_LIST: &str = "Skip to the list";
+    pub const SKIP_DAYS: &str = "Jump to days";
+    pub const DAYS: &str = "Days";
+    pub const UNDATED: &str = "Undated";
+    pub const NO_TIME: &str = "No usable time";
+    pub const NO_TIME_SECTION: &str = "Items without a usable recorded time";
+    pub const EMPTY: &str = "No items of this conversation are in this export.";
+    pub const VERSIONS: &str =
+        "Stored versions and edit entries recorded on the phone (stored order)";
+    pub const PREVIEW: &str = "preview, re-encoded";
+    pub const LARGER: &str = "Larger preview";
+    pub const UNAVAILABLE: &str = "Preview unavailable";
+    pub const SIZE_LIMIT: &str = "Preview not embedded (size limit)";
+    pub const PARTS: &str = "Parts of this conversation:";
+    pub const NEXT: &str = "Next part";
+    pub const INDEX_LINK: &str = "All conversations in this export";
+    pub const INDEX_HEADING: &str = "Conversations in this export";
+    pub const ABOUT: &str = "About this export";
+    pub const ABOUT_BUNDLE: &str = "How this export was made (its scope, options, time zone table, counts and the kinds of data never exported) is recorded in manifest.json and explained in README.txt, in the export's folder, and listed at the end of index.html.";
+
+    pub const LEGEND: &[&str] = &[
+        "Each item is headed by the sender's address when one is recorded, or by what is recorded about the sender, and by its recorded time in the zone named at the top, with the offset in force. Items the archive sorts as undated come last and follow the order of the earliest import that recorded them, which is not a recorded fact. Tags in brackets follow the heading.",
+        "[same recorded time; order not known]: the item has the same recorded time as its neighbour, so their order is the order the archive imported them in.",
+        "Values and tags marked 'derived' were worked out by the archive from what the phone recorded, not recorded by the phone itself.",
+        "A framed code such as U+200B stands for a character that does not show when printed or that changes the text direction or controls a terminal. A framed phrase such as 'one-time code hidden' or 'Attachment 3' is written by the export and stands for what was at that place in the text. Neither is ever message text.",
+        "Images are previews re-encoded by the app, never the original files. Original files, when they were copied, are named by their path in the export's folder but not linked. Web addresses in messages are text, not links.",
+        "A reply links to the message it answers only when that message is earlier on the same page; otherwise its item number is named.",
     ];
 }
 
@@ -927,6 +968,13 @@ mod tests {
             .chain(readme::paragraphs(&[], crate::ids::IdentifierMode::Ordinals).iter())
             .chain(txt_legend::LINES)
             .chain([&txt_legend::FIRST_LINE])
+            .chain(html_text::LEGEND)
+            .chain([
+                &html_text::NOTICE,
+                &html_text::ABOUT_BUNDLE,
+                &html_text::EMPTY,
+                &html_text::VERSIONS,
+            ])
         {
             assert!(!says_you(p), "{p}");
         }
