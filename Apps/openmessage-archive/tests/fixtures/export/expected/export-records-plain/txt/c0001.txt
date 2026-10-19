@@ -1,0 +1,77 @@
+OpenMessage Archive export — plaintext copy. See the end of this file for details.
+Conversation 1: No name recorded
+Addresses recorded in this conversation (includes people who left): 1
+Times: UTC (offsets shown on every line)
+
+==== 2026-01-13 ====
+[2026-01-13 12:27:40 +00:00] [item 1] synthetic-export-rec-1@example.invalid [iMessage]
+    Text:
+      ⟨one-time code hidden⟩
+[2026-01-13 12:28:40 +00:00] [item 2] synthetic-export-rec-1@example.invalid [iMessage]
+    Text:
+      SYNTH-EXP-SEG-INLINE ⟨Inline emoji image (not shown)⟩ unmatched ⟨Attachment placeholder not matched to a file⟩
+[2026-01-13 12:29:40 +00:00] [item 3] synthetic-export-rec-1@example.invalid [iMessage]
+    Transcription recorded on the phone:
+      SYNTH-EXP-REC-BODY-3 transcription
+[2026-01-13 12:30:40 +00:00] [item 4] [Direction not recorded] [iMessage]
+    Text:
+      SYNTH-EXP-REC-BODY-4
+[2026-01-13 12:31:40 +00:00] [item 5] synthetic-export-rec-1@example.invalid [iMessage] [Recorded with a code this app does not know (itemKind 99)]
+    Text:
+      SYNTH-EXP-REC-ITEM-77
+    Event: Recorded with a code this app does not know (itemKind 99)
+    Addresses recorded with it: synthetic-export-rec-1@example.invalid
+[2026-01-13 12:32:40 +00:00] [item 6] synthetic-export-rec-1@example.invalid [iMessage] [Unrecognised item]
+    No text is recorded for this message
+    Event: Unrecognised item
+    Addresses recorded with it: synthetic-export-rec-1@example.invalid
+[2026-01-13 12:33:40 +00:00] [item 7] synthetic-export-rec-1@example.invalid [iMessage]
+    Text:
+      SYNTH-EXP-REC-BODY-7
+[2026-01-13 12:34:40 +00:00] [item 8] synthetic-export-rec-1@example.invalid [iMessage] [App or link content (not decoded)]
+    Text:
+      SYNTH-EXP-REC-BODY-8
+[2026-01-13 12:35:40 +00:00] [item 9] synthetic-export-rec-1@example.invalid [iMessage]
+    Text:
+      SYNTH-EXP-ALT-FORMATTED
+    The two stored text fields differ; which one the phone showed is not known
+    The plain-text column holds different text:
+      SYNTH-EXP-ALT-PLAIN-COLUMN
+[2026-01-13 12:36:40 +00:00] [item 10] synthetic-export-rec-1@example.invalid [iMessage]
+    Text:
+      ⟨one-time code hidden⟩
+    The two stored text fields differ; which one the phone showed is not known
+    The other stored text is not included: it may hold a one-time code
+[2026-01-13 12:37:40 +00:00] [item 11] [Sent from the backed-up phone's account] [iMessage] [Unsent by the sender: part 1 of 3]
+    Text:
+      SYNTH-EXP-ALT-UNSENT-PART-0 SYNTH-EXP-ALT-UNSENT-PART-2
+    The two stored text fields differ; which one the phone showed is not known
+    The other stored text is not included: it may hold text from before an unsend or edit
+[2026-01-13 12:38:40 +00:00] [item 12] [Sent from the backed-up phone's account] [iMessage] [Edited: part 0] [Unsent by the sender: part 1 of 3]
+    Text:
+      SYNTH-EXP-REC-EDITED-PART-0 SYNTH-EXP-REC-EDITED-PART-2
+    Stored versions not included in this export: 1 captured, 1 phone edit entries
+[2026-01-13 12:39:40 +00:00] [item 13] [Sent from the backed-up phone's account] [planned send time] [iMessage] [schedule_type 2 recorded. For scheduled messages, the time shown is the planned send time]
+    Text:
+      SYNTH-EXP-REC-BODY-13
+[No usable time] [item 14] synthetic-export-rec-1@example.invalid [Recorded with a code this app does not know (timeUnit 9)] [iMessage]
+    Text:
+      SYNTH-EXP-REC-BODY-14
+[2026-01-13 12:40:40 +00:00] [item 15] synthetic-export-rec-1@example.invalid [iMessage]
+    Text:
+      SYNTH-EXP-REC-BODY-15
+[2026-01-13 12:42:40 +00:00] [item 16] synthetic-export-rec-1@example.invalid [iMessage] [Also in conversation 2]
+    Text:
+      SYNTH-EXP-REC-BODY-16 in two conversations
+
+==== End of conversation file ====
+Items: 16
+Reactions shown on the messages they react to: 0
+
+Legend:
+Each item starts at the beginning of a line with its recorded time in brackets and its number in this export, [item N], then the sender's address when one is recorded, then tags in brackets. Everything that belongs to an item is indented: labels by four spaces, recorded text by six. A line of message text can therefore never start a new item.
+Times are shown in the zone named at the top, with the offset in force on every line. [Undated] marks an item the archive sorts as undated; undated items come last and follow the order of the earliest import that recorded them, which is not a recorded fact. [No usable time] marks an item sorted among the dated ones whose own recorded time cannot be shown; a tag says why.
+[same recorded time; order not known]: the item has the same recorded time as its neighbour, so their order is the order the archive imported them in.
+Values and tags marked 'derived' were worked out by the archive from what the phone recorded, not recorded by the phone itself.
+Text in angle brackets ⟨…⟩ is written by the export, never by a message: ⟨U+200B⟩ stands for a character that does not show when printed or that controls the terminal or the text direction, ⟨U+005B⟩ and ⟨U+005D⟩ for square brackets in an address or a name, ⟨+N combining marks⟩ for marks left out of a very long run of accents, and ⟨one-time code hidden⟩ or ⟨Attachment N⟩ for what stood at that place in the text. A literal ⟨ in a message is itself written as ⟨U+27E8⟩.
+Line breaks inside a message become new indented lines. In addresses, names and other fields on a tag line, every line break and control is written as a code instead.

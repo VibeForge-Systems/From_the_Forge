@@ -324,11 +324,12 @@ fn the_blob_option_gives_every_attachment_a_verified_store_file() {
     let reader = lib.open_read(&id).expect("reader");
     for (att, blob) in rows {
         let mut got = Vec::new();
-        reader
+        let mut r = reader
             .open_blob(oma_archive::BlobId::new(blob))
-            .expect("open")
-            .read_to_end(&mut got)
-            .expect("read");
+            .expect("open");
+        assert_eq!(r.verified_digest(), None, "not verified before the end");
+        r.read_to_end(&mut got).expect("read");
+        assert!(r.verified_digest().is_some(), "verified at the end");
         assert_eq!(
             got,
             common::bulk::blob_bytes(att, 4_096),

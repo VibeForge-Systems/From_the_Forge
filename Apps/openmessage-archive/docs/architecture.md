@@ -80,7 +80,7 @@ flowchart LR
 | `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them. From M4: `copy_file_to` streams one listed file's plaintext into a caller's writer, hashing it, under `Limits::attachment_bytes` and per-file stamps | ✔ M2, M3, M4 (slice 4b) |
 | `crates/oma-messages` | Scans and probes the sms.db schema by capability, streams typed records (handles, chats, the joins, messages, attachments, Recently Deleted links) as `Col<T>` values, decodes `attributedBody` with a clean-room typedstream decoder, and produces the aggregate `ExtractionReport`. Persists nothing. From M4: stable `KnownColumn` codes, raw values of unreadable cells (`raw_issues`), `payload_data` on request, the raw association columns, key-only passes and the storage class of text cells | ✔ M3, M4 (slice 4c) |
 | `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep; slices 4e–4j the import; slice 4k the report-only verifier and `open_blob`. Used by the shell since slice 4l. From M5: the viewer reads (`view/`, `sortkey.rs`, phased budgets), search (`search/`) and media sniffing, checks and rendering (`media/`, `blobs::open_range`) | ✔ M4 (slices 4d–4k), M5 (slices 5a–5d) |
-| `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX. Tauri-free and SQLite-free: it reads only through `oma-archive`'s export APIs. Slice 6d ships the record core: the validated plan, the code registry, the column ledger, the canonical record and its mapping, export-local ordinals, the Rust word tables, time zones and local-day bounds, and the hidden-character markers. Slice 6e1 adds the files core: names, staging and publish, leftovers, the manifest and the writer trait. No writer or shell command yet | M6 slices 6d (record core), 6e1 (files core); writers 6e2–6g |
+| `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX. Tauri-free and SQLite-free: it reads only through `oma-archive`'s export APIs. Slice 6d ships the record core: the validated plan, the code registry, the column ledger, the canonical record and its mapping, export-local ordinals, the Rust word tables, time zones and local-day bounds, and the hidden-character markers. Slice 6e1 adds the files core: names, staging and publish, leftovers, the manifest and the writer trait. Slice 6e2 adds the attachment copy, the TXT writer and the pipeline (`pipeline::run`). No shell command yet | M6 slices 6d (record core), 6e1 (files core), 6e2 (attachments, TXT, pipeline); writers 6f–6j |
 | `crates/oma-device` | Detects devices and creates backups behind a platform trait | planned, M7 |
 
 Each library crate can be built and tested without Tauri. The shell only
@@ -3329,7 +3329,7 @@ holds the rules every writer will share. It reads the archive only through
   file carries names only; CSV, XLSX and TXT bundles copy only when
   ticked. `check_confirmation` is the D147 comparison of the job's
   pre-count with the confirmed N. "Save a copy" of one attachment is not
-  a plan; it arrives with the copy in slice 6e.
+  a plan; it arrives with the shell's commands in slice 6h.
 - **The code registry** (`codes.rs`, spec §5.1): every enum a record
   carries travels as `{token, code}`. Archive codes keep the stored
   numbers; export codes (sender reasons, chip states, cards, segment
@@ -3371,7 +3371,7 @@ holds the rules every writer will share. It reads the archive only through
   split into replies in the export and elsewhere through the new
   `ExportSnapshot::reply_ids`; `inConversation` facts use the new
   `ExportSnapshot::chats_of`. Whether a file is copied is the caller's
-  (`AttachmentFiles`, slice 6e); the mapper alone decides `notRequested`,
+  (`AttachmentFiles`, slice 6e2's `attach.rs`); the mapper alone decides `notRequested`,
   `withheldUnsent` and `noStoredFile`.
 - **Identifiers** (`ids.rs`, D141, owner Q5 **lean, awaiting
   confirmation**): every id is an export-local ordinal by default
@@ -3529,6 +3529,159 @@ Windows was not run: the Windows half of `stage.rs` was only compiled
 (and linted) for `x86_64-pc-windows-msvc` through a scratch harness that
 stubs the crate's other modules; the whole crate could not be compiled
 for that target here (the bundled SQLite needs MSVC).
+
+### Attachment copies, the TXT writer and the pipeline (M6 slice 6e2)
+
+Slice 6e2 adds the attachment copy (`attach.rs`, spec §6.1, §6.3, §6.4,
+owner Q3, D134), the TXT writer (`writer/txt.rs`, §5.4, D138) and the
+pipeline that drives an export from the pre-count to the publish
+(`pipeline.rs`, §4.3, the spec's `Exporter::run`).
+
+- **Copy with verification.** The bytes come only from
+  `ExportSnapshot::open_blob`'s `BlobReader` and go straight to the
+  file's final name inside staging (`Staging::create_verified`), in
+  1 MiB chunks with the cancel token checked per chunk. The first 4 KiB of
+  that stream are read first and sniffed (`oma_archive::media::sniff`),
+  because the name's extension rule needs the kind; the file is created
+  after that and the stream continues. **One hash:** the reader verifies
+  length and digest at its end, and the new
+  `BlobReader::verified_digest` hands the verified digest to
+  `Staging::close_verified`, which records it for `manifest.json` and
+  `SHA256SUMS` (a copy of another length is refused); the copy is never
+  hashed or read again. No `verify_blob` and second open.
+- **Exclusions.** A store file that is missing, unreadable, of another
+  length or digest is `checksumMismatch` (the partial copy is removed;
+  a copy that cannot be removed fails the export). On FAT12/16/32
+  (detected on Linux; `VolumeRule::for_kind`) a blob over 4 GiB − 1 is
+  `tooLargeForVolume` before any byte is read; exFAT is never limited; on
+  Windows a write refused at the boundary (`FileTooLarge`, error 87, or a
+  space error after 4 GiB − 1 bytes) is classified so instead. Any other
+  write error is `writeFailed` and the export carries on; a full volume
+  stops it (`NoSpace`). A blob whose copy failed fails the same way for
+  every record of it, without a second attempt.
+- **Deduplication.** One file per `BlobId` per export; later records
+  are `deduplicated`, point at the same file, and the file carries the
+  first record's name. The mapper checks that the file ordinal the copy
+  named the file with is the one it assigns (`RowCountMismatch`
+  otherwise).
+- **Defusing (owner Q3b).** `naming::attachment_name` with the sniffed
+  kind: `.blocked` unless the extension is on `naming::PASSIVE` for that
+  kind, or the confirmed "Keep original file extensions" is on. Text
+  files have no allowed extension (the spec's table has none), so
+  `notes.txt` is copied as `notes.txt.blocked`.
+- **Mark of the Web (owner Q3c).** After each copy closes, on Windows
+  only, `Staging::write_mark_of_the_web` creates `<file>:Zone.Identifier`
+  (`[ZoneTransfer]`, `ZoneId=3`; the stream name is built by
+  `naming::zone_identifier`, the one path with a `:`). A failure is
+  counted (`motwNotWritten`) and never fails the export; nothing is
+  written on Linux. Whether Windows honours the mark (SmartScreen, Office
+  Protected View) is **UNVERIFIED**, and the Windows code was only
+  compiled here, never run.
+- **The record** gains, per file, its bundle `path` (content, since its
+  name part comes from `transfer_name`) and its `sniffed` kind (a new
+  `sniffedKind` registry with the viewer's tokens and sentences;
+  `null` when the export did not read the file, as in names-only mode).
+  `TimeRecord` carries the instant for the human-readable writers
+  (`utc_ns`, not serialised).
+- **The TXT writer** writes one file per conversation file
+  (`txt/c0001.txt`, `txt/no-conversation.txt`) or the single file, UTF-8
+  without a BOM, LF or CRLF. The header block names the conversation (or
+  "No conversation"), its participant count, its other recorded names and
+  the zone. Each item line starts at column 0:
+  `[time] [item N] <sender address> [tag] …`, with `[Undated]` for an
+  item the archive sorts as undated (its `undated` label; the undated
+  section comes last) and `[No usable time]` for one sorted among the
+  dated items whose own time cannot be shown (an unknown unit). Labels are
+  indented by four spaces, recorded text by six, so no message line can
+  start an item. Header fields (the sender, the conversation name,
+  attachment names, every recorded value on a tag or label line) are
+  marked with `MarkPolicy::text_header`, and their `[` and `]` are
+  written `⟨U+005B⟩`/`⟨U+005D⟩`, so a recorded address cannot forge a tag.
+  Recorded text is split at CRLF, LF, CR, U+2028, U+2029 and U+0085 into
+  six-space lines, each marked with `MarkPolicy::text_body` (controls
+  always, hidden characters with the option, a literal `⟨` always,
+  combining runs over 16). Segment kinds stay visible: `⟨one-time code
+  hidden⟩`, `⟨Attachment N⟩` and the M5 placeholder sentences; a
+  transcription is written under "Transcription recorded on the phone".
+  Edits and unsends are tags (`[Edited: part 1]`, `[Unsent by the sender:
+  part 2 of 3]`); attachments list their outcome, path, sniffed kind and
+  declared type; chips say "derived"; stored versions (history on) follow
+  their item. Folded reaction rows are not items; each file's footer
+  counts its items and folded rows, then the legend
+  (`words::txt_legend`); a single file then carries "About this export",
+  the manifest's fields flattened to `key: value` lines (a list over 16
+  entries, such as the zone's transitions, by its length).
+- **The pipeline** (`pipeline::run`) runs inside the job's export
+  snapshot: the exact pre-count and `check_confirmation` (D147) before
+  anything is written; the scope index and the conversation files (those
+  with a timeline row in scope; one conversation is written even when
+  empty); staging; per file, byte-sized batches assembled under the
+  plan's reveal and depth, each message mapped with its attachments
+  copied, every record to every writer through `FanOut`, handles before
+  the first item that names them (a new `ExportWriter::handle`), stored
+  versions after their item (`ExportWriter::version`; once per message,
+  under its first file), copied files flushed once per batch; ties
+  computed across batch boundaries by holding each batch's last item for
+  the next; then the writers' `finish`, the counts checked against the
+  pre-count, the provenance, and the no-replace publish. Any error
+  removes the staging. `pipeline::scope_ids` turns the plan's scope into
+  ids (local dates through the zone table); a search scope's ids come
+  from the shell.
+- **A crash point** in the middle of an attachment copy (after its first
+  bytes) joins `FaultPoint::ALL`; its kill runs the whole pipeline on an
+  imported archive.
+
+**Deviations from the spec**, all recorded here:
+
+- The body is written whole, not per part: the record's segments carry
+  no part index, so "part 1: … part 2: ⟨unsent by the sender⟩" cannot be
+  rendered; the parts are named in the tags.
+- `[` and `]` in TXT header fields are escaped (an addition to §5.4).
+- The spec's `[Recently Deleted in the backup of <date>]` is written as
+  the viewer's sentence without the date: the record names the session by
+  ordinal only, and `importSessions` (the session facts) is not filled
+  yet.
+- The "events" option off is refused (`OptionDoesNotApply`) until the
+  scope index can leave events out without a gap in the ordinals (6h);
+  the default is on.
+- Previews from the copy stream (§6.1) arrive with the preview pool (6g,
+  6h); "Save a copy" of one attachment (§6.6) with the shell (6h).
+- The goldens live in `tests/fixtures/export/expected/<entry>/` as
+  §14.3 says, but are written by `crates/oma-export/tests/golden_txt.rs`
+  (`OMA_REGEN_GOLDENS=1`) and pinned by `expected/SHA256SUMS`, whose hash
+  that test pins, not by the generator's `EXPECTED.SHA256SUMS`; files over
+  64 KiB (the hostile catalogue's 1 MiB body) are pinned by digest only.
+  They are names-only exports, so no copied file's budgeted name depends
+  on the destination's path.
+
+**Tests:** `crates/oma-export/tests/{txt,attach,golden_txt,crash}.rs`, a
+strict Rust parser of the TXT grammar (`tests/txtgrammar`), and the
+independent oracle `scripts/oracles/txt_grammar.py`. Every entry and
+scenario of both catalogues exports to TXT that follows the grammar, with
+footer counts equal to the parsed items and the manifest; header forgery
+through the conversation name and the sender (U+2028, U+0085, U+2029,
+U+202E, LF) stays on one line as markers; every hostile body unmarks back
+to its text; no masking sentinel appears in any byte unless revealed, and
+each appears with the reveal; the options change line ends, the clock and
+markers only; a single file carries its About; a dated range writes only
+its days; a cancel leaves nothing. The file cases: byte-identical copies
+whose manifest and `SHA256SUMS` digest is the stored one; the corrupted
+store file excluded with no file; the shared blob written once; every
+name case (case and NFC/NFD collisions, reserved names, over 255 bytes,
+trailing dots and spaces, invisible characters, the U+202E spoof,
+traversal, separators, unknown and mismatched types, empty and NULL
+names); the opt-out; the reveal copying the unsent part's file; a volume
+limit; a cancel mid-copy; and, on Linux, the staging folder swapped for a
+link mid-copy (the victim stays empty, the publish fails with
+`DestinationChanged`). The goldens compare 21 exports byte for byte. The
+oracle, run here on Linux (Python 3.13.16), checked 21 exports with 9,777
+checks (433 item texts compared with `display_text`), 0 failed; turning
+off the header escaping made it and four Rust tests fail. The attachment
+throughput test is ignored and was run once at a small size
+(`docs/development.md`). The Windows halves (`write_mark_of_the_web`,
+the Windows boundary classification) were compiled and linted for
+`x86_64-pc-windows-msvc` through the scratch harness only; the Mark of
+the Web test runs only on CI's Windows job.
 
 ### Status and qualifiers (D43)
 
@@ -3746,11 +3899,11 @@ owner: its lean is applied and awaits confirmation.
 | D137 | Search scope (slice 6b2) | The live set by default; "all matches" re-runs in the job with a cap of 1,000,000 and honest `capped` and coverage booleans; hits matched only in hidden content are excluded unless revealed, re-checked against the masked text the export writes; a multi-conversation hit is written under its lowest conversation | Always the shown 10,000; exporting membership as is | Faithful to what the user saw, with no disclosure through membership |
 | D128, D145 | Time zones and the window (slice 6d) | The webview's offset table, validated in Rust; a window clamped to 1900 … now + 366 days; outliers written in UTC and counted; a stale table refused; local-day bounds and formatting in Rust's own civil arithmetic | jiff with a bundled tzdb | One zone source (D104); nothing approximated |
 | D129 | Words (slice 6d) | Exhaustive Rust tables; `export-words.json` generated and checked against `viewerText.ts`; third-party wording | Codes only | Readable outputs without drift |
-| D138 | Readability safety, the classifier and markers (slice 6d; the writers apply it from 6e) | D121's rule inverted, checked against the shared vectors; the reserved `⟨` marker form; header fields always marked; combining runs limited in TXT and PDF | Raw everywhere | Prevents marker forgery, header forgery and bidi spoofing |
+| D138 | Readability safety, the classifier and markers (slice 6d; the TXT writer applies it from 6e2, with `[` and `]` also escaped in its header fields) | D121's rule inverted, checked against the shared vectors; the reserved `⟨` marker form; header fields always marked; combining runs limited in TXT and PDF | Raw everywhere | Prevents marker forgery, header forgery and bidi spoofing |
 | D141 | Identifiers (**owner Q5: lean applied, awaiting confirmation**; slice 6d) | Export-local ordinals by default; archive ids as decimal strings and source identifiers only under an opt-in for JSON, CSV and XLSX, off | Archive ids by default | No archive-size disclosure by default; joining exports is possible on request |
 | D142 | Record fidelity and the ledger (slice 6d) | Dedicated record structs; segments kept; unknown codes and states kept; tagged absence; every v1 column given a disposition, exported columns checked at their paths; `exclusions` generated; never less than the viewer, with the documented exceptions; `extras == false` refused | Flattened bodies; hand-picked fields | Rule 3 holds by construction, and drift fails a test |
 | D126 | Packaging and placement (slices 6d, 6e1) | A bundle for multi-file, CSV, attachments or multi-conversation exports, a single file otherwise; staging inside the destination; a no-replace rename publishes (` (2)` … ` (99)`); a single file replaces only a regular file, only after the app's confirmation | Always a folder; trusting native overwrite prompts | Atomic per output, never a silent overwrite, nothing outside the destination |
-| D134 | Attachment names (**owner-confirmed, Q3b**; slice 6e1 names, 6e2 the copy) | Ordinal-prefixed, budgeted, sharded names; the passive allowlist with sniff agreement, else `.blocked`; the confirmed opt-out | An extension blocklist | Safe names by construction; no completeness claimed, so Mark of the Web follows (Q3c, 6e2) |
+| D134 | Attachments (**owner-confirmed, Q3a–Q3c**; slice 6e1 names, 6e2 the copy) | Ordinal-prefixed, budgeted, sharded names; the passive allowlist with sniff agreement, else `.blocked`; the confirmed opt-out; copies through `BlobReader` to final names inside staging with one hash (the reader's verified digest); dedupe per blob; Mark of the Web (`ZoneId=3`) on Windows, its effect **UNVERIFIED**; exclusions counted; the 4 GiB rule for FAT12/16/32 only; Q3a's defaults in `plan::default_attachments` | An extension blocklist; `verify_blob` then copy | Safe names by construction; no check-then-use gap; no completeness claimed, so Mark of the Web follows |
 | D135 | Provenance (slice 6e1) | README, then manifest, then `SHA256SUMS`; counts with the four identities; never the query, the excluded-hit count, device facts, the archive id or label, or paths | An opt-in for the query | Never reveal more than the export contains |
 | D140 | Permissions (slice 6e1) | 0700 folders and 0600 files on Linux (`mkdirat`, `openat` modes); the destination's ACL on Windows | umask | Private by default |
 | D143 | Destination integrity (slice 6e1) | Canonical destination; on Linux every write relative to `O_DIRECTORY\|O_NOFOLLOW` handles and a `(dev, ino)` check before publish; the Windows residual disclosed | String paths | Closes the staging-swap path into a backup (I1) |

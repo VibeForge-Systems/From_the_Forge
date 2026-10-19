@@ -366,7 +366,8 @@ fn offset_text(offset_seconds: i32, colon: bool) -> String {
     }
 }
 
-fn year_text(year: i64) -> String {
+/// A year as the export writes it: four digits, a sign outside 0–9999.
+pub fn year_text(year: i64) -> String {
     if (0..=9_999).contains(&year) {
         format!("{year:04}")
     } else if year < 0 {

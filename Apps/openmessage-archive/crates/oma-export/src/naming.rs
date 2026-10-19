@@ -436,6 +436,14 @@ pub fn child(parent: &Path, name: &str) -> PathBuf {
     parent.join(name)
 }
 
+/// `<file>:Zone.Identifier`: the NTFS stream a Mark of the Web goes into
+/// (spec §6.4). The one path with a `:`, built only here.
+pub fn zone_identifier(file: &Path) -> PathBuf {
+    let mut s = file.as_os_str().to_owned();
+    s.push(ZONE_IDENTIFIER);
+    PathBuf::from(s)
+}
+
 // ---------------------------------------------------------------------------
 // Attachment names (§6.2, §6.4)
 // ---------------------------------------------------------------------------
@@ -760,6 +768,20 @@ mod tests {
         assert_eq!(
             p.under(root),
             root.join("csv").join("attachment_observations.csv")
+        );
+    }
+
+    #[test]
+    fn the_mark_of_the_web_stream_is_built_here_only() {
+        let f = Path::new("x").join("000001-a.jpg");
+        let z = zone_identifier(&f);
+        assert_eq!(
+            z.as_os_str().to_string_lossy(),
+            format!("{}:Zone.Identifier", f.display())
+        );
+        assert_eq!(
+            crate::stage::MARK_OF_THE_WEB,
+            b"[ZoneTransfer]\r\nZoneId=3\r\n"
         );
     }
 

@@ -518,6 +518,15 @@ impl BlobReader {
         self.len == 0
     }
 
+    /// The digest every byte read so far was checked against, once the
+    /// reader has returned `Ok(0)` with the length and the digest both
+    /// matching; `None` before that, or after a mismatch. An export copy
+    /// records this instead of hashing the copy a second time (M6 spec
+    /// §6.1, "one hash").
+    pub fn verified_digest(&self) -> Option<[u8; 32]> {
+        (self.end == Some(true)).then_some(self.expected)
+    }
+
     /// The identity of the open file (M5 §5.4).
     pub(crate) fn identity(&self) -> io::Result<FileIdentity> {
         Ok(FileIdentity::of(&self.file.get_ref().metadata()?))

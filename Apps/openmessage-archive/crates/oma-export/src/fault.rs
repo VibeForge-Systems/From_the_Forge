@@ -29,11 +29,14 @@ pub enum FaultPoint {
     /// A single file's `.partial-file` is written and synced; its
     /// placement is next.
     SingleFileStaged,
+    /// An attachment's copy has its first bytes in its final name inside
+    /// staging; the rest of the stream is next.
+    MidAttachmentCopy,
 }
 
 impl FaultPoint {
     /// Every point, in a fixed order.
-    pub const ALL: [FaultPoint; 7] = [
+    pub const ALL: [FaultPoint; 8] = [
         FaultPoint::StagingCreated,
         FaultPoint::FirstFileStaged,
         FaultPoint::BeforeReadme,
@@ -41,6 +44,7 @@ impl FaultPoint {
         FaultPoint::PublishedBeforeDirFlush,
         FaultPoint::PublishedBeforeMarkerRemoval,
         FaultPoint::SingleFileStaged,
+        FaultPoint::MidAttachmentCopy,
     ];
 
     /// The point's name in `OMA_EXPORT_TEST_FAULT` and in `FAULT` lines.
@@ -53,6 +57,7 @@ impl FaultPoint {
             FaultPoint::PublishedBeforeDirFlush => "published-before-dir-flush",
             FaultPoint::PublishedBeforeMarkerRemoval => "published-before-marker-removal",
             FaultPoint::SingleFileStaged => "single-file-staged",
+            FaultPoint::MidAttachmentCopy => "mid-attachment-copy",
         }
     }
 

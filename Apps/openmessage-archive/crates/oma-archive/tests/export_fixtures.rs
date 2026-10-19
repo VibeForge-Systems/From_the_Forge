@@ -108,6 +108,10 @@ fn every_file_is_pinned_by_one_of_the_two_sums() {
     assert!(expected.iter().all(|r| is_expectation(r)));
     let mut all = BTreeSet::new();
     walk(&export_root(), &export_root(), &mut all);
+    // `expected/` holds the writers' golden outputs (M6 spec §14.3),
+    // written by oma-export's golden tests and pinned there by
+    // `expected/SHA256SUMS`, not by the generator's two sums.
+    all.retain(|r| !r.starts_with("expected/"));
     for extra in ["SHA256SUMS", "EXPECTED.SHA256SUMS", "README.md"] {
         assert!(all.remove(extra), "{extra} missing");
     }
@@ -544,6 +548,7 @@ fn the_corrupted_store_file_fails_its_rehash() {
                 reader.read_to_end(&mut sink).is_err(),
                 "{what}: a corrupted store file read back cleanly"
             );
+            assert_eq!(reader.verified_digest(), None, "{what}: no verified digest");
             corrupted += 1;
         }
     }

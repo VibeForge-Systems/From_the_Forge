@@ -7,15 +7,23 @@
 //! formats render the same records, and enforces the order:
 //!
 //! ```text
-//! begin  (begin_conversation  item*  end_conversation)*  finish
+//! begin  handle*  (begin_conversation  (handle* item version*)*  end_conversation)*  finish
 //! ```
+//!
+//! A handle is handed over once, when the mapping first references it
+//! (the conversation records' participants first, then senders and
+//! reaction rows as items arrive), always before the first item that
+//! names it, so a human-readable writer can print the address. An item's
+//! stored body versions (history included) follow it.
 //!
 //! It checks the cancel token before every item, counts the items and
 //! folded reaction rows of each conversation file, and refuses a writer
 //! whose report disagrees with what it was given (`RowCountMismatch`, the
 //! manifest's "counts equal the writer reports"). The writers themselves
-//! arrive with slices 6e2 (TXT), 6f (JSON, CSV), 6g (HTML) and 6i/6j
-//! (XLSX, PDF through the export-render helper).
+//! are [`txt`] (slice 6e2), then JSON and CSV (6f), HTML (6g), and XLSX
+//! and PDF through the export-render helper (6i, 6j).
+
+pub mod txt;
 
 use std::collections::BTreeMap;
 
@@ -26,7 +34,7 @@ use crate::manifest::ManifestBody;
 use crate::map::ExportZone;
 use crate::naming::EntryId;
 use crate::plan::{ExportPlan, Format};
-use crate::record::{ConversationRecord, ItemRecord};
+use crate::record::{ConversationRecord, HandleRecord, ItemRecord, VersionRecord};
 use crate::stage::Staging;
 
 /// What every writer knows before its first record.
@@ -100,6 +108,19 @@ pub trait ExportWriter: Send {
         out: &mut Staging,
     ) -> Result<(), ExportError>;
     fn item(&mut self, it: &ItemRecord, out: &mut Staging) -> Result<(), ExportError>;
+    /// A handle, before the first item that references it. Writers that
+    /// collect handles (single-file JSON) or print addresses (TXT, HTML,
+    /// PDF) keep it; the default ignores it.
+    fn handle(&mut self, h: &HandleRecord, out: &mut Staging) -> Result<(), ExportError> {
+        let _ = (h, out);
+        Ok(())
+    }
+    /// One stored body version of the item just written (history
+    /// included). The default ignores it.
+    fn version(&mut self, v: &VersionRecord, out: &mut Staging) -> Result<(), ExportError> {
+        let _ = (v, out);
+        Ok(())
+    }
     fn end_conversation(
         &mut self,
         totals: &ConversationTotals,
@@ -199,6 +220,28 @@ impl FanOut {
         self.phase = Phase::InFile;
         self.file = ConversationTotals::default();
         self.totals.conversation_files += 1;
+        Ok(())
+    }
+
+    /// Hand `h` to every writer (after `begin`, before `finish`).
+    pub fn handle(&mut self, h: &HandleRecord, out: &mut Staging) -> Result<(), ExportError> {
+        if self.phase == Phase::New {
+            return Err(order());
+        }
+        for w in &mut self.writers {
+            w.handle(h, out)?;
+        }
+        Ok(())
+    }
+
+    /// Hand a body version of the last item to every writer.
+    pub fn version(&mut self, v: &VersionRecord, out: &mut Staging) -> Result<(), ExportError> {
+        if self.phase != Phase::InFile {
+            return Err(order());
+        }
+        for w in &mut self.writers {
+            w.version(v, out)?;
+        }
         Ok(())
     }
 

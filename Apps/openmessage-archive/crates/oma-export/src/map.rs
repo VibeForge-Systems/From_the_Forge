@@ -43,8 +43,8 @@ use crate::codes::{
     AltTextSourceCode, AltTextWithheldCode, AssocVisibilityCode, AttachmentAccessCode,
     AttachmentOutcome, CardStateCode, ChipSenderCode, ChipStateCode, Code, Direction,
     EditTextsOutcomeCode, FormattingCode, HistoryColumnCode, MaskKindCode, MessageLabelCode,
-    NoTextReason, ReactionKindCode, ReplyResolution, SegmentKindCode, SenderReasonCode, Style,
-    WithheldReasonCode,
+    NoTextReason, ReactionKindCode, ReplyResolution, SegmentKindCode, SenderReasonCode,
+    SniffedKindCode, Style, WithheldReasonCode,
 };
 use crate::error::{ExportError, LimitKind};
 use crate::ids::{IdentifierMode, MessageRef, Ordinal, Ordinals};
@@ -95,14 +95,43 @@ pub enum FileDecision {
     WriteFailed,
 }
 
+/// What happened to one attachment's file: the decision, and for a file
+/// that was written, the file ordinal it was written under (the mapper
+/// checks it against its own first-reference ordinal), its bundle path
+/// and what its bytes were sniffed as.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileOutcome {
+    pub decision: FileDecision,
+    /// The file ordinal, for `Copied`, `Deduplicated` and
+    /// `BlockedExtension`.
+    pub file: Option<Ordinal>,
+    /// `attachments/<shard>/<name>`, `/`-separated (content).
+    pub path: Option<String>,
+    /// What the copy stream's first bytes were sniffed as; `None` when the
+    /// file was not read (or a kind with no code).
+    pub sniffed: Option<oma_archive::SniffedKind>,
+}
+
+impl FileOutcome {
+    /// An outcome with no file written and nothing read.
+    pub fn without_file(decision: FileDecision) -> FileOutcome {
+        FileOutcome {
+            decision,
+            file: None,
+            path: None,
+            sniffed: None,
+        }
+    }
+}
+
 /// Decides, for an attachment with a stored file the export may copy,
-/// what happens to the file.
+/// what happens to the file (the copy itself is `attach.rs`).
 pub trait AttachmentFiles {
     fn decide(
         &mut self,
         attachment: &ExportAttachment,
         blob: BlobId,
-    ) -> Result<FileDecision, ExportError>;
+    ) -> Result<FileOutcome, ExportError>;
 }
 
 /// Counts the mapper keeps for the manifest (spec §7.1); content-free.
@@ -387,6 +416,7 @@ impl Mapper {
             outside_zone_window: outside,
             before2007: t.utc_ns.is_some_and(|ns| ns < FLOOR_2007_NS),
             planned,
+            utc_ns: t.utc_ns,
         })
     }
 
@@ -1164,53 +1194,69 @@ impl Mapper {
                 .entry(key.to_owned())
                 .or_insert(0) += 1;
         };
-        let none = |o: AttachmentOutcome| FileRecord {
+        let none = |o: AttachmentOutcome, sniffed: Option<Code>| FileRecord {
             outcome: Code::of(o),
             file: None,
+            path: None,
+            sniffed,
         };
         if x.access.is_withheld() {
             excluded(&mut self.counts, "withheldUnsent");
-            return Ok(none(AttachmentOutcome::WithheldUnsent));
+            return Ok(none(AttachmentOutcome::WithheldUnsent, None));
         }
         let Some(blob) = x.facts.blob.map(|b| b.id) else {
             excluded(&mut self.counts, card.state.token);
-            return Ok(none(AttachmentOutcome::NoStoredFile));
+            return Ok(none(AttachmentOutcome::NoStoredFile, None));
         };
         if self.options.names_only {
             self.counts.attachments_not_requested += 1;
-            return Ok(none(AttachmentOutcome::NotRequested));
+            return Ok(none(AttachmentOutcome::NotRequested, None));
         }
-        let decision = files.decide(x, blob)?;
-        let written = |outcome, ord: &mut Ordinals| FileRecord {
-            outcome: Code::of(outcome),
-            file: Some(ord.files.ordinal(blob)),
+        let got = files.decide(x, blob)?;
+        let sniffed = match got.sniffed {
+            Some(k) => Some(Code::of(SniffedKindCode::of(k).ok_or_else(unmapped)?)),
+            None => None,
         };
-        Ok(match decision {
+        let written = |outcome, ord: &mut Ordinals| -> Result<FileRecord, ExportError> {
+            let n = ord.files.ordinal(blob);
+            // The copy named the file by the ordinal it expected; the
+            // record must carry the same one.
+            if got.file != Some(n) || got.path.is_none() {
+                return Err(limit(LimitKind::RowCountMismatch));
+            }
+            Ok(FileRecord {
+                outcome: Code::of(outcome),
+                file: Some(n),
+                path: got.path.clone().map(Content::new),
+                sniffed,
+            })
+        };
+        Ok(match got.decision {
             FileDecision::Copied => {
                 self.counts.attachments_with_file += 1;
-                written(AttachmentOutcome::Copied, &mut self.ordinals)
+                written(AttachmentOutcome::Copied, &mut self.ordinals)?
             }
             FileDecision::Deduplicated => {
                 self.counts.attachments_with_file += 1;
                 self.counts.files_deduplicated += 1;
-                written(AttachmentOutcome::Deduplicated, &mut self.ordinals)
+                written(AttachmentOutcome::Deduplicated, &mut self.ordinals)?
             }
             FileDecision::BlockedExtension => {
                 self.counts.attachments_with_file += 1;
                 self.counts.files_blocked += 1;
-                written(AttachmentOutcome::BlockedExtension, &mut self.ordinals)
+                written(AttachmentOutcome::BlockedExtension, &mut self.ordinals)?
             }
             FileDecision::ChecksumMismatch => {
                 excluded(&mut self.counts, "checksumMismatch");
-                none(AttachmentOutcome::ChecksumMismatch)
+                none(AttachmentOutcome::ChecksumMismatch, sniffed)
             }
             FileDecision::TooLargeForVolume => {
                 excluded(&mut self.counts, "tooLargeForVolume");
-                none(AttachmentOutcome::TooLargeForVolume)
+                none(AttachmentOutcome::TooLargeForVolume, sniffed)
             }
             FileDecision::WriteFailed => {
                 excluded(&mut self.counts, "writeFailed");
-                none(AttachmentOutcome::WriteFailed)
+                none(AttachmentOutcome::WriteFailed, sniffed)
             }
         })
     }

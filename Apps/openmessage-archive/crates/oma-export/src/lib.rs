@@ -44,9 +44,18 @@
 //!   every format with the same records;
 //! - [`fault`]: crash points for the kill tests.
 //!
-//! The attachment copy, the TXT writer and the job's pipeline follow in
-//! slice 6e2, the other writers in 6f to 6j. Nothing here logs; errors
-//! carry kinds only (I6).
+//! Slice 6e2, attachments, the first writer and the pipeline:
+//!
+//! - [`attach`]: the attachment copy through the archive's `BlobReader`
+//!   to final names inside staging, hashed once, deduplicated per blob,
+//!   defused by the passive allowlist (owner Q3b), with a Mark of the Web
+//!   on Windows (Q3c) and the FAT 4 GiB rule;
+//! - [`writer::txt`]: the TXT writer and its line grammar (D138);
+//! - [`pipeline`]: one export from the pre-count to the publish
+//!   (`pipeline::run`, the spec's `Exporter::run`).
+//!
+//! The other writers follow in 6f to 6j. Nothing here logs; errors carry
+//! kinds only (I6).
 #![cfg_attr(
     not(test),
     deny(
@@ -57,6 +66,7 @@
     )
 )]
 
+pub mod attach;
 pub mod codes;
 pub mod error;
 pub mod fault;
@@ -67,6 +77,7 @@ pub mod ledger;
 pub mod manifest;
 pub mod map;
 pub mod naming;
+pub mod pipeline;
 pub mod plan;
 pub mod record;
 pub mod stage;
@@ -80,7 +91,8 @@ pub use error::{DateRangeRefusal, ExportError, LimitKind, PlanRefusal, ZoneTable
 pub use ids::{IdentifierMode, Ordinal, Ordinals};
 pub use manifest::{write_provenance, ManifestBody, ManifestCounts, ManifestInput};
 pub use map::{
-    order_ties, AttachmentFiles, ExportZone, FileDecision, Mapper, Placement, RecordCounts,
+    order_ties, AttachmentFiles, ExportZone, FileDecision, FileOutcome, Mapper, Placement,
+    RecordCounts,
 };
 pub use naming::{BundlePath, EntryId, EntryKind, EntryName, TargetName};
 pub use plan::{

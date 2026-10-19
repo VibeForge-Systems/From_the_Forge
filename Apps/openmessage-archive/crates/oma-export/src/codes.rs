@@ -639,6 +639,73 @@ export_registry! {
     }
 }
 
+export_registry! {
+    /// What a copied file's bytes were sniffed as (`oma_archive::sniff`,
+    /// the first 4 KiB of the copy stream): the viewer's `SniffedKindDto`
+    /// tokens. Never the declared type.
+    SniffedKindCode, SNIFFED_KIND, "sniffedKind" {
+        Gif = 1 => "gif",
+        Webp = 2 => "webp",
+        Png = 3 => "png",
+        Jpeg = 4 => "jpeg",
+        Bmp = 5 => "bmp",
+        Ico = 6 => "ico",
+        QuickTime = 7 => "quickTime",
+        M4a = 8 => "m4a",
+        M4v = 9 => "m4v",
+        Heif = 10 => "heif",
+        Mp4 = 11 => "mp4",
+        IsoBmffOther = 12 => "isoBmffOther",
+        Webm = 13 => "webm",
+        Wav = 14 => "wav",
+        Aiff = 15 => "aiff",
+        Ogg = 16 => "ogg",
+        Mp3 = 17 => "mp3",
+        Caf = 18 => "caf",
+        Pdf = 19 => "pdf",
+        Xml = 20 => "xml",
+        Html = 21 => "html",
+        Vcard = 22 => "vcard",
+        Text = 23 => "text",
+        Unknown = 24 => "unknown",
+    }
+}
+
+impl SniffedKindCode {
+    /// The code of a sniffed kind; `None` for a kind this build has no
+    /// code for (the archive's enum is `#[non_exhaustive]`).
+    pub fn of(k: oma_archive::SniffedKind) -> Option<SniffedKindCode> {
+        use oma_archive::SniffedKind as K;
+        Some(match k {
+            K::Gif => SniffedKindCode::Gif,
+            K::Webp => SniffedKindCode::Webp,
+            K::Png => SniffedKindCode::Png,
+            K::Jpeg => SniffedKindCode::Jpeg,
+            K::Bmp => SniffedKindCode::Bmp,
+            K::Ico => SniffedKindCode::Ico,
+            K::QuickTime => SniffedKindCode::QuickTime,
+            K::M4a => SniffedKindCode::M4a,
+            K::M4v => SniffedKindCode::M4v,
+            K::Heif => SniffedKindCode::Heif,
+            K::Mp4 => SniffedKindCode::Mp4,
+            K::IsoBmffOther => SniffedKindCode::IsoBmffOther,
+            K::Webm => SniffedKindCode::Webm,
+            K::Wav => SniffedKindCode::Wav,
+            K::Aiff => SniffedKindCode::Aiff,
+            K::Ogg => SniffedKindCode::Ogg,
+            K::Mp3 => SniffedKindCode::Mp3,
+            K::Caf => SniffedKindCode::Caf,
+            K::Pdf => SniffedKindCode::Pdf,
+            K::Xml => SniffedKindCode::Xml,
+            K::Html => SniffedKindCode::Html,
+            K::Vcard => SniffedKindCode::Vcard,
+            K::Text => SniffedKindCode::Text,
+            K::Unknown => SniffedKindCode::Unknown,
+            _ => return None,
+        })
+    }
+}
+
 /// Every registry table, in a fixed order (pinned by `tests/codes.rs`).
 pub static REGISTRIES: &[&Registry] = &[
     &VALUE_STATE,
@@ -680,6 +747,7 @@ pub static REGISTRIES: &[&Registry] = &[
     &ALT_TEXT_SOURCE,
     &ALT_TEXT_WITHHELD,
     &EXCLUSION_REASON,
+    &SNIFFED_KIND,
 ];
 
 /// The registry as text, one `name<TAB>source<TAB>code<TAB>token` line per
@@ -755,6 +823,17 @@ mod tests {
         check(BlobVerifyState::ALL);
         check(Direction::ALL);
         check(ExclusionReason::ALL);
+        check(SniffedKindCode::ALL);
+        // Every kind the archive sniffs has a code, and no two share one.
+        let codes: BTreeSet<i64> = oma_archive::SniffedKind::ALL
+            .iter()
+            .map(|k| {
+                SniffedKindCode::of(*k)
+                    .map(ExportCode::export_code)
+                    .expect("code")
+            })
+            .collect();
+        assert_eq!(codes.len(), oma_archive::SniffedKind::ALL.len());
     }
 
     #[test]

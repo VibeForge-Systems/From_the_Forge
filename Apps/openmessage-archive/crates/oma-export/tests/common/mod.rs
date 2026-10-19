@@ -18,7 +18,7 @@ use oma_archive::{
     MessageId, NoProgress, ProceedWith, TimeRange,
 };
 use oma_backup::{inspect, Candidate, JobCtx, Limits, OpenBackup, Progress, StagingRoot};
-use oma_export::map::{AttachmentFiles, ExportZone, FileDecision, Mapper, Placement};
+use oma_export::map::{AttachmentFiles, ExportZone, FileDecision, FileOutcome, Mapper, Placement};
 use oma_export::record::{ConversationRecord, HandleRecord, ItemRecord, VersionRecord};
 use oma_export::{ExportError, IdentifierMode, Ordinals, RecordOptions};
 use serde_json::Value;
@@ -186,7 +186,14 @@ fn import_step(
 /// Import a document's first order into a fresh archive.
 pub fn import(doc: &Doc) -> Imported {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let lib = Library::new(tmp.path())
+    let (lib, id) = import_in(doc, tmp.path());
+    Imported { tmp, lib, id }
+}
+
+/// Import a document's first order into a fresh archive of a library in
+/// `dir` (which must exist).
+pub fn import_in(doc: &Doc, dir: &Path) -> (Library, ArchiveId) {
+    let lib = Library::new(dir)
         .expect("library")
         .with_space_probe(Arc::new(FakeSpace));
     let id = lib.create(None).expect("create");
@@ -205,7 +212,7 @@ pub fn import(doc: &Doc) -> Imported {
         drop(a);
         assert!(ob.close().removed, "staging not removed");
     }
-    Imported { tmp, lib, id }
+    (lib, id)
 }
 
 /// Apply an export document's `patches` (codes an import cannot write) to
@@ -237,11 +244,12 @@ pub fn apply_patches(db: &Path, patches: &[Value]) {
     }
 }
 
-/// Copies every file (the 6e copy decides for real; here every stored file
-/// counts as copied once and deduplicated after).
+/// Copies every file without writing it (the real copy is `attach.rs`;
+/// here every stored file counts as copied once and deduplicated after,
+/// under the ordinal the mapper assigns at first reference).
 #[derive(Default)]
 pub struct CopyAll {
-    seen: std::collections::BTreeSet<oma_archive::BlobId>,
+    seen: BTreeMap<oma_archive::BlobId, u64>,
 }
 
 impl AttachmentFiles for CopyAll {
@@ -249,11 +257,20 @@ impl AttachmentFiles for CopyAll {
         &mut self,
         _a: &ExportAttachment,
         blob: oma_archive::BlobId,
-    ) -> Result<FileDecision, ExportError> {
-        Ok(if self.seen.insert(blob) {
-            FileDecision::Copied
-        } else {
-            FileDecision::Deduplicated
+    ) -> Result<FileOutcome, ExportError> {
+        let next = self.seen.len() as u64 + 1;
+        let (decision, n) = match self.seen.get(&blob) {
+            Some(n) => (FileDecision::Deduplicated, *n),
+            None => {
+                self.seen.insert(blob, next);
+                (FileDecision::Copied, next)
+            }
+        };
+        Ok(FileOutcome {
+            decision,
+            file: Some(n),
+            path: Some(format!("attachments/000/{n:06}-file")),
+            sniffed: None,
         })
     }
 }
@@ -439,4 +456,73 @@ pub fn with_snapshot<T>(
     let hold = i.lib.hold_for_export(&i.id).expect("hold");
     r.with_export_snapshot(&hold, &CancelToken::new(), f)
         .expect("snapshot")
+}
+
+/// Export `i` to TXT through the whole pipeline under `scope` and
+/// `tweak`ed defaults into `parent`, publishing as `target`, with the
+/// attachment policy `attach` (or the plan's).
+pub fn export_txt(
+    i: &Imported,
+    parent: &Path,
+    scope: oma_export::plan::ScopePlan,
+    tweak: &dyn Fn(&mut oma_export::plan::ExportOptions),
+    target: &str,
+    attach: Option<oma_export::attach::AttachPolicy>,
+) -> Result<oma_export::pipeline::ExportReport, ExportError> {
+    use oma_export::plan::{ExportOptions, ExportPlan, Format};
+    let mut o = ExportOptions::defaults(&scope, &[Format::Txt]);
+    tweak(&mut o);
+    let plan = ExportPlan::new(scope, vec![Format::Txt], o).expect("plan");
+    let zone = ExportZone::Utc;
+    let target = oma_export::TargetName::new(target).expect("name");
+    let r = i.lib.open_read(&i.id).expect("reader");
+    let hold = i.lib.hold_for_export(&i.id).expect("hold");
+    r.with_export_snapshot(&hold, &CancelToken::new(), |snap| {
+        let scope = oma_export::pipeline::scope_ids(&plan, &zone)?.expect("not a search");
+        let run = oma_export::pipeline::ExportRun {
+            plan: &plan,
+            zone: &zone,
+            scope: &scope,
+            export_id: oma_export::EntryId::from_bytes([9; 16]),
+            created_utc_ns: MODEL_NOW_NS,
+            app_version: "0.0.0-test",
+            parent,
+            target: &target,
+            replace: oma_export::stage::Replace::Never,
+            attach,
+            search: None,
+        };
+        let writers: Vec<Box<dyn oma_export::writer::ExportWriter>> =
+            vec![Box::new(oma_export::writer::txt::TxtWriter::new())];
+        oma_export::pipeline::run(snap, &run, writers, &CancelToken::new(), &mut |_| {})
+    })
+}
+
+/// The store file of the blob with digest `sha256` (hex) in `i`'s archive.
+pub fn store_file(i: &Imported, sha256: &str) -> PathBuf {
+    dunce_root(i.tmp.path())
+        .join(i.id.as_str())
+        .join("attachments")
+        .join(&sha256[..2])
+        .join(sha256)
+}
+
+/// Flip the last byte of a store file (same length, wrong digest).
+pub fn corrupt(path: &Path) {
+    let mut bytes = fs::read(path).expect("store file");
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0xff;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).expect("chmod");
+    }
+    #[cfg(windows)]
+    {
+        let mut p = fs::metadata(path).expect("meta").permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        p.set_readonly(false);
+        fs::set_permissions(path, p).expect("writable");
+    }
+    fs::write(path, &bytes).expect("corrupt");
 }

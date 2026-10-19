@@ -28,7 +28,7 @@ use crate::codes::{
     AttachmentOutcome, CardStateCode, ChipSenderCode, ChipStateCode, Direction, EditEntryTextCode,
     EditTextsOutcomeCode, ExclusionReason, ExportCode, FormattingCode, HistoryColumnCode,
     MaskKindCode, MessageLabelCode, NoTextReason, ReactionKindCode, ReplyResolution,
-    SegmentKindCode, SenderReasonCode, Style, WithheldReasonCode,
+    SegmentKindCode, SenderReasonCode, SniffedKindCode, Style, WithheldReasonCode,
 };
 
 /// One entry of a words table.
@@ -607,6 +607,36 @@ words! {
     }
 }
 
+words! {
+    /// What a copied file's bytes are (the viewer's sentences).
+    sniffed_kind, "sniffedKind", SniffedKindCode, viewer = "SNIFFED_KIND_TEXT" {
+        Gif => "GIF image",
+        Webp => "WebP image",
+        Png => "PNG image",
+        Jpeg => "JPEG image",
+        Bmp => "BMP image",
+        Ico => "Icon image",
+        QuickTime => "QuickTime video",
+        M4a => "MPEG-4 audio",
+        M4v => "MPEG-4 video",
+        Heif => "HEIC image" @ "",
+        Mp4 => "MPEG-4 video",
+        IsoBmffOther => "MPEG-4 family file",
+        Webm => "WebM video",
+        Wav => "WAV audio",
+        Aiff => "AIFF audio",
+        Ogg => "Ogg audio",
+        Mp3 => "MP3 audio",
+        Caf => "Core Audio file",
+        Pdf => "PDF document",
+        Xml => "XML document",
+        Html => "HTML document" @ "",
+        Vcard => "Contact card (vCard)",
+        Text => "Text file",
+        Unknown => "Unrecognised content",
+    }
+}
+
 /// Fixed phrases of the human-readable formats.
 pub const PHRASES: &[Phrase] = &[
     Phrase {
@@ -745,6 +775,7 @@ pub fn tables() -> Vec<WordsTable> {
         alt_text_source::table(),
         alt_text_withheld::table(),
         exclusion_reason::table(),
+        sniffed_kind::table(),
     ]
 }
 
@@ -803,6 +834,24 @@ pub mod readme {
         out.push(CONTRACT);
         out
     }
+}
+
+/// The fixed text of the TXT format (spec §5.4): its first line, and the
+/// legend at the end of every file, which explains each bracketed tag and
+/// marker once. No sentence names a path, a conversation, a search or a
+/// device, and none says "you".
+pub mod txt_legend {
+    pub const FIRST_LINE: &str =
+        "OpenMessage Archive export \u{2014} plaintext copy. See the end of this file for details.";
+
+    pub const LINES: &[&str] = &[
+        "Each item starts at the beginning of a line with its recorded time in brackets and its number in this export, [item N], then the sender's address when one is recorded, then tags in brackets. Everything that belongs to an item is indented: labels by four spaces, recorded text by six. A line of message text can therefore never start a new item.",
+        "Times are shown in the zone named at the top, with the offset in force on every line. [Undated] marks an item the archive sorts as undated; undated items come last and follow the order of the earliest import that recorded them, which is not a recorded fact. [No usable time] marks an item sorted among the dated ones whose own recorded time cannot be shown; a tag says why.",
+        "[same recorded time; order not known]: the item has the same recorded time as its neighbour, so their order is the order the archive imported them in.",
+        "Values and tags marked 'derived' were worked out by the archive from what the phone recorded, not recorded by the phone itself.",
+        "Text in angle brackets \u{27E8}\u{2026}\u{27E9} is written by the export, never by a message: \u{27E8}U+200B\u{27E9} stands for a character that does not show when printed or that controls the terminal or the text direction, \u{27E8}U+005B\u{27E9} and \u{27E8}U+005D\u{27E9} for square brackets in an address or a name, \u{27E8}+N combining marks\u{27E9} for marks left out of a very long run of accents, and \u{27E8}one-time code hidden\u{27E9} or \u{27E8}Attachment N\u{27E9} for what stood at that place in the text. A literal \u{27E8} in a message is itself written as \u{27E8}U+27E8\u{27E9}.",
+        "Line breaks inside a message become new indented lines. In addresses, names and other fields on a tag line, every line break and control is written as a code instead.",
+    ];
 }
 
 #[derive(Serialize)]
@@ -876,6 +925,8 @@ mod tests {
         for p in all
             .iter()
             .chain(readme::paragraphs(&[], crate::ids::IdentifierMode::Ordinals).iter())
+            .chain(txt_legend::LINES)
+            .chain([&txt_legend::FIRST_LINE])
         {
             assert!(!says_you(p), "{p}");
         }

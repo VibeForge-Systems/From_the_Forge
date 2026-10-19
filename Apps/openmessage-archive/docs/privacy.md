@@ -646,8 +646,40 @@ yet, and nothing here was run on Windows):
 - **Attachment file names** keep their extension only when it is on a
   short list of passive types and matches what the file's bytes are;
   every other copied file gets `.blocked` appended (owner decision Q3b),
-  unless "Keep original file extensions" is chosen and confirmed. The
-  copy itself is slice 6e2.
+  unless "Keep original file extensions" is chosen and confirmed.
+
+What the attachment copy and the TXT writer do (slice 6e2, tested on
+Linux through the export pipeline on the synthetic catalogues; no export
+can be started from the app yet; nothing was run on Windows):
+
+- **Which files are copied** (owner-confirmed decision Q3a): by default,
+  bundle exports with HTML or JSON, and whole-archive exports, copy the
+  original attachment files; a single file carries names only; CSV, XLSX
+  and TXT bundles copy files only when the box is ticked. A names-only
+  export reads no attachment file.
+- **A copy is the stored file, byte for byte, metadata included** (GPS
+  coordinates in a photo too): nothing is converted or stripped. Its
+  checksum in `manifest.json` and `SHA256SUMS` is the one the archive
+  stored, checked while the file was copied. A stored file that no longer
+  matches its checksum is not copied, and the record says so.
+- **Attachments of unsent parts are not copied** unless the export
+  includes content captured before an unsend (owner decision Q4, confirmed
+  against an exact count); a test checks that their bytes appear nowhere
+  in the export otherwise.
+- **Mark of the Web** (owner-confirmed decision Q3c): on Windows, each
+  copied file gets a `Zone.Identifier` stream marking it as from the
+  Internet (`ZoneId=3`), so Windows may warn before opening it. What
+  Windows actually does with the mark is **UNVERIFIED**, and the code has
+  not been run on Windows yet. Nothing is written on Linux, and a volume
+  without such streams (FAT, exFAT, some network shares) gets no mark
+  (counted in `manifest.json` as `motwNotWritten`).
+- **TXT files are plain text that a terminal or an editor shows as
+  written.** Control characters, and in names and addresses also line
+  breaks and square brackets, are written as codes such as `⟨U+001B⟩`;
+  characters that do not show when printed are written as codes too
+  unless the option is turned off (in names and addresses they always
+  are). This keeps a message from faking another item or a sender line,
+  but it is not a guarantee about every viewer.
 
 ## Device identifiers (M2)
 

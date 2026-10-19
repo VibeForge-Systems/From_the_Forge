@@ -107,6 +107,14 @@ jobs:
           OMA_ORACLE_OUT="$out" cargo test -p oma-archive --locked --test export_fixtures -- \
             --ignored --exact write_oracle_archives
           "$RUNNER_TEMP/venv-oracles/bin/python" -I scripts/oracles/run_oracles.py --archives "$out"
+          # Slice 6e2: every catalogue entry exported to TXT through the
+          # pipeline, parsed back with the line grammar and compared with
+          # its archive; each bundle's SHA256SUMS also with coreutils.
+          txt="$RUNNER_TEMP/oracle-txt"
+          OMA_ORACLE_TXT_OUT="$txt" cargo test -p oma-export --locked --test txt -- \
+            --ignored --exact write_oracle_txt
+          "$RUNNER_TEMP/venv-oracles/bin/python" -I scripts/oracles/txt_grammar.py --exports "$txt"
+          for b in "$txt"/*/export/*/; do (cd "$b" && sha256sum --quiet -c SHA256SUMS); done
       - name: IPC bindings are up to date
         run: |
           if ! git diff --exit-code -- src/types/generated; then

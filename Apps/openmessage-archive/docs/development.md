@@ -440,6 +440,48 @@ cargo test -p oma-export --test fanout   # the writer trait and fan-out over the
   violations, retries, `remove_dir_all` of a leftover) is **UNVERIFIED**
   until the Windows CI job runs these tests.
 
+### Attachments, TXT and the pipeline (M6 slice 6e2)
+
+```sh
+cargo test -p oma-export --test txt          # every catalogue entry to TXT through the pipeline, parsed back
+cargo test -p oma-export --test attach       # copies, names, exclusions, the reveal, cancel; the swap test is Linux only
+cargo test -p oma-export --test golden_txt   # names-only TXT bundles against tests/fixtures/export/expected/
+OMA_REGEN_GOLDENS=1 cargo test -p oma-export --test golden_txt   # regenerate them (then re-pin the hash it prints)
+
+# The independent TXT oracle (Linux; in the oracle virtual environment):
+OMA_ORACLE_TXT_OUT=/tmp/oma-txt cargo test -p oma-export --test txt -- --ignored --exact write_oracle_txt
+python3 -I scripts/oracles/txt_grammar.py --exports /tmp/oma-txt
+
+# Attachment copy throughput (ignored; prints RECORD lines, asserts no timing):
+OMA_PERF_ATTACH_FILES=1000 OMA_PERF_ATTACH_BYTES=262144 \
+  cargo test -p oma-export --test perf_attach -- --ignored --nocapture
+```
+
+- `tests/txtgrammar/mod.rs` is a strict parser of the TXT grammar for the
+  Rust tests; `scripts/oracles/txt_grammar.py` is an independent one that
+  also compares each file with its archive through stdlib `sqlite3`
+  (membership, order, times, text, senders) and checks `SHA256SUMS`.
+  Both must change with the grammar. Run here (Python 3.13.16): 21
+  exports, 9,777 checks, 0 failed; with the header escaping turned off by
+  hand, both it and four Rust tests failed.
+- The goldens are regenerated only when a TXT, manifest or README rule
+  changes on purpose; name the rule in the commit. Files over 64 KiB are
+  pinned by digest in `expected/SHA256SUMS` and not committed.
+- `perf_attach.rs` builds a bulk archive with store files through
+  `oma-archive`'s generator (its test module is included by path, which
+  needs `oma-archive`'s `fault-injection` feature and `oma-messages` as
+  `oma-export` dev-dependencies). Run once here, debug build, on the
+  container's disk (not a tmpfs): 953 files of 256 KiB (238 MiB) exported
+  in 1.76 s (135 MiB/s, TXT included, with one `sync_all` per file),
+  against 0.24 s to read and hash the same files once and 0.57 s to
+  `fs::copy` them. The spec's 100,000 files / 50 GB target needs about
+  100 GB free and was **not run**; the FAT32 manual row (§21) is not run
+  either.
+- Windows: `write_mark_of_the_web` and the Windows half of the FAT
+  boundary rule were only compiled and linted for
+  `x86_64-pc-windows-msvc` with the scratch harness; the Mark of the Web
+  assertions in `attach.rs` run only on the Windows CI job.
+
 ### The bulk generator (M5)
 
 `crates/oma-archive/tests/common/bulk.rs` writes a schema-valid v1 archive
@@ -689,19 +731,20 @@ Linux job, 6 on Windows), measured from slice 6a.** The baseline is `main`
 at `9883217` (milestones 1–5), run in a Linux container (4 CPUs, debug
 build, `CARGO_INCREMENTAL=0`, after compiling), then again with slice 6a:
 
-| What | Baseline (`9883217`) | Slice 6a | Slice 6b1 | Slice 6b2 | Slice 6c | Slice 6d | Slice 6e1 |
-|---|---|---|---|---|---|---|---|
-| `cargo test --workspace`, wall clock | 2 min 8 s | 2 min 6 s | 2 min 26 s | 2 min 38 s | 2 min 42 s | 2 min 42 s | 2 min 41 s |
-| Sum of all test binaries' run times | 124.2 s | 123.1 s | 142.9 s | 153.9 s | 158.5 s | 159.0 s | 150.0 s |
-| Rust tests passed | 1,241 (12 ignored) | 1,251 (12 ignored) | 1,270 (12 ignored) | 1,284 (15 ignored) | 1,290 (16 ignored) | 1,332 (16 ignored) | 1,371 (16 ignored) |
-| `oma-archive`'s `export_caps.rs` | — | 2.4 s (4 tests) | 3.0 s | 2.7 s | 3.3 s | 3.3 s | 2.6 s |
-| `oma-archive`'s `export_reads.rs` | — | — | 5.4 s (12 tests) | 5.5 s | 5.3 s | 5.7 s | 5.6 s |
-| `oma-archive`'s `export_scope.rs` | — | — | — | 2.0 s (7 tests) | 2.6 s (the oracle also reads the export catalogue) | 2.4 s | 2.6 s |
-| `oma-archive`'s `export_memory.rs` | — | — | — | 10.6 s (1 test; Linux only) | 9.8 s | 10.1 s | 8.9 s |
-| `oma-archive`'s `export_fixtures.rs` | — | — | — | — | 0.7 s (5 tests, 1 ignored) | 0.7 s | 0.7 s |
-| `oma-archive`'s `bulk.rs` | — | — | — | — | 0.9 s (2 tests; the blob option's test is new) | 0.8 s | 0.8 s |
-| `oma-export`'s `record_catalogue.rs` | — | — | — | — | — | 8.1 s (7 tests) | 7.7 s |
-| `oma-export`'s `stage.rs`, `crash.rs`, `fanout.rs` | — | — | — | — | — | — | 0.1 s, 0.1 s, 0.6 s (15, 4 and 3 tests) |
+| What | Baseline (`9883217`) | Slice 6a | Slice 6b1 | Slice 6b2 | Slice 6c | Slice 6d | Slice 6e1 | Slice 6e2 |
+|---|---|---|---|---|---|---|---|---|
+| `cargo test --workspace`, wall clock | 2 min 8 s | 2 min 6 s | 2 min 26 s | 2 min 38 s | 2 min 42 s | 2 min 42 s | 2 min 41 s | 2 min 46 s |
+| Sum of all test binaries' run times | 124.2 s | 123.1 s | 142.9 s | 153.9 s | 158.5 s | 159.0 s | 150.0 s | 161.7 s |
+| Rust tests passed | 1,241 (12 ignored) | 1,251 (12 ignored) | 1,270 (12 ignored) | 1,284 (15 ignored) | 1,290 (16 ignored) | 1,332 (16 ignored) | 1,371 (16 ignored) | 1,392 (18 ignored) |
+| `oma-archive`'s `export_caps.rs` | — | 2.4 s (4 tests) | 3.0 s | 2.7 s | 3.3 s | 3.3 s | 2.6 s | 2.6 s |
+| `oma-archive`'s `export_reads.rs` | — | — | 5.4 s (12 tests) | 5.5 s | 5.3 s | 5.7 s | 5.6 s | 5.2 s |
+| `oma-archive`'s `export_scope.rs` | — | — | — | 2.0 s (7 tests) | 2.6 s (the oracle also reads the export catalogue) | 2.4 s | 2.6 s | 2.2 s |
+| `oma-archive`'s `export_memory.rs` | — | — | — | 10.6 s (1 test; Linux only) | 9.8 s | 10.1 s | 8.9 s | 9.4 s |
+| `oma-archive`'s `export_fixtures.rs` | — | — | — | — | 0.7 s (5 tests, 1 ignored) | 0.7 s | 0.7 s | 0.6 s |
+| `oma-archive`'s `bulk.rs` | — | — | — | — | 0.9 s (2 tests; the blob option's test is new) | 0.8 s | 0.8 s | 1.0 s |
+| `oma-export`'s `record_catalogue.rs` | — | — | — | — | — | 8.1 s (7 tests) | 7.7 s | 8.2 s |
+| `oma-export`'s `stage.rs`, `crash.rs`, `fanout.rs` | — | — | — | — | — | — | 0.1 s, 0.1 s, 0.6 s (15, 4 and 3 tests) | 0.1 s, 0.3 s (5 tests), 0.5 s |
+| `oma-export`'s `txt.rs`, `attach.rs`, `golden_txt.rs` | — | — | — | — | — | — | — | 3.4 s (7 tests, 1 ignored), 0.8 s (6 tests), 3.1 s (1 test) |
 
 The difference between the two runs is inside the run-to-run noise: a
 first, cold run of the baseline in the same container took 3 min 58 s
@@ -725,6 +768,13 @@ time; the rest of its run is inside the noise. The Vitest
 in `oma-fs`, 14 unit tests and 23 integration tests in `oma-export`); the
 crash test's 14 child processes take about 0.1 s together. The lower
 summed time of that run is within the run-to-run noise described above.
+Slice 6e2 adds 21 tests (6 unit tests and 15 integration tests in
+`oma-export`) and two ignored ones (`write_oracle_txt`, `perf_attach`):
+`txt.rs` and `golden_txt.rs` each import every catalogue entry and export
+it through the pipeline (about 3 s each), and the crash test's new kill
+imports one entry and runs two child exports. The Linux CI oracle step
+gains the TXT oracle (about 2.5 s for the export, under 1 s for the
+Python run here).
 Windows has not been measured for M6. Slices 6h and 6l record the figures again, with CI's.
 
 **Export read measurements (slice 6b2; synthetic, one host, no timing

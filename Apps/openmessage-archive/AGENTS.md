@@ -153,8 +153,9 @@ Each one is enforced in code. Keep it that way.
   `Archive::import`; and the report-only verifier `Archive::verify` with
   `open_blob`), driven by the shell's six archive commands and its
   import and verify jobs (slice 4l), and the Archive page (slice 4m).
-  `oma-export` (M6) has its record core from slice 6d and its files core
-  (names, staging, the manifest, the writer trait) from 6e1; `oma-device` (M7)
+  `oma-export` (M6) has its record core from slice 6d, its files core
+  (names, staging, the manifest, the writer trait) from 6e1, and the
+  attachment copy, the TXT writer and the pipeline from 6e2; `oma-device` (M7)
   is planned. Each must build and test without
   Tauri. The shell's `src-tauri/src/backups/` (registry, job table, worker,
   DTOs, messages) and `src-tauri/src/archives/` (listing, details, the
@@ -575,7 +576,8 @@ Never hand-edit generated files.
   `VmHWM` (Linux only); keep its versions above the bound's size.
 - **Export fixtures and oracles (M6 slice 6c).** `tests/fixtures/export/`
   is written only by `scripts/fixtures/make_synthetic_exports.py` (SQLite
-  3.45.1 only) and has two pins in `tests/export_fixtures.rs`: the inputs
+  3.45.1 only), except `expected/` (the writers' goldens, slice 6e2), and
+  has two pins in `tests/export_fixtures.rs`: the inputs
   (backups and `hidden-vectors.json`) are frozen; `*.expected/` and
   `scenarios/` (`content.json`, `export.json`) may be re-pinned when a
   slice settles a rule. A new export case goes into the generator with an
@@ -622,6 +624,28 @@ Never hand-edit generated files.
   `ManifestBody` must never gain a field for a query, a device fact, an
   archive id or label, a GUID or a path. A new crash point goes into
   `FaultPoint::ALL` and `tests/crash.rs` together.
+- **Attachments, TXT and the pipeline (M6 slice 6e2, `oma-export`).**
+  Attachment bytes come only from `ExportSnapshot::open_blob`
+  (`attach.rs`): the first 4 KiB of that stream are sniffed, then the file
+  is created under its final name with `Staging::create_verified` and
+  closed with `close_verified` and the reader's `verified_digest`; never
+  hash a copy again, never `verify_blob` then open, never add another
+  reader of store files. A failed copy is `discard`ed (an undeletable one
+  fails the export). Mark of the Web is `Staging::write_mark_of_the_web`
+  (Windows only; a failure is counted, never fatal; its effect is
+  **UNVERIFIED**). TXT (`writer/txt.rs`): item lines at column 0, labels
+  at four spaces, recorded text at six, split at every line break; header
+  fields through `TxtWriter::header` (marks, and escapes `[` `]`);
+  sentences only from `words.rs`; no `.join(` (the source rule), use the
+  `Comma` helper. A grammar change goes into `tests/txtgrammar` and
+  `scripts/oracles/txt_grammar.py` together, and regenerates the goldens
+  (`OMA_REGEN_GOLDENS=1 cargo test -p oma-export --test golden_txt`, then
+  re-pin `GOLDEN_SUMS_SHA256`; files over 64 KiB are pinned by digest
+  only). `pipeline::run` is the one driver: pre-count and consent first,
+  handles before the item that names them, versions after their item,
+  ties across batch boundaries, the counts checked against the pre-count
+  before provenance; any error removes the staging. The record's file
+  `path` is content.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush

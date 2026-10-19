@@ -34,6 +34,10 @@ fault-injection = []
 
 [dev-dependencies]
 oma-export = { path = ".", features = ["fault-injection"] }
+# Tests only: the archive's bulk generator (`hooks::bulk_writer`) for the
+# ignored attachment throughput test (`tests/perf_attach.rs`).
+oma-archive = { workspace = true, features = ["fault-injection"] }
+oma-messages.workspace = true # what that generator's shared test module names
 oma-backup.workspace = true # tests import the synthetic catalogues
 tempfile.workspace = true
 # Tests only: applying the export catalogue's `patches` (codes an import

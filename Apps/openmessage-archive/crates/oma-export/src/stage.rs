@@ -37,6 +37,13 @@
 //! sweep's 5-minute rule still protects the folder). Whether an open
 //! handle under the folder blocks the rename at all is **UNVERIFIED**.
 //!
+//! **Attachment copies** (slice 6e2) are created with
+//! [`Staging::create_verified`] and closed with
+//! [`Staging::close_verified`]: their digest is the one the archive's
+//! reader verified, so they are not hashed a second time. A failed copy is
+//! [`Staging::discard`]ed. [`Staging::write_mark_of_the_web`] adds the
+//! `Zone.Identifier` stream on Windows.
+//!
 //! Nothing here writes outside `<parent>` or uses a temporary directory.
 //! Errors carry kinds only, and `Debug` prints no path or name.
 
@@ -63,6 +70,9 @@ pub const MARKER_CONTENT: &[u8] =
 
 /// The buffer of each staged file.
 const WRITE_BUFFER: usize = 64 * 1024;
+
+/// A Mark of the Web's content (owner Q3c): the Internet zone.
+pub const MARK_OF_THE_WEB: &[u8] = b"[ZoneTransfer]\r\nZoneId=3\r\n";
 
 /// The bounded backoff of §8.6: 100 ms doubling to 2 s, at most 10 s in
 /// all (these sum to 9.1 s).
@@ -158,7 +168,9 @@ impl FileEntry {
 pub struct StagedFile {
     path: BundlePath,
     out: BufWriter<File>,
-    hasher: Sha256,
+    /// `None` for a file whose content another reader already verified
+    /// (an attachment copy, [`Staging::create_verified`]).
+    hasher: Option<Sha256>,
     bytes: u64,
     token: u64,
 }
@@ -185,8 +197,9 @@ impl StagedFile {
 impl Write for StagedFile {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let n = self.out.write(buf)?;
-        let accepted = buf.get(..n).unwrap_or(buf);
-        self.hasher.update(accepted);
+        if let Some(h) = &mut self.hasher {
+            h.update(buf.get(..n).unwrap_or(buf));
+        }
         self.bytes = self.bytes.saturating_add(n as u64);
         Ok(n)
     }
@@ -383,6 +396,21 @@ impl Staging {
     /// replacing anything). In single-file mode the first and only output
     /// is the `.partial-file`, whatever its bundle path.
     pub fn create(&mut self, path: &BundlePath) -> Result<StagedFile, ExportError> {
+        self.create_with(path, true)
+    }
+
+    /// Like [`Staging::create`], for a file whose bytes come from a reader
+    /// that verifies them itself (an attachment's `BlobReader`): nothing is
+    /// hashed while it is written, and [`Staging::close_verified`] records
+    /// the reader's digest (spec §6.1, "one hash"). Bundles only.
+    pub fn create_verified(&mut self, path: &BundlePath) -> Result<StagedFile, ExportError> {
+        if self.packaging != Packaging::Bundle {
+            return Err(limit(LimitKind::RowOrder));
+        }
+        self.create_with(path, false)
+    }
+
+    fn create_with(&mut self, path: &BundlePath, hash: bool) -> Result<StagedFile, ExportError> {
         self.live()?;
         let file = match self.packaging {
             Packaging::Bundle => {
@@ -418,7 +446,7 @@ impl Staging {
         Ok(StagedFile {
             path: path.clone(),
             out: BufWriter::with_capacity(WRITE_BUFFER, file),
-            hasher: Sha256::new(),
+            hasher: hash.then(Sha256::new),
             bytes: 0,
             token,
         })
@@ -427,6 +455,37 @@ impl Staging {
     /// Close `f`: flush it and record its length and hash. Its `sync_all`
     /// follows in the next [`Staging::sync_batch`].
     pub fn close(&mut self, f: StagedFile) -> Result<FileEntry, ExportError> {
+        if f.hasher.is_none() {
+            return Err(limit(LimitKind::RowOrder));
+        }
+        self.close_with(f, None)
+    }
+
+    /// Close a file made by [`Staging::create_verified`], recording
+    /// `sha256`, the digest its reader verified over exactly
+    /// `expected_bytes` bytes. A file of another length is refused
+    /// (`RowCountMismatch`) and stays listed for removal.
+    pub fn close_verified(
+        &mut self,
+        f: StagedFile,
+        sha256: [u8; 32],
+        expected_bytes: u64,
+    ) -> Result<FileEntry, ExportError> {
+        if f.hasher.is_some() {
+            return Err(limit(LimitKind::RowOrder));
+        }
+        if f.bytes != expected_bytes {
+            self.open.remove(&f.token);
+            return Err(limit(LimitKind::RowCountMismatch));
+        }
+        self.close_with(f, Some(sha256))
+    }
+
+    fn close_with(
+        &mut self,
+        f: StagedFile,
+        verified: Option<[u8; 32]>,
+    ) -> Result<FileEntry, ExportError> {
         if !self.open.remove(&f.token) {
             return Err(limit(LimitKind::RowOrder));
         }
@@ -438,14 +497,71 @@ impl Staging {
             ..
         } = f;
         let file = out.into_inner().map_err(|e| io_err(e.into_error()))?;
+        let sha256 = match (verified, hasher) {
+            (Some(d), _) => d,
+            (None, Some(h)) => h.finalize().into(),
+            (None, None) => return Err(limit(LimitKind::RowOrder)),
+        };
         let entry = FileEntry {
             path,
             bytes,
-            sha256: hasher.finalize().into(),
+            sha256,
         };
         self.files.push(entry.clone());
         self.unsynced.push(file);
         Ok(entry)
+    }
+
+    /// Drop `f` unfinished and remove it (an attachment whose copy failed
+    /// its checksum or could not be written, spec §6.1). Its name stays
+    /// used. `Ok(false)` when the removal failed: the file is then still
+    /// in the staging folder (never in [`Staging::files`]), and the caller
+    /// must fail the export rather than publish a bundle that holds it;
+    /// [`Staging::remove`] retries it with the folder.
+    pub fn discard(&mut self, f: StagedFile) -> Result<bool, ExportError> {
+        self.live()?;
+        if !self.open.remove(&f.token) || self.packaging != Packaging::Bundle {
+            return Err(limit(LimitKind::RowOrder));
+        }
+        let path = f.path.clone();
+        drop(f);
+        let removed = with_retries(|| {
+            self.sys
+                .remove_file(&self.parent, &self.entry.to_name(), &path)
+        })
+        .is_ok();
+        if removed {
+            if let Some(i) = self.created.iter().rposition(|p| *p == path) {
+                self.created.remove(i);
+            }
+        }
+        Ok(removed)
+    }
+
+    /// Write a Mark of the Web beside the closed file `e` (owner Q3c,
+    /// spec §6.4): the NTFS stream `<file>:Zone.Identifier` holding
+    /// `[ZoneTransfer]` and `ZoneId=3` (the Internet zone), created new
+    /// and private. Windows only; elsewhere nothing is written and
+    /// `Ok(false)` is returned. An error means it was not written (on FAT
+    /// or exFAT, for example): the caller counts it (`motwNotWritten`) and
+    /// carries on. What Windows does with the mark (SmartScreen, Office
+    /// Protected View) is **UNVERIFIED**.
+    pub fn write_mark_of_the_web(&mut self, e: &FileEntry) -> Result<bool, ExportError> {
+        self.live()?;
+        if self.packaging != Packaging::Bundle || !self.files.iter().any(|f| f == e) {
+            return Err(limit(LimitKind::RowOrder));
+        }
+        #[cfg(windows)]
+        {
+            let mut f = self.sys.create_zone_identifier(e.path()).map_err(io_err)?;
+            f.write_all(MARK_OF_THE_WEB).map_err(io_err)?;
+            self.unsynced.push(f);
+            Ok(true)
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(false)
+        }
     }
 
     /// `sync_all` every file closed since the last call, then close their
@@ -1497,6 +1613,13 @@ mod sys {
             let f = oma_fs::create_new_private(&p)?;
             self.partial = Some(p);
             Ok(f)
+        }
+
+        /// `<file>:Zone.Identifier` beside a staged file (Mark of the Web).
+        #[cfg(windows)]
+        pub(super) fn create_zone_identifier(&self, path: &BundlePath) -> io::Result<File> {
+            let file = path.under(self.staging()?);
+            oma_fs::create_new_private(&naming::zone_identifier(&file))
         }
 
         pub(super) fn sync_subdirs(&self) -> io::Result<()> {

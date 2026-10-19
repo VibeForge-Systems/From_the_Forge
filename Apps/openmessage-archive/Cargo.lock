@@ -2652,6 +2652,7 @@ dependencies = [
  "oma-backup",
  "oma-export",
  "oma-fs",
+ "oma-messages",
  "rusqlite",
  "rustix",
  "serde",

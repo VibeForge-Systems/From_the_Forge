@@ -201,6 +201,11 @@ pub struct TimeRecord {
     pub before2007: bool,
     /// A scheduled message: the time is the planned send time.
     pub planned: bool,
+    /// The instant, Unix nanoseconds UTC, for the human-readable writers
+    /// (day headings, their own time format). Not serialised: `utc` and
+    /// `local` are the JSON form.
+    #[serde(skip)]
+    pub utc_ns: Option<i64>,
 }
 
 /// A message reference: in this export with its ordinal, or not, with no
@@ -718,6 +723,14 @@ pub struct FileRecord {
     pub outcome: Code,
     /// The file ordinal it shares, when a file was written.
     pub file: Option<Ordinal>,
+    /// The file's place in the bundle (`attachments/<shard>/<name>`,
+    /// `/`-separated), when a file was written. Its name part comes from
+    /// `transfer_name`, so it is content.
+    pub path: Option<Content>,
+    /// A `sniffedKind` code: what the copied bytes are (the first 4 KiB of
+    /// the copy stream, never the declared type); `null` when this export
+    /// did not read the file.
+    pub sniffed: Option<Code>,
 }
 
 /// An attachment's source identifiers (D141 opt-in only).

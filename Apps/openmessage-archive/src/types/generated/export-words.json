@@ -1910,6 +1910,156 @@
           "viewer": null
         }
       ]
+    },
+    {
+      "name": "sniffedKind",
+      "registry": "sniffedKind",
+      "entries": [
+        {
+          "token": "gif",
+          "code": 1,
+          "sentence": "GIF image",
+          "viewer": "SNIFFED_KIND_TEXT.gif"
+        },
+        {
+          "token": "webp",
+          "code": 2,
+          "sentence": "WebP image",
+          "viewer": "SNIFFED_KIND_TEXT.webp"
+        },
+        {
+          "token": "png",
+          "code": 3,
+          "sentence": "PNG image",
+          "viewer": "SNIFFED_KIND_TEXT.png"
+        },
+        {
+          "token": "jpeg",
+          "code": 4,
+          "sentence": "JPEG image",
+          "viewer": "SNIFFED_KIND_TEXT.jpeg"
+        },
+        {
+          "token": "bmp",
+          "code": 5,
+          "sentence": "BMP image",
+          "viewer": "SNIFFED_KIND_TEXT.bmp"
+        },
+        {
+          "token": "ico",
+          "code": 6,
+          "sentence": "Icon image",
+          "viewer": "SNIFFED_KIND_TEXT.ico"
+        },
+        {
+          "token": "quickTime",
+          "code": 7,
+          "sentence": "QuickTime video",
+          "viewer": "SNIFFED_KIND_TEXT.quickTime"
+        },
+        {
+          "token": "m4a",
+          "code": 8,
+          "sentence": "MPEG-4 audio",
+          "viewer": "SNIFFED_KIND_TEXT.m4a"
+        },
+        {
+          "token": "m4v",
+          "code": 9,
+          "sentence": "MPEG-4 video",
+          "viewer": "SNIFFED_KIND_TEXT.m4v"
+        },
+        {
+          "token": "heif",
+          "code": 10,
+          "sentence": "HEIC image",
+          "viewer": null
+        },
+        {
+          "token": "mp4",
+          "code": 11,
+          "sentence": "MPEG-4 video",
+          "viewer": "SNIFFED_KIND_TEXT.mp4"
+        },
+        {
+          "token": "isoBmffOther",
+          "code": 12,
+          "sentence": "MPEG-4 family file",
+          "viewer": "SNIFFED_KIND_TEXT.isoBmffOther"
+        },
+        {
+          "token": "webm",
+          "code": 13,
+          "sentence": "WebM video",
+          "viewer": "SNIFFED_KIND_TEXT.webm"
+        },
+        {
+          "token": "wav",
+          "code": 14,
+          "sentence": "WAV audio",
+          "viewer": "SNIFFED_KIND_TEXT.wav"
+        },
+        {
+          "token": "aiff",
+          "code": 15,
+          "sentence": "AIFF audio",
+          "viewer": "SNIFFED_KIND_TEXT.aiff"
+        },
+        {
+          "token": "ogg",
+          "code": 16,
+          "sentence": "Ogg audio",
+          "viewer": "SNIFFED_KIND_TEXT.ogg"
+        },
+        {
+          "token": "mp3",
+          "code": 17,
+          "sentence": "MP3 audio",
+          "viewer": "SNIFFED_KIND_TEXT.mp3"
+        },
+        {
+          "token": "caf",
+          "code": 18,
+          "sentence": "Core Audio file",
+          "viewer": "SNIFFED_KIND_TEXT.caf"
+        },
+        {
+          "token": "pdf",
+          "code": 19,
+          "sentence": "PDF document",
+          "viewer": "SNIFFED_KIND_TEXT.pdf"
+        },
+        {
+          "token": "xml",
+          "code": 20,
+          "sentence": "XML document",
+          "viewer": "SNIFFED_KIND_TEXT.xml"
+        },
+        {
+          "token": "html",
+          "code": 21,
+          "sentence": "HTML document",
+          "viewer": null
+        },
+        {
+          "token": "vcard",
+          "code": 22,
+          "sentence": "Contact card (vCard)",
+          "viewer": "SNIFFED_KIND_TEXT.vcard"
+        },
+        {
+          "token": "text",
+          "code": 23,
+          "sentence": "Text file",
+          "viewer": "SNIFFED_KIND_TEXT.text"
+        },
+        {
+          "token": "unknown",
+          "code": 24,
+          "sentence": "Unrecognised content",
+          "viewer": "SNIFFED_KIND_TEXT.unknown"
+        }
+      ]
     }
   ],
   "phrases": [

@@ -19,11 +19,17 @@
 //!   lists the stray marker;
 //! - a re-run never overwrites: it publishes under ` (2)`.
 //!
+//! The kill in the middle of an attachment copy runs the whole pipeline
+//! (`pipeline::run` with the TXT writer) on an archive the parent imported
+//! from the export catalogue's file cases; its leftover holds a partial
+//! copy under its final name inside the marked staging folder, and no
+//! masking sentinel of that entry.
+//!
 //! What this shows: consistency after a **process kill**, which leaves the
-//! kernel's page cache intact; power loss is not tested. The masking
-//! oracle over leftover trees needs writers with content (slice 6f).
+//! kernel's page cache intact; power loss is not tested.
 #![allow(clippy::disallowed_methods)]
 
+mod common;
 mod files;
 
 use std::io::{BufRead, BufReader, Write};
@@ -43,6 +49,9 @@ use oma_export::writer::{AboutDraft, ConversationFile, ExportWriter, FanOut};
 const ENV_FAULT: &str = "OMA_EXPORT_TEST_FAULT";
 const ENV_DEST: &str = "OMA_EXPORT_TEST_DEST";
 const ENV_SINGLE: &str = "OMA_EXPORT_TEST_SINGLE";
+/// A library and archive id: the child runs the real pipeline on it.
+const ENV_LIB: &str = "OMA_EXPORT_TEST_LIB";
+const ENV_ARCHIVE: &str = "OMA_EXPORT_TEST_ARCHIVE";
 const CHILD_TIMEOUT: Duration = Duration::from_secs(60);
 
 const BUNDLE: &str = "Crash export";
@@ -79,6 +88,27 @@ fn export(parent: &Path, single: bool) {
     }
 }
 
+/// Export the whole archive `id` of the library in `lib` to a TXT bundle
+/// with its files copied, through the pipeline.
+fn export_archive(lib: &Path, id: &str, parent: &Path) {
+    let lib = oma_archive::Library::new(lib).expect("library");
+    let id = oma_archive::ArchiveId::parse(id).expect("id");
+    let i = common::Imported {
+        tmp: tempfile::tempdir().expect("unused"),
+        lib,
+        id,
+    };
+    common::export_txt(
+        &i,
+        parent,
+        oma_export::plan::ScopePlan::Archive,
+        &|_| {},
+        BUNDLE,
+        None,
+    )
+    .expect("export");
+}
+
 /// The child side. Does nothing unless the parent set the variables.
 #[test]
 fn crash_child() {
@@ -102,7 +132,10 @@ fn crash_child() {
             }),
         )
     });
-    export(Path::new(&dest), single);
+    match (std::env::var(ENV_LIB), std::env::var(ENV_ARCHIVE)) {
+        (Ok(lib), Ok(id)) => export_archive(Path::new(&lib), &id, Path::new(&dest)),
+        _ => export(Path::new(&dest), single),
+    }
     println!("\nDONE");
 }
 
@@ -113,6 +146,15 @@ enum Ran {
 }
 
 fn run_child(dest: &Path, single: bool, fault: Option<FaultPoint>) -> Ran {
+    run_child_with(dest, single, fault, None)
+}
+
+fn run_child_with(
+    dest: &Path,
+    single: bool,
+    fault: Option<FaultPoint>,
+    archive: Option<(&Path, &str)>,
+) -> Ran {
     let exe = std::env::current_exe().expect("test binary");
     let mut cmd = Command::new(exe);
     cmd.args([
@@ -128,6 +170,9 @@ fn run_child(dest: &Path, single: bool, fault: Option<FaultPoint>) -> Ran {
     .stderr(Stdio::null());
     if single {
         cmd.env(ENV_SINGLE, "1");
+    }
+    if let Some((lib, id)) = archive {
+        cmd.env(ENV_LIB, lib).env(ENV_ARCHIVE, id);
     }
     if let Some(p) = fault {
         cmd.env(ENV_FAULT, format!("{}:1", p.name()));
@@ -174,12 +219,14 @@ const BUNDLE_POINTS: [FaultPoint; 6] = [
     FaultPoint::PublishedBeforeMarkerRemoval,
 ];
 const SINGLE_POINTS: [FaultPoint; 1] = [FaultPoint::SingleFileStaged];
+const PIPELINE_POINTS: [FaultPoint; 1] = [FaultPoint::MidAttachmentCopy];
 
 #[test]
 fn every_fault_point_has_a_kill() {
     let mut all: Vec<FaultPoint> = BUNDLE_POINTS
         .iter()
         .chain(&SINGLE_POINTS)
+        .chain(&PIPELINE_POINTS)
         .copied()
         .collect();
     all.sort();
@@ -299,5 +346,56 @@ fn a_kill_before_a_single_file_is_placed_leaves_a_sweepable_partial_file() {
         ));
         assert!(s.remove());
         assert_eq!(top(&d.parent), [SINGLE]);
+    }
+}
+
+#[test]
+fn a_kill_in_the_middle_of_an_attachment_copy_leaves_a_sweepable_folder() {
+    let doc = common::docs()
+        .into_iter()
+        .find(|d| d.name == "export-files-plain")
+        .expect("export-files-plain");
+    let e = doc.export.clone().expect("export.json");
+    let lib = tempfile::tempdir().expect("library");
+    let (l, id) = common::import_in(&doc, lib.path());
+    drop(l);
+    let archive = Some((lib.path(), id.as_str()));
+    for point in PIPELINE_POINTS {
+        let d = dest();
+        assert_eq!(
+            run_child_with(&d.parent, false, Some(point), archive),
+            Ran::Killed,
+            "{point:?}"
+        );
+        // The leftover holds the partial copy, under its final name in
+        // the shard, and nothing masked.
+        let entries = top(&d.parent);
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        let left = d.parent.join(&entries[0]);
+        let inside = tree(&left);
+        assert!(
+            inside.iter().any(|p| p.starts_with("attachments/000/0000")),
+            "{inside:?}"
+        );
+        assert!(!inside.iter().any(|p| p == "SHA256SUMS"), "{inside:?}");
+        let bytes: Vec<u8> = inside
+            .iter()
+            .filter(|p| !p.ends_with('/'))
+            .flat_map(|p| std::fs::read(common::under(&left, p)).expect("read"))
+            .collect();
+        for s in e["sentinels"]["unsentAttachmentFiles"]
+            .as_array()
+            .expect("sentinels")
+        {
+            let s = s.as_str().expect("str");
+            assert!(!bytes.windows(s.len()).any(|w| w == s.as_bytes()), "{s}");
+        }
+        check_after_kill(&d, point, BUNDLE, false);
+        assert_eq!(
+            run_child_with(&d.parent, false, None, archive),
+            Ran::Finished
+        );
+        assert_eq!(top(&d.parent), [BUNDLE]);
+        verify_sums(&d.parent.join(BUNDLE));
     }
 }
