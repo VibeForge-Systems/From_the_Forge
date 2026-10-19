@@ -305,12 +305,15 @@ A verify (`verify_archive`) opens the writer without recovery, runs the
 database, index and file checks of slice 4k, and records one `verify_run`
 row; its terminal event is `verifyFinished`.
 
-Planned (M5):
+M5 (PR A implemented; the UI is PR B):
 
 ```
   → UI: paged queries through ArchiveReader (keyset pagination on
-        (chat_id, sort_key, message_id)), virtualized thread list,
-        attachments loaded on demand through BlobReader and a scoped asset protocol
+        (chat_id, sort_key, message_id)), virtualized thread list (PR B),
+        attachments by session token through the oma-media scheme:
+        images re-encoded in a decode helper process from the hashed
+        file, audio and video streamed in ranges after the hash and
+        structural checks (no asset protocol)
 ```
 
 Decrypted intermediates are written only inside the archive library's
@@ -2283,6 +2286,187 @@ window built in Rust are slice 5f.
   results stay **UNVERIFIED**, and the designed behaviour stays behind
   feature detection (slice 5h3).
 
+### The media protocol, the decode helper and the main window (M5 slice 5f)
+
+`src-tauri/src/viewer/media/` (Tauri-free: `mod.rs` the request rules and
+responses, `range.rs`, `tokens.rs`, `cache.rs`, `exec.rs`, `engine.rs`,
+`helper.rs`), the scheme registration in `lib.rs`, the decode helper's
+entry in `main.rs`, and `src-tauri/src/window.rs` (the main window built
+in Rust). No UI yet: `services/media.ts` and the media elements are PR B.
+
+- **Why a custom scheme (§6.1, D97).** Tauri's `asset:` protocol makes the
+  URL a filesystem path (I4), falls back to `text/html`, logs the path and
+  opens files without the store checks; it stays off (`protocol-asset` is
+  not a feature of `tauri`, checked through `cargo metadata` by a test).
+  IPC with `blob:` URLs cannot serve ranges for video.
+- **Registration (§6.2).** `register_asynchronous_uri_scheme_protocol("oma-media", …)`.
+  The adapter in `lib.rs` turns Tauri's request into a `MediaRequest`
+  (webview label, method, path and query, every `Range` and `Origin`
+  value, whether `mediaPlayback` is not `off`) and the responder into a
+  `Reply`; `viewer::media::dispatch` does the rest. URLs are
+  `oma-media://localhost/v1/<token>/<rendition>` on Linux and
+  `http://oma-media.localhost/v1/…` on Windows; Rust sends the base as
+  `ViewerSessionDto.mediaBase` (a `MediaBase` brand), so the frontend never
+  guesses the platform. The hyphenated scheme name is valid (RFC 3986
+  §3.1); in a headless smoke test WebKitGTK 2.52.6 routed `<img>` and
+  `<video>` requests for it to the handler with `incognito` on
+  (`compatibility.md`); a desktop run and WebView2 are spike 5s
+  (**UNVERIFIED**; the fallback name is `omamedia`).
+- **The handler never blocks.** `dispatch` parses, authorises, answers
+  refusals, `416`s and rendition cache hits at once, and hands everything
+  else to the session's executors. A `Reply` answers exactly once; one
+  dropped unanswered (a closed queue, a stopped worker) answers `503`
+  itself, so no request hangs. A test proves `dispatch` returned before a
+  worker (held at a gate by the test) answered; no timing is asserted.
+- **Authorisation (§6.4 rule 1).** Custom schemes bypass the capability
+  ACL, so every request is checked here, and anything not exactly right is
+  `404` with an empty body and no reason: a webview other than `main`; a
+  method other than `GET` or `HEAD`; a target that is not exactly
+  `/v1/<32 lowercase hex>/<thumb|display|stream>` (no query, fragment,
+  escape or trailing slash); more than one `Origin`, or one that is not
+  the app's page origin (`tauri://localhost` on Linux,
+  `http://tauri.localhost` on Windows, plus the dev server's in a dev
+  build); more than one `Range`, or one that is not a single strict spec;
+  an unknown, stale or evicted token; a token whose file has not been
+  inspected; a rendition the sniffed kind does not allow (`thumb` and
+  `display` for images only, `stream` for audio and video only); `stream`
+  before both the full hash and the structural check passed in this
+  session, or with playback off; `stream` without `Range` for a file over
+  8 MiB.
+- **Tokens (§6.3).** One random 128-bit token (`getrandom`) per
+  `(session, attachment)`, minted by `get_thread_page`, `get_reply_thread`
+  and `get_message_detail` for every listed attachment with a stored file
+  (`AttachmentDto.token`, a `MediaToken` brand) and by
+  `inspect_attachment` (`AttachmentInspectionDto.token`). The table lives
+  in the session (at most 50,000 entries, evicting the one least recently
+  minted or requested), so tokens die with it: `close_viewer`, an archive
+  switch, a reopen after a reload, the exit handler. `inspect_attachment`
+  records the sniffed kind on the token; until then no rendition is
+  served. Tokens keep row ids out of URLs and limit serving to files the
+  session surfaced; they are defence in depth, not a boundary against a
+  compromised page, which could read any message through IPC anyway.
+- **Executors (§6.2, D89).** Per session: **decode**, 2 workers, each with
+  its own reader and helper process, a queue of 64 taken newest first (a
+  full queue drops its oldest entry with `503`); **stream**, 2 workers,
+  each with its own reader, a FIFO queue of 16 (full is `503`); **verify**,
+  the session's `verify` reader behind a gate of one running and four
+  waiting checks (`inspect_attachment { forPlayback }` beyond that is
+  `busy`). Readers open on a worker's first job (each repeats the M4 open
+  checks); helpers start on a decode worker's first cache miss. Closing a
+  session closes both queues (waiting requests answer `503`); the workers
+  stop after the job each holds, dropping their readers and helpers.
+- **Renditions (§5.5, §5.8, D98, D102, D113).** A decode worker reads the
+  whole file through `read_blob_verified` (the hashing reader; over
+  64 MiB or a digest mismatch is a remembered failure) and hands the
+  verified bytes to its helper. The result is cached in memory (an LRU of
+  96 MiB of encoded renditions keyed by blob and rendition, cleared when
+  the session closes; nothing on disk) and answered `200` with
+  `image/jpeg` or `image/png`. Every failure (a refusal, a crash, a bad
+  hash) is remembered per `(blob, rendition)`, so a hostile image is
+  decoded at most once per session. The original's size the helper
+  reports is returned by `inspect_attachment` as `originalSize` once a
+  rendition exists. After 5 helper crashes in a session previews are off
+  (`previewsOff`) and every rendition request is refused.
+- **The decode helper (§5.5, D113).** The app's own binary started with
+  `--oma-decode-helper` (exactly that one argument; `main` checks it before
+  Tauri, logging or settings run), through `std::process::Command` with
+  piped stdin and stdout, stderr discarded and, on Windows,
+  `CREATE_NO_WINDOW` (`CommandExt::creation_flags`); no `unsafe`. Frames
+  are length-prefixed: the request is a fixed 42-byte header (magic,
+  version, rendition, the four limits, the length) plus the verified
+  bytes; the reply a fixed 31-byte header (status, format, alpha and
+  animation flags, the rendition's and the original's size, the length)
+  plus the encoded image. No path, id or name crosses (a test rebuilds the
+  header from those fields alone). The helper clamps the limits to the
+  app's own, calls only `oma_archive::media::render::render`, and exits on
+  any malformed frame. The host treats a closed pipe, a malformed reply or
+  no reply within 20 s (a watchdog thread kills the helper) as a crash,
+  and starts a new helper for the next request. It is **not an OS
+  sandbox**: the helper runs as the same user. Debug builds accept one
+  extra rendition code that makes the helper exit without replying, for
+  the restart test.
+- **Streams (§6.4 rule 3).** Exactly one `bytes=a-b`, `bytes=a-` or
+  `bytes=-n` (ASCII digits, values that fit in `u64`, no spaces, no list,
+  `bytes=` in lower case) is honoured: `206` with `Content-Range: bytes
+  a-b/len`, `Content-Length` and `Accept-Ranges: bytes`, each chunk at most
+  2 MiB, read through `open_range` with the identity `verify_blob`
+  recorded (a changed file is refused). `a > b`, `bytes=-0` and a start at
+  or past the end are `416` with `bytes */len`; a suffix longer than the
+  file is served from byte 0. Without `Range`, a file of at most 8 MiB is
+  `200` with the whole body (never `206`); a larger one is refused, so if an
+  engine ever requests media without `Range`, files over 8 MiB cannot play
+  on it (whether either engine does is spike 5s, **UNVERIFIED**).
+  `inspect_attachment { forPlayback }` now hashes a file once per session
+  and enables `stream` only when the structural check also passed.
+- **Headers (§6.4 rule 4).** Every response: `X-Content-Type-Options:
+  nosniff`, `Cache-Control: no-store`, `Content-Security-Policy:
+  default-src 'none'; sandbox`; every `2xx` also the `Content-Type`
+  decided in Rust (the rendition's, or the sniffed kind's for a stream)
+  and `Content-Length`. No `Content-Disposition`, and no CORP header
+  (whether either engine treats the app origin and the scheme as same-site
+  is **UNVERIFIED**). `HEAD` gets the headers only.
+- **CSP per platform (§6.5).** `tauri.linux.conf.json` adds `oma-media:`
+  and `tauri.windows.conf.json` adds `http://oma-media.localhost` to
+  `img-src` (after `'self' data:`) and as the whole of `media-src`, in
+  both `csp` and `devCsp`; Tauri merges them over `tauri.conf.json` (JSON
+  Merge Patch). Nothing else changes: `connect-src` stays IPC only. On
+  Linux `http://oma-media.localhost` would be a real loopback origin, so
+  each platform names only the form its engine serves. A test merges each
+  platform file the way tauri-utils does and compares both maps exactly,
+  and checks that neither names the other platform's form. The `ipc`
+  form on Linux is a follow-up (§19), not changed here.
+- **The window built in Rust (§6.6, §6.7, D106).** `main` has
+  `"create": false` and `"incognito": true` (no persistent HTTP cache or
+  web storage; WebView2 needs runtime 101.0.1210.39 or later). `setup`
+  builds it with `WebviewWindowBuilder::from_config` and four hooks:
+  navigation only to the app's page origin (plus the dev server's in a dev
+  build), new windows denied, downloads refused, permission requests
+  denied. The policies are plain functions with tests; the hooks
+  themselves run only in a real window (**UNVERIFIED** here, as is the
+  scheme under incognito on WebKitGTK, spike 5s). Zoom hotkeys stay off
+  (D116); the title is never a chat name (D112).
+- **Logs (§6.4 rule 5).** One `debug` line per request: a closed outcome
+  kind (`refused`, `cached`, `decoded`, `decodeFailed`, `helperCrashed`,
+  `streamed`, `unsatisfiable`, `unreadable`, `dropped`), the status, a size
+  bucket (< 64 KiB, < 1 MiB, < 16 MiB, ≥ 16 MiB) and the elapsed time; a
+  `warn` per helper crash with the session's crash count. Never the token,
+  the blob, the range, the URI or an exact size.
+  `src-tauri/tests/log_hygiene.rs` drives the handler for every token of
+  three catalogue archives through the real helper.
+- **Tests.** In `viewer/media/tests.rs` (on the `view-media-plain`
+  archive, with a fake decode backend; reads, hashes, structural checks and
+  ranges are real): every refusal of §13.6, answered before `dispatch`
+  returns; tokens and helpers ending with the session and a reopen;
+  renditions decoded once and then served from memory without a queue;
+  remembered failures; five crashes turning previews off; the full decode
+  queue dropping its oldest entry with `503`; verification never holding
+  a decode or stream worker, and its bounded gate; the range rules on a
+  real stream; the arithmetic for an injected 3 GiB length and the 8 MiB
+  rule. Unit tests for the range parser and planner, the token table, the
+  cache and the queues. `tests/decode_helper.rs` starts the real binary
+  (`CARGO_BIN_EXE_openmessage-archive`): images round-trip through one
+  long-lived helper, refusals are codes, a helper that dies mid-request is
+  restarted, and (Unix) a hung helper is killed after the timeout.
+  `window/tests.rs`: the merged configurations, the media base, the
+  feature check and the window policies.
+- **Deviations.** `get_search_results` mints no token: its hits list no
+  attachments. The original's size is kept beside the rendition cache
+  (per blob), not in the token table. A failed preview is `404` (a queue
+  overflow is `503`). The verify executor is the session's existing
+  `verify` reader with a five-place gate, not a thread of its own. An
+  evicted token is tested on the table, not through the protocol (the
+  bound is 50,000).
+- **Not verified here.** Apart from one headless smoke test (WebKitGTK
+  2.52.6 under `xvfb-run`, a dev build and a scratch page: the window was
+  built, the scheme reached the handler under incognito, and a scripted
+  navigation away was not followed; `compatibility.md`), nothing has run
+  in a window, and nothing on Windows: that either engine loads images from
+  the scheme under the merged production CSP, sends
+  `Range`, seeks, honours `no-store`, or reaches the hooks is spike 5s and
+  the manual checklist (**UNVERIFIED**). The Windows-only code
+  (`CREATE_NO_WINDOW`, the `http://oma-media.localhost` base) is compiled
+  and tested only by CI on `windows-2022`, not here.
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`
@@ -2436,6 +2620,47 @@ are design decisions of the M4 spec.
 | D87 | Migrations | Explicit `migrate()` only; fingerprint first; space checked before anything changes; unfinished sessions superseded; a real migration refused until the pre-migration copy exists | Migrate on open | No surprise writes; reads never migrate |
 | D88 | Stopped state | Session state 6, `stopped`, for resumable stops (space, a changed source, a volume limit) | Reuse cancelled or failed | "Failed" is kept for errors that cannot be continued. A file-size limit hit on the database itself (`EFBIG`) still fails the session; only per-file limits on attachments are handled |
 
+### Milestone 5 decisions
+
+D89–D117 (M5 spec §18), as PR A (slices 5a–5f) implements them. **The
+owner answered the spec's four questions on 2026-10-18**: D97's and D99's
+playback wording, D100 and D110 (Q1), D101 (Q2, **which differs from the
+lean**), D105 and D115 (Q3) and D99's default (Q4) are **owner-confirmed**.
+The rest are design decisions of the M5 spec. Rows about the UI (D96,
+D104, D107–D109, D112's UI side) are implemented in PR B.
+
+| # | Topic | Choice | Main alternative | Trade-off |
+|---|---|---|---|---|
+| D89 | Reader | `ArchiveReader` methods; per session a `pages`, a `search` and a `verify` reader, plus one reader per stream and decode worker; one snapshot per call | One reader behind one mutex; long-lived read transactions | Search, decode and verify cannot stall page reads or playback, and checkpoints are never held back |
+| D90 | Budgets | `ReadConn::viewing` in phases with `QueryTooBroad`, `Cancelled` and deadlines; `budgeted()` unchanged for M4 | One budget per call | A broad search is never reported as damage |
+| D91 | Paging | Keysets on `(sort_key, message_id)` bounded to dated keys, the undated section on its own, remembered keys for moved anchors | `OFFSET`; unbounded `max(sort_key)` | Pages cost the same at any depth; undated rows never pose as newest |
+| D92 | Schema | No change in M5; a bounded exact-text scan matched in Rust | A trigram or names index with the first migration | v1 stays frozen; short-query search is slower |
+| D93 | Reactions | Fold only tapbacks whose target is in the same chat; chip state derived from recorded rows; the full history shown | Show only raw rows | Readable threads without hiding a recorded row |
+| D94 | Status | No read, delivery or sent value crosses IPC, chat-level included; the guard bans the keys | A raw "recorded columns" view | Follows I5 |
+| D95 | Content DTOs | A separate viewer module and guard; brands `UntrustedText`, `DecimalString`, `SafeId`, and from 5f `MediaToken` and `MediaBase`; the archive guard rejects every brand and viewer type | Extend the archive guard | Neither guard silently covers the other |
+| D96 | Rendering | `SafeText` only, no HTML path, no linkification (PR B) | Sanitised HTML | Links need copy and paste |
+| D97 | Media transport (**owner-confirmed wording, Q1**) | The `oma-media` async scheme; stable 128-bit tokens per attachment; bounded chunks; a self-authorising handler; per-platform CSP; the window built in Rust | `asset:` (rejected); IPC plus `blob:` URLs | Streaming and seeking without paths, network origins or save paths |
+| D98 | Images | Only app-produced renditions reach the webview; SVG never served | Serve sniffed originals | The engine's decoders never see attachment image bytes |
+| D99 | Audio and video (**owner-confirmed, Q1b and Q4**) | The engine's media stack after a structural check, a full hash check (integrity only) and, by default (`confirm`), a confirmation per file; `off` refused in Rust and by the protocol | No inline playback | Playback, at the disclosed cost of exposing native codecs to sender-chosen bytes |
+| D100 | Opening attachments (**owner-confirmed, Q1a**) | Never in M5; downloads refused by the window's hook; saving is M6 | Hand off to the OS | No plaintext copy outside the archive |
+| D101 | HEIC (**owner-confirmed, Q2; differs from the lean**) | An optional `heic` feature of `oma-archive` (pure-Rust `heic-rs`, MIT OR Apache-2.0), **off by default and never enabled in official or CI release builds**; HEIC is a file card otherwise | No decoder and no feature | Self-builders may opt in at their own legal risk (HEVC patent pools); official builds show HEIC as cards |
+| D102 | Rendition cache | Memory LRU of 96 MiB per session; no disk cache | An opt-in disk cache | No new writer, plaintext derivative or viewing history; re-decoding after a restart |
+| D103 | Search | Rust-built quoted FTS queries; scoped and global plans; highlight under a budget with a reconstruction check; exact text matched in Rust | Pass user syntax through | No query injection, no markup across IPC |
+| D104 | Time | ICU in the webview; Rust is time-zone-free; raw values as decimal strings | A time-zone crate | One time-zone source |
+| D105 | Edited text (**owner-confirmed, Q3a**) | Decode `ec[*].t` at read time; never stored or indexed | No edit text | Matches what the phone shows |
+| D106 | Webview profile | `incognito: true`, `no-store`, the navigation hook; context-menu, drag, print and reload guards in PR B | A persistent profile | No web cache of media |
+| D107 | Clipboard | Web copy on explicit action only (PR B) | `arboard` (BSL-1.0 transitively) | No new licence class |
+| D108 | Privacy screen | A curtain that unmounts content; idle hide closes the session (PR B) | CSS blur | Honest about not being a lock |
+| D109 | Virtualisation | `virtua` behind `VirtualFeed`, pending spike 5s (PR B) | TanStack; hand-written | Prepend anchoring ready-made if the spike passes |
+| D110 | Search history (**owner-confirmed, Q1c**) | Nothing persisted | A v2 table | The reader stays read-only |
+| D111 | Handles | Shown as recorded, with the service when one address has two | Phone formatting | No misleading grouping |
+| D112 | Window title | Never a chat name | Show the chat name | Nothing leaks to taskbars or screen shares |
+| D113 | Image decoding process | Two long-lived helper processes per session (the app's own binary, `--oma-decode-helper`), fed verified bytes over pipes; no `unsafe`; failure cache; restart, and previews off after 5 crashes | Decode in the main process (`panic = "abort"`) or in the webview | A decoder panic, OOM or memory bug cannot end the app or reach keys, connections or IPC; not an OS sandbox |
+| D114 | Viewer and the archive location | A session counts as an open archive; location changes refused | Drop the session silently | Consistent with M4 |
+| D115 | Masking and retraction (**owner-confirmed, Q3b**) | Enforced in Rust on every content path, released only by `reveal` after a click; revealing by default is a setting, off | Mask in the bubble only | A one-time code or withdrawn text never reaches the webview unasked |
+| D116 | Zoom | `uiZoom` applied from Rust with `set_zoom`; no webview permission | `zoomHotkeysEnabled` | WCAG reflow without widening the capability |
+| D117 | M6 export source | `view/assemble.rs` is the uncapped layer M6 streams | Export from the paging APIs | Exports are complete |
+
 ## Logging
 
 `tracing` writes to stderr, filtered by `OMA_LOG` (default `info`). Log
@@ -2503,6 +2728,15 @@ time; at `debug`, page and hit buckets and flags. It never logs query or
 filter text, ids, labels, addresses, names, text or exact byte counts;
 `src-tauri/tests/log_hygiene.rs` runs every viewer operation over the
 viewer catalogue with sentinel filters and queries and checks the log.
+
+The `oma-media` handler (M5 slice 5f) logs, at `debug`, one line per
+request: a closed outcome kind, the status, a size bucket and the elapsed
+time; at `warn`, a decode helper crash with the session's crash count. It
+never logs the token, the blob, the range, the URI or an exact size (an
+exact size can identify a known file). The decode helper logs nothing and
+its stderr is discarded. The log-hygiene test drives the handler for every
+token of three catalogue archives, through the real helper, and checks
+that no token, `/v1/` path or range appears.
 
 The persistent, redacted diagnostic log file was deferred to M4 (D15); M4
 defers it again, to M8 (D71, a lean awaiting the owner).

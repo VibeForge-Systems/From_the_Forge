@@ -32,6 +32,8 @@ pub const QUERY_CONTROL: &str = "Searches cannot contain control characters.";
 pub const QUERY_NO_TERMS: &str = "Type a word or a number to search for.";
 pub const QUERY_NEEDLE_TOO_LONG: &str = "Exact-text searches can be up to 64 characters long.";
 pub const BUSY_VIEWER_LOCATION: &str = "Close the viewer to change the archive location.";
+pub const PLAYBACK_CHECK_BUSY: &str =
+    "Other files are being checked for playback. Try again in a moment.";
 
 /// Every sentence here (distinct; checked by a test).
 pub const ALL: &[&str] = &[
@@ -52,6 +54,7 @@ pub const ALL: &[&str] = &[
     QUERY_NO_TERMS,
     QUERY_NEEDLE_TOO_LONG,
     BUSY_VIEWER_LOCATION,
+    PLAYBACK_CHECK_BUSY,
 ];
 
 pub fn closed() -> IpcError {

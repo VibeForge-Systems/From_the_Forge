@@ -847,6 +847,61 @@ and playback on a desktop with audio, WebKitGTK and WebView2) cannot run
 in this container; its results are **UNVERIFIED**, and the designed
 behaviour stays behind feature detection until it is run.
 
+### Milestone 5 media protocol, decode helper and window (slice 5f)
+
+Run in the Linux container on 2026-10-19 (Rust 1.97.0, debug build, 4
+CPUs); not CI, not a desktop, no window, synthetic data only:
+
+- **The protocol's core, without a window** (`viewer::media` tests, on an
+  archive imported from `view-media-plain`, with a fake decoder): every
+  refusal of spec §13.6 answers `404` with an empty body before `dispatch`
+  returns; renditions are served from the decode workers and then from the
+  memory cache without a queue; a full decode queue drops its oldest entry
+  with `503`; five decoder crashes turn previews off; tokens stop working
+  when the session closes or is reopened, and the session's decoders end;
+  real streams of the catalogue's playable files honour the range rules
+  (`206` chunks with `Content-Range`, `416` with `*/len`, `200` whole only
+  without `Range`, refusals for malformed, multiple and overflowing
+  ranges); a 3 GiB length is checked by arithmetic only (no such file).
+- **The decode helper** (`tests/decode_helper.rs`): the built binary, run
+  with `--oma-decode-helper`, re-encoded the catalogue's PNG (RGB and
+  alpha), EXIF-rotated JPEG and animated GIF, refused the 60000×60000 PNG
+  header and SVG with closed codes, was restarted after dying mid-request
+  (debug-build crash code), and a hung stand-in process was killed after
+  the timeout.
+- **The configuration** (`window` tests): `tauri.conf.json` merged with
+  `tauri.linux.conf.json` and with `tauri.windows.conf.json` (JSON Merge
+  Patch, as tauri-utils does) gives exactly the designed CSP and dev CSP
+  for each platform; `main` has `create: false` and `incognito: true`;
+  `tauri` resolves without `protocol-asset` (`cargo metadata`).
+- **Logs** (`src-tauri/tests/log_hygiene.rs`): the handler, driven for
+  every token of three catalogue archives through the real helper, logged
+  no token, media path, range or exact size.
+
+**Headless smoke test** (2026-10-19, `xvfb-run`, WebKitGTK 2.52.6, a
+debug build whose dev URL served a scratch page instead of the app; not a
+desktop, no audio, not committed): the app built `main` from Rust with
+`incognito` on and loaded the dev URL (allowed by the navigation hook);
+`<img>` and `<video>` sources on `oma-media://localhost/…` reached the
+handler (four refusals logged: no viewer session was open), so WebKitGTK
+2.52.6 registered the **hyphenated scheme under incognito**; a script
+navigation to `https://example.com/` left the page in place (two later
+requests still arrived), consistent with the navigation hook refusing it.
+Not shown by it: images actually rendered, the production CSP (a dev build
+was used), `Range` behaviour, the new-window and download hooks.
+
+**Not tested** (manual checklist; slice 5k and spike 5s): whether WebKitGTK
+loads and renders images from the scheme under the merged production CSP
+on a desktop; the same on WebView2 with
+`http://oma-media.localhost`; whether either engine sends `Range` for
+every media request, seeks with `206` chunks, or keeps anything despite
+`no-store` and incognito; whether the navigation, new-window, download and
+permission hooks fire on either engine (including downloads from native
+`<video>` controls); the `CREATE_NO_WINDOW` helper spawn and the decode
+times on Windows; decode times on real hardware with synthetic photos. No
+row of this section has run on Windows; CI on `windows-2022` will compile
+and run the same tests.
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI

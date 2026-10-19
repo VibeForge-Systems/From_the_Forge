@@ -67,6 +67,11 @@ image = { version = "=0.25.10", default-features = false, features = ["jpeg", "p
 # feature it has no dependencies at all.
 heic-rs = { version = "=0.1.4", default-features = false, features = ["std"] }
 
+# Milestone 5: media tokens in the shell (src-tauri/src/viewer/media/tokens.rs):
+# 128 random bits from the OS. Already in the lockfile through Tauri; default
+# features only (no `wasm_js`, no custom backend).
+getrandom = "=0.3.4"
+
 oma-fs = { path = "crates/oma-fs" }
 oma-backup = { path = "crates/oma-backup" }
 oma-messages = { path = "crates/oma-messages" }

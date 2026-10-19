@@ -103,6 +103,42 @@ impl DecimalString {
     }
 }
 
+/// A media token (§6.3): 32 lowercase hex characters naming one surfaced
+/// attachment in this viewer session. Only `services/media.ts` turns it
+/// into a URL.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(transparent)]
+#[ts(export, type = "string & { readonly __mediaToken: unique symbol }")]
+pub struct MediaToken(String);
+
+impl MediaToken {
+    pub fn of(t: &super::media::tokens::TokenBytes) -> MediaToken {
+        MediaToken(t.hex())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// The base of every media URL on this platform (§6.2):
+/// `oma-media://localhost/` on Linux, `http://oma-media.localhost/` on
+/// Windows. Rust decides it, so the frontend never guesses.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(transparent)]
+#[ts(export, type = "string & { readonly __mediaBase: unique symbol }")]
+pub struct MediaBase(String);
+
+impl MediaBase {
+    pub fn platform() -> MediaBase {
+        MediaBase(super::media::media_base().to_owned())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 fn dec(v: Option<i64>) -> Option<DecimalString> {
     v.map(DecimalString::of)
 }
@@ -490,6 +526,8 @@ pub struct ViewerSessionDto {
     /// counted within its budget.
     pub unsearchable: Option<u64>,
     pub skipped_rows: u64,
+    /// The base of media URLs on this platform.
+    pub media_base: MediaBase,
 }
 
 impl ViewerSessionDto {
@@ -525,6 +563,7 @@ impl ViewerSessionDto {
             }),
             unsearchable: unsearchable.map(n),
             skipped_rows: cx.skipped,
+            media_base: MediaBase::platform(),
         }
     }
 }
@@ -1003,6 +1042,8 @@ pub struct AttachmentDto {
     pub stored: bool,
     pub stored_bytes: Option<u64>,
     pub placed_inline: bool,
+    /// The media token of the stored file, for `services/media.ts`.
+    pub token: Option<MediaToken>,
 }
 
 /// One message, assembled.
@@ -1244,6 +1285,7 @@ fn attachment_ref(a: &oa::AttachmentRef, cx: &mut Conv) -> Option<AttachmentDto>
         stored: a.blob.is_some(),
         stored_bytes: a.stored_bytes.and_then(|b| u64::try_from(b).ok()).map(n),
         placed_inline: a.placed_inline,
+        token: None,
     })
 }
 
@@ -2517,6 +2559,24 @@ pub struct AttachmentInspectionDto {
     pub content: ContentKindDto,
     /// Only when asked `forPlayback`.
     pub playback: Option<PlaybackDto>,
+    /// The media token of the stored file; renditions and streams are
+    /// served for it only after this inspection.
+    pub token: Option<MediaToken>,
+    /// The original's size, once a rendition was made ("original W×H");
+    /// `None` until then.
+    pub original_size: Option<ImageSizeDto>,
+    /// Image previews are off for this session (the decode helper
+    /// crashed too often).
+    pub previews_off: bool,
+}
+
+/// An image's size in pixels, as the decode helper reported it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ImageSizeDto {
+    pub width: u32,
+    pub height: u32,
 }
 
 /// The viewer's output types, for the guard (and the archive guard's
@@ -2574,10 +2634,13 @@ pub const M5_VIEWER_TYPES: &[&str] = &[
     "HitTextDto",
     "HitVersionDto",
     "IdentifierProbeDto",
+    "ImageSizeDto",
     "ItemKindDto",
     "LookupDto",
     "MaskKindDto",
+    "MediaBase",
     "MediaClassDto",
+    "MediaToken",
     "MessageDetailDto",
     "MessageDto",
     "MessageLabelDto",

@@ -132,14 +132,14 @@ pub(crate) fn synthetic_archive(library: &Path) -> (tempfile::TempDir, ArchiveId
     (keep, import_order(library, "view-main-plain"))
 }
 
-struct Fx {
+pub(crate) struct Fx {
     _tmp: tempfile::TempDir,
-    library: PathBuf,
-    id: ArchiveId,
+    pub(crate) library: PathBuf,
+    pub(crate) id: ArchiveId,
     model: Value,
 }
 
-fn fx(entry: &str) -> Fx {
+pub(crate) fn fx(entry: &str) -> Fx {
     let tmp = tempfile::tempdir().expect("tempdir");
     let library = tmp.path().join("lib");
     std::fs::create_dir(&library).expect("mkdir");
@@ -165,7 +165,7 @@ fn strings(v: &Value) -> Vec<String> {
     }
 }
 
-fn id_of<T: serde::de::DeserializeOwned>(v: Value) -> T {
+pub(crate) fn id_of<T: serde::de::DeserializeOwned>(v: Value) -> T {
     serde_json::from_value(v).expect("input")
 }
 
@@ -192,7 +192,7 @@ fn page_req(
 
 /// Every page of every conversation (newest to oldest, then the undated
 /// section), as JSON.
-fn walk_threads(s: &ViewerSession, viewer: u32, reveal: bool) -> Vec<ThreadPageDto> {
+pub(crate) fn walk_threads(s: &ViewerSession, viewer: u32, reveal: bool) -> Vec<ThreadPageDto> {
     let index = list_conversations(s, &id_of(json!({ "viewer": viewer, "sort": "recent" })))
         .expect("index");
     let mut pages = Vec::new();
@@ -881,6 +881,8 @@ fn the_viewer_guard_admits_only_branded_strings_and_safe_ids() {
     assert!(UntrustedText::decl(&cfg).contains("string & { readonly __untrusted"));
     assert!(DecimalString::decl(&cfg).contains("string & { readonly __decimal"));
     assert!(SafeId::decl(&cfg).contains("number & { readonly __id"));
+    assert!(MediaToken::decl(&cfg).contains("string & { readonly __mediaToken"));
+    assert!(MediaBase::decl(&cfg).contains("string & { readonly __mediaBase"));
     // The type list is the walk's outputs.
     let listed: BTreeSet<String> = M5_VIEWER_TYPES.iter().map(|s| (*s).to_owned()).collect();
     assert_eq!(outputs, listed, "M5_VIEWER_TYPES matches the walk");

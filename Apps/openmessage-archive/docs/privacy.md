@@ -337,7 +337,8 @@ for that set, and nothing else.
 
 ### What crosses into the window
 
-The Archive page and the confirmation step show counts, closed kinds,
+(For the viewer, see "The viewer (M5)" below.) The Archive page and the
+confirmation step show counts, closed kinds,
 booleans, dates and the archive's label only, never a message, address,
 chat name, file name or device value. The IPC types have one free-text
 field, the label, and a structural test fails on any other. To pre-select
@@ -371,6 +372,111 @@ checkpoints or truncation, SSD remapping and snapshots are **not** erased.
 M4 deletes nothing a user can see: there is no way to delete an archive or
 a message from one yet. These settings are hygiene, not protection; see
 "Deleting data" below.
+
+## The viewer (M5)
+
+M5 is the first milestone that shows message content, addresses, chat
+names and attachment files in the window. *Status: the reading side, the
+commands, the media protocol, the decode helper and the window's settings
+exist from M5 PR A (slices 5a–5f); the screens that show them come in PR
+B. Nothing here has been run in a window or on Windows yet; items marked
+**UNVERIFIED** depend on the web engine and are on the manual checklist in
+`compatibility.md`.*
+
+### What crosses into the window
+
+- Message text, addresses, chat names, file names and image previews now
+  cross into the webview, which is a separate process. They cross only
+  when the window asks for what it shows, page by page and under size
+  limits.
+- **One-time codes** and **text captured before the sender unsent it**
+  cross only after you press "Show code" or "Show earlier text" for that
+  message (owner-confirmed 2026-10-18, Q3b). A setting can show earlier
+  text by default; it is off by default. Earlier versions of an edited
+  message are decoded from the archive when you open its details; nothing
+  is stored or indexed for that (Q3a).
+- No GUID, content digest, rank, file path or storage name crosses, and
+  **no read, delivery or sent value**, chat-level ones included. A
+  structural test of the IPC types enforces this.
+- Attachment files are named in the window only by a random token that is
+  valid for the current viewer session, and only for files the session has
+  shown. Tokens end when the viewer closes, the archive changes or the app
+  exits. They keep row numbers out of URLs; they are not a protection
+  against a compromised page.
+
+### Images
+
+Images are decoded by memory-safe Rust decoders in a separate helper
+process (the app's own program, started for this) and re-encoded as JPEG
+or PNG, without any metadata (location included), before the window sees
+them. The original image bytes never reach the web engine's image
+decoders. Before decoding, the whole file is re-read and checked against
+the checksum recorded at import; that check protects against corruption
+only. A helper that crashes ends one preview, not the app; after five
+crashes in a session, previews are turned off for that session. **The
+helper is not an operating-system sandbox:** it runs as you, so a
+successful exploit of a decoder could read your files. SVG, HTML, PDF and
+other formats are never rendered; they are shown as file cards.
+
+### Audio and video
+
+Audio and video are played by your system's media codecs (GStreamer on
+Linux, Media Foundation on Windows) from the original file
+(owner-confirmed 2026-10-18, Q1b and Q4). The original bytes reach the
+web engine only when you press Play, and only after:
+
+1. a structural check of the file (MP4, QuickTime, M4A and WAV; MP3, Ogg
+   and WebM get a check of their first bytes only), which also refuses
+   QuickTime reference movies and external data references, so a file
+   cannot make the engine fetch another;
+2. a full check against the checksum recorded at import, which proves the
+   file is the one imported, **not that it is safe**;
+3. by default (`confirm`), your confirmation for that file in this
+   session.
+
+A file crafted by its sender could exploit a flaw in those codecs; the app
+cannot prevent that. On Linux the web engine's own sandbox may be off
+(**UNVERIFIED**, recorded per engine in `compatibility.md`). Playback can be
+turned off in the viewer settings; with `off`, the app refuses playback in
+its own code and the engine never receives attachment bytes.
+
+### Attachments are never opened, executed or saved
+
+M5 never hands an attachment to another program and never saves one
+(owner-confirmed 2026-10-18, Q1a). The window refuses downloads, new
+windows and permission requests (camera, microphone, location and others)
+in Rust, and may only navigate within the app. Saving a copy of an
+attachment is M6.
+
+### Memory, cache and the web profile
+
+- Image previews are kept in memory only (up to 96 MiB) and dropped when
+  the viewer closes. **Nothing is cached on disk.**
+- The window runs in a private (incognito) web profile, so the engine keeps
+  no persistent HTTP cache or web storage, and every media response tells
+  it not to store the response (`Cache-Control: no-store`). Whether either
+  engine keeps anything regardless is **UNVERIFIED** (manual checklist).
+- Search runs in memory; no search history is kept anywhere.
+- The window title is always "OpenMessage Archive", never a conversation
+  name.
+
+### Not prevented by the app
+
+These paths can keep or expose what the viewer showed, and M5 does not
+prevent them:
+
+- crash dumps (systemd-coredump, Windows Error Reporting) of the web
+  process or the app, which may hold message text and, during an import,
+  the backup's keys;
+- swap and hibernation files;
+- print-to-PDF, if an engine handles Ctrl+P before the app can intercept
+  it (**UNVERIFIED** per engine);
+- clipboard history and cloud clipboard, once you copy text;
+- window previews (Alt-Tab, taskbar thumbnails) and screen capture,
+  including Windows Recall (capture protection is an opt-in setting on
+  Windows only; its effect on Recall is **UNVERIFIED**);
+- other programs running as you, which can read the archive and the
+  screen.
 
 ## Device identifiers (M2)
 
@@ -409,7 +515,10 @@ never logged.
   run makes the dependency tree auditable.
 - The webview runs under a Content Security Policy whose `connect-src`
   allows only Tauri's IPC channel. Fonts, icons and styles are bundled; no
-  CDN is used.
+  CDN is used. From M5, images and media may also load from the app's own
+  `oma-media` scheme (`oma-media:` on Linux, `http://oma-media.localhost`
+  on Windows, where WebView2 serves custom schemes under that name); the
+  app answers it itself and it reaches no network.
 - **Caveat: the webview runtime itself.** On Windows, the UI runs in
   Microsoft Edge WebView2, a Microsoft component that updates itself and
   can contact Microsoft services (for example SmartScreen or update checks)
@@ -484,10 +593,10 @@ Backups and their contents are treated as hostile:
   corruption only**, not against a file that was harmful when it was
   imported. The type a message records for an attachment is never trusted;
   the app looks at the bytes, and treats anything it does not recognise as
-  a file card. *Status: the crate side (the content check, the structural
-  check, the checksum readers and the image re-encoding function) exists
-  from M5 slice 5d; the helper process, playback and the viewer window
-  come in later M5 slices.*
+  a file card. *Status: the content check, the structural check, the
+  checksum readers and the image re-encoding exist from M5 slice 5d; the
+  helper process, the media protocol and the hardened window from slice
+  5f; the screens that use them come in M5 PR B. See "The viewer (M5)".*
 - **HEIC images (owner-confirmed 2026-10-18, Q2).** Official builds, and
   every build CI produces, **do not decode HEIC or HEIF**: such an
   attachment is shown as a file card. Decoding HEIC means implementing
@@ -516,7 +625,9 @@ content digests, ranks, attachment hashes or storage names, source rowids
 and cursors, an archive id or label, device names or product types, any
 path (archive folder names included), display text, any value from the
 archive's issue or history tables, or SQLite error text (only the primary
-code). The persistent diagnostic log file is deferred to M8 (D71, a lean
+code). From M5 they also never record search or filter text, ids, media
+tokens, media URLs, byte ranges or exact file sizes (sizes are bucketed).
+The persistent diagnostic log file is deferred to M8 (D71, a lean
 awaiting the owner). Set `OMA_LOG=debug` for more detail. That
 setting changes how much is recorded, not which kinds of data.
 

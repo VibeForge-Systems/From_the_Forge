@@ -35,14 +35,19 @@ jobs, and the Archive page. Archives are plaintext at rest (encryption is
 M8). All slices pass CI on `ubuntu-22.04` and `windows-2022`. Its sign-off
 is pending the manual checklist in
 `docs/compatibility.md`, and the owner's answers on D69, D70, D71, D79 and
-D82 (D51, D59, D60 and D61 are owner-confirmed). Milestone 5 (the rich
-viewer) is next.
+D82 (D51, D59, D60 and D61 are owner-confirmed). **Milestone 5 (the rich
+viewer) is in progress:** PR A (slices 5a–5f: the viewer catalogue, the
+viewer reads and search in `oma-archive`, media sniffing and checks, the 14
+viewer commands, the `oma-media` protocol, the image decode helper and the
+main window built in Rust) is implemented and tested in a Linux container
+without a window; the UI is PR B. The owner answered the M5 questions
+(`docs/architecture.md`, "Milestone 5 decisions").
 
 Read these before designing anything:
 
 | Doc | Read it for |
 |---|---|
-| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, the archive (layout, threat model, import data flow, one section per M4 slice), and the decision records (D1–D88; D43 is how "do not fabricate" is read for the check) |
+| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, the archive (layout, threat model, import data flow, one section per M4 slice), and the decision records (D1–D117; D43 is how "do not fabricate" is read for the check) |
 | [`docs/supported-formats.md`](docs/supported-formats.md) | Sourced research on the backup format, encryption, the sms.db schema (columns with sources, timestamps, codes, typedstream) and device tooling. Items marked **UNVERIFIED** are hypotheses, not facts. |
 | [`docs/privacy.md`](docs/privacy.md) | What is copied, where and for how long, including the plaintext copies of sms.db, and what an archive holds (plaintext at rest) |
 | [`docs/compatibility.md`](docs/compatibility.md) | What has actually been tested |
@@ -103,6 +108,11 @@ Each one is enforced in code. Keep it that way.
    - Do not add HTTP client crates or CDN-hosted assets, and no telemetry.
    - The CSP in `src-tauri/tauri.conf.json` allows `connect-src` to IPC
      only, with no `unsafe-inline` in production. Do not loosen it.
+   - From M5, `tauri.linux.conf.json` and `tauri.windows.conf.json` each
+     add exactly one scheme source (`oma-media:` on Linux,
+     `http://oma-media.localhost` on Windows) to `img-src` and
+     `media-src`, and nothing else. The `window` tests compare the merged
+     maps exactly; change them only with the spec.
 4. **The webview never supplies filesystem paths.** Paths come from native
    dialogs that Rust opens, or from settings Rust has already validated.
    Input types use `#[serde(deny_unknown_fields)]`.
@@ -388,6 +398,26 @@ Never hand-edit generated files.
   refuses playback in Rust when `mediaPlayback` is `off`. A viewer session
   blocks location changes (D114). Never log query or filter text, ids or
   content (`src-tauri/tests/log_hygiene.rs`).
+- **The media protocol and the window (M5 slice 5f).** `oma-media`
+  is a custom scheme, and **custom schemes bypass the capability ACL**: the
+  handler (`src-tauri/src/viewer/media/`, Tauri-free; `lib.rs` only adapts
+  the request and responder) authorises every request itself and refuses
+  anything not exactly `GET`/`HEAD /v1/<token>/<rendition>` from `main`
+  with `404` and an empty body. It must never block (WebKitGTK calls it on
+  the GTK main loop): only parse, authorise, answer cache hits and
+  refusals, and enqueue; every `Reply` is answered once (a dropped one
+  answers `503`). Tokens are per session and minted only for surfaced
+  attachments; `stream` needs both the hash and the structural check in
+  this session. Every response carries nosniff, `no-store` and the
+  `sandbox` CSP; never add `Content-Disposition`. Log outcome kinds,
+  statuses, size buckets and elapsed time only: never a token, URI, range
+  or exact size. **Images are decoded only in the decode helper** (`main`
+  runs `viewer::media::helper::run_helper` for `--oma-decode-helper`
+  before anything else); never call `media::render` in the app process.
+  Keep `protocol-asset` off and Tauri's `tracing` feature off. The main
+  window is built in Rust (`window.rs`, `"create": false`, `incognito`):
+  navigation to the app's origin only, new windows, downloads and
+  permission requests denied; keep those hooks when touching `setup`.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush

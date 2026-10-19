@@ -17,7 +17,9 @@
 //! M5 (§7.7): every viewer operation over archives imported from the
 //! synthetic viewer catalogue, with filter and query strings that carry
 //! sentinels, refusals included: no content, filter or query text and no
-//! archive id reaches a log line.
+//! archive id reaches a log line. The `oma-media` handler is driven for
+//! every attachment token, with the real decode helper (this package's
+//! binary): no token, URI, range or exact size is logged (§6.4 rule 5).
 //!
 //! Its own test binary with one global capturing subscriber: a thread-local
 //! subscriber would miss events from worker threads.
@@ -446,14 +448,48 @@ fn req<T: serde::de::DeserializeOwned>(v: serde_json::Value) -> T {
 /// Run every viewer operation on one archive, refusals included. Returns
 /// the DTOs as JSON (they carry content, so they are never added to the
 /// content-free texts).
-fn exercise_viewer(library: &Path, id: &str) -> Vec<String> {
+fn exercise_viewer(library: &Path, id: &str, tokens: &mut Vec<String>) -> Vec<String> {
     use openmessage_archive_lib::settings::MediaPlayback;
+    use openmessage_archive_lib::viewer::media::engine::MediaConfig;
+    use openmessage_archive_lib::viewer::media::helper::{
+        HelperCommand, HelperHost, RenderBackend, HELPER_FLAG,
+    };
+    use openmessage_archive_lib::viewer::media::{self, MediaRequest, Reply};
     use openmessage_archive_lib::viewer::{self, ViewerHost};
     use serde_json::json;
     let env = ArchiveEnv {
         space: Some(std::sync::Arc::new(FakeSpace)),
     };
-    let host = ViewerHost::default();
+    let helper = HelperCommand::new(
+        PathBuf::from(env!("CARGO_BIN_EXE_openmessage-archive")),
+        vec![std::ffi::OsString::from(HELPER_FLAG)],
+    );
+    let host = ViewerHost::with_media(MediaConfig {
+        backend: std::sync::Arc::new(move || {
+            Box::new(HelperHost::new(Some(helper.clone()))) as Box<dyn RenderBackend>
+        }),
+        crash_cap: 5,
+    });
+    let ask = |host: &ViewerHost, target: &str, ranges: &[&str]| -> u16 {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let reply = Reply::new(Box::new(move |r: media::MediaResponse| {
+            let _ = tx.send(r.status);
+        }));
+        media::dispatch(
+            host,
+            &MediaRequest {
+                label: "main",
+                method: "GET",
+                target,
+                ranges,
+                origins: &[],
+                playback_allowed: true,
+            },
+            reply,
+        );
+        rx.recv_timeout(std::time::Duration::from_secs(60))
+            .expect("media answer")
+    };
     let jobs = Jobs::default();
     let opened = viewer::open(&host, library, &env, &jobs, id).expect("open viewer");
     let v = opened.viewer;
@@ -523,6 +559,25 @@ fn exercise_viewer(library: &Path, id: &str) -> Vec<String> {
                                 )?)
                                 .expect("json"),
                             );
+                        }
+                        // The protocol, for every token: renditions through
+                        // the real helper, streams, refusals.
+                        if let Some(t) = &a.token {
+                            let t = t.as_str();
+                            tokens.push(t.to_owned());
+                            for (rendition, ranges) in [
+                                ("thumb", &[][..]),
+                                ("display", &[][..]),
+                                ("thumb", &[][..]),
+                                ("stream", &["bytes=0-"][..]),
+                                ("stream", &["bytes=-0"][..]),
+                                ("stream", &["bytes= 0-1"][..]),
+                                ("stream", &[][..]),
+                                ("raw", &[][..]),
+                            ] {
+                                let status = ask(&host, &format!("/v1/{t}/{rendition}"), ranges);
+                                push(format!("media {rendition} {status}"));
+                            }
                         }
                     }
                 }
@@ -657,6 +712,7 @@ fn nothing_identifying_is_logged() {
 
     // M5: every viewer operation over the viewer catalogue.
     let mut viewer_outputs = Vec::new();
+    let mut media_tokens = Vec::new();
     for name in [
         "view-main-plain",
         "view-hostile-text-plain",
@@ -665,7 +721,7 @@ fn nothing_identifying_is_logged() {
         let mut viewer_texts = Vec::new();
         let id = import_and_verify_from(&viewer_fixtures(), name, tmp.path(), &mut viewer_texts);
         let library = tmp.path().join(format!("implib-{name}"));
-        viewer_outputs.extend(exercise_viewer(&library, &id));
+        viewer_outputs.extend(exercise_viewer(&library, &id, &mut media_tokens));
         archive_ids.push(id);
         texts.extend(viewer_texts);
     }
@@ -742,7 +798,19 @@ fn nothing_identifying_is_logged() {
             assert!(!e.contains(sentinel), "{sentinel:?} logged in {e}");
         }
         assert!(!has_40_hex(e), "a fileID-like value was logged: {e}");
+        for t in &media_tokens {
+            assert!(!e.contains(t.as_str()), "a media token was logged: {e}");
+        }
+        assert!(!e.contains("/v1/"), "a media URI was logged: {e}");
+        assert!(!e.contains("bytes="), "a range was logged: {e}");
     }
+    assert!(media_tokens.len() > 10, "the protocol was exercised");
+    assert!(
+        events
+            .iter()
+            .any(|e| e.contains("media") && e.contains("decoded")),
+        "the media handler logged its outcomes (so the check means something)"
+    );
     // User-facing messages from errors and checks never carry device text,
     // passwords or SnapshotState values either.
     for m in &messages_seen {

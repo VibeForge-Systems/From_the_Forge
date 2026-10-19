@@ -19,18 +19,20 @@
 
 pub mod dto;
 pub mod input;
+pub mod media;
 pub mod messages;
 pub mod session;
 #[cfg(test)]
 pub(crate) mod tests;
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 use oma_archive as oa;
-use oma_archive::{ArchiveError, AttachmentId, ChatId, MessageId};
+use oma_archive::{ArchiveError, AttachmentId, BlobId, ChatId, MessageId};
 
 use crate::archives::{self, ArchiveEnv};
 use crate::backups::dto::JobKind;
@@ -39,9 +41,9 @@ use crate::error::{ErrorCode, IpcError, IpcResult};
 use crate::settings::MediaPlayback;
 use dto::{
     AttachmentFactsDto, AttachmentInspectionDto, ContentKindDto, Conv, ConversationIndexDto,
-    ConversationRowDto, ConversationRowsDto, DayCountsDto, MessageDetailDto, PlaybackDto,
-    ScanProgressDto, SearchHitDto, SearchHitsDto, SearchStartedDto, SeekResultDto, TextChunkDto,
-    ThreadPageDto, ViewerSessionDto,
+    ConversationRowDto, ConversationRowsDto, DayCountsDto, ImageSizeDto, MediaToken,
+    MessageDetailDto, MessageDto, PlaybackDto, ScanProgressDto, SearchHitDto, SearchHitsDto,
+    SearchStartedDto, SeekResultDto, TextChunkDto, ThreadPageDto, ViewerSessionDto,
 };
 use input::{
     AnchorInput, ConversationSortInput, DirectionInput, GetConversationsRequest,
@@ -50,20 +52,52 @@ use input::{
     ListConversationsRequest, RevealInput, SearchMessagesRequest, SearchModeInput, SeekDateRequest,
     SeekDirInput, SenderFilterInput,
 };
+use media::engine::{MediaConfig, MediaEngine, ReaderSource};
+use media::tokens::Inspected;
 use messages::NotFound;
 use session::{LiveSearch, ViewerSession};
 
 /// The largest serialised page or detail (§7.3).
 pub const PAGE_JSON_MAX: usize = 1 << 20;
 
-/// The one viewer session, if any.
+/// The one viewer session, if any, and how sessions decode media.
 #[derive(Debug, Default)]
 pub struct ViewerHost {
     slot: Mutex<Option<Arc<ViewerSession>>>,
     generation: AtomicU32,
+    media: MediaConfig,
+    /// The page origins the media protocol accepts in an `Origin` header
+    /// (set once at startup; the platform's app origin until then).
+    origins: OnceLock<Vec<String>>,
 }
 
 impl ViewerHost {
+    /// A host whose sessions decode through `media` (tests use a fake).
+    pub fn with_media(media: MediaConfig) -> ViewerHost {
+        ViewerHost {
+            media,
+            ..ViewerHost::default()
+        }
+    }
+
+    /// Set the accepted page origins (once, at startup).
+    pub fn set_origins(&self, origins: Vec<String>) {
+        let _ = self.origins.set(origins);
+    }
+
+    /// `origin` is the app's own page origin.
+    pub fn origin_allowed(&self, origin: &str) -> bool {
+        match self.origins.get() {
+            Some(list) => list.iter().any(|o| o == origin),
+            None => origin == crate::window::app_origin(),
+        }
+    }
+
+    /// The open session, whatever its generation (the media protocol).
+    pub fn current(&self) -> Option<Arc<ViewerSession>> {
+        self.slot.lock().ok()?.as_ref().map(Arc::clone)
+    }
+
     fn lock(&self) -> IpcResult<std::sync::MutexGuard<'_, Option<Arc<ViewerSession>>>> {
         self.slot
             .lock()
@@ -185,6 +219,11 @@ pub fn open(
     let pages = reader()?;
     let search = reader()?;
     let verify = reader()?;
+    let source: ReaderSource = {
+        let (library, env, id) = (library.to_path_buf(), env.clone(), id.clone());
+        Arc::new(move || env.library(&library)?.open_read(&id))
+    };
+    let media = MediaEngine::new(&host.media, source);
     let generation = host.next_generation();
     let s = host.install(ViewerSession::new(
         generation,
@@ -192,6 +231,7 @@ pub fn open(
         pages,
         search,
         verify,
+        media,
     ))?;
     let described = describe(&s, jobs);
     match &described {
@@ -324,6 +364,28 @@ fn surface_page(s: &ViewerSession, p: &oa::ThreadPage) -> IpcResult<()> {
     s.surface(p.items.iter().flat_map(attachment_ids))
 }
 
+/// Give every listed attachment with a stored file its session token
+/// (§6.3: one stable token per attachment, so remounts reuse the URL).
+fn mint_tokens<'a>(
+    s: &ViewerSession,
+    assembled: impl IntoIterator<Item = &'a oa::AssembledMessage>,
+    dtos: &mut [MessageDto],
+) {
+    let blobs: HashMap<i64, BlobId> = assembled
+        .into_iter()
+        .flat_map(|m| m.attachments.iter())
+        .filter_map(|a| Some((a.id.get(), a.blob?)))
+        .collect();
+    for a in dtos.iter_mut().flat_map(|m| m.attachments.iter_mut()) {
+        if let Some(blob) = blobs.get(&a.id.get()) {
+            a.token = s
+                .media()
+                .mint(AttachmentId::new(a.id.get()), *blob)
+                .map(|t| MediaToken::of(&t));
+        }
+    }
+}
+
 /// Keep the serialised page within [`PAGE_JSON_MAX`]: drop the items
 /// farthest from where the page was read from, moving its anchor so the
 /// next page returns them.
@@ -410,6 +472,7 @@ pub fn thread_page(s: &ViewerSession, req: &GetThreadPageRequest) -> IpcResult<T
         oa::Anchor::Message { .. } => dir == oa::Direction::Newer,
         _ => false,
     };
+    mint_tokens(s, &page.items, &mut dto.items);
     fit_page(&mut dto, newest_side)?;
     tracing::debug!(
         items = bucket(dto.items.len()),
@@ -431,6 +494,7 @@ pub fn reply_thread(s: &ViewerSession, req: &GetReplyThreadRequest) -> IpcResult
         .map_err(|e| err(&e, NotFound::Message))?;
     surface_page(s, &page)?;
     let mut dto = ThreadPageDto::build(&page);
+    mint_tokens(s, &page.items, &mut dto.items);
     fit_page(&mut dto, true)?;
     tracing::debug!(items = bucket(dto.items.len()), "reply thread");
     Ok(dto)
@@ -462,6 +526,7 @@ pub fn message_detail(
     s.surface(attachment_ids(&detail.message).chain(detail.attachments.iter().map(|a| a.id)))?;
     let mut dto =
         MessageDetailDto::build(&detail, history.as_ref()).ok_or_else(messages::invalid_id)?;
+    mint_tokens(s, [&detail.message], std::slice::from_mut(&mut dto.message));
     fit_detail(&mut dto)?;
     Ok(dto)
 }
@@ -696,10 +761,11 @@ pub fn cancel_search(s: &ViewerSession, search_id: u32) -> IpcResult<()> {
 // ------------------------------------------------------------ attachments
 
 /// `inspect_attachment`: only for attachments surfaced in this session.
-/// Sniffs the stored file; `forPlayback` then hashes it in full (integrity
-/// only), checks its structure and, when both pass, remembers its
-/// identity for streaming (slice 5f). Playback set to `off` is refused
-/// here, in Rust.
+/// Sniffs the stored file and records its kind for the attachment's
+/// media token (no rendition is served before that); `forPlayback` then
+/// hashes it in full (integrity only, once per session), checks its
+/// structure and, when both pass, enables `stream` for it. Playback set
+/// to `off` is refused here, in Rust, and by the protocol.
 pub fn inspect(
     s: &ViewerSession,
     req: &InspectAttachmentRequest,
@@ -732,6 +798,26 @@ pub fn inspect(
         ),
         Some((_, Err(e))) => return Err(err(e, NotFound::Message)),
     };
+    // The token, and what its file is: until this is recorded the
+    // protocol serves no rendition for it.
+    let token = match (&sniffed, kind) {
+        (Some((blob, _)), Some(sn)) => {
+            let t = s.media().mint(id, *blob);
+            s.media().set_inspected(
+                id,
+                Inspected {
+                    blob: *blob,
+                    kind: sn.kind,
+                },
+            );
+            t.map(|t| MediaToken::of(&t))
+        }
+        _ => None,
+    };
+    let original_size = sniffed
+        .as_ref()
+        .and_then(|(b, _)| s.media().source_size(*b))
+        .map(|(width, height)| ImageSizeDto { width, height });
     let playback = if !req.for_playback {
         None
     } else if playback == MediaPlayback::Off {
@@ -753,6 +839,9 @@ pub fn inspect(
         facts: facts_dto,
         content,
         playback,
+        token,
+        original_size,
+        previews_off: s.media().previews_off(),
     })
 }
 
@@ -761,11 +850,16 @@ fn check_playback(
     blob: oa::BlobId,
     kind: oa::SniffedKind,
 ) -> IpcResult<PlaybackDto> {
+    let _slot = s.verify_slot()?;
     let r = s.verify_reader()?;
     let ident = match s.verified(blob)? {
         Some(i) => i,
         None => match r.verify_blob(blob, &s.closing) {
-            Ok(i) => i,
+            // The full hash is checked once per session (integrity only).
+            Ok(i) => {
+                s.set_verified(i)?;
+                i
+            }
             Err(ArchiveError::Blob(p)) => {
                 return Ok(PlaybackDto::Unavailable {
                     problem: dto::file_problem(p),
@@ -782,7 +876,8 @@ fn check_playback(
         Err(e) => return Err(err(&e, NotFound::Message)),
     };
     if matches!(verdict, PlaybackDto::Allowed { .. }) {
-        s.set_verified(ident)?;
+        // Only now does the protocol serve `stream` for it.
+        s.set_playable(blob)?;
     }
     Ok(verdict)
 }

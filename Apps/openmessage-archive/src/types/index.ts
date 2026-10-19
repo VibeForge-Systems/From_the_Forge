@@ -127,7 +127,8 @@ export type { VerifyDepthDto } from './generated/VerifyDepthDto';
 export type { VerifyOutcomeDto } from './generated/VerifyOutcomeDto';
 export type { VerifySummaryDto } from './generated/VerifySummaryDto';
 // Milestone 5: the viewer. Content is `UntrustedText` (render by interpolation
-// only); ids are `SafeId`; raw source numbers are `DecimalString`.
+// only); ids are `SafeId`; raw source numbers are `DecimalString`; media URLs
+// are built from `MediaBase` and a `MediaToken` only (`services/media.ts`).
 export type { AnchorInput } from './generated/AnchorInput';
 export type { AssocKindDto } from './generated/AssocKindDto';
 export type { AssocTargetShapeDto } from './generated/AssocTargetShapeDto';
@@ -191,14 +192,17 @@ export type { HitPieceDto } from './generated/HitPieceDto';
 export type { HitTextDto } from './generated/HitTextDto';
 export type { HitVersionDto } from './generated/HitVersionDto';
 export type { IdentifierProbeDto } from './generated/IdentifierProbeDto';
+export type { ImageSizeDto } from './generated/ImageSizeDto';
 export type { IdleHideMinutes } from './generated/IdleHideMinutes';
 export type { InspectAttachmentRequest } from './generated/InspectAttachmentRequest';
 export type { ItemKindDto } from './generated/ItemKindDto';
 export type { ListConversationsRequest } from './generated/ListConversationsRequest';
 export type { LookupDto } from './generated/LookupDto';
 export type { MaskKindDto } from './generated/MaskKindDto';
+export type { MediaBase } from './generated/MediaBase';
 export type { MediaClassDto } from './generated/MediaClassDto';
 export type { MediaPlayback } from './generated/MediaPlayback';
+export type { MediaToken } from './generated/MediaToken';
 export type { MessageDetailDto } from './generated/MessageDetailDto';
 export type { MessageDto } from './generated/MessageDto';
 export type { MessageLabelDto } from './generated/MessageLabelDto';

@@ -1,0 +1,14 @@
+{
+  "app": {
+    "security": {
+      "csp": {
+        "img-src": "'self' data: http://oma-media.localhost",
+        "media-src": "http://oma-media.localhost"
+      },
+      "devCsp": {
+        "img-src": "'self' data: http://oma-media.localhost",
+        "media-src": "http://oma-media.localhost"
+      }
+    }
+  }
+}

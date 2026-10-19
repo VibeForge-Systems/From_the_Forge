@@ -97,6 +97,19 @@ connect to localhost".
 Diagnostic logging goes to stderr: `OMA_LOG=debug npm run tauri dev`
 (PowerShell: `$env:OMA_LOG="debug"; npm run tauri dev`).
 
+**The decode helper (M5).** The viewer decodes images in helper processes:
+the app's own binary started with the single argument
+`--oma-decode-helper`, which reads length-prefixed requests on stdin and
+writes renditions on stdout (`src-tauri/src/viewer/media/helper.rs`). It is
+not meant to be run by hand; it exits on any malformed input. Its tests
+start the binary Cargo builds:
+
+```sh
+cargo test -p openmessage-archive --test decode_helper
+cargo test -p openmessage-archive --lib viewer::media   # the protocol, with a fake decoder
+cargo test -p openmessage-archive --lib window          # merged CSP files, window policies
+```
+
 ## IPC types
 
 IPC request and response types are defined once, in Rust, with
@@ -471,6 +484,29 @@ milestone is recorded. The Windows crash plan is smaller on purpose
 (§18.12). The
 catalogue's `README.md` is generated and documents the manifest format and
 the readings the model makes.
+
+**Milestone 5 (spec §0.1: at most 3 more minutes of Rust test time per
+Linux job, 6 on Windows), measured in slice 5f** after the decode, protocol
+and shell tests exist, in the same container (4 CPUs, debug build, after
+compiling; 1,220 Rust tests passed, 10 ignored):
+
+| What | Time |
+|---|---|
+| `cargo test --workspace`, wall clock | 2 min 2 s |
+| Sum of all test binaries' run times | 118.6 s |
+| Added since M4 (slice 4n: 57.2 s) | about 61 s |
+| of which the shell's unit tests (the viewer session, commands and protocol tests import viewer catalogue entries; 0.6 s in M4) | 36.1 s |
+| of which `oma-archive`'s viewer binaries (`viewer_conversations`, `viewer_threads`, `viewer_details`, `viewer_search`, `viewer_fixtures`, `viewer_media`, `media_corpus`) | 16.1 s |
+| of which the protocol tests alone (`viewer::media`, `window`; 35 tests) | 1.1 s |
+| of which `decode_helper.rs` (three helper processes) | 0.3 s |
+| the shell's `log_hygiene.rs` (now also the viewer and the protocol through the real helper) | 2.6 s |
+
+The ignored performance tests (`perf_search.rs`, the bulk calibration) are
+not counted. So M5 so far adds about 1 minute per Linux job here, inside
+its 3-minute budget. **Windows has not been measured:** PR A has not run
+on CI yet. With the 4× factor seen for slices 4a–4f, the M5 tests would add
+about 4 minutes on `windows-2022`, inside the 6-minute budget; that is an
+extrapolation until a CI run is recorded. Slice 5k measures again.
 
 **Optional oracles** (manual; nothing enters the repository or CI; each
 run is recorded in `docs/compatibility.md` with the checksum it tested):
