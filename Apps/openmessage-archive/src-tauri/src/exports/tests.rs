@@ -912,9 +912,14 @@ fn destination_checks_refuse_warn_and_name() {
     assert!(!c.target_exists);
     let c = one("Chat.TXT").expect("own extension");
     assert_eq!(c.target.as_str(), "Chat.TXT");
-    for bad in [".oma-export-0123.txt", "a:b.txt"] {
-        assert_eq!(code(one(bad)), ErrorCode::ExportNameRefused, "{bad}");
+    // Names every platform can carry as a path component. (`a:b.txt` is
+    // Unix only: on Windows `a:` is a drive prefix, so the joined path
+    // leaves the destination and is refused as a destination instead.)
+    for bad in [".oma-export-0123.txt", "NUL.txt", "a\u{202E}b.txt"] {
+        assert_eq!(code(one(bad)), ErrorCode::ExportNameRefused, "{bad:?}");
     }
+    #[cfg(unix)]
+    assert_eq!(code(one("a:b.txt")), ErrorCode::ExportNameRefused);
     std::fs::write(f.dest.join("old.txt"), b"x").expect("old");
     assert!(one("old.txt").expect("exists").target_exists);
     std::fs::create_dir(f.dest.join("dir.txt")).expect("dir");
