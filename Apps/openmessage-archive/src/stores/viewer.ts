@@ -24,6 +24,13 @@
 // user's confirmation for that file in this session, then the media
 // viewer. With `off` nothing is asked and Rust refuses anyway. The right
 // panel shows the message details, the reply thread or the archive facts.
+//
+// Search and dates (slice 5i): the search form (query, scope and filters)
+// lives here until the viewer closes and is never persisted (owner Q1c);
+// the right panel shows the search panel. `dayCounts` and `seekDate` serve
+// the date-jump dialog. Requests the global shortcuts make of the open
+// thread (the date dialog, the first or newest item) go through
+// `dateJumpOpen` and `threadCommand`, which the thread watches.
 import { defineStore } from 'pinia';
 import { computed, markRaw, ref, shallowRef } from 'vue';
 import { IpcError, ipc } from '@/services/ipc';
@@ -44,6 +51,9 @@ import type {
   RevealInput,
   SafeId,
   ScanProgressDto,
+  SearchModeInput,
+  SenderFilterInput,
+  SeekDirInput,
   SearchHitDto,
   SearchMessagesRequest,
   SearchStartedDto,
@@ -74,11 +84,48 @@ export const MAX_REVEALED = 100;
 export const MAX_FULL_TEXTS = 20;
 /** Inspections in flight at once (§8.4). */
 export const MAX_INSPECTING = 4;
+/** Debounce of the search field (§2). */
+export const SEARCH_DEBOUNCE_MS = 250;
 
 /** What the right panel shows. */
 export type SidePanel =
   | { kind: 'details'; message: SafeId; reactions: boolean }
-  | { kind: 'replies'; message: SafeId };
+  | { kind: 'replies'; message: SafeId }
+  | { kind: 'search' };
+
+/** The search form, kept until the viewer closes (never persisted). */
+export interface SearchForm {
+  query: string;
+  mode: SearchModeInput;
+  /** Only this conversation; `null` searches all of them. */
+  chatId: SafeId | null;
+  /** Typed `YYYY-MM-DD` dates, inclusive; empty for no bound. */
+  from: string;
+  to: string;
+  hasAttachment: boolean;
+  sender: SenderFilterInput;
+  includeEarlier: boolean;
+  includeEvents: boolean;
+}
+
+export const emptySearchForm = (): SearchForm => ({
+  query: '',
+  mode: 'auto',
+  chatId: null,
+  from: '',
+  to: '',
+  hasAttachment: false,
+  sender: 'anyone',
+  includeEarlier: false,
+  includeEvents: false,
+});
+
+/** A request the global shortcuts make of the open thread. */
+export interface ThreadCommand {
+  kind: 'first' | 'last';
+  /** Bumped per request, so the same request twice is seen twice. */
+  n: number;
+}
 
 /** The attachment the media viewer shows, and how. */
 export interface MediaOpen {
@@ -191,7 +238,9 @@ export interface SearchState {
   hits: SearchHitDto[];
   progress: ScanProgressDto | null;
   running: boolean;
+  loadingMore: boolean;
   error: string | null;
+  errorCode: ErrorCode | null;
 }
 
 const emptySearch = (): SearchState => ({
@@ -200,7 +249,9 @@ const emptySearch = (): SearchState => ({
   hits: [],
   progress: null,
   running: false,
+  loadingMore: false,
   error: null,
+  errorCode: null,
 });
 
 function message(error: unknown): string {
@@ -228,6 +279,14 @@ export const useViewer = defineStore('viewer', () => {
   const openChatId = ref<SafeId | null>(null);
 
   const search = ref<SearchState>(emptySearch());
+  const searchForm = ref<SearchForm>(emptySearchForm());
+  /** Bumped to ask the search panel to focus its query field. */
+  const searchFocus = ref(0);
+  /** Open the search panel once the next session opens (the Archive page's button). */
+  let searchWhenOpened = false;
+  const dateJumpOpen = ref(false);
+  const threadCommand = ref<ThreadCommand | null>(null);
+  let commands = 0;
   const inspections = shallowRef(new Map<SafeId, AttachmentInspectionDto>());
   const revealed = shallowRef(new Map<SafeId, RevealedMessage>());
   const fullTexts = shallowRef(new Map<SafeId, FullText>());
@@ -267,6 +326,9 @@ export const useViewer = defineStore('viewer', () => {
     windows.value = [];
     openChatId.value = null;
     search.value = emptySearch();
+    searchForm.value = emptySearchForm();
+    dateJumpOpen.value = false;
+    threadCommand.value = null;
     inspections.value = new Map();
     revealed.value = new Map();
     fullTexts.value = new Map();
@@ -293,12 +355,14 @@ export const useViewer = defineStore('viewer', () => {
       if (session.value) await close();
       session.value = await ipc.openViewer(id);
       archiveId.value = id;
+      if (searchWhenOpened) openSearch(null);
       return true;
     } catch (e) {
       error.value = failed(e);
       return false;
     } finally {
       opening.value = false;
+      searchWhenOpened = false;
     }
   }
 
@@ -485,6 +549,7 @@ export const useViewer = defineStore('viewer', () => {
     } catch (e) {
       if (seq !== searchSeq) return;
       if (e instanceof IpcError && e.code === 'searchSuperseded') return;
+      search.value.errorCode = e instanceof IpcError ? e.code : null;
       search.value.error = failed(e);
     } finally {
       if (seq === searchSeq) search.value.running = false;
@@ -496,20 +561,95 @@ export const useViewer = defineStore('viewer', () => {
     const id = search.value.searchId;
     if (v === null || id === null) return;
     const seq = searchSeq;
+    if (offset > 0) search.value.loadingMore = true;
     try {
       const got = await ipc.getSearchResults({ viewer: v, searchId: id, offset, limit: HITS_PER_REQUEST });
       if (seq !== searchSeq) return;
-      search.value.hits = offset === 0 ? got.hits : [...search.value.hits, ...got.hits];
+      // Hits are immutable DTOs: kept raw, like page items.
+      search.value.hits = markRaw(offset === 0 ? got.hits : [...search.value.hits, ...got.hits]);
     } catch (e) {
       if (seq !== searchSeq) return;
       if (e instanceof IpcError && e.code === 'searchSuperseded') return;
+      search.value.errorCode = e instanceof IpcError ? e.code : null;
       search.value.error = failed(e);
+    } finally {
+      if (seq === searchSeq) search.value.loadingMore = false;
     }
   }
 
+  /** The next page of hits, when more are kept than loaded. */
+  async function loadMoreHits(): Promise<void> {
+    const s = search.value;
+    if (s.running || s.loadingMore || !s.started || s.hits.length >= s.started.total) return;
+    await loadHits(s.hits.length);
+  }
+
+  /** Clear the results (an empty query), cancelling a running search. */
+  async function clearSearch(): Promise<void> {
+    if (search.value.running || search.value.searchId !== null) await cancelSearch();
+    else search.value = emptySearch();
+  }
+
+  /** Show the search panel, scoped to one conversation or to all. */
+  function openSearch(scope: SafeId | null): void {
+    searchForm.value = { ...searchForm.value, chatId: scope };
+    panel.value = { kind: 'search' };
+    searchFocus.value += 1;
+  }
+
+  /** Open the search panel in archive `id`'s viewer, now or once its session opens. */
+  function searchOnOpen(id: string): void {
+    if (session.value && archiveId.value === id) openSearch(null);
+    else searchWhenOpened = true;
+  }
+
+  /** Ask the open thread to jump to its first or newest item. */
+  function requestThread(kind: ThreadCommand['kind']): void {
+    threadCommand.value = { kind, n: (commands += 1) };
+  }
+
+  /**
+   * Visible items per interval of `bounds` (2 to 43 UTC instants, local
+   * day boundaries built in the webview, D104).
+   */
+  async function dayCounts(chatId: SafeId, bounds: number[]): Promise<{ counts: number[] } | { error: string } | null> {
+    const v = viewer.value;
+    if (v === null) return null;
+    try {
+      const got = await ipc.getDayCounts({ viewer: v, chatId, boundsUtcMs: bounds });
+      if (viewer.value !== v) return null;
+      return { counts: got.counts };
+    } catch (e) {
+      return { error: failed(e) };
+    }
+  }
+
+  /** The first visible dated item at or after an instant, or the last before it. */
+  async function seekDate(
+    chatId: SafeId,
+    utcMs: number,
+    dir: SeekDirInput,
+  ): Promise<{ id: SafeId | null } | { error: string } | null> {
+    const v = viewer.value;
+    if (v === null) return null;
+    try {
+      const got = await ipc.seekDate({ viewer: v, chatId, utcMs, dir });
+      if (viewer.value !== v) return null;
+      return { id: got.messageId };
+    } catch (e) {
+      return { error: failed(e) };
+    }
+  }
+
+  /**
+   * Stop the search: a scan still running is named by its progress
+   * (`searchId` arrives with the first batch); a finished one is forgotten
+   * in Rust. A words search that has not answered yet cannot be named, so
+   * it runs out (bounded by its 5 s deadline) and its answer is dropped.
+   */
   async function cancelSearch(): Promise<void> {
     const v = viewer.value;
-    const id = search.value.searchId;
+    const id = search.value.searchId ?? search.value.progress?.searchId ?? null;
     searchSeq += 1;
     search.value = emptySearch();
     if (v === null || id === null) return;
@@ -800,6 +940,10 @@ export const useViewer = defineStore('viewer', () => {
     openChatId,
     openWindow,
     search,
+    searchForm,
+    searchFocus,
+    dateJumpOpen,
+    threadCommand,
     inspections,
     revealed,
     fullTexts,
@@ -816,7 +960,14 @@ export const useViewer = defineStore('viewer', () => {
     loadMore,
     startSearch,
     loadHits,
+    loadMoreHits,
+    clearSearch,
     cancelSearch,
+    openSearch,
+    searchOnOpen,
+    requestThread,
+    dayCounts,
+    seekDate,
     inspect,
     openImage,
     closeMedia,

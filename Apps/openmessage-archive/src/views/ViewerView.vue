@@ -9,7 +9,10 @@
 // Since slice 5h3 the Archive page links here ("Browse conversations").
 // The right panel shows a message's details ("As recorded") or its reply
 // thread when one is asked for, and the archive's facts otherwise. The
-// media viewer and the play confirmation are mounted once, here.
+// media viewer and the play confirmation are mounted once, here. Since
+// slice 5i the right panel also shows the search panel ("Search", Ctrl+F
+// for the open conversation, Ctrl+Shift+F for all); opening a result goes
+// through `openChat` with the message remembered in the store.
 import { computed, watch } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import type { SafeId } from '@/types';
@@ -21,8 +24,9 @@ import MessageDetails from '@/components/viewer/MessageDetails.vue';
 import ReplyThread from '@/components/viewer/ReplyThread.vue';
 import MediaViewer from '@/components/viewer/MediaViewer.vue';
 import PlayConfirmDialog from '@/components/viewer/PlayConfirmDialog.vue';
+import SearchPanel from '@/components/viewer/SearchPanel.vue';
 import { parseSafeId } from '@/services/ids';
-import { DETAILS_TEXT, THREAD_TEXT, fill } from '@/services/viewerText';
+import { DETAILS_TEXT, SEARCH_TEXT, THREAD_TEXT, fill } from '@/services/viewerText';
 import { useLayout } from '@/stores/layout';
 import { useViewer } from '@/stores/viewer';
 
@@ -40,7 +44,9 @@ const rightLabel = computed(() =>
     ? DETAILS_TEXT.title
     : panel.value?.kind === 'replies'
       ? DETAILS_TEXT.replies
-      : THREAD_TEXT.infoHeading,
+      : panel.value?.kind === 'search'
+        ? SEARCH_TEXT.title
+        : THREAD_TEXT.infoHeading,
 );
 
 // Asking for details or replies shows the right panel.
@@ -85,6 +91,14 @@ function closeViewer(): void {
         <span class="visually-hidden">Toggle conversation list</span>
       </button>
       <span class="flex-grow-1"></span>
+      <button
+        v-if="viewer.session"
+        type="button"
+        class="btn btn-sm btn-outline-secondary"
+        @click="viewer.openSearch(null)"
+      >
+        <i class="bi bi-search me-1" aria-hidden="true"></i>{{ THREAD_TEXT.searchAll }}
+      </button>
       <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeViewer">
         {{ THREAD_TEXT.closeViewer }}
       </button>
@@ -128,6 +142,11 @@ function closeViewer(): void {
         v-else-if="viewer.session && panel?.kind === 'replies'"
         :message-id="panel.message"
         @close="viewer.closePanel()"
+      />
+      <SearchPanel
+        v-else-if="viewer.session && panel?.kind === 'search'"
+        @close="viewer.closePanel()"
+        @open-chat="openChat"
       />
       <template v-else>
         <div class="oma-panel-header">

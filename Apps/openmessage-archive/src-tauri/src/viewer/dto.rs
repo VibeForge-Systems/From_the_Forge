@@ -2144,18 +2144,22 @@ pub struct ScanCoverageDto {
     pub stop: Option<ScanStopDto>,
 }
 
-/// Progress of an exact-text scan, pushed on the search's channel.
+/// Progress of an exact-text scan, pushed on the search's channel. It
+/// names the running search, so `cancel_search` can stop a scan before it
+/// returns its `SearchStartedDto` (slice 5i's Cancel).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct ScanProgressDto {
+    pub search_id: u32,
     pub examined: u64,
     pub matched: u64,
 }
 
-impl From<oa::ScanProgress> for ScanProgressDto {
-    fn from(p: oa::ScanProgress) -> Self {
+impl ScanProgressDto {
+    pub fn new(search_id: u32, p: oa::ScanProgress) -> Self {
         ScanProgressDto {
+            search_id,
             examined: n(p.examined),
             matched: n(p.matched),
         }

@@ -149,7 +149,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 2 Backup discovery and validation | Find backups, read their manifests, detect encryption, unlock, validate | Implemented; sign-off pending (fixture-generator review, manual tests) |
 | 3 Extraction check | Locate sms.db, probe the schema, and check that messages, chats, handles and attachment references can be read (counts only) | Implemented; sign-off pending (Windows CI, the clean-room review of the typedstream decoder and the fixture generators, the manual tests) |
 | 4 Archive database | Extract messages and copy attachments into the archive; versioned SQLite schema, transactional and resumable imports, FTS5, integrity verification | Implemented; sign-off pending (CI of slices 4g–4n, two §18.8 Windows tests that are not written yet (a held partial file, a killed lock holder; see `docs/compatibility.md`), the manual tests, the owner's answers on D69, D70, D71, D79 and D82) |
-| 5 Rich viewer | Conversation list, threads, inline media, search, date navigation | In progress: PR A (viewer reads, search, media checks, the 14 viewer commands, the `oma-media` protocol, the image decode helper and the window built in Rust) merged after CI passed on `ubuntu-22.04` and `windows-2022` ([run 39205163013](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39205163013)), tested on synthetic data only; the screens are PR B, in progress (frontend foundations, the virtualised conversation list and thread, message bubbles with reactions, replies, edits, unsends and withheld text, attachment cards, the media viewer with the play confirmation, the details panel and the reply thread; opened from the Archive page; tested in jsdom only, not yet in a real window; search, date navigation and the privacy screen are next) |
+| 5 Rich viewer | Conversation list, threads, inline media, search, date navigation | In progress: PR A (viewer reads, search, media checks, the 14 viewer commands, the `oma-media` protocol, the image decode helper and the window built in Rust) merged after CI passed on `ubuntu-22.04` and `windows-2022` ([run 39205163013](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39205163013)), tested on synthetic data only; the screens are PR B, in progress (frontend foundations, the virtualised conversation list and thread, message bubbles with reactions, replies, edits, unsends and withheld text, attachment cards, the media viewer with the play confirmation, the details panel and the reply thread, search with filters, a calendar to jump to a date, and the viewer's keyboard shortcuts; opened from the Archive page; tested in jsdom only, not yet in a real window; the privacy screen is next) |
 | 6 Exports | TXT, CSV, JSON, HTML, PDF, XLSX, and attachments | Planned |
 | 7 Direct device backup | USB device detection and local backup creation | Planned |
 | 8 Hardening and release | Archive repair, recovery tests, diagnostic log, accessibility, signed packages | Planned |
@@ -336,10 +336,10 @@ and message bodies.
 ### Next: milestone 5 (rich viewer)
 
 Its backend (PR A) is implemented. Of the screens (PR B), the conversation
-list, the threads, attachments, the media viewer and the details panel are
-in place and open from the Archive page ("Browse conversations"); search,
-date navigation and the privacy screen are next. The screens have been
-tested in jsdom only.
+list, the threads, attachments, the media viewer, the details panel,
+search and the date dialog are in place and open from the Archive page
+("Browse conversations", "Search messages"); the privacy screen is next.
+The screens have been tested in jsdom only.
 
 - The conversation list and threads, paged through the archive's
   lock-free reader.
@@ -353,8 +353,13 @@ tested in jsdom only.
   request ranges as expected and honour the window's download and
   permission refusals is on the manual checklist
   ([compatibility.md](docs/compatibility.md)).
-- Search over the full-text index, with a bounded fallback for short
-  Chinese, Japanese and Korean queries and emoji.
+- Search over the full-text index, with a bounded exact-text scan for
+  Chinese, Japanese, Korean, Thai and emoji (case-, accent- and
+  normalisation-sensitive), filters (conversation, dates, attachment,
+  sender), and a capped result that says it is incomplete. Nothing about
+  a search is saved.
+- "Jump to a date" with a calendar that marks the days with items, in the
+  time zone the viewer shows.
 - Labels: "not in the latest import from this phone", "edited", "unsent;
   earlier text kept", "matched an earlier version", and "provisional
   (untested iOS version)".

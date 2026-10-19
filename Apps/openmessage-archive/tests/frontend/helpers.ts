@@ -37,6 +37,8 @@ import type {
   UntrustedText,
   ValueStateDto,
   ViewerSessionDto,
+  SearchHitDto,
+  SearchStartedDto,
 } from '@/types';
 
 export function snapshot(overrides: Partial<Settings> = {}, readOnly = false): SettingsSnapshot {
@@ -813,6 +815,49 @@ export function messageDetail(m: MessageDto, overrides: Partial<MessageDetailDto
     reactions: null,
     cutForSize: false,
     skippedRows: 0,
+    ...overrides,
+  };
+}
+
+/** A search's start: `total` kept results, all dated unless `dated` says. */
+export function searchStarted(total: number, overrides: Partial<SearchStartedDto> = {}): SearchStartedDto {
+  return {
+    searchId: 1,
+    total,
+    dated: total,
+    capped: false,
+    newestKept: true,
+    mode: 'words',
+    plan: 'global',
+    coverage: null,
+    ...overrides,
+  };
+}
+
+/** A dated, received search hit in chat 4 whose snippet marks `match`. */
+export function searchHit(id: number, overrides: Partial<SearchHitDto> = {}, match = 'hello'): SearchHitDto {
+  return {
+    message: sid(id),
+    body: sid(id),
+    chat: sid(4),
+    otherChats: { n: 0, capped: false },
+    ms: Date.UTC(2026, 0, 1) + id * 60_000,
+    direction: 'received',
+    item: 'message',
+    association: null,
+    version: 'current',
+    text: {
+      pieces: [
+        { kind: 'text', value: content('say '), hit: false },
+        { kind: 'text', value: content(match), hit: true },
+        { kind: 'text', value: content(` ${id}`), hit: false },
+      ],
+      cutStart: false,
+      cutEnd: false,
+      highlight: { kind: 'shown' },
+      matchedHidden: false,
+      fullUtf16: 20,
+    },
     ...overrides,
   };
 }

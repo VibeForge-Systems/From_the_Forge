@@ -54,6 +54,7 @@ import type {
   ScanStopDto,
   SearchRanDto,
   SenderDto,
+  SenderFilterInput,
   ServiceClassDto,
   SniffedKindDto,
   SummaryTimeKindDto,
@@ -797,6 +798,98 @@ export const WORDS_PLAN_TEXT: Record<WordsPlanDto, string> = {
   scoped: 'This conversation',
 };
 
+/**
+ * The search panel (§4, §8.4). `{n}`, `{examined}` and `{matched}` are
+ * counts. Nothing here repeats the query: it is never echoed.
+ */
+export const SEARCH_TEXT = {
+  title: 'Search',
+  close: 'Close search',
+  queryLabel: 'Search messages',
+  queryHint: 'Words match whole words; the last word also matches as a prefix when it has 3 or more characters.',
+  modeLabel: 'Mode',
+  modeAuto: 'Words (exact text for Chinese, Japanese, Korean, Thai and emoji)',
+  modeExact: 'Exact text',
+  exactNote: 'Exact text is case-, accent- and Unicode-normalisation-sensitive.',
+  scopeLabel: 'Only this conversation',
+  scopeAll: 'All conversations',
+  filtersLegend: 'Filters',
+  fromLabel: 'From (YYYY-MM-DD)',
+  toLabel: 'To (YYYY-MM-DD)',
+  dateNote: 'Dates are whole days in the time zone the viewer shows. Undated items are left out when a date is set.',
+  badFrom: 'The "from" date is not a date in the form YYYY-MM-DD.',
+  badTo: 'The "to" date is not a date in the form YYYY-MM-DD.',
+  badOrder: 'The "to" date is before the "from" date.',
+  attachmentLabel: 'Has an attachment',
+  senderLabel: 'Sender',
+  earlierLabel: 'Include earlier versions and unsent text',
+  earlierNote: 'Matches in withheld text are listed, and their text is shown.',
+  eventsLabel: 'Include reactions and system events',
+  searching: 'Searching…',
+  scanning: 'Searching… {examined} messages examined, {matched} matches so far',
+  cancel: 'Cancel',
+  cancelled: 'Search cancelled.',
+  none: 'No matches.',
+  one: '1 match.',
+  many: '{n} matches.',
+  cappedNewest: 'More than {n} matches. Showing the newest {n}; add words or filters to see all.',
+  capped:
+    'More than {n} matches. Showing {n} of them, newest first. These are not necessarily the newest {n} in the archive; add words or filters to see all.',
+  ranMode: 'Searched as: {mode}',
+  examinedPartial: 'Searched {examined} messages, newest first; older messages were not searched.',
+  unsearchable: '{n} messages have no searchable text and cannot be found in either mode.',
+  hintPrefix: 'A word shorter than 3 characters matches only whole words.',
+  hintScripts: 'Chinese, Japanese, Korean, Thai and emoji are found with exact text.',
+  hintFilters: 'Filters and the conversation scope also narrow the results.',
+  tooBroad: 'Too many matches to search quickly; add a word or a filter.',
+  undatedHeading: 'Undated (no usable date recorded)',
+  more: 'Show more results',
+  loadingMore: 'Loading more results…',
+  open: 'Open in conversation',
+  noChat: 'This message is in no conversation',
+  otherChats: 'also in {n} other conversations',
+  otherChatsCapped: 'also in {n}+ other conversations',
+  undated: 'Undated',
+  matchedHidden: 'Matched hidden text (one-time code)',
+  noText: 'No text to show for this match',
+  resultsLabel: 'Search results',
+} as const;
+
+/** The sender filter's options. */
+export const SENDER_FILTER_TEXT: Record<SenderFilterInput, string> = {
+  anyone: 'Anyone',
+  me: 'You',
+  others: 'Others',
+};
+
+/** The date-jump dialog (§8.7). `{n}` is a count. */
+export const DATE_JUMP_TEXT = {
+  title: 'Jump to a date',
+  open: 'Jump to date…',
+  previousMonth: 'Previous month',
+  nextMonth: 'Next month',
+  previousYear: 'Previous year',
+  nextYear: 'Next year',
+  gridHint: 'Arrow keys move by day and week, Page Up and Page Down by month (with Shift, by year).',
+  marked: 'Days with items are marked with a dot and the word "items".',
+  oneItem: '1 item',
+  items: '{n} items',
+  noItems: 'no items',
+  countsLoading: 'Counting items…',
+  countsFailed: 'Item counts could not be read for this month; days are not marked.',
+  typedLabel: 'Or type a date (YYYY-MM-DD)',
+  typedBad: 'Type a date in the form YYYY-MM-DD, between 1900 and 2200.',
+  go: 'Go',
+  seeking: 'Finding the first item of that day…',
+  noMessages: 'No messages on this day.',
+  earlier: 'Nearest earlier item',
+  later: 'Nearest later item',
+  noEarlier: 'No dated item before this day.',
+  noLater: 'No dated item after this day.',
+  failed: 'The date could not be looked up.',
+  zoneNote: 'Days are counted in the time zone the viewer shows. Undated items are never on the calendar.',
+} as const;
+
 // ------------------------------------------------------------- errors
 
 type ViewerErrorCode = Extract<
@@ -815,7 +908,7 @@ export const VIEWER_ERROR_TEXT: Record<ViewerErrorCode, string> = {
   viewerClosed: 'The viewer was closed. Open the archive again.',
   queryTooBroad: 'This request covers too much at once. Narrow it and try again.',
   invalidQuery: 'This search could not be understood.',
-  searchUnavailable: 'Search is not available for this archive.',
+  searchUnavailable: 'Search is unavailable for this archive; browsing still works. Run Verify.',
   searchSuperseded: '',
   messageNotFound: 'That message is no longer in the archive.',
   anchorNotFound: 'That position is no longer in the conversation.',
@@ -875,6 +968,8 @@ export const THREAD_TEXT = {
   dateRange: '{first} – {last}',
   jumpFirst: 'Jump to first',
   jumpNewest: 'Jump to newest',
+  searchConversation: 'Search this conversation',
+  searchAll: 'Search',
   undatedButton: 'Undated items ({n})',
   undatedButtonCapped: 'Undated items ({n}+)',
   undatedHeading: 'Undated items, in source order',

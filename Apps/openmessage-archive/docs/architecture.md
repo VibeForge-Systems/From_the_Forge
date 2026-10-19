@@ -2648,8 +2648,9 @@ are spec §3.6's, applied to the DTOs' closed codes:
 The viewer opens from the Archive page ("Browse conversations", enabled
 for an archive that is ready, importing or verifying; Rust refuses the
 rest), and the roadmap's `viewer` capability is `available`. Search (5i)
-and the privacy screen (5j, a new roadmap entry `privacy-screen`) are
-still planned, and their controls stay disabled with their badges. The
+and the privacy screen (5j, a new roadmap entry `privacy-screen`) were
+still planned at this slice, their controls disabled with their badges;
+search has since shipped (slice 5i, below). The
 pure rules are in `services/attachmentView.ts`; the words in
 `services/viewerText.ts` (`ATTACHMENT_TEXT`, `DETAILS_TEXT`,
 `PLAY_CONFIRM_TEXT`).
@@ -2723,6 +2724,91 @@ pure rules are in `services/attachmentView.ts`; the words in
 - **Settings.** The viewer's preferences are enabled now that the viewer
   ships. "Always reduce motion" applies the same reset as the system's
   reduced-motion preference (`oma-reduce-motion` on `<html>`).
+
+### Search and date navigation (M5 slice 5i)
+
+The roadmap's `search` capability is `available`: the viewer has a search
+panel and a "Jump to a date" dialog, and the Archive page's "Search
+messages" opens the viewer with the panel showing. The privacy screen
+(5j) is still planned. The words are in `services/viewerText.ts`
+(`SEARCH_TEXT`, `SENDER_FILTER_TEXT`, `DATE_JUMP_TEXT`); the date
+arithmetic is in `services/calendar.ts`.
+
+- **The search panel** (`SearchPanel`, in the right panel; "Search" in
+  the toolbar, "Search this conversation" in the thread header, Ctrl+F
+  and Ctrl+Shift+F). The query field and the date fields have
+  `spellcheck="false"`, `autocomplete="off"` and `autocapitalize="off"`.
+  Typing is debounced 250 ms; filter changes search at once. The request
+  carries the query as typed, the mode (`auto`, which Rust turns into
+  exact text for CJK, Thai and emoji, or `exact`), the scope (this
+  conversation or all), a local date range, "has an attachment", the
+  sender as recorded, "include earlier versions and unsent text" (the
+  explicit reveal for search, D115, off by default) and "include reactions
+  and system events". The date range is two typed `YYYY-MM-DD` days, both
+  inclusive, turned into the half-open UTC range `[start of from, start of
+  the day after to)` by the same injected `DayBoundaryBuilder` as the
+  calendar (D104); a malformed or reversed range is refused in the panel
+  and nothing is searched. The form stays in the store until the viewer
+  closes and is never persisted (D110).
+- **What the panel says.** The count is a `role="status"` region, never
+  repeating the query: "N matches", or, when capped, "More than N matches.
+  Showing N of them, newest first. These are not necessarily the newest N
+  in the archive; add words or filters to see all" (or "Showing the
+  newest N" when Rust kept the newest). It names the mode that ran, the
+  exact-text caveat (case-, accent- and normalisation-sensitive), a scan's
+  coverage when it stopped early, and "N messages have no searchable text"
+  from the session. No matches shows three hints (3-character prefixes,
+  exact text for scripts and emoji, filters). `queryTooBroad` reads "Too
+  many matches to search quickly; add a word or a filter";
+  `searchSuperseded` is dropped silently.
+- **Progress and Cancel.** An exact-text scan pushes `{ searchId,
+  examined, matched }` after each batch; the panel shows it with Cancel,
+  which calls `cancel_search` with that id (D119; `ScanProgressDto` gained
+  `searchId`). A late answer from a cancelled search is dropped.
+- **Results** (`SearchHit`), 50 per page with "Show more results": the
+  time (or "Undated", with undated results listed apart under their own
+  heading), the direction, the conversation's label (rows are loaded for
+  the conversations named), "also in N other conversations", the item or
+  association kind when it is not a plain message, the version matched
+  ("Earlier version", "Text from before it was unsent"), and Rust's
+  snippet. `SafeText` gained a `hits` mode: the snippet's pieces sit in
+  **one** `<bdi>`, each match in `<mark>`, a masked code as its sentence,
+  and the UI draws the ellipses for `cutStart` and `cutEnd`. A hit inside
+  a masked code says "Matched hidden text (one-time code)"; an
+  unhighlighted hit names why. "Open in conversation" remembers the
+  message in the store (`focusOnOpen`) and opens the conversation; the
+  thread opens a page around it (`include: true`, `around`) and focuses
+  it, so the message id never enters the URL.
+- **The date dialog** (`DateJumpDialog`, "Jump to date…" in the thread
+  header and Ctrl+G; mounted by the thread). The APG date-picker dialog
+  grid, Monday first: one 6-week month at a time, whose 43 local-day
+  boundaries go to `get_day_counts` (visible items; folded reactions and
+  undated rows never count). Days with items carry a dot, an outline and
+  the words "N items" for assistive technology, never colour alone; a
+  failed count leaves the grid usable and unmarked. Arrow keys move by day
+  and week, Home and End to the week's ends, Page Up and Page Down by
+  month (with Shift, by year), with one tab stop in the grid. A typed
+  `YYYY-MM-DD` field (1900–2200) sits beside it, since `<input
+  type="date">` popups on WebKitGTK are **UNVERIFIED**. Picking a day
+  counts that day again; with items, `seek_date(onOrAfter, start)` finds
+  its first visible item and the thread opens around it without animation
+  and focuses it. Without, it says "No messages on this day" and offers
+  the nearest earlier (`seek_date(before, start)`) and later
+  (`seek_date(onOrAfter, end)`) items. The dialog starts on the focused
+  item's day, else the window's newest dated item's, else the
+  conversation's last.
+- **Shortcuts** (`services/shortcuts.ts`): Ctrl+F (this conversation, or
+  all outside one), Ctrl+Shift+F, Ctrl+G, Ctrl+Home and Ctrl+End (open the
+  first or newest page and focus its end item), Ctrl+= (or Ctrl++),
+  Ctrl+- and Ctrl+0 (`uiZoom` along a ladder of values Rust accepts,
+  D116). Enter and R on a focused message open its details and its reply
+  thread; they are declared with `scope: 'message'` and matched only by
+  the thread, on the article itself, so they never steal Enter from a
+  button and R is never a global single-key shortcut (WCAG 2.1.4). The
+  viewer's shortcuts act only on the viewer page with a session, and
+  never in text fields. The global handler reaches the thread through the
+  store (`dateJumpOpen`, `threadCommand`). Ctrl+Shift+H (the privacy
+  screen) is slice 5j's.
 
 ### Status and qualifiers (D43)
 
@@ -2880,7 +2966,7 @@ are design decisions of the M4 spec.
 ### Milestone 5 decisions
 
 D89–D117 (M5 spec §18), as PR A (slices 5a–5f) implements them, and
-D118 from PR B (slice 5h3). **The
+D118 and D119 from PR B (slices 5h3 and 5i). **The
 owner answered the spec's four questions on 2026-10-18**: D97's and D99's
 playback wording, D100 and D110 (Q1), D101 (Q2, **which differs from the
 lean**), D105 and D115 (Q3) and D99's default (Q4) are **owner-confirmed**.
@@ -2918,6 +3004,7 @@ D104, D107–D109, D112's UI side) are implemented in PR B.
 | D115 | Masking and retraction (**owner-confirmed, Q3b**) | Enforced in Rust on every content path, released only by `reveal` after a click; revealing by default is a setting, off | Mask in the bubble only | A one-time code or withdrawn text never reaches the webview unasked |
 | D116 | Zoom | `uiZoom` applied from Rust with `set_zoom`; no webview permission | `zoomHotkeysEnabled` | WCAG reflow without widening the capability |
 | D117 | M6 export source | `view/assemble.rs` is the uncapped layer M6 streams | Export from the paging APIs | Exports are complete |
+| D119 | Cancelling a running scan (slice 5i) | Each `ScanProgressDto` carries the running search's `searchId`, so `cancel_search` can stop an exact-text scan before it returns; a words search that has not answered cannot be named and runs out within its 5 s deadline, its answer dropped | `cancel_search` without an id stops whatever runs | The id still guards against cancelling a newer search; a Cancel button that only hid results would have left a 2,000,000-row scan running |
 | D118 | Play order (slice 5h3) | Rust's structural check and full hash run on the first Play, **before** the confirmation, so the confirmation's "It has checked the file's structure" is true and a refused file never asks | The spec's §2 order: confirm, then check | A full hash of a file the user may then cancel; no attachment byte reaches the engine before the confirmation either way |
 
 ## Logging

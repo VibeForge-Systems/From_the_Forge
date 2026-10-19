@@ -97,6 +97,28 @@ const ALLOWED_BINDINGS: Record<string, readonly string[]> = {
     'class="boxClass"',
     'id="captionId"',
   ],
+  // The calendar (5i): cell ids from the grid position, classes and
+  // `aria-selected` from closed day states, weekday names from Intl, and
+  // fixed words; none is archive content.
+  'components/viewer/DateJumpDialog.vue': [
+    'aria-invalid="typedBad"',
+    'aria-selected="sameDay(c, focusDay)"',
+    'class="cellClass(c, w * 7 + d)"',
+    'id="cellId(w * 7 + d)"',
+    'title="DATE_JUMP_TEXT.title"',
+    'title="w.long"',
+  ],
+  // A result's ids are `oma-hit-<position>` (5i).
+  'components/viewer/SearchHit.vue': [
+    'aria-describedby="`${base}-h ${base}-t`"',
+    'id="`${base}-h`"',
+    'id="`${base}-t`"',
+  ],
+  'components/viewer/SearchPanel.vue': [
+    'aria-invalid="fromInvalid"',
+    'aria-invalid="toInvalid"',
+    'aria-label="SEARCH_TEXT.close"',
+  ],
   // Dialog titles and close labels are fixed words (5h3).
   'components/viewer/MediaViewer.vue': ['title="title"'],
   'components/viewer/MessageDetails.vue': ['aria-label="DETAILS_TEXT.close"'],

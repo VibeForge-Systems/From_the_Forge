@@ -25,6 +25,7 @@ vi.mock('@/services/ipc', async (importOriginal) => {
 import { IpcError } from '@/services/ipc';
 import ThreadView from '@/components/viewer/ThreadView.vue';
 import VirtualFeed from '@/components/viewer/VirtualFeed.vue';
+import DateJumpDialog from '@/components/viewer/DateJumpDialog.vue';
 import { useViewer } from '@/stores/viewer';
 import { useSettings } from '@/stores/settings';
 import { dayKey } from '@/services/time';
@@ -370,5 +371,96 @@ describe('ThreadView', () => {
     useSettings().snapshot = snapshot();
     const single = await mountThread();
     expect(single.findAll('.oma-item-sender').every((s) => s.classes().includes('visually-hidden'))).toBe(true);
+  });
+});
+
+describe('ThreadView: dates, search and shortcuts (5i)', () => {
+  /** Serve pages around a message with a focus notice, and the rest as usual. */
+  function serveAround(): void {
+    const serve = fake.handlers.getThreadPage!;
+    fake.handlers.getThreadPage = (arg) => {
+      const r = arg as GetThreadPageRequest;
+      if (r.anchor.kind === 'message' && r.direction === 'around') {
+        const at = r.anchor.message;
+        return Promise.resolve(page(range(at - 5, 11), 200, { focus: { id: sid(at), reason: 'anchor' } }));
+      }
+      return serve(arg);
+    };
+  }
+
+  it('opens a search result in this conversation around it, and focuses it', async () => {
+    serveAround();
+    const w = await mountThread();
+    fake.calls.length = 0;
+    useViewer().focusOnOpen(sid(CHAT), sid(20));
+    await flushPromises();
+    await flushPromises();
+    expect(pageRequests()[0]).toMatchObject({
+      anchor: { kind: 'message', message: 20, include: true },
+      direction: 'around',
+    });
+    expect(useViewer().pendingFocus).toBeNull();
+    expect(document.activeElement?.id).toBe('oma-m-20');
+    w.unmount();
+  });
+
+  it('jumps to the day the date dialog picked, without animation, and focuses its first item', async () => {
+    serveAround();
+    const w = await mountThread();
+    const open = w.findAll('button').find((b) => b.text() === 'Jump to date…')!;
+    await open.trigger('click');
+    expect(useViewer().dateJumpOpen).toBe(true);
+    expect((w.findComponent(DateJumpDialog as unknown as DefineComponent).props() as { open: boolean }).open).toBe(true);
+    fake.calls.length = 0;
+    w.findComponent(DateJumpDialog as unknown as DefineComponent).vm.$emit('jump', sid(30));
+    await flushPromises();
+    await flushPromises();
+    expect(useViewer().dateJumpOpen).toBe(false);
+    expect(pageRequests()[0]).toMatchObject({ anchor: { kind: 'message', message: 30, include: true }, direction: 'around' });
+    expect(document.activeElement?.id).toBe('oma-m-30');
+  });
+
+  it('opens and focuses the first or newest item when the global shortcuts ask (Ctrl+Home, Ctrl+End)', async () => {
+    const w = await mountThread();
+    fake.calls.length = 0;
+    useViewer().requestThread('first');
+    await flushPromises();
+    await flushPromises();
+    expect(pageRequests()[0]).toMatchObject({ anchor: { kind: 'oldest' }, direction: 'newer' });
+    expect(document.activeElement?.id).toBe('oma-m-1');
+    fake.calls.length = 0;
+    useViewer().requestThread('last');
+    await flushPromises();
+    await flushPromises();
+    expect(pageRequests()[0]).toMatchObject({ anchor: { kind: 'newest' } });
+    expect(document.activeElement?.id).toBe('oma-m-200');
+    w.unmount();
+  });
+
+  it('shows a focused message’s details on Enter and its replies on R, only from the article itself', async () => {
+    const w = await mountThread();
+    const store = useViewer();
+    const article = w.get('#oma-m-200');
+    (article.element as HTMLElement).focus();
+    await article.trigger('keydown', { key: 'Enter' });
+    expect(store.panel).toEqual({ kind: 'details', message: 200, reactions: false });
+    await article.trigger('keydown', { key: 'r' });
+    expect(store.panel).toEqual({ kind: 'replies', message: 200 });
+    store.closePanel();
+    // A key typed on a control inside the article is that control's.
+    const inner = article.findAll('button').find((b) => b.text() === 'Details')!;
+    await inner.trigger('keydown', { key: 'r' });
+    expect(store.panel).toBeNull();
+    // With a modifier it is not the shortcut.
+    await article.trigger('keydown', { key: 'r', ctrlKey: true });
+    expect(store.panel).toBeNull();
+  });
+
+  it('opens the search panel scoped to this conversation', async () => {
+    const w = await mountThread();
+    const store = useViewer();
+    await w.findAll('button').find((b) => b.text() === 'Search this conversation')!.trigger('click');
+    expect(store.panel).toEqual({ kind: 'search' });
+    expect(store.searchForm.chatId).toBe(CHAT);
   });
 });

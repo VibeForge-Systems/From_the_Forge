@@ -380,7 +380,8 @@ names and attachment files in the window. *Status: the reading side, the
 commands, the media protocol, the decode helper and the window's settings
 exist from M5 PR A (slices 5a–5f); PR B adds the screens (the threads,
 attachments, the media viewer, the play confirmation and the details panel
-since slice 5h3; search and the privacy screen are still to come). The
+since slice 5h3; search and the date dialog since slice 5i; the privacy
+screen is still to come). The
 screens have been tested in jsdom only. Nothing here has been run in a
 window or on Windows yet; items marked
 **UNVERIFIED** depend on the web engine and are not yet tested: they are
@@ -462,7 +463,13 @@ attachment is M6.
   it not to store the response (`Cache-Control: no-store`). Whether either
   engine keeps anything regardless is **UNVERIFIED** (not yet tested; to
   be recorded per engine in `compatibility.md` by slice 5k).
-- Search runs in memory; no search history is kept anywhere.
+- Search runs in memory; no search history is kept anywhere. The query
+  and filters stay in the window's memory until the viewer closes, never
+  in a URL, a setting or a log. The search and date fields ask the engine
+  not to spell-check, auto-complete or auto-capitalise
+  (`spellcheck="false"`, `autocomplete="off"`, `autocapitalize="off"`);
+  whether each engine and the system's input methods honour that is
+  **UNVERIFIED** (slice 5k's checklist).
 - The window title is always "OpenMessage Archive", never a conversation
   name.
 

@@ -48,9 +48,10 @@ of slice 5h0, the conversation list and the thread, the viewer routes) and
 slice 5h2 (message bubbles, system rows, reaction chips, reply quotes,
 per-part edits and unsends, and the reveals of codes and earlier text) and
 slice 5h3 (attachment cards, the media viewer, the play confirmation, the
-details panel and the reply thread) are in place. The viewer opens from
-the Archive page and the roadmap's `viewer` is available; search (5i) and
-the privacy screen (5j) are still planned.
+details panel and the reply thread) and slice 5i (the search panel, the
+date dialog and the viewer shortcuts) are in place. The viewer opens from
+the Archive page and the roadmap's `viewer` and `search` are available;
+the privacy screen (5j) is still planned.
 The owner answered the M5 questions (`docs/architecture.md`, "Milestone 5
 decisions").
 
@@ -491,6 +492,20 @@ Never hand-edit generated files.
   `ViewerView`; the right panel (`viewer.panel`) shows `MessageDetails` or
   `ReplyThread`. A `ThreadItem` outside the feed needs its own `idPrefix`,
   so ids stay unique. Details repeat only the reveal the user asked for.
+- **Search and dates (M5 slice 5i).** The search form lives in
+  `stores/viewer.ts` (`searchForm`) until the viewer closes; never persist
+  it or put the query, a filter or a message id in a URL or a sentence.
+  Every text field in the search panel and the date dialog keeps
+  `spellcheck="false"`, `autocomplete="off"` and `autocapitalize="off"`.
+  Local dates become UTC instants only through `services/calendar.ts` and
+  the injected `DayBoundaryBuilder` (D104); add a case to
+  `tests/frontend/dst/` when that arithmetic changes. Snippets render only
+  through `SafeText`'s `hits` mode (one isolate, `<mark>` per match).
+  Cancel names a running scan by the `searchId` its progress carries
+  (D119). Shortcuts that act on a focused message are declared with
+  `scope: 'message'` and matched only by `ThreadView` on the article;
+  the global handler reaches the thread through the store
+  (`dateJumpOpen`, `threadCommand`), never through the DOM.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush

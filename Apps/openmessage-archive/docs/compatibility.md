@@ -1118,6 +1118,29 @@ card. `IntersectionObserver` is feature-detected; without it a mounted
 card counts as in view. Screen readers, forced colours and 400 % zoom are
 slice 5j's.
 
+**Slice 5i (the search panel, the date dialog and the viewer shortcuts)**
+was tested in jsdom only (Vitest 4.1.12, synthetic DTOs, a hand-written
+`invoke` fake): the 250 ms debounce; the request (scope, filters, the
+explicit reveal, and the local date range built by a fake day-boundary
+builder); `spellcheck`, `autocomplete` and `autocapitalize` off on every
+text field; superseded searches dropped; the count, capped and no-match
+sentences; snippets as text in one isolate with `<mark>`; masked codes;
+undated results apart; opening a result focuses it; scan progress and
+Cancel by the progress's search id (also a Rust test that cancels a scan
+mid-way by that id); the calendar's 43 bounds, marked days, APG keys,
+picking a day, "No messages on this day" with the nearest items, the typed
+date; Enter and R only on a focused article; Ctrl+Home and Ctrl+End. The
+calendar's day ranges and the search date filter were tested across DST
+changes with the production builder under `TZ=Europe/London`,
+`America/Sao_Paulo` and `Australia/Lord_Howe` on Linux (Node honouring
+`TZ` on the Windows runner is **UNVERIFIED** until CI runs it; each run
+checks its zone first). **Not tested:** any of it on WebKitGTK or
+WebView2; whether either engine gives Ctrl+F, Ctrl+G or Ctrl+Home to the
+page rather than acting on them itself; whether the engines and input
+methods honour `spellcheck`, `autocomplete` and `autocapitalize`; the zoom
+shortcuts against Rust's `set_zoom`; a screen reader on the grid, the
+results or the live count; real exact-text scans at scale through the UI.
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI

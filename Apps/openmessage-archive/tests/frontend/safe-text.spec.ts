@@ -144,6 +144,27 @@ describe('SafeText', () => {
     expect(css).toMatch(/\.oma-safe-text bdi\s*\{[^}]*unicode-bidi:\s*isolate;/);
   });
 
+  it('renders a search snippet in one isolate, matches in <mark>, as text only (5i)', () => {
+    const w = mount(SafeText, {
+      props: {
+        hits: [
+          { kind: 'text', value: content('before '), hit: false },
+          { kind: 'text', value: content('<b>match</b>\u202E', { bidiControls: true }), hit: true },
+          { kind: 'masked', mask: 'oneTimeCode' },
+        ],
+        showHidden: true,
+      },
+    });
+    // A match never escapes the snippet's single isolate.
+    expect(w.findAll('bdi')).toHaveLength(1);
+    expect(w.find('bdi mark').exists()).toBe(true);
+    expect(w.find('mark').text()).toContain('<b>match</b>');
+    expect(w.find('b').exists()).toBe(false);
+    expect(w.find('mark .oma-cp').text()).toBe('⟨U+202E⟩');
+    expect(w.find('.oma-masked').text()).toBe(MASK_TEXT.oneTimeCode);
+    expect(w.text()).toContain(CONTENT_BADGE_TEXT.hidden);
+  });
+
   it('renders nothing for a null value', () => {
     const w = mount(SafeText, { props: { value: null } });
     expect(w.text()).toBe('');

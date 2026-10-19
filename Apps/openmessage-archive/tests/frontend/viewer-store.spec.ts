@@ -461,3 +461,86 @@ describe('viewer store: attachments, playback and the panel (5h3)', () => {
     expect(fake.calls.at(-1)?.[1]).toEqual({ viewer: 7, messageId: 5, reveal: { oneTimeCode: true }, reactionPage: {} });
   });
 });
+
+describe('viewer store: search and dates (5i)', () => {
+  it('opens the search panel scoped or global, and asks the panel for focus each time', async () => {
+    const store = await openSession();
+    store.openSearch(sid(4));
+    expect(store.panel).toEqual({ kind: 'search' });
+    expect(store.searchForm.chatId).toBe(4);
+    const focus = store.searchFocus;
+    store.openSearch(null);
+    expect(store.searchForm.chatId).toBeNull();
+    expect(store.searchFocus).toBe(focus + 1);
+  });
+
+  it('opens the search panel once the requested archive’s session opens', async () => {
+    const store = useViewer();
+    store.searchOnOpen(ARCHIVE_ID);
+    expect(store.panel).toBeNull();
+    fake.handlers.openViewer = () => Promise.resolve(viewerSession({ viewer: 7 }));
+    await store.open(ARCHIVE_ID);
+    expect(store.panel).toEqual({ kind: 'search' });
+    // Only once.
+    await store.close();
+    await store.open(ARCHIVE_ID);
+    expect(store.panel).toBeNull();
+  });
+
+  it('keeps the search form until the viewer closes, and persists none of it', async () => {
+    const store = await openSession();
+    store.searchForm.query = 'synthetic words';
+    store.searchForm.from = '2026-01-01';
+    store.dateJumpOpen = true;
+    await store.close();
+    expect(store.searchForm.query).toBe('');
+    expect(store.searchForm.from).toBe('');
+    expect(store.dateJumpOpen).toBe(false);
+    expect(localStorage.length).toBe(0);
+  });
+
+  it('cancels a scan still running by the id its progress names', async () => {
+    const store = await openSession();
+    let progress: ((p: { searchId: number; examined: number; matched: number }) => void) | null = null;
+    fake.handlers.searchMessages = (arg) => {
+      progress = (arg as [SearchMessagesRequest, typeof progress])[1];
+      return new Promise(() => {});
+    };
+    void store.startSearch({ query: 'abc', mode: 'exact', filters: {}, includeEarlier: false, includeEvents: false });
+    await Promise.resolve();
+    progress!({ searchId: 12, examined: 5000, matched: 0 });
+    expect(store.search.progress?.searchId).toBe(12);
+    await store.cancelSearch();
+    expect(fake.calls.find(([n]) => n === 'cancelSearch')?.[1]).toEqual({ viewer: 7, searchId: 12 });
+    expect(store.search.running).toBe(false);
+  });
+
+  it('keeps the error code of a failed search, for its own sentence', async () => {
+    const store = await openSession();
+    fake.handlers.searchMessages = () => Promise.reject(new IpcError('search_messages', 'queryTooBroad', 'Too broad.'));
+    await store.startSearch({ query: 'abc', mode: 'auto', filters: {}, includeEarlier: false, includeEvents: false });
+    expect(store.search.errorCode).toBe('queryTooBroad');
+    expect(store.search.error).toBeTruthy();
+  });
+
+  it('counts days and seeks dates for the open session, returning errors as sentences', async () => {
+    const store = await openSession();
+    fake.handlers.getDayCounts = () => Promise.resolve({ counts: [2, 0] });
+    fake.handlers.seekDate = () => Promise.resolve({ messageId: 33 });
+    expect(await store.dayCounts(sid(4), [0, 1000, 2000])).toEqual({ counts: [2, 0] });
+    expect(fake.calls.at(-1)).toEqual(['getDayCounts', { viewer: 7, chatId: 4, boundsUtcMs: [0, 1000, 2000] }]);
+    expect(await store.seekDate(sid(4), 1000, 'before')).toEqual({ id: 33 });
+    expect(fake.calls.at(-1)).toEqual(['seekDate', { viewer: 7, chatId: 4, utcMs: 1000, dir: 'before' }]);
+    fake.handlers.seekDate = () => Promise.reject(new IpcError('seek_date', 'anchorNotFound', 'Gone.'));
+    expect(await store.seekDate(sid(4), 1000, 'onOrAfter')).toEqual({ error: 'That position is no longer in the conversation.' });
+  });
+
+  it('passes the first and newest requests to the thread, each one seen', async () => {
+    const store = await openSession();
+    store.requestThread('first');
+    const a = store.threadCommand;
+    store.requestThread('first');
+    expect(store.threadCommand?.kind).toBe('first');
+    expect(store.threadCommand?.n).not.toBe(a?.n);
+  });
+});

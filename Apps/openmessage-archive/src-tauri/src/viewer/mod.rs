@@ -702,7 +702,7 @@ pub fn search(
     let started = Instant::now();
     let result = {
         let r = s.search_reader()?;
-        r.search(&q, &token, &mut |p| progress(p.into()))
+        r.search(&q, &token, &mut |p| progress(ScanProgressDto::new(id, p)))
     };
     let mut slot = s.searches()?;
     if slot.running.as_ref().is_some_and(|(r, _)| *r == id) {

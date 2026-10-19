@@ -19,6 +19,15 @@
 //   another conversation, by asking the view to open that conversation
 //   (`openChat`) with the originator remembered in the store, never in
 //   the URL.
+// - Dates and search (5i): "Jump to date…" opens the date dialog (also
+//   Ctrl+G, through the store); a picked day opens a page around its first
+//   visible item and focuses it. "Search this conversation" opens the
+//   search panel scoped here (also Ctrl+F). A search result opened in this
+//   conversation arrives as a pending focus and is handled like a reply
+//   jump. Ctrl+Home and Ctrl+End (through `threadCommand`) open the first
+//   or newest page and focus its end. On a focused article, Enter shows
+//   its details and R its reply thread (`scope: 'message'` shortcuts,
+//   matched here only).
 import { computed, nextTick, ref, watch } from 'vue';
 import type { AnchorInput, MessageDto, SafeId } from '@/types';
 import type { FeedHandle } from '@/services/feedModel';
@@ -26,9 +35,12 @@ import VirtualFeed from './VirtualFeed.vue';
 import ThreadItem from './ThreadItem.vue';
 import { runStarts, serviceChanges } from '@/services/messageView';
 import ConversationLabel from './ConversationLabel.vue';
+import DateJumpDialog from './DateJumpDialog.vue';
+import { matchShortcut } from '@/services/shortcuts';
 import { parseSafeId } from '@/services/ids';
 import { dayKey, formatInstant, timeText } from '@/services/time';
 import {
+  DATE_JUMP_TEXT,
   FOCUS_REASON_TEXT,
   LIST_TEXT,
   SERVICE_TEXT,
@@ -131,6 +143,20 @@ const several = computed(() => (row.value?.addresses ?? 0) > 1);
 const starts = computed(() => runStarts(items.value, dayLabels.value));
 const changes = computed(() => serviceChanges(items.value));
 
+/** Where the date dialog starts: the focused item, the window's newest dated item, or the chat's last. */
+const dateStart = computed<number | null>(() => {
+  const focused = focusedId.value === null ? null : items.value.find((m) => m.id === focusedId.value);
+  if (focused) {
+    const t = timeText(focused.date);
+    if (t.kind === 'instant') return t.ms;
+  }
+  for (let i = items.value.length - 1; i >= 0; i -= 1) {
+    const t = timeText(items.value[i]!.date);
+    if (t.kind === 'instant') return t.ms;
+  }
+  return row.value?.stats?.lastMs ?? null;
+});
+
 const empty = computed(
   () => !!win.value && win.value.loading === null && !win.value.error && win.value.pages.length > 0 && items.value.length === 0,
 );
@@ -150,7 +176,7 @@ watch(
     focusedId.value = null;
     if (!viewer.rows.has(id)) void viewer.loadRows([id]);
     const target = viewer.takePendingFocus(id);
-    if (target !== null) open({ kind: 'message', message: target }, 'end', true);
+    if (target !== null) open({ kind: 'message', message: target, include: true }, 'end', true);
     else open({ kind: 'newest' }, 'end');
   },
   { immediate: true },
@@ -175,10 +201,20 @@ async function alignOpened(): Promise<void> {
   if (f && focus && shown) f.scrollToKey(focus.id, 'center');
   else if (f && pending.align === 'start') f.scrollToStart();
   else if (f) f.scrollToEnd();
-  if (pending.focus && focus && shown) {
-    focusedId.value = focus.id;
+  // An open at a message focuses that message only; an open at an end
+  // (Ctrl+Home, Ctrl+End) focuses the end's item.
+  const target =
+    focus && shown
+      ? focus.id
+      : lastOpen.anchor.kind === 'message'
+        ? null
+        : pending.align === 'start'
+        ? (items.value[0]?.id ?? null)
+        : (items.value[items.value.length - 1]?.id ?? null);
+  if (pending.focus && target !== null) {
+    focusedId.value = target;
     await nextTick();
-    document.getElementById(`${ARTICLE_ID_PREFIX}${focus.id}`)?.focus({ preventScroll: true });
+    document.getElementById(`${ARTICLE_ID_PREFIX}${target}`)?.focus({ preventScroll: true });
   }
   if (pendingAlign === pending) pendingAlign = null;
   aligning = false;
@@ -223,6 +259,32 @@ function onFocusin(event: FocusEvent): void {
   if (id !== null) focusedId.value = id;
 }
 
+// A search result opened in this conversation (another conversation's
+// remounts this view, and the watch on `chatId` takes it).
+watch(
+  () => viewer.pendingFocus,
+  (p) => {
+    if (!p || p.chatId !== props.chatId) return;
+    const target = viewer.takePendingFocus(props.chatId);
+    if (target !== null) open({ kind: 'message', message: target, include: true }, 'end', true);
+  },
+);
+
+// Ctrl+Home and Ctrl+End, asked through the store by the global handler.
+watch(
+  () => viewer.threadCommand,
+  (c) => {
+    if (!c || viewer.openChatId !== props.chatId) return;
+    if (c.kind === 'first') open({ kind: 'oldest' }, 'start', true);
+    else open({ kind: 'newest' }, 'end', true);
+  },
+);
+
+function onDateJump(messageId: SafeId): void {
+  viewer.dateJumpOpen = false;
+  open({ kind: 'message', message: messageId, include: true }, 'end', true);
+}
+
 /** A reply's quote: open around its originator, here or in its conversation. */
 function onJump(originator: SafeId, chat: SafeId | null): void {
   if (chat === null || chat === props.chatId) {
@@ -236,6 +298,16 @@ function onJump(originator: SafeId, chat: SafeId | null): void {
 const NEXT_KEYS: Record<string, number> = { PageDown: 1, ArrowDown: 1, PageUp: -1, ArrowUp: -1 };
 
 function onFeedKeydown(event: KeyboardEvent): void {
+  if (event.target instanceof Element && event.target.matches('article.oma-thread-item')) {
+    const shortcut = matchShortcut(event, undefined, 'message');
+    const id = shortcut ? articleId(event.target) : null;
+    if (shortcut && id !== null) {
+      event.preventDefault();
+      if (shortcut.id === 'viewer-details') viewer.openDetails(id);
+      else if (shortcut.id === 'viewer-reply-thread') viewer.openReplies(id);
+      return;
+    }
+  }
   if (event.ctrlKey || event.altKey || event.metaKey) return;
   const delta = NEXT_KEYS[event.key];
   if (delta === undefined) return;
@@ -281,8 +353,14 @@ function onFeedKeydown(event: KeyboardEvent): void {
           <button v-if="undated" type="button" class="btn btn-sm btn-outline-secondary" @click="open({ kind: 'undated' }, 'start')">
             {{ undated }}
           </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" @click="viewer.dateJumpOpen = true">
+            {{ DATE_JUMP_TEXT.open }}
+          </button>
           <span v-if="showing" class="oma-thread-range">{{ showing }}</span>
         </template>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @click="viewer.openSearch(chatId)">
+          {{ THREAD_TEXT.searchConversation }}
+        </button>
       </div>
     </header>
 
@@ -332,5 +410,12 @@ function onFeedKeydown(event: KeyboardEvent): void {
       </template>
     </VirtualFeed>
     <p v-if="loading === 'newer'" class="oma-thread-loading" role="status">{{ THREAD_TEXT.loadingNewer }}</p>
+    <DateJumpDialog
+      :open="viewer.dateJumpOpen"
+      :chat-id="chatId"
+      :initial="dateStart"
+      @close="viewer.dateJumpOpen = false"
+      @jump="onDateJump"
+    />
   </div>
 </template>

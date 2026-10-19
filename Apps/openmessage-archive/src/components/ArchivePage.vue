@@ -7,10 +7,10 @@ import { useRouter } from 'vue-router';
 import ArchiveStatusBadge from '@/components/ArchiveStatusBadge.vue';
 import ImportSummary from '@/components/ImportSummary.vue';
 import JobProgress from '@/components/JobProgress.vue';
-import PlannedBadge from '@/components/PlannedBadge.vue';
 import VerifySummary from '@/components/VerifySummary.vue';
 import { useArchives } from '@/stores/archives';
 import { useBackups } from '@/stores/backups';
+import { useViewer } from '@/stores/viewer';
 import {
   GATE_ENDING,
   NOT_IMPORTABLE,
@@ -27,6 +27,7 @@ import {
 import type { ProgressJob } from '@/types/progress';
 
 const archives = useArchives();
+const viewer = useViewer();
 const backups = useBackups();
 
 const id = computed(() => archives.selectedId as string);
@@ -69,6 +70,12 @@ const router = useRouter();
 
 function browse(): void {
   void router.push({ name: 'viewer', params: { archiveId: id.value } });
+}
+
+/** Open the viewer with the search panel showing (slice 5i). */
+function searchMessages(): void {
+  viewer.searchOnOpen(id.value);
+  browse();
 }
 const newerRules = computed(() => summary.value?.newerRules ?? false);
 const canImport = computed(() => ready.value && !newerRules.value && !busy.value);
@@ -255,11 +262,9 @@ function cancelUnheard(): void {
             <i class="bi bi-chat-square-text me-1" aria-hidden="true"></i>Browse conversations
           </button>
         </div>
-        <label for="conversation-search" class="form-label small mb-1 d-flex justify-content-between">
-          <span>Search messages</span>
-          <PlannedBadge capability="search" />
-        </label>
-        <input id="conversation-search" type="search" class="form-control form-control-sm" disabled />
+        <button type="button" class="btn btn-outline-secondary" :disabled="!canBrowse" @click="searchMessages">
+          <i class="bi bi-search me-1" aria-hidden="true"></i>Search messages
+        </button>
       </div>
     </section>
   </div>

@@ -69,8 +69,9 @@ export const CAPABILITIES: readonly Capability[] = [
     id: 'search',
     title: 'Search and filtering',
     milestone: 5,
-    status: 'planned',
-    summary: 'Full-text search across conversations with date, sender, and type filters.',
+    status: 'available',
+    summary:
+      'Search message text in one conversation or all of them, with date, sender and attachment filters and an exact-text mode for scripts and emoji the index does not split; jump to a date with a calendar.',
   },
   {
     id: 'privacy-screen',

@@ -12,8 +12,11 @@
 //   selectors must stay, or emoji sequences break) unless `showHidden`
 //   (the `showHiddenCharacters` setting) asks for tokens. The badge
 //   "contains invisible or direction-control characters" shows either way.
+// - `hits` (a search snippet, slice 5i): the pieces sit inside ONE `<bdi>`,
+//   so a match never escapes the snippet's isolate, and each matched piece
+//   is wrapped in `<mark>`. Masked pieces show their sentence.
 import { computed } from 'vue';
-import type { ContentTextDto, OptContentDto, TextPieceDto } from '@/types';
+import type { ContentTextDto, HitPieceDto, OptContentDto, TextPieceDto } from '@/types';
 import { visibleRuns, type SafeRun } from '@/services/safeText';
 import { CONTENT_BADGE_TEXT, MASK_TEXT, VALUE_STATE_TEXT } from '@/services/viewerText';
 
@@ -21,17 +24,19 @@ const props = withDefaults(
   defineProps<{
     value?: ContentTextDto | OptContentDto | null;
     pieces?: readonly TextPieceDto[] | null;
+    /** A search snippet's pieces: rendered in one isolate, matches in `<mark>`. */
+    hits?: readonly HitPieceDto[] | null;
     mode?: 'body' | 'identifier';
     ltr?: boolean;
     showHidden?: boolean;
     /** Hide the badges (for compact places that show them elsewhere). */
     quiet?: boolean;
   }>(),
-  { value: null, pieces: null, mode: 'body', ltr: false, showHidden: false, quiet: false },
+  { value: null, pieces: null, hits: null, mode: 'body', ltr: false, showHidden: false, quiet: false },
 );
 
 type Part =
-  | { kind: 'text'; key: number; runs: SafeRun[] | null; text: string; content: ContentTextDto }
+  | { kind: 'text'; key: number; runs: SafeRun[] | null; text: string; content: ContentTextDto; hit: boolean }
   | { kind: 'masked'; key: number; label: string }
   | { kind: 'missing'; key: number; label: string };
 
@@ -41,18 +46,24 @@ function isContent(v: ContentTextDto | OptContentDto): v is ContentTextDto {
 
 const tokens = computed(() => props.mode === 'identifier' || props.showHidden);
 
-function textPart(key: number, content: ContentTextDto): Part {
+function textPart(key: number, content: ContentTextDto, hit = false): Part {
   const text: string = content.text;
   return {
     kind: 'text',
     key,
     text,
     content,
+    hit,
     runs: tokens.value ? visibleRuns(text, props.mode === 'identifier' ? 'identifier' : 'body') : null,
   };
 }
 
 const parts = computed<Part[]>(() => {
+  if (props.hits) {
+    return props.hits.map((p, i) =>
+      p.kind === 'text' ? textPart(i, p.value, p.hit) : { kind: 'masked', key: i, label: MASK_TEXT[p.mask] },
+    );
+  }
   if (props.pieces) {
     return props.pieces.map((p, i) =>
       p.kind === 'text' ? textPart(i, p.value) : { kind: 'masked', key: i, label: MASK_TEXT[p.mask] },
@@ -76,7 +87,26 @@ const dir = computed(() => (props.ltr ? 'ltr' : 'auto'));
 
 <template>
   <span class="oma-safe-text" :class="mode === 'identifier' ? 'oma-safe-id' : 'oma-safe-body'">
-    <template v-for="part in parts" :key="part.key">
+    <bdi v-if="hits" :dir="dir"
+      ><template v-for="part in parts" :key="part.key"
+        ><template v-if="part.kind === 'text'"
+          ><mark v-if="part.hit"
+            ><template v-if="part.runs"
+              ><template v-for="(run, i) in part.runs" :key="i"
+                ><span v-if="run.kind === 'token'" class="oma-cp">{{ run.label }}</span
+                ><template v-else>{{ run.text }}</template></template
+              ></template
+            ><template v-else>{{ part.text }}</template></mark
+          ><template v-else-if="part.runs"
+            ><template v-for="(run, i) in part.runs" :key="i"
+              ><span v-if="run.kind === 'token'" class="oma-cp">{{ run.label }}</span
+              ><template v-else>{{ run.text }}</template></template
+            ></template
+          ><template v-else>{{ part.text }}</template></template
+        ><span v-else class="oma-masked">{{ part.label }}</span></template
+      ></bdi
+    >
+    <template v-for="part in hits ? [] : parts" :key="part.key">
       <bdi v-if="part.kind === 'text'" :dir="dir"
         ><template v-if="part.runs"
           ><template v-for="(run, i) in part.runs" :key="i"

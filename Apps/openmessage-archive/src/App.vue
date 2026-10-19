@@ -6,12 +6,15 @@ import ArchiveDialogs from '@/components/ArchiveDialogs.vue';
 import ShortcutHelpDialog from '@/components/ShortcutHelpDialog.vue';
 import ToastHost from '@/components/ToastHost.vue';
 import { nextTheme, useTheme } from '@/composables/useTheme';
-import { matchShortcut, type ShortcutId } from '@/services/shortcuts';
+import { isMessageShortcut, matchShortcut, type GlobalShortcutId } from '@/services/shortcuts';
+import { ZOOM_DEFAULT, nextZoom } from '@/services/zoom';
 import { useLayout } from '@/stores/layout';
 import { useSettings } from '@/stores/settings';
+import { useViewer } from '@/stores/viewer';
 
 const settings = useSettings();
 const layout = useLayout();
+const viewer = useViewer();
 const router = useRouter();
 const showShortcuts = ref(false);
 const noticeDismissed = ref(false);
@@ -29,7 +32,19 @@ watch(
 const hasPanels = () =>
   ['archive', 'backups', 'viewer', 'viewer-chat'].includes(String(router.currentRoute.value.name));
 
-const actions: Record<ShortcutId, () => unknown> = {
+const routeName = () => String(router.currentRoute.value.name);
+/** The viewer's shortcuts act only on the viewer page, with a session. */
+const inViewer = () => ['viewer', 'viewer-chat'].includes(routeName()) && viewer.session !== null;
+/** ... and those about a conversation, only with one open. */
+const inChat = () => routeName() === 'viewer-chat' && viewer.session !== null && viewer.openChatId !== null;
+
+/** The in-app zoom (D116): Rust validates and applies `uiZoom`. */
+function zoomTo(uiZoom: number): unknown {
+  return settings.snapshot && uiZoom !== settings.viewer.uiZoom ? settings.setViewer({ uiZoom }) : undefined;
+}
+
+// The message shortcuts (Enter, R) are matched by the thread, never here.
+const actions: Record<GlobalShortcutId, () => unknown> = {
   'toggle-left-panel': () => hasPanels() && layout.toggleLeft(),
   'toggle-right-panel': () => hasPanels() && layout.toggleRight(),
   'go-archive': () => router.push({ name: 'archive' }),
@@ -38,11 +53,19 @@ const actions: Record<ShortcutId, () => unknown> = {
   'go-about': () => router.push({ name: 'about' }),
   'cycle-theme': () => settings.setTheme(nextTheme(settings.theme)),
   'show-shortcuts': () => (showShortcuts.value = true),
+  'viewer-search-conversation': () => inViewer() && viewer.openSearch(inChat() ? viewer.openChatId : null),
+  'viewer-search-all': () => inViewer() && viewer.openSearch(null),
+  'viewer-jump-date': () => inChat() && (viewer.dateJumpOpen = true),
+  'viewer-first': () => inChat() && viewer.requestThread('first'),
+  'viewer-last': () => inChat() && viewer.requestThread('last'),
+  'zoom-in': () => zoomTo(nextZoom(settings.viewer.uiZoom, 1)),
+  'zoom-out': () => zoomTo(nextZoom(settings.viewer.uiZoom, -1)),
+  'zoom-reset': () => zoomTo(ZOOM_DEFAULT),
 };
 
 function onKeydown(event: KeyboardEvent): void {
   const shortcut = matchShortcut(event);
-  if (!shortcut) return;
+  if (!shortcut || isMessageShortcut(shortcut.id)) return;
   event.preventDefault();
   void actions[shortcut.id]();
 }
