@@ -207,10 +207,19 @@ impl PdfText {
 }
 
 /// Builds one [`PdfText`] from recorded text and our own words.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct TextBuilder {
     text: String,
     counts: MarkCounts,
+}
+
+impl std::fmt::Debug for TextBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Recorded text; never printed (I6).
+        f.debug_struct("TextBuilder")
+            .field("len", &self.text.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl TextBuilder {

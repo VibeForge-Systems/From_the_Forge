@@ -709,13 +709,23 @@ fn count(
 // ------------------------------------------------------------ destination
 
 /// What `choose_export_destination` opens the dialog with.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DialogPlan {
     pub title: String,
     pub picked: destination::Picked,
     /// The bundle's base name, or the single file's default name.
     pub default_name: String,
     pub needs: SpaceNeeds,
+}
+
+impl std::fmt::Debug for DialogPlan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The default name can carry an attachment's offered file name;
+        // never printed (I6).
+        f.debug_struct("DialogPlan")
+            .field("picked", &self.picked)
+            .finish_non_exhaustive()
+    }
 }
 
 /// `choose_export_destination` before the dialog: the draft must be
