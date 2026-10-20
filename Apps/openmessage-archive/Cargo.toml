@@ -11,7 +11,7 @@ members = ["src-tauri", "crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.90"
+rust-version = "1.92"
 license = "Apache-2.0"
 repository = "https://github.com/VibeForge-Systems/From_the_Forge"
 authors = ["VibeForge Systems, Inc. and OpenMessage Archive contributors"]
@@ -86,6 +86,18 @@ csv = "=1.4.0"
 # `decompress_to_vec_zlib_with_limit` API) only: no `std`, no `simd`.
 miniz_oxide = { version = "=0.8.9", default-features = false, features = ["with-alloc"] }
 
+# Milestone 6 slice 6j1: PDF in the export-render helper only (owner Q1,
+# spec §5.6, D133), behind oma-export's `render` feature, which only the
+# shell enables. krilla: no default features (no `simple-text`, whose
+# rustybuzz duplicates parley's shaping; no `raster-images` until the
+# thumbnails need it). parley: never its default `system` feature (system
+# font discovery through fontconfig, ISC `libloading`); fonts come only
+# from the pinned bundled set. krilla needs Rust 1.92 (the workspace
+# `rust-version` above) and brings `arrayref` (BSD-2-Clause, the per-crate
+# exception in deny.toml). Both MIT OR Apache-2.0; see docs/dependencies.md.
+krilla = { version = "=0.8.2", default-features = false }
+parley = { version = "=0.11.1", default-features = false, features = ["std", "complex-scripts"] }
+
 oma-fs = { path = "crates/oma-fs" }
 oma-backup = { path = "crates/oma-backup" }
 oma-messages = { path = "crates/oma-messages" }
@@ -136,4 +148,30 @@ opt-level = 3
 [profile.dev.package.csv]
 opt-level = 3
 [profile.dev.package.csv-core]
+opt-level = 3
+# Slice 6j1: PDF layout and serialisation run in the export-render helper,
+# and the layout tests shape and serialise whole documents in debug builds:
+# the shaping, segmentation, font and PDF crates are optimized in tests too
+# (spec §0.1, §16).
+[profile.dev.package.krilla]
+opt-level = 3
+[profile.dev.package.parley]
+opt-level = 3
+[profile.dev.package.fontique]
+opt-level = 3
+[profile.dev.package.harfrust]
+opt-level = 3
+[profile.dev.package.skrifa]
+opt-level = 3
+[profile.dev.package.read-fonts]
+opt-level = 3
+[profile.dev.package.subsetter]
+opt-level = 3
+[profile.dev.package.icu_segmenter]
+opt-level = 3
+[profile.dev.package.pdf-writer]
+opt-level = 3
+[profile.dev.package.flate2]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
 opt-level = 3

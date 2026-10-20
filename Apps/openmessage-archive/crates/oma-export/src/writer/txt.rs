@@ -158,8 +158,9 @@ fn is_break(c: char) -> bool {
     matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}' | '\u{85}')
 }
 
-/// `text` split at its line breaks (CRLF counts once).
-fn split_lines(text: &str) -> Vec<&str> {
+/// `text` split at its line breaks (CRLF counts once). The PDF block
+/// model splits recorded text into paragraphs with the same rule.
+pub(crate) fn split_lines(text: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut start = 0;
     let mut it = text.char_indices().peekable();

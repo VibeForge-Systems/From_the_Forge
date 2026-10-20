@@ -84,7 +84,7 @@ flowchart LR
 | `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them. From M4: `copy_file_to` streams one listed file's plaintext into a caller's writer, hashing it, under `Limits::attachment_bytes` and per-file stamps | ✔ M2, M3, M4 (slice 4b) |
 | `crates/oma-messages` | Scans and probes the sms.db schema by capability, streams typed records (handles, chats, the joins, messages, attachments, Recently Deleted links) as `Col<T>` values, decodes `attributedBody` with a clean-room typedstream decoder, and produces the aggregate `ExtractionReport`. Persists nothing. From M4: stable `KnownColumn` codes, raw values of unreadable cells (`raw_issues`), `payload_data` on request, the raw association columns, key-only passes and the storage class of text cells | ✔ M3, M4 (slice 4c) |
 | `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep; slices 4e–4j the import; slice 4k the report-only verifier and `open_blob`. Used by the shell since slice 4l. From M5: the viewer reads (`view/`, `sortkey.rs`, phased budgets), search (`search/`) and media sniffing, checks and rendering (`media/`, `blobs::open_range`) | ✔ M4 (slices 4d–4k), M5 (slices 5a–5d) |
-| `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX. Tauri-free and SQLite-free: it reads only through `oma-archive`'s export APIs. Slice 6d ships the record core: the validated plan, the code registry, the column ledger, the canonical record and its mapping, export-local ordinals, the Rust word tables, time zones and local-day bounds, and the hidden-character markers. Slice 6e1 adds the files core: names, staging and publish, leftovers, the manifest and the writer trait. Slice 6e2 adds the attachment copy, the TXT writer and the pipeline (`pipeline::run`); 6f the JSON and CSV writers; 6g the HTML writer; 6h2 the preview feed between the pipeline and the decode-helper pool. Driven by the shell's export job (slice 6h1). PDF and XLSX are PR B | ✔ M6 PR A (slices 6d–6h2); PDF and XLSX in PR B (6i, 6j); no Export dialog until 6k |
+| `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX. Tauri-free and SQLite-free: it reads only through `oma-archive`'s export APIs. Slice 6d ships the record core: the validated plan, the code registry, the column ledger, the canonical record and its mapping, export-local ordinals, the Rust word tables, time zones and local-day bounds, and the hidden-character markers. Slice 6e1 adds the files core: names, staging and publish, leftovers, the manifest and the writer trait. Slice 6e2 adds the attachment copy, the TXT writer and the pipeline (`pipeline::run`); 6f the JSON and CSV writers; 6g the HTML writer; 6h2 the preview feed between the pipeline and the decode-helper pool. Driven by the shell's export job (slice 6h1). PDF and XLSX are PR B: slice 6i adds the export-render helper and the output check, 6j1 the PDF layout (parley, krilla, behind the `render` feature) with the pinned fonts | ✔ M6 PR A (slices 6d–6h2); PR B: 6i, 6j1 built; no export writes PDF until 6j2; XLSX deferred; no Export dialog until 6k |
 | `crates/oma-device` | Detects devices and creates backups behind a platform trait | planned, M7 |
 
 Each library crate can be built and tested without Tauri. The shell only
@@ -4423,6 +4423,128 @@ the helper itself. Everything ran only in a Linux container; the helper
 code was compiled clippy-clean for `x86_64-pc-windows-msvc` through a
 scratch harness, and nothing ran on Windows.
 
+### PDF layout and pinned fonts (M6 slice 6j1)
+
+Slice 6j1 gives the export-render helper its first real backend: PDF
+layout with parley and serialisation with krilla (owner Q1), drawing
+only with the pinned bundled fonts (owner Q2). **No export uses it
+yet:** the record-to-block mapping, the pipeline's PDF writer, volumes,
+thumbnails and the "About this export" page are slice 6j2's, so PDF stays
+refused at the draft (`exportUnavailable`).
+
+**Where each part runs.**
+
+- *Main process* (`oma-export`'s `pdf/`, always compiled):
+  `pdf::fonts` pins the twelve font files (`PINS`: file, family, length,
+  SHA-256) and `verify` checks a set against them; only a `VerifiedFonts`
+  can be sent (`RenderSession::send_fonts`), so no unchecked byte reaches
+  the helper. The shell's `exports/pdf_fonts.rs` reads the files from a
+  folder Rust chose (the resource folder, from 6j2), refusing a file
+  whose length differs from its pin before reading it. `pdf::doc` is
+  what the helper lays out: `Block::Heading` (conversation, day, section)
+  and `Block::Entry` (a header of separate pieces, then paragraphs), JSON
+  with unknown fields refused, bounded per block; and the backend's
+  `Begin` options (`PdfOptions`: page size, Han face, the generic title).
+- *Helper* (`render/pdf/`, feature `render`): `library` registers the
+  slots with fontique **without system fonts** after checking the pins
+  again and each file's family name; `layout` lays out one paragraph at
+  a time with parley; `compose` places lines on pages and draws them with
+  krilla; `PdfBackend` is the `OutputBackend`. It words, marks and formats
+  nothing.
+
+**The marker rule in the text layer (§4.7).** Every string the helper
+draws is a `PdfText`, built only by `pdf::doc::TextBuilder`: recorded body
+text through `hidden::mark` with `MarkPolicy::text_body(markers)`, header
+fields with `MarkPolicy::text_header()` (the TXT policies: controls
+always escaped, hidden characters marked when the option is on and always
+in header fields, `⟨` escaped, combining runs over 16 cut to 16 plus
+`⟨+N combining marks⟩`), our own words verbatim. The helper gives krilla
+each paragraph's string as the glyphs' text, so ToUnicode and (where a
+glyph's text is not its own) ActualText carry exactly the drawn string:
+with markers on both carry `⟨U+202E⟩`, with markers off both carry
+U+202E. There is no second string a text layer could come from. Recorded
+text is split into paragraphs at every line break (TXT's `split_lines`),
+so a bidi paragraph ends at each break.
+
+**Layout.** A4 (US Letter by option), 15 mm margins, Noto Sans 9.5 pt,
+line height 1.3, headings at 13 pt (conversation, section) and 10.5 pt
+(day); a transcript, not bubbles. Each paragraph's base direction is its
+first strong character's (parley resolves it when none is given) and it
+is aligned to its start, so RTL paragraphs are right-aligned (tested; the
+spec's **UNVERIFIED** is settled). An entry's header pieces (time, sender,
+each qualifier) are laid out **one by one**, each its own paragraph and
+so its own bidi isolate, then flowed left to right and wrapped between
+pieces. `OverflowWrap::Anywhere` never clips; a line parley breaks as an
+emergency is counted as a forced wrap. Font stacks: the default stack is
+Noto Sans, Arabic, Hebrew, Devanagari, Thai, the CJK faces (the export's
+Han face, the other Chinese face, JP, KR), Symbols 2, Math and Noto Color
+Emoji last; a CJK run holding kana is set JP first, one holding hangul KR
+first, any other the Han face first (SC, TC by option); a character with
+VS16 (and its keycap or ZWJ sequence) is set emoji first, one with VS15
+without the emoji font. Characters drawn as glyph 0 are counted once each
+(`.notdef`); the glyphs keep their cluster's text range, so the text
+layer keeps the true characters. A conversation heading starts a page and
+a top-level outline entry; a day heading adds an entry under it and is
+kept with the next line. The document title is the options' generic title
+(D112). `Done` reports pages, `.notdef` characters, forced wraps and the
+limited combining runs (counted from their markers).
+
+**The output check meets krilla.** krilla 0.8.2 writes no object or
+cross-reference streams with its default settings (observed: every
+test PDF passes the check, which refuses them). It does write two
+binary streams without a `/Type`: a font descriptor's `/CIDSet` and its
+`/FontFile2` (with no `/Length1`). The check (`check/pdf.rs`) now makes
+two passes: the first follows the syntax and collects the objects a
+`/CIDSet`, `/FontFile`, `/FontFile2` or `/FontFile3` key references; the
+second inflates those objects' streams without tokenising them. Every
+other stream is checked as in 6i.
+
+**Deviations and choices** (recorded in `docs/dependencies.md`):
+**parley 0.11.1, not 0.12.0** (0.12.0 was published 2026-10-09, under the
+14-day rule until 2026-10-23; same licence, features and deny outcome;
+`parlance` and `font-types` pinned back for the same reason); the CJK
+fonts are the **regional subset OTFs** (SC, TC, JP, KR), not the TTC; the
+emoji font is the **COLRv1 build** of Noto Color Emoji (no raster
+decoders needed); **Noto Sans Math** is added, because no other bundled
+font has the marker's `⟨` and `⟩`; the record-to-block mapping is in the
+main process (spec §5.7 sends `ItemRecord`s): the helper then needs no
+words, zone table or marking, and TXT and PDF share the marking code. The
+krilla features `simple-text` and `raster-images` are off. Not built
+here (6j2): the volume estimate and its cuts, `Image` frames (refused
+with `Unsupported`), tagged structure, the pipeline's PDF writer, the
+fonts in the app bundle, re-measured scale.
+
+**Tests:** `crates/oma-export/src/pdf/` (pins well formed, unique and in
+the budget; a mismatched set refused; options and blocks round-trip and
+are bounded; recorded text marked and split, header fields always marked,
+`Debug` without content); `render/pdf/layout.rs` (CJK runs by script;
+VS15 and VS16 ranges, keycaps and ZWJ sequences);
+`crates/oma-export/tests/pdf_layout.rs` (the committed fonts match their
+pins and register their families, a set in the wrong order is refused;
+each script takes its face, Han unification and the TC option; VS15 and
+VS16 in both directions and emoji-only sequences; `.notdef` counts; RTL
+right-aligned and LTR-first left-aligned; long tokens wrap anywhere
+within the width and Thai breaks by dictionary without forced wraps; a
+hostile corpus (a 5,000-character token, 10,000 combining marks, a bidi
+bomb, mixed scripts, 400 entries) paginates with every glyph inside the
+margins on A4 (its first entries also on Letter) and passes the output
+check; header pieces as
+separate isolates; the marker rule in the ToUnicode maps and ActualText
+with markers on and off; a whole session through `serve` in-process,
+and the refusals of a misplaced heading, a tampered font and an image);
+`src-tauri/src/exports/pdf_fonts.rs` (the committed folder loads and
+holds nothing unpinned; an altered, longer, missing or replaced font is
+refused); `src-tauri/tests/export_helper.rs` (the real binary makes a
+checked PDF from the pinned fonts; fonts off their pins and missing
+options are refused); `scripts/oracles/pdf_text.py` (pypdf and
+`pdftotext` over eleven samples, including the marker pair; a mutation
+run with the markers-off file under the markers-on name failed as it
+should). pypdf 6.19.0 does not apply ActualText, so its text for Arabic,
+Devanagari, Thai and Hebrew differs and those samples are held to
+`pdftotext` only. Everything ran only in a Linux container; nothing ran
+on Windows, and no exported PDF was opened in a viewer or screen reader
+(**UNVERIFIED**).
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`
@@ -4657,7 +4779,7 @@ marked PR B are decided but not built in PR A.
 | D127 | Destination (lean; slices 6h1, 6h2) | Rust-opened dialogs whose titles name sensitive options; the folder kept in the draft, never crossing IPC, behind an opaque destination token bound to the draft (the latest choice's token starts the export); names generated in Rust; the format's extension enforced; `.oma-export-*` names refused; refusals per I1 plus the archive folder; warnings to confirm, checked again at start; no remembered destination | A name or path from the webview | I4, I3; `settings.json` stays content-free |
 | D136 | Export DTOs (slice 6h1) | A new export walk disjoint from the others but for three shared types; `exportFinished` inside the archive guard's walk, counts only; warnings and providers as closed codes | Reuse the viewer walk | Walks stay disjoint and events small |
 | D131 | XLSX (lean; **deferred** to a follow-up slice after 2026-10-31) | rust_xlsxwriter 0.100.0 in constant-memory mode in the export-render helper; `quotePrefix`; our own 32,767 UTF-16 limit with continuation rows; temp directory in staging. Slice 6i built the helper without it: 0.100.0 (published 2026-10-17) is not 14 days old until 2026-10-31, and 0.99.x is rejected (advisories), so XLSX stays refused | In-process | A panic on temp-file I/O cannot end the app; exact values |
-| D133 | Export-render helper (**owner-confirmed Q1, Q2**; **PR B**, slices 6i, 6j) | PDF layout and XLSX writing in `--oma-export-helper`; bounded frames; main-process output checks; PDF with krilla 0.8.2 + parley 0.12.0 (a per-crate BSD-2-Clause exception for `arrayref` only; `rust-version` 1.92); fonts: the base scripts, Noto Sans CJK and Noto Color Emoji, pinned by SHA-256 | In-process; our own PDF writer | Hostile text and full disks cannot end the app |
+| D133 | Export-render helper (**owner-confirmed Q1, Q2**; **PR B**, slices 6i, 6j) | PDF layout and XLSX writing in `--oma-export-helper`; bounded frames; main-process output checks; PDF with krilla 0.8.2 + parley 0.12.0 (a per-crate BSD-2-Clause exception for `arrayref` only; `rust-version` 1.92); fonts: the base scripts, Noto Sans CJK and Noto Color Emoji, pinned by SHA-256. Slice 6j1 applied it with parley **0.11.1** until 0.12.0 is 14 days old (2026-10-23), the regional CJK subsets, the COLRv1 emoji build and Noto Sans Math added for the marker's brackets | In-process; our own PDF writer | Hostile text and full disks cannot end the app |
 | D139 | Job (slice 6h1) | `JobKind::Export` on the archive subject, holding the archive lock until its cleanup ends; its own reader, so damaged or migrating archives are refused; survives the viewer closing; `removingPartial` keeps the slot | A viewer-session task | One job model; excludes writers in every instance |
 
 ## Logging

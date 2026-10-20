@@ -86,7 +86,15 @@
 //! - `render` (feature `render`, enabled only by the shell): the helper's
 //!   own `serve` loop and, in debug builds, its test backend.
 //!
-//! PDF (slice 6j) is the helper's first real backend; XLSX is deferred
+//! Slice 6j1, PDF layout (spec §5.6; owner Q1, Q2):
+//!
+//! - [`pdf`]: the bundled fonts' pins and their check before any byte
+//!   reaches the helper, and the block model the helper lays out, built
+//!   with the marker rule (§4.7);
+//! - `render::pdf` (feature `render`): the helper's PDF backend, parley
+//!   for shaping, bidi and line breaking, krilla for the PDF.
+//!
+//! PDF is the helper's first real backend; XLSX is deferred
 //! (its writer crate is not yet old enough to pin) and stays refused.
 //! Nothing here logs; errors carry kinds only (I6).
 #![cfg_attr(
@@ -112,6 +120,7 @@ pub mod ledger;
 pub mod manifest;
 pub mod map;
 pub mod naming;
+pub mod pdf;
 pub mod pipeline;
 pub mod plan;
 pub mod preview;

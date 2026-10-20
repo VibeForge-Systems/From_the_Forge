@@ -31,13 +31,20 @@
 //!    is not a name object, and would make legitimate files fail at random.
 //! 5. Compressed object and cross-reference streams (`/Type /ObjStm`,
 //!    `/Type /XRef`) are refused: every object must be visible to step 2.
-//!    Whether krilla (slice 6j) writes them is **UNVERIFIED**; if it does,
-//!    6j extends this check to tokenise their objects instead.
+//!    krilla 0.8.2 with its default settings writes neither (observed in
+//!    slice 6j1's tests, `tests/pdf_layout.rs`).
+//! 6. A font descriptor's `/CIDSet` stream (a bitset krilla writes for PDF
+//!    1.7) and its `/FontFile2` (krilla writes no `/Length1`) carry no
+//!    type of their own: a first pass collects the objects that a
+//!    `/CIDSet`, `/FontFile`, `/FontFile2` or `/FontFile3` key references,
+//!    and their streams are inflated but not tokenised (slice 6j1). Every
+//!    other stream is checked as above.
 //!
 //! Residual risk (spec §11.1): a parser differential between this check
 //! and a reader, or an action reached through a name not on the list.
 
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 
 use miniz_oxide::inflate::{decompress_to_vec_zlib_with_limit, TINFLStatus};
 
@@ -139,11 +146,18 @@ enum Tok<'a> {
 struct Lexer<'a> {
     b: &'a [u8],
     pos: usize,
+    /// Objects a font descriptor names as its `/CIDSet` (a bitset) or
+    /// `/FontFile`, `/FontFile2`, `/FontFile3` (a font program).
+    binary_refs: BTreeSet<i64>,
 }
 
 impl<'a> Lexer<'a> {
     fn new(b: &'a [u8]) -> Lexer<'a> {
-        Lexer { b, pos: 0 }
+        Lexer {
+            b,
+            pos: 0,
+            binary_refs: BTreeSet::new(),
+        }
     }
 
     fn peek(&self) -> Option<u8> {
@@ -316,7 +330,8 @@ struct StreamFacts {
 enum Val {
     Name(Vec<u8>),
     Int(i64),
-    Ref,
+    /// An indirect reference, with its object number.
+    Ref(i64),
     Names(Vec<Vec<u8>>),
     Other,
 }
@@ -333,7 +348,7 @@ fn value_from<'a>(lx: &mut Lexer<'a>, t: Tok<'a>, depth: usize) -> Result<Val, P
             // `n g R` is an indirect reference.
             let at = lx.pos;
             match (lx.next()?, lx.next()?) {
-                (Some(Tok::Int(_)), Some(Tok::Keyword(b"R"))) => Val::Ref,
+                (Some(Tok::Int(_)), Some(Tok::Keyword(b"R"))) => Val::Ref(i),
                 _ => {
                     lx.pos = at;
                     Val::Int(i)
@@ -390,7 +405,10 @@ fn parse_dict(lx: &mut Lexer<'_>, depth: usize) -> Result<StreamFacts, PdfRefusa
             (b"Type", Val::Name(n)) => f.kind = Some(n),
             (b"Subtype", Val::Name(n)) => f.subtype = Some(n),
             (b"Length1" | b"Length2" | b"Length3", _) => f.font_lengths = true,
-            (b"N", Val::Int(_) | Val::Ref) => f.icc_n = true,
+            (b"N", Val::Int(_) | Val::Ref(_)) => f.icc_n = true,
+            (b"CIDSet" | b"FontFile" | b"FontFile2" | b"FontFile3", Val::Ref(n)) => {
+                lx.binary_refs.insert(n);
+            }
             _ => {}
         }
     }
@@ -447,7 +465,13 @@ fn scan_syntax(data: &[u8]) -> Result<(), PdfRefusal> {
 }
 
 /// The stream whose `stream` keyword the lexer has just read.
-fn stream(lx: &mut Lexer<'_>, f: &StreamFacts, budget: &mut usize) -> Result<(), PdfRefusal> {
+fn stream(
+    lx: &mut Lexer<'_>,
+    f: &StreamFacts,
+    budget: &mut usize,
+    binary_object: bool,
+    scan: bool,
+) -> Result<(), PdfRefusal> {
     if matches!(f.kind.as_deref(), Some(b"ObjStm" | b"XRef")) {
         return Err(PdfRefusal::CompressedObjects);
     }
@@ -477,9 +501,14 @@ fn stream(lx: &mut Lexer<'_>, f: &StreamFacts, budget: &mut usize) -> Result<(),
         return Err(PdfRefusal::StreamLength);
     }
     lx.pos += b"endstream".len();
-    match filter(f)? {
+    let filter = filter(f)?;
+    if !scan {
+        return Ok(());
+    }
+    let binary = f.binary() || binary_object;
+    match filter {
         Filter::None => {
-            if !f.binary() {
+            if !binary {
                 scan_syntax(data)?;
             }
         }
@@ -494,7 +523,7 @@ fn stream(lx: &mut Lexer<'_>, f: &StreamFacts, budget: &mut usize) -> Result<(),
                 }
             })?;
             *budget = budget.saturating_sub(inflated.len());
-            if !f.binary() {
+            if !binary {
                 scan_syntax(&inflated)?;
             }
         }
@@ -519,18 +548,48 @@ pub fn check(bytes: &[u8]) -> Result<(), PdfRefusal> {
     {
         return Err(PdfRefusal::NoEof);
     }
+    // The first pass follows the syntax and collects the font
+    // descriptors' binary objects without reading any stream's data; the second checks every
+    // stream, treating those objects' streams as binary.
+    let binary = pass(bytes, None)?;
+    pass(bytes, Some(&binary)).map(|_| ())
+}
+
+/// One pass over the file's objects; `known` is the first pass's binary
+/// objects (`None`: the first pass, which reads no stream's data).
+fn pass(bytes: &[u8], known: Option<&BTreeSet<i64>>) -> Result<BTreeSet<i64>, PdfRefusal> {
     let mut lx = Lexer::new(bytes);
     let mut budget = MAX_INFLATED_TOTAL;
     let mut last_dict: Option<StreamFacts> = None;
+    // The last two integers before an `obj` keyword: the object's number.
+    let mut ints: [Option<i64>; 2] = [None, None];
+    let mut object: Option<i64> = None;
     while let Some(t) = lx.next()? {
         match t {
             Tok::DictOpen => {
                 last_dict = Some(parse_dict(&mut lx, 1)?);
+                ints = [None, None];
                 continue;
             }
+            Tok::Int(n) => {
+                ints = [ints[1], Some(n)];
+                last_dict = None;
+                continue;
+            }
+            Tok::Keyword(b"obj") => {
+                object = match ints {
+                    [Some(n), Some(_)] => Some(n),
+                    _ => return Err(PdfRefusal::Malformed),
+                };
+            }
+            Tok::Keyword(b"endobj") => object = None,
             Tok::Keyword(b"stream") => {
                 let f = last_dict.take().ok_or(PdfRefusal::StreamLength)?;
-                stream(&mut lx, &f, &mut budget)?;
+                let binary_object = match (known, object) {
+                    (Some(k), Some(o)) => k.contains(&o),
+                    _ => false,
+                };
+                stream(&mut lx, &f, &mut budget, binary_object, known.is_some())?;
             }
             Tok::Keyword(b"endstream") => return Err(PdfRefusal::StreamLength),
             Tok::ArrOpen => {
@@ -539,9 +598,10 @@ pub fn check(bytes: &[u8]) -> Result<(), PdfRefusal> {
             Tok::DictClose | Tok::ArrClose | Tok::Brace => return Err(PdfRefusal::Malformed),
             _ => {}
         }
+        ints = [None, None];
         last_dict = None;
     }
-    Ok(())
+    Ok(lx.binary_refs)
 }
 
 #[cfg(test)]

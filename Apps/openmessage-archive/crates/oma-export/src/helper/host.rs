@@ -426,6 +426,22 @@ impl RenderSession {
         Ok(())
     }
 
+    /// The PDF backend's fonts, every slot in [`crate::pdf::fonts::PINS`]
+    /// order. Only fonts that passed [`crate::pdf::fonts::verify`] can be
+    /// sent: this is the path by which font bytes reach the helper (owner
+    /// Q2). Only before the first record.
+    pub fn send_fonts(
+        &mut self,
+        fonts: &crate::pdf::fonts::VerifiedFonts,
+    ) -> Result<(), ExportError> {
+        for (slot, bytes) in fonts.slots().iter().enumerate() {
+            let slot =
+                u8::try_from(slot).map_err(|_| ExportError::Limit(LimitKind::FrameTooLarge))?;
+            self.resource(slot, bytes)?;
+        }
+        Ok(())
+    }
+
     /// A conversation record, already masked.
     pub fn conversation(&mut self, record: &[u8]) -> Result<(), ExportError> {
         self.send(FrameKind::Conversation, &[record])

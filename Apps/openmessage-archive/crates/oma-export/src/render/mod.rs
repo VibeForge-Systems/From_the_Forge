@@ -13,9 +13,9 @@
 //! `Chunk` frames of at most [`CHUNK_BYTES`] and one `Done`. Any refusal is
 //! one `Error` frame with a closed code, after which the helper exits.
 //!
-//! **Backends in this build.** None that produces a real format yet:
-//! `Pdf` is slice 6j's and `Xlsx` is deferred, so both are refused with
-//! `Unsupported`. Debug builds also have [`stub`], a test backend that
+//! **Backends in this build.** [`pdf`] (slice 6j1: layout and
+//! serialisation with the pinned fonts). `Xlsx` is deferred and refused
+//! with `Unsupported`. Debug builds also have [`stub`], a test backend that
 //! writes a minimal PDF of counts (no content) and can be told to crash,
 //! hang, panic, stop reading, send oversized, early or garbage frames,
 //! report a full disk or plant a forbidden name, so the host's supervision
@@ -26,6 +26,7 @@
 //! prints a location only, never a payload; stderr is counted by the
 //! host, never read.
 
+pub mod pdf;
 #[cfg(debug_assertions)]
 pub mod stub;
 
@@ -106,8 +107,9 @@ fn backend(begin: &Begin) -> Result<Box<dyn OutputBackend>, Halt> {
         BackendKind::Stub => Ok(Box::new(stub::Stub::new(&begin.options)?)),
         #[cfg(not(debug_assertions))]
         BackendKind::Stub => Err(Halt::Refuse(HelperErrorCode::Unsupported)),
-        // PDF is slice 6j's; XLSX is deferred (see `docs/dependencies.md`).
-        BackendKind::Pdf | BackendKind::Xlsx => Err(Halt::Refuse(HelperErrorCode::Unsupported)),
+        BackendKind::Pdf => Ok(Box::new(pdf::PdfBackend::new(&begin.options)?)),
+        // XLSX is deferred (see `docs/dependencies.md`).
+        BackendKind::Xlsx => Err(Halt::Refuse(HelperErrorCode::Unsupported)),
     }
 }
 
@@ -308,8 +310,11 @@ mod tests {
     }
 
     #[test]
-    fn pdf_and_xlsx_are_refused_until_their_backends_exist() {
-        for backend in [BackendKind::Pdf, BackendKind::Xlsx] {
+    fn xlsx_is_refused_and_pdf_needs_its_options() {
+        for (backend, code) in [
+            (BackendKind::Xlsx, HelperErrorCode::Unsupported),
+            (BackendKind::Pdf, HelperErrorCode::BadRequest),
+        ] {
             let input = request(
                 FrameKind::Begin,
                 &Begin {
@@ -323,7 +328,7 @@ mod tests {
             let r = replies(&out);
             assert_eq!(r.len(), 1);
             assert_eq!(r[0].kind, FrameKind::Error);
-            assert_eq!(r[0].payload, [HelperErrorCode::Unsupported.code()]);
+            assert_eq!(r[0].payload, [code.code()]);
         }
     }
 

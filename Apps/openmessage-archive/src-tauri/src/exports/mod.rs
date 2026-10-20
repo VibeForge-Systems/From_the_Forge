@@ -26,9 +26,12 @@
 //!   pool behind `oma_export`'s preview feed.
 //! - **The export-render helper** ([`render_helper`], slice 6i): the
 //!   `--oma-export-helper` entry, how the app launches it, and its kill
-//!   on the job's cancel path. No format uses it yet: PDF (slice 6j) is
-//!   its first backend, and PDF and XLSX stay refused at the draft with
-//!   `exportUnavailable` until then.
+//!   on the job's cancel path. Its first backend, PDF, exists from slice
+//!   6j1, but no export uses it yet: PDF (until slice 6j2 wires its
+//!   writer) and XLSX stay refused at the draft with `exportUnavailable`.
+//! - **The PDF fonts** ([`pdf_fonts`], slice 6j1): read from the resource
+//!   folder and checked against their SHA-256 pins before any byte can be
+//!   sent to the helper.
 //! - **Logs** carry kinds, buckets and outcomes only (I6): never a path, a
 //!   name, an id, a zone, a query, an exact count or content.
 
@@ -36,6 +39,7 @@ pub mod destination;
 pub mod dto;
 pub mod input;
 pub mod messages;
+pub mod pdf_fonts;
 pub mod previews;
 pub mod render_helper;
 #[cfg(test)]

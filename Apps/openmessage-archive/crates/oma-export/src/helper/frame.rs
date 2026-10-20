@@ -234,7 +234,7 @@ pub fn read_frame(r: &mut dyn Read, direction: Direction) -> Result<Frame, Frame
 /// The backend a session asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BackendKind {
-    /// PDF layout and serialisation (slice 6j; refused until then).
+    /// PDF layout and serialisation (`render::pdf`, slice 6j1).
     Pdf,
     /// XLSX writing (deferred; refused).
     Xlsx,
@@ -406,7 +406,7 @@ impl DoneCounts {
 /// Why the helper refused (an `Error` frame). A closed set: no text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HelperErrorCode {
-    /// The backend is not in this build (PDF until slice 6j, XLSX, the
+    /// The backend is not in this build (XLSX, the
     /// stub in release builds).
     Unsupported,
     /// A request out of order, or a payload the helper could not parse.

@@ -5,8 +5,9 @@
 //! fault per session.
 //!
 //! Covered: a session's round trip (resources over several frames,
-//! records, images, two volumes, an output of several chunks), PDF and
-//! XLSX refused by this build, a crash, a hang (the reply timeout), a
+//! records, images, two volumes, an output of several chunks), XLSX
+//! refused by this build, the real PDF backend (slice 6j1) fed the pinned
+//! fonts and its refusals (fonts off their pins, no options), a crash, a hang (the reply timeout), a
 //! helper that stops reading while the worker is blocked writing (the
 //! stall timeout, the supervisor's cancel and the job's cancel hook), an
 //! oversized frame, garbage, an early write, a `Done` that disagrees with
@@ -24,10 +25,15 @@ use std::time::{Duration, Instant};
 use oma_archive::CancelToken;
 use oma_export::helper::frame::{self, BackendKind, Begin, FrameKind, HelperErrorCode};
 use oma_export::helper::{HelperLaunch, RenderSession, SessionLimits};
+use oma_export::hidden::MarkCounts;
+use oma_export::pdf::doc::{
+    Block, HanFace, HeadingLevel, PageSize, Para, PdfOptions, PdfText, TextBuilder,
+};
 use oma_export::render::stub::{Fault, PANIC_SENTINEL};
 use oma_export::{ExportError, HelperFailure, LimitKind};
 use openmessage_archive_lib::backups::dto::JobKind;
 use openmessage_archive_lib::backups::{Jobs, LastOutcome};
+use openmessage_archive_lib::exports::pdf_fonts;
 use openmessage_archive_lib::exports::render_helper::{register_kill, EXPORT_HELPER_FLAG};
 
 const BIN: &str = env!("CARGO_BIN_EXE_openmessage-archive");
@@ -119,24 +125,122 @@ fn an_output_of_several_chunks_is_reassembled_and_bounded() {
 }
 
 #[test]
-fn pdf_and_xlsx_are_refused_by_this_build() {
-    for backend in [BackendKind::Pdf, BackendKind::Xlsx] {
-        let begin = Begin {
-            backend,
-            options: Vec::new(),
-        };
-        let r = RenderSession::start(&launch(), &begin, &CancelToken::new(), quick())
-            .and_then(|mut s| run(&mut s, 1));
-        assert!(
-            matches!(
-                r,
-                Err(ExportError::HelperFailed(HelperFailure::Refused(
-                    HelperErrorCode::Unsupported
-                )))
-            ),
-            "{backend:?}: {r:?}"
-        );
+fn xlsx_is_refused_by_this_build() {
+    let begin = Begin {
+        backend: BackendKind::Xlsx,
+        options: Vec::new(),
+    };
+    let r = RenderSession::start(&launch(), &begin, &CancelToken::new(), quick())
+        .and_then(|mut s| run(&mut s, 1));
+    assert!(
+        matches!(
+            r,
+            Err(ExportError::HelperFailed(HelperFailure::Refused(
+                HelperErrorCode::Unsupported
+            )))
+        ),
+        "{r:?}"
+    );
+}
+
+fn pdf_begin() -> Begin {
+    Begin {
+        backend: BackendKind::Pdf,
+        options: PdfOptions {
+            page: PageSize::A4,
+            han: HanFace::Simplified,
+            title: "Messages export \u{2014} conversation 1".into(),
+        }
+        .encode(),
     }
+}
+
+fn fonts_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("resources")
+        .join("fonts")
+}
+
+/// Slice 6j1: the real PDF backend in the real helper process, fed the
+/// pinned fonts through `send_fonts` (only checked fonts can be sent).
+#[test]
+fn the_pdf_backend_makes_a_checked_pdf_in_the_helper_process() {
+    let fonts = pdf_fonts::load(&fonts_dir()).expect("the pinned fonts");
+    let mut s = RenderSession::start(
+        &launch(),
+        &pdf_begin(),
+        &CancelToken::new(),
+        SessionLimits::default(),
+    )
+    .expect("start");
+    s.send_fonts(&fonts).expect("fonts");
+    let heading = Block::Heading {
+        level: HeadingLevel::Conversation,
+        text: PdfText::ours("Conversation 1"),
+    };
+    s.conversation(&heading.encode()).expect("conversation");
+    let mut n = MarkCounts::default();
+    let (sender, _) = TextBuilder::new().header("Alice").build();
+    let entry = Block::Entry {
+        head: vec![PdfText::ours("[2024-03-10 14:02:11 +01:00]"), sender],
+        body: Para::recorded(
+            2,
+            "hello \u{05E9}\u{05DC}\u{05D5}\u{05DD} \u{1F600}",
+            true,
+            &mut n,
+        ),
+    };
+    for _ in 0..200 {
+        s.item(&entry.encode()).expect("item");
+    }
+    let v = s
+        .end_volume(true)
+        .expect("a PDF that passed the output check");
+    assert!(v.bytes.starts_with(b"%PDF-1.7"));
+    assert!(v.counts.units >= 2, "{:?}", v.counts);
+    assert_eq!(v.counts.notdef_chars, 0);
+    assert_eq!(s.finish(), 0);
+
+    // Fonts that do not match their pins are refused by the helper too
+    // (sent here through the raw resource path the app never uses).
+    let mut s =
+        RenderSession::start(&launch(), &pdf_begin(), &CancelToken::new(), quick()).expect("start");
+    for (slot, bytes) in fonts.slots().iter().enumerate() {
+        let mut b = bytes.to_vec();
+        if slot == 0 {
+            b[500] ^= 1;
+        }
+        s.resource(u8::try_from(slot).expect("slot"), &b)
+            .expect("resource");
+    }
+    let r = s
+        .conversation(&heading.encode())
+        .and_then(|()| s.end_volume(true).map(|_| ()));
+    assert!(
+        matches!(
+            r,
+            Err(ExportError::HelperFailed(HelperFailure::Refused(
+                HelperErrorCode::BadRequest
+            )))
+        ),
+        "{r:?}"
+    );
+    // A PDF session without its options is refused.
+    let begin = Begin {
+        backend: BackendKind::Pdf,
+        options: Vec::new(),
+    };
+    let r = RenderSession::start(&launch(), &begin, &CancelToken::new(), quick())
+        .and_then(|mut s| run(&mut s, 1));
+    assert!(
+        matches!(
+            r,
+            Err(ExportError::HelperFailed(HelperFailure::Refused(
+                HelperErrorCode::BadRequest
+            )))
+        ),
+        "{r:?}"
+    );
 }
 
 #[test]

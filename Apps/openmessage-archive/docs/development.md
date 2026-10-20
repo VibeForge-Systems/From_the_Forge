@@ -605,12 +605,51 @@ cargo test -p openmessage-archive --lib backups::             # the job table's 
   the test backend (`oma_export::render::stub`, debug builds only). Its
   timeouts are shortened to 2 s through `SessionLimits`, so the whole
   file runs in about 2 s here. The `/dev/full` case runs on Linux only.
-- No export format uses the helper yet, and no oracle checks its output:
-  the PDF oracles (pypdf, `pdftotext`) arrive with slice 6j.
+- No export format uses the helper yet. Slice 6j1 adds its PDF backend
+  and the PDF text-layer oracle (below).
 - Windows: the helper code was only compiled and linted for
   `x86_64-pc-windows-msvc` through a scratch harness that includes
   `helper/`, `check/` and `render/` by path; the process tests run on the
   Windows CI job only.
+
+### PDF layout, the fonts and the PDF text oracle (M6 slice 6j1)
+
+```sh
+cargo test -p oma-export --lib -- pdf:: render::            # pins, blocks, options, CJK and emoji ranges
+cargo test -p oma-export --test pdf_layout                  # layout, fonts, the marker rule, a whole session
+cargo test -p openmessage-archive --lib exports::pdf_fonts  # the shell's font loader and its refusals
+cargo test -p openmessage-archive --test export_helper      # the real binary makes a checked PDF
+
+# The independent PDF text oracle (Linux; in the oracle virtual
+# environment; needs poppler-utils for pdftotext):
+OMA_PDF_SAMPLES=/tmp/oma-pdf cargo test -p oma-export --test pdf_layout -- \
+  --ignored --exact write_samples
+python3 -I scripts/oracles/pdf_text.py --samples /tmp/oma-pdf
+```
+
+- **The fonts** are `src-tauri/resources/fonts/` (twelve files and
+  `OFL.txt`, about 30 MB; `.gitattributes` keeps them binary). Their
+  pins are `crates/oma-export/src/pdf/fonts.rs` (`PINS`). To replace a
+  font: fetch it from its upstream repository at a pinned commit (the
+  sources are in `docs/dependencies.md`, "PDF fonts"), compare
+  `git hash-object` of the download with the commit's blob id, compute
+  its length and SHA-256, update `PINS`, `OFL.txt` and the table in
+  `dependencies.md` together, and run the tests above. The tests read the
+  committed files directly; `exports::pdf_fonts`'s test also fails on
+  any file in the folder without a pin.
+- `OMA_PDF_SAMPLES` must be an empty directory. `write_samples` writes
+  eleven PDFs and `expected.json`; `pdf_text.py` checks titles, outlines,
+  embedded fonts, and each sample's must and never strings with
+  `pdftotext` (all samples) and pypdf (the samples it can read; pypdf
+  6.19.0 does not apply ActualText). Run here: poppler 24.02.0, Python
+  3.13.16, 11 samples, 0 errors. CI's `ubuntu-22.04` installs its own
+  `poppler-utils` (22.02); that it gives the same text there is
+  **UNVERIFIED** until the CI run.
+- Layout tests run in about 0.5 s here: krilla, parley and the shaping,
+  segmentation and font crates are built at `opt-level = 3` in dev and
+  test builds (the root `Cargo.toml`).
+- Windows: nothing in 6j1 is platform-specific, and nothing of it ran on
+  Windows here; the CI `windows-2022` job runs the Rust tests.
 
 ### The bulk generator (M5)
 

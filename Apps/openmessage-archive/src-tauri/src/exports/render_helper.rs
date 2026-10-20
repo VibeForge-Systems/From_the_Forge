@@ -13,8 +13,9 @@
 //! - **The panic hook** is the payload-free one of [`crate::panic_hook`],
 //!   writing its line (a thread name and a source location) to stderr,
 //!   which the host only counts.
-//! - **Backends.** This build has none that writes a real format: PDF is
-//!   slice 6j's and XLSX is deferred, so both are refused with
+//! - **Backends.** PDF (slice 6j1: parley layout and krilla output with
+//!   the pinned fonts, which the main process checks first,
+//!   [`super::pdf_fonts`]); XLSX is deferred and refused with
 //!   `Unsupported`. Debug builds also serve the test backend
 //!   (`oma_export::render::stub`) that `tests/export_helper.rs` drives.
 //! - **The host** is `oma_export::helper::RenderSession`; [`launch`] is

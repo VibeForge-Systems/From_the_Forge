@@ -1468,6 +1468,27 @@ pipe and kill behaviour, the process tests); the helper with a real
 backend (none exists until slice 6j); any PDF opened in a viewer; XLSX
 (deferred). The oracles were not re-run: no writer's output changed.
 
+### Milestone 6 PR B, slice 6j1: PDF layout and the pinned fonts (Linux container only)
+
+Run on 2026-10-20 in the same Linux container (Ubuntu 24.04.5 LTS, Rust
+1.97.0), on `feat/oma-m6-export-ui`, synthetic text only:
+
+| What | Result here |
+|---|---|
+| `cargo test --workspace` (from a clean target) | 1,576 passed, 23 ignored, 0 failed; 9 min 51 s wall clock, compiling included |
+| `cargo test -p oma-export --test pdf_layout` | 10 passed, 1 ignored (`write_samples`), in about 0.5 s |
+| `cargo test -p openmessage-archive --test export_helper` | 15 passed, in about 2 s (including the real PDF backend in the helper process) |
+| `scripts/oracles/pdf_text.py` (pypdf 6.19.0, poppler `pdftotext` 24.02.0, Python 3.13.16) | 11 samples, 0 errors; a mutation run (the markers-off file in place of the markers-on one, a Latin file in place of the Thai one) reported 6 errors |
+| `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all`, `cargo deny check` | Pass |
+| Sample PDFs rendered with poppler's `pdftoppm` and looked at (Arabic right-aligned, CJK faces, colour emoji, the hostile corpus's first page) | As intended |
+
+**Not run, so UNVERIFIED:** anything on Windows (the 6j1 code is
+platform-neutral, but it was not compiled for `x86_64-pc-windows-msvc`
+here); CI's `poppler-utils` 22.02 on `ubuntu-22.04` giving the same text;
+any exported PDF opened in Acrobat, a browser, a desktop viewer or a
+screen reader; tagged structure (not built); no export writes PDF until
+slice 6j2.
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI

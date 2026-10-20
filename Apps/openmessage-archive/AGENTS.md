@@ -60,8 +60,9 @@ the TXT, CSV, JSON and HTML writers, the shell's export job, its five
 IPC commands and the export's decode-helper pool. It has run only in a
 Linux container (not on CI, not on Windows). No export can be made from
 the UI until PR B (PDF, the Export dialog, slices 6i–6l). PR B's slice
-6i (the export-render helper, without a real backend) is built on
-`feat/oma-m6-export-ui`; **XLSX is deferred** to a follow-up slice after
+6i (the export-render helper) and slice 6j1 (its PDF backend: parley
+layout and krilla output with the pinned Noto fonts; no export uses it
+until 6j2) are built on `feat/oma-m6-export-ui`; **XLSX is deferred** to a follow-up slice after
 2026-10-31 (its writer crate is not yet 14 days old) and stays refused. The owner
 answered M6's Q1–Q4 on 2026-10-19 (Q5 is a lean awaiting confirmation;
 `docs/architecture.md`, "Milestone 6 decisions").
@@ -793,6 +794,28 @@ Never hand-edit generated files.
   (`render/stub.rs`) is debug-only and writes counts, never record
   bytes; add a fault there and a case to `src-tauri/tests/export_helper.rs`
   together. Helper stderr is counted, never read into a log.
+- **PDF layout and the fonts (M6 slice 6j1, `oma-export`'s `pdf/` and
+  `render/pdf/`; the shell's `exports/pdf_fonts.rs`).** krilla and parley
+  are optional dependencies behind `render`; only `render/pdf/` names
+  them, and parley's `system` feature stays off (fontique with
+  `system_fonts: false`). The fonts are `src-tauri/resources/fonts/`,
+  each pinned in `pdf::fonts::PINS` (length, SHA-256, family): never
+  commit a font whose hash you did not compute from its upstream download
+  at a pinned commit, and change a file, its pin, `OFL.txt` and
+  `docs/dependencies.md` together. Font bytes reach the helper only as a
+  `VerifiedFonts` (`RenderSession::send_fonts`); the helper checks them
+  again. Every string the helper draws is a `pdf::doc::PdfText` from
+  `TextBuilder` (`content` and `header` mark with TXT's policies; `ours`
+  is for our own words only, never recorded text), and the helper passes
+  that same string to krilla as the glyphs' text, so the text layer is
+  the drawn text (the marker rule, §4.7); never draw from one string and
+  give krilla another. Header pieces are laid out one at a time (each its
+  own isolate); recorded text is one paragraph per line. A new
+  krilla-written binary stream without a `/Type` needs its key in
+  `check/pdf.rs`'s first pass. A layout change runs `tests/pdf_layout.rs`
+  and the PDF text oracle (`write_samples`, `scripts/oracles/pdf_text.py`);
+  pypdf does not apply ActualText, so complex scripts are held to
+  `pdftotext` only. parley is 0.11.1 until 0.12.0 is 14 days old.
 - **`oma-export` in one place (M6 PR A).** One record model and ledger;
   masking happens in `oma-archive` before any writer sees text; paths
   only from `naming.rs`; on Linux every write relative to the staging
