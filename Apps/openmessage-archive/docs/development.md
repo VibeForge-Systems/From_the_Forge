@@ -721,6 +721,33 @@ npm run typecheck                                      # the exhaustive word tab
   the table for this computer's zone with `Date`'s offsets.
 - This slice changes no Rust code, so the Rust test time is unchanged.
 
+### Entry points, events off and "Save a copy" (M6 slice 6k2)
+
+```sh
+cargo test -p oma-archive --test export_scope -- events_left_out a_copy_names   # the reads
+cargo test -p oma-export --test events          # events on and off through the pipeline
+cargo test -p oma-export --test copy            # save_copy: bytes, names, replace, mismatch, cancel
+cargo test -p openmessage-archive --lib exports:: # the shell: copy drafts and jobs, events off
+cargo test -p openmessage-archive --test log_hygiene   # now saves a copy and exports with events off
+npx vitest run tests/frontend/export-copy.spec.ts       # Save a copy, events words, the chip
+```
+
+- No catalogue holds a group or system event, so the events tests make
+  some in their own copy of an imported archive (`item_type` 2,
+  `item_kind` 5). The archive test checks the walk against the cursors
+  and an oracle for three scopes; the export test checks the manifest's
+  counts and the ordinals.
+- The copy tests use `export-files-plain`'s stored files; the late
+  mismatch grows one store file to 10,000 bytes and records that length,
+  so its digest no longer matches.
+- The shell's copy test opens a viewer session on `view-media-plain`,
+  pages its conversations to surface attachments, and saves the first
+  attachment whose facts are ready.
+- The chip and "Continue in background" are tested in jsdom only.
+- The Windows-only code (the Mark of the Web beside a published copy) was
+  linted for `x86_64-pc-windows-msvc` through the scratch harness that
+  includes `stage.rs` and `naming.rs` by path; it has not run.
+
 ### The bulk generator (M5)
 
 `crates/oma-archive/tests/common/bulk.rs` writes a schema-valid v1 archive

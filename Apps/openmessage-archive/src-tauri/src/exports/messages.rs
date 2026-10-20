@@ -45,10 +45,12 @@ pub const HELPER_FAILED: &str =
 pub const UNAVAILABLE_FORMAT: &str =
     "Spreadsheet (XLSX) exports are not available in this version.";
 pub const FONTS_DAMAGED: &str = "The fonts the app uses for PDF exports are missing or damaged. Reinstall the app. Nothing was published.";
-pub const UNAVAILABLE_ATTACHMENT: &str =
-    "Saving a copy of one attachment is not available in this version.";
-pub const UNAVAILABLE_EVENTS: &str =
-    "Leaving events out of an export is not available in this version.";
+pub const CHECKSUM_MISMATCH: &str =
+    "The file does not match its recorded checksum and was not saved.";
+pub const COPY_UNAVAILABLE: &str =
+    "This attachment has no stored file that can be saved. Open it again in the viewer and try again.";
+pub const RISKY_NAME_NOT_CONFIRMED: &str =
+    "Saving a file under a name that can run programs must be confirmed. Choose where to save again.";
 pub const INVALID_EXPORT_INPUT: &str =
     "The export request is not one this version accepts. Review the export again.";
 pub const OPTIONS_DO_NOT_APPLY: &str =
@@ -123,6 +125,7 @@ pub fn to_ipc(e: &ExportError) -> IpcError {
         | ExportError::Limit(LimitKind::FrameTooLarge) => {
             IpcError::new(C::ExportHelperFailed, HELPER_FAILED)
         }
+        ExportError::ChecksumMismatch => IpcError::new(C::AttachmentUnavailable, CHECKSUM_MISMATCH),
         ExportError::Cancelled => IpcError::internal("cancel reported as an error"),
         ExportError::Limit(_) => IpcError::internal("export invariant"),
         // `ExportError` is non-exhaustive.
@@ -172,8 +175,9 @@ pub(crate) const ALL: &[&str] = &[
     HELPER_FAILED,
     FONTS_DAMAGED,
     UNAVAILABLE_FORMAT,
-    UNAVAILABLE_ATTACHMENT,
-    UNAVAILABLE_EVENTS,
+    CHECKSUM_MISMATCH,
+    COPY_UNAVAILABLE,
+    RISKY_NAME_NOT_CONFIRMED,
     INVALID_EXPORT_INPUT,
     OPTIONS_DO_NOT_APPLY,
     REVEAL_NOT_CONFIRMED,

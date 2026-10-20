@@ -7,7 +7,6 @@ import EmptyState from '@/components/EmptyState.vue';
 import LocationStateBadge from '@/components/LocationStateBadge.vue';
 import LocationStatusList from '@/components/LocationStatusList.vue';
 import PanelLayout from '@/components/PanelLayout.vue';
-import PlannedBadge from '@/components/PlannedBadge.vue';
 import { useArchives } from '@/stores/archives';
 import { useLayout } from '@/stores/layout';
 import { useSettings } from '@/stores/settings';
@@ -121,7 +120,7 @@ const libraryError = computed(() =>
           </li>
           <li>
             <strong>Browse, search, and export.</strong> Read and search your conversations in the
-            viewer. Exports <PlannedBadge capability="exports" /> come later.
+            viewer, and export them as PDF, HTML, plain text, CSV or JSON.
           </li>
         </ol>
         <template #actions>

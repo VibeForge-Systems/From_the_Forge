@@ -31,6 +31,7 @@ import { cardNotes, cardView, sizeLine } from '@/services/attachmentView';
 import { formatInstant } from '@/services/time';
 import { mediaUrl, retryDelayMs } from '@/services/media';
 import { ATTACHMENT_TEXT, SNIFFED_KIND_TEXT, fill } from '@/services/viewerText';
+import { SAVE_A_COPY } from '@/services/exportText';
 import { useSettings } from '@/stores/settings';
 import { useViewer } from '@/stores/viewer';
 
@@ -61,6 +62,8 @@ const isChecking = computed(() => viewer.checking.has(props.attachment.id));
 const playId = computed(() => `${captionId.value}-play`);
 const openId = computed(() => `${captionId.value}-open`);
 const inspectError = computed(() => viewer.inspectionErrors.get(props.attachment.id) ?? null);
+/** "Save a copy…" (M6 §6.6): only for a stored file the inspection could read. */
+const canSave = computed(() => inspection.value?.content.kind === 'sniffed');
 let mounted = false;
 
 function importDate(session: SafeId): string | null {
@@ -238,6 +241,16 @@ function retry(): void {
       </p>
     </div>
     <p v-for="(note, i) in notes" :key="`n${i}`" class="oma-body-note oma-card-note">{{ note }}</p>
+    <p v-if="canSave" class="oma-body-note mb-0">
+      <button
+        type="button"
+        class="btn btn-link btn-sm oma-inline-btn"
+        :aria-describedby="captionId"
+        @click="viewer.saveCopy(attachment.id)"
+      >
+        {{ SAVE_A_COPY }}
+      </button>
+    </p>
 
     <figcaption :id="captionId" class="oma-attachment-caption">
       <span class="visually-hidden">{{ fill(ATTACHMENT_TEXT.numbered, { n: index }) }}{{ ' ' }}</span>

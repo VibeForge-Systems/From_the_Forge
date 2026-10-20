@@ -63,9 +63,12 @@ the UI until PR B (PDF, the Export dialog, slices 6i–6l). PR B's slice
 6i (the export-render helper), slice 6j1 (its PDF backend: parley
 layout and krilla output with the pinned Noto fonts) and slice 6j2 (the
 PDF writer: PDF is an export format, with volumes, previews and tagged
-structure) are built on `feat/oma-m6-export-ui`, and so is slice 6k1 (the
-Export dialog, its store, its words and the zone table; no control opens
-it until slice 6k2's entry points); **XLSX is deferred** to a follow-up slice after
+structure) are built on `feat/oma-m6-export-ui`, and so are slice 6k1 (the
+Export dialog, its store, its words and the zone table) and slice 6k2 (its
+entry points in the thread header, the search panel and the Archive page,
+"Continue in background" and the navbar chip, the Archive page's
+"Exporting" state, leaving events out, "Save a copy" of one attachment,
+and the roadmap's `exports` flip); **XLSX is deferred** to a follow-up slice after
 2026-10-31 (its writer crate is not yet 14 days old) and stays refused. The owner
 answered M6's Q1–Q4 on 2026-10-19 (Q5 is a lean awaiting confirmation;
 `docs/architecture.md`, "Milestone 6 decisions").
@@ -860,6 +863,25 @@ Never hand-edit generated files.
   `useViewer().closeDialogs()` calls `closeForPrivacy`. Words live in
   `exportText.ts`'s exhaustive tables; new dialog bindings go into the
   source rule's allowlist.
+- **Entry points, events off and "Save a copy" (M6 slice 6k2).** Every
+  entry point calls `useExports().openExport` (or `openSaveCopy` through
+  `useViewer().saveCopy`), which builds a fresh form; never put an id
+  other than the context's in a URL, and never send the search query
+  (the set goes by its `searchId`). The chip (`ExportStatusChip.vue`) and
+  "Continue in background" only close and reopen the dialog; the job
+  never depends on it being open. Events off is one snapshot setting in
+  `oma-archive` (`ExportSnapshot::leave_out_events`): every walk and
+  cursor skips the same rows through `scope::left_out`, so add a new
+  read of the scope there, never a second filter, and take a plan's
+  count options only from `ExportPlan::preview_options`. "Save a copy"
+  is a draft of its own kind (`DraftWork::Copy`) with a fixed option set
+  (`input::copy_options_apply`, the webview's `COPY_OPTIONS`); Rust
+  serves only a surfaced attachment, decides the unsent-part rule over
+  every linking message (`ExportSnapshot::attachment_copy`), checks the
+  typed name (`naming::risky_copy_name`, `riskyName` →
+  `keepRiskyExtension`), and copies only through
+  `oma_export::copy::save_copy` (verified bytes into the `.partial-file`,
+  no manifest, a Mark of the Web after placement on Windows).
 - **`oma-export` in one place (M6 PR A).** One record model and ledger;
   masking happens in `oma-archive` before any writer sees text; paths
   only from `naming.rs`; on Linux every write relative to the staging

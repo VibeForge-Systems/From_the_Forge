@@ -452,8 +452,9 @@ M5 never hands an attachment to another program and never saves one
 (owner-confirmed 2026-10-18, Q1a). The window refuses downloads, new
 windows and permission requests (camera, microphone, location and others)
 in Rust, and may only navigate within the app. Copying attachments into
-an export, and saving a copy of one attachment, are described in
-"Exports (M6)"; saving one attachment is not built yet.
+an export, and saving a copy of one attachment (M6 slice 6k2, the one
+way the viewer can write a file, and only where you choose in a save
+dialog), are described in "Exports (M6)".
 
 ### Memory, cache and the web profile
 
@@ -566,11 +567,11 @@ prevent them:
 *Status: PR A of milestone 6, the export engine, is built: the archive's
 export reads, the `oma-export` crate (TXT, CSV, JSON and HTML), the
 export job, its five IPC commands and the decode-helper pool for HTML
-previews; PR B's slice 6j2 adds PDF through the export-render helper.
-**There is no Export dialog yet** (PR B, slice 6k), so no export can be
-made from the app's interface; XLSX, "Save a copy" of one attachment and
-leaving events out are refused, never faked ("Save a copy" and leaving
-events out are assigned to slice 6k). Every
+previews; PR B's slice 6j2 adds PDF through the export-render helper,
+and slices 6k1 and 6k2 the Export dialog with its entry points (a
+conversation, search results, the whole archive), leaving events out, and
+"Save a copy" of one attachment. XLSX is refused, never faked (its writer
+is a later slice). Every
 statement below was tested on Linux with synthetic data only; nothing
 was run on Windows, in a browser (pages were read back by parsers), or in
 a spreadsheet program. Owner decisions are those of 2026-10-19 (Q3, Q4);
@@ -987,6 +988,40 @@ browser, a desktop viewer or a screen reader:
   screen reader reads it is **UNVERIFIED**.
 - If the shipped fonts are missing or altered, a PDF export stops before
   anything is written and says so.
+
+### Leaving events out, and "Save a copy" (slice 6k2)
+
+Tested on Linux with synthetic data only (`crates/oma-archive/tests/export_scope.rs`,
+`crates/oma-export/tests/events.rs`, `crates/oma-export/tests/copy.rs`,
+the shell's `exports::tests`, `src-tauri/tests/log_hygiene.rs`); the
+dialog ran in jsdom only:
+
+- **"Group and system events" off** leaves out every group or system event
+  (a participant added or removed, a group renamed, a photo or background
+  changed, …) and any reaction to one, from every format; how many is
+  recorded in `manifest.json` (or "About this export"). A message of a
+  kind this version does not recognise is kept. Events are on by default.
+- **"Save a copy…"** writes one attachment's stored file, byte for byte
+  (its metadata, which can include location, included), to the name and
+  folder you choose in a save dialog. The app offers the attachment's
+  recorded name made safe: hidden characters removed, and ".blocked"
+  added unless the extension is a passive one that matches the file's
+  content (owner decision Q3b). If you type a name whose extension could
+  run a program, the app asks you to confirm it first. No manifest or
+  record is written beside it.
+- The file is checked against the archive's checksum while it is copied;
+  a mismatch saves nothing. It is written under a temporary
+  `.oma-export-….partial-file` name beside the target, then renamed; an
+  existing file is replaced only after the app's own confirmation.
+- An attachment of a part the sender unsent is hidden by the viewer; if
+  it is shown and you save it, the app asks you to confirm including
+  content captured before an unsend, as an export does (owner decision
+  Q4), and the save dialog's title says so.
+- On Windows a copy gets a Mark of the Web (`ZoneId=3`), as exported
+  attachments do (owner decision Q3c); what Windows does with it is
+  **UNVERIFIED**, and so is everything about "Save a copy" on Windows.
+- The app remembers where a copy went only until it closes, for "Show in
+  folder".
 
 ## Device identifiers (M2)
 

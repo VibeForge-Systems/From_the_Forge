@@ -1536,6 +1536,28 @@ opens it until slice 6k2, so no smoke test or screenshot was taken);
 WebView2; the native save dialog and folder picker; a screen reader
 reading the steps and the progress region; Windows.
 
+### Milestone 6 PR B, slice 6k2: entry points, events off and "Save a copy" (Linux container, jsdom only)
+
+Run on 2026-10-20 in the same Linux container, on `feat/oma-m6-export-ui`:
+
+| What | Result here |
+|---|---|
+| `npm test` | 751 passed in 58 files (the four DST projects included) |
+| `tests/frontend/export-copy.spec.ts` | 10 passed: "Save a copy" (the fixed request, the disclosure, no Back before Review, Cancel while reading, the earlier-content confirmation sent as `earlierContent: 1`, the risky-name confirmation, the result, the reset on the next open), the events words, "Continue in background" and the chip (progress, the Escape prompt, an end while closed, a cancelled job) |
+| Entry points | `thread-view.spec.ts` (Export conversation…), `search-panel.spec.ts` (Export results… by search id, disabled while a search runs, conversations not named before every hit is loaded), `archive-view.spec.ts` (Export… and the "Exporting" state), `attachment-card.spec.ts` (Save a copy… on a card with a stored file and in the media viewer), `roadmap.spec.ts` (`exports` available, XLSX said to be unavailable) |
+| `npm run typecheck`, `npm run licenses` | Pass |
+| `cargo test --workspace` | 1,601 passed, 25 ignored, 0 failed (from a clean build) |
+| Events off | `oma-archive`'s `export_scope.rs` (walk, cursors, scope index, an oracle, three scopes), `oma-export`'s `events.rs` (JSON on and off), the shell's job test, the log-hygiene run |
+| "Save a copy" | `oma-archive`'s copy facts, `oma-export`'s `copy.rs` (4), the shell's end-to-end test through a viewer session on `view-media-plain`, the log-hygiene run (one copy saved into the sentinel folder) |
+| `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all --check`, `cargo deny check` | Pass |
+| `x86_64-pc-windows-msvc` | `stage.rs` and `naming.rs` linted through the scratch harness only (clippy `-D warnings`); nothing ran |
+
+**Not run, so UNVERIFIED:** any of it in a real window (WebKitGTK or
+WebView2), with a screen reader (the chip's live region, the dialog's
+steps), or on Windows (the Mark of the Web beside a saved copy, sharing
+violations, the save dialog's own overwrite prompt); a copy of a real
+attachment; events in a real archive (the tests make synthetic ones).
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI

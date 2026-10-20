@@ -99,6 +99,12 @@
 //! an estimate, sends checked previews, and stages the volumes the helper
 //! returns checked.
 //!
+//! Slice 6k2: [`copy`], "Save a copy" of one attachment (no manifest, no
+//! records: the verified bytes under the user's name, placed no-replace
+//! or by a confirmed replace, with a Mark of the Web on Windows), and the
+//! "events" option off (the snapshot leaves group and system events out,
+//! [`pipeline`]).
+//!
 //! PDF is the helper's first real backend; XLSX is deferred
 //! (its writer crate is not yet old enough to pin) and stays refused.
 //! Nothing here logs; errors carry kinds only (I6).
@@ -115,6 +121,7 @@
 pub mod attach;
 pub mod check;
 pub mod codes;
+pub mod copy;
 pub mod error;
 pub mod fault;
 pub mod helper;

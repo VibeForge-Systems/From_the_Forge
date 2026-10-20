@@ -44,7 +44,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use oma_archive::{
-    ArchiveGeneration, ArchiveId, CancelToken, ExportHold, PreviewOptions, SearchRan, SenderFilter,
+    ArchiveGeneration, ArchiveId, CancelToken, ExportHold, SearchRan, SenderFilter,
     EXPORT_SEARCH_CAP,
 };
 use oma_export::helper::{HelperKill, HelperLaunch};
@@ -128,13 +128,16 @@ pub fn prepare(draft: Draft, c: &ExportConfirmationsInput) -> IpcResult<Prepared
     draft.count.cancel();
     let Draft {
         archive,
-        spec,
+        work,
         search,
         zone,
         counted,
         destination: chosen,
         ..
     } = draft;
+    let super::DraftWork::Export(spec) = work else {
+        return Err(IpcError::internal("not an export draft"));
+    };
     let (Some(counted), Some(zone), Some(chosen)) = (counted, zone, chosen) else {
         return Err(invalid(em::NOT_PREPARED));
     };
@@ -205,6 +208,46 @@ pub fn prepare(draft: Draft, c: &ExportConfirmationsInput) -> IpcResult<Prepared
         needs,
         messages: counted.preview.distinct_messages,
     })
+}
+
+/// A draft `start_export` accepted: an export, or "Save a copy".
+#[derive(Debug)]
+pub enum Start {
+    Export(Box<Prepared>),
+    Copy(Box<super::copy::PreparedCopy>),
+}
+
+impl Start {
+    pub fn archive(&self) -> &ArchiveId {
+        match self {
+            Start::Export(p) => &p.archive,
+            Start::Copy(p) => &p.archive,
+        }
+    }
+}
+
+/// [`prepare`] or `copy::prepare`, by the draft's kind.
+pub fn prepare_start(draft: Draft, c: &ExportConfirmationsInput) -> IpcResult<Start> {
+    match draft.work {
+        super::DraftWork::Export(_) => prepare(draft, c).map(|p| Start::Export(Box::new(p))),
+        super::DraftWork::Copy(_) => {
+            super::copy::prepare(draft, c).map(|p| Start::Copy(Box::new(p)))
+        }
+    }
+}
+
+/// [`recheck`] or `copy::recheck`, by kind.
+pub fn recheck_start(
+    s: &Start,
+    env: &ArchiveEnv,
+    library: &std::path::Path,
+    confirmed: &[super::dto::ExportWarningDto],
+    probe: &dyn DestinationProbe,
+) -> IpcResult<()> {
+    match s {
+        Start::Export(p) => recheck(p, env, library, confirmed, probe),
+        Start::Copy(p) => super::copy::recheck(p, env, library, confirmed, probe),
+    }
 }
 
 /// The checks `start_export` repeats on disk before it reserves the job:
@@ -430,7 +473,7 @@ fn export(
                 None,
             ),
             Some(s) => {
-                let opts = PreviewOptions::new(p.plan.reveal(), p.plan.depth());
+                let opts = p.plan.preview_options();
                 let rerun;
                 let set = if s.all_matches {
                     rerun = snap.search_ids(&s.request, EXPORT_SEARCH_CAP, &mut |_| {})?;
@@ -555,6 +598,8 @@ pub fn summary(
         neutralised_cells: k(c.neutralised_cells),
         times_outside_zone_window: k(c.times_outside_zone_window),
         undated_excluded: k(c.undated_excluded),
+        events_not_included: k(c.events_not_included),
+        motw_missing: c.attachments.motw_not_written > 0,
         search_hits_excluded: search_excluded.map(&mut k),
         bundle,
         size: ExportSizeBucketDto::of(report.output_bytes),

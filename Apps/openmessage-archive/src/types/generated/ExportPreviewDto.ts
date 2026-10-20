@@ -33,6 +33,11 @@ zoneWindowUtcMs: [number, number] | null,
  */
 search: SearchPreviewDto | null, 
 /**
+ * Timeline rows left out because events are left out (events and the
+ * reactions folded into them); 0 when events are included.
+ */
+eventsLeftOut: number, 
+/**
  * A count above 2^53 − 1 was clamped.
  */
 clamped: boolean, };

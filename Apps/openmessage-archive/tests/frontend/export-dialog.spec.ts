@@ -28,7 +28,7 @@ import { IpcError, ipc } from '@/services/ipc';
 import ExportDialog from '@/components/ExportDialog.vue';
 import {
   DISCLOSURE,
-  EVENTS_ALWAYS,
+  EVENTS_NOTE,
   FORMAT_UNAVAILABLE,
   KEEP_EXTENSIONS_CONFIRM,
   REPLACE_CONFIRMED,
@@ -96,6 +96,7 @@ function preview(overrides: Partial<ExportPreviewDto> = {}): ExportPreviewDto {
     spanUtcMs: [Date.UTC(2024, 0, 1), Date.UTC(2024, 5, 1)],
     zoneWindowUtcMs: null,
     search: null,
+    eventsLeftOut: 0,
     clamped: false,
     ...overrides,
   };
@@ -112,6 +113,7 @@ function destination(overrides: Partial<ExportDestinationDto> = {}): ExportDesti
     freeSpace: 'under100Gb',
     enough: 'yes',
     leftovers: 0,
+    riskyName: false,
     ...overrides,
   };
 }
@@ -134,6 +136,8 @@ function summary(overrides: Partial<ExportSummaryDto> = {}): ExportSummaryDto {
     neutralisedCells: 0,
     timesOutsideZoneWindow: 0,
     undatedExcluded: 0,
+    eventsNotIncluded: 0,
+    motwMissing: false,
     searchHitsExcluded: null,
     bundle: true,
     size: 'under1Gb',
@@ -359,16 +363,19 @@ describe('ExportDialog', () => {
     expect(req.zone).toBeUndefined();
   });
 
-  it('sends options that do not apply as off, and shows events as always included', async () => {
+  it('sends options that do not apply as off, and events as chosen', async () => {
     await mountDialog();
     await toReview(['txt'], async () => {
-      expect(wrapper!.find('#export-events-note').text()).toBe(EVENTS_ALWAYS);
-      expect(wrapper!.find('#export-events').attributes('disabled')).toBeDefined();
+      expect(wrapper!.find('#export-events-note').text()).toBe(EVENTS_NOTE);
+      expect(wrapper!.find('#export-events').attributes('disabled')).toBeUndefined();
+      expect(wrapper!.find<HTMLInputElement>('#export-events').element.checked).toBe(true);
+      await check('#export-events', false);
       expect(wrapper!.find('#export-identifiers').attributes('disabled')).toBeDefined();
       expect(wrapper!.find('#export-previews').attributes('disabled')).toBeDefined();
       expect(wrapper!.find('#export-keep-extensions').attributes('disabled')).toBeDefined();
     });
     const o = lastPreviewRequest().options;
+    expect(o.events).toBe(false);
     expect(o.previews).toBe(false);
     expect(o.largerPreviews).toBe(false);
     expect(o.includeIdentifiers).toBe(false);

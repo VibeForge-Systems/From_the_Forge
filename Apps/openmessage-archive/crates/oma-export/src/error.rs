@@ -72,6 +72,11 @@ pub enum ExportError {
     /// within its size limits. Nothing of it was written.
     #[error("a helper's output was refused")]
     HelperOutputRejected,
+    /// "Save a copy" (spec §6.6, slice 6k2): the stored file is missing,
+    /// unreadable, or does not match its recorded length or digest. The
+    /// partial copy was removed and nothing was saved.
+    #[error("the stored file does not match its recorded checksum")]
+    ChecksumMismatch,
     /// The export-render helper failed (spec §5.7): it could not start,
     /// crashed, did not answer in time, broke the protocol or refused with
     /// a closed code. The partial output is removed.

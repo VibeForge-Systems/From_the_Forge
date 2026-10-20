@@ -1,15 +1,19 @@
 <script setup lang="ts">
 // One archive's details (centre of the Archive page, M4 §16): its status,
 // the import and verify actions, progress, and the last import and verify.
-// Counts and states only; the label is the one free text (I7).
+// Counts and states only; the label is the one free text (I7). From M6
+// (slice 6k2) it opens the Export dialog for the whole archive, and shows
+// "Exporting" with the job's progress while this app exports from it.
 import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import ArchiveStatusBadge from '@/components/ArchiveStatusBadge.vue';
 import ImportSummary from '@/components/ImportSummary.vue';
 import JobProgress from '@/components/JobProgress.vue';
 import VerifySummary from '@/components/VerifySummary.vue';
+import { CANCEL_EXPORT, ENTRY_TEXT } from '@/services/exportText';
 import { useArchives } from '@/stores/archives';
 import { useBackups } from '@/stores/backups';
+import { useExports } from '@/stores/exports';
 import { useViewer } from '@/stores/viewer';
 import {
   GATE_ENDING,
@@ -29,6 +33,7 @@ import type { ProgressJob } from '@/types/progress';
 const archives = useArchives();
 const viewer = useViewer();
 const backups = useBackups();
+const exports = useExports();
 
 const id = computed(() => archives.selectedId as string);
 const entry = computed(() => archives.selectedEntry);
@@ -39,8 +44,12 @@ const result = computed(() => archives.importResults[id.value] ?? null);
 const verifyResult = computed(() => archives.verifyResults[id.value] ?? null);
 
 const thisJob = computed(() => (archives.liveJob?.archiveId === id.value ? archives.liveJob : null));
+/** This app's export runs from this archive (its progress is the dialog's). */
+const exportHere = computed(() =>
+  exports.liveJob !== null && exports.jobArchiveId === id.value ? exports.liveJob : null,
+);
 /** A job on this archive this page cannot hear (after a reload, or elsewhere). */
-const unheard = computed(() => (thisJob.value ? null : (details.value?.activeJob ?? null)));
+const unheard = computed(() => (thisJob.value || exportHere.value ? null : (details.value?.activeJob ?? null)));
 const unheardCancelling = ref(false);
 watch(
   () => unheard.value?.jobId,
@@ -58,7 +67,7 @@ const unheardProgress = computed<ProgressJob | null>(() => {
   };
 });
 
-const busy = computed(() => archives.jobRunning || backups.jobRunning);
+const busy = computed(() => archives.jobRunning || backups.jobRunning || exports.liveJob !== null);
 const ready = computed(() => entry.value?.status === 'ready' || (!entry.value && !!details.value));
 /** The viewer reads while an import or a verify runs (M5 §2); Rust refuses the rest. */
 const canBrowse = computed(
@@ -80,6 +89,12 @@ function searchMessages(): void {
 const newerRules = computed(() => summary.value?.newerRules ?? false);
 const canImport = computed(() => ready.value && !newerRules.value && !busy.value);
 const canVerify = computed(() => ready.value && !busy.value);
+/** One job at a time: an export waits for every other job, and they for it. */
+const canExport = computed(() => ready.value && !busy.value);
+
+function exportArchive(): void {
+  exports.openExport({ archiveId: id.value, scope: 'archive' });
+}
 const resumable = computed(() => details.value?.resumable ?? false);
 const describedBy = computed(() => {
   if (!ready.value) return 'archive-status-reason';
@@ -158,7 +173,7 @@ function cancelUnheard(): void {
         <JobProgress v-if="thisJob" :job="thisJob" class="mb-3" @cancel="archives.cancel(id)" />
         <JobProgress v-else-if="unheardProgress" :job="unheardProgress" class="mb-3" @cancel="cancelUnheard()" />
         <p v-if="busy && !thisJob && !unheard" id="archive-busy" class="small text-body-secondary">
-          Another import or check is running. Wait for it to finish or cancel it.
+          Another import, check or export is running. Wait for it to finish or cancel it.
         </p>
 
         <div v-if="!thisJob && !unheard" class="d-flex flex-wrap gap-2 align-items-center">
@@ -245,6 +260,33 @@ function cancelUnheard(): void {
             </tr>
           </tbody>
         </table>
+      </div>
+    </section>
+
+    <section class="card mb-3" aria-labelledby="archive-export-title">
+      <div class="card-header">
+        <h2 id="archive-export-title" class="h6 mb-0">Export</h2>
+      </div>
+      <div class="card-body">
+        <template v-if="exportHere">
+          <p class="small fw-semibold mb-2">{{ ENTRY_TEXT.exportingHere }}</p>
+          <JobProgress :job="exportHere" :cancel-label="CANCEL_EXPORT" class="mb-2" @cancel="exports.cancelExport()" />
+          <button type="button" class="btn btn-sm btn-outline-secondary" @click="exports.reopen()">
+            {{ ENTRY_TEXT.showExport }}
+          </button>
+        </template>
+        <template v-else>
+          <p class="small">{{ ENTRY_TEXT.archiveHelp }}</p>
+          <button
+            type="button"
+            class="btn btn-outline-secondary"
+            :disabled="!canExport"
+            :aria-describedby="describedBy"
+            @click="exportArchive"
+          >
+            <i class="bi bi-box-arrow-up me-1" aria-hidden="true"></i>{{ ENTRY_TEXT.archive }}
+          </button>
+        </template>
       </div>
     </section>
 

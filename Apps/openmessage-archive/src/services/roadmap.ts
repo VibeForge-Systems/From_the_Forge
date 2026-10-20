@@ -85,8 +85,9 @@ export const CAPABILITIES: readonly Capability[] = [
     id: 'exports',
     title: 'Exports',
     milestone: 6,
-    status: 'planned',
-    summary: 'TXT, CSV, JSON, HTML, PDF, and XLSX exports, plus attachment export.',
+    status: 'available',
+    summary:
+      'Export a conversation, search results, a date range or the whole archive as PDF, HTML, plain text, CSV or JSON, and save a copy of one attachment. Excel (XLSX) workbooks are not available yet.',
   },
   {
     id: 'device-backup',

@@ -301,6 +301,10 @@ pub struct Staging {
     next_token: u64,
     unsynced: Vec<File>,
     state: State,
+    /// The name a single file was published under (for its Mark of the
+    /// Web, which only Windows writes).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    published: Option<TargetName>,
 }
 
 impl std::fmt::Debug for Staging {
@@ -380,6 +384,7 @@ impl Staging {
             next_token: 0,
             unsynced: Vec::new(),
             state: State::Live,
+            published: None,
         }
     }
 
@@ -435,11 +440,9 @@ impl Staging {
     /// Like [`Staging::create`], for a file whose bytes come from a reader
     /// that verifies them itself (an attachment's `BlobReader`): nothing is
     /// hashed while it is written, and [`Staging::close_verified`] records
-    /// the reader's digest (spec §6.1, "one hash"). Bundles only.
+    /// the reader's digest (spec §6.1, "one hash"). In a bundle, an
+    /// attachment copy; as a single file, "Save a copy" (slice 6k2).
     pub fn create_verified(&mut self, path: &BundlePath) -> Result<StagedFile, ExportError> {
-        if self.packaging != Packaging::Bundle {
-            return Err(limit(LimitKind::RowOrder));
-        }
         self.create_with(path, false)
     }
 
@@ -598,6 +601,37 @@ impl Staging {
             if self.unsynced.len() >= MAX_UNSYNCED {
                 self.sync_batch()?;
             }
+            Ok(true)
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(false)
+        }
+    }
+
+    /// Write a Mark of the Web beside the single file just published
+    /// ("Save a copy" of one attachment, spec §6.6, owner Q3c): the NTFS
+    /// stream `<file>:Zone.Identifier` with `ZoneId=3`, created new and
+    /// private, then flushed. Windows only; elsewhere nothing is written
+    /// and `Ok(false)` is returned. An error means it was not written (on
+    /// FAT or exFAT, for example): the copy stays published, and the
+    /// caller reports it. Its effect is **UNVERIFIED**.
+    pub fn mark_published_file(&mut self) -> Result<bool, ExportError> {
+        if self.state != State::Published || self.packaging != Packaging::SingleFile {
+            return Err(limit(LimitKind::RowOrder));
+        }
+        #[cfg(windows)]
+        {
+            let name = self
+                .published
+                .clone()
+                .ok_or_else(|| limit(LimitKind::RowOrder))?;
+            let mut f = self
+                .sys
+                .create_published_zone_identifier(&self.parent, name.as_str())
+                .map_err(io_err)?;
+            f.write_all(MARK_OF_THE_WEB).map_err(io_err)?;
+            f.sync_all().map_err(io_err)?;
             Ok(true)
         }
         #[cfg(not(windows))]
@@ -786,6 +820,7 @@ impl Staging {
             }
         };
         self.state = State::Published;
+        self.published = Some(name.clone());
         let parent_synced = self.sys.sync_parent(&self.parent).is_ok();
         Ok(Published {
             name: name.clone(),
@@ -1735,6 +1770,17 @@ mod sys {
         pub(super) fn create_zone_identifier(&self, path: &BundlePath) -> io::Result<File> {
             let file = path.under(self.staging()?);
             oma_fs::create_new_private(&naming::zone_identifier(&file))
+        }
+
+        /// `<file>:Zone.Identifier` beside the published single file `name`
+        /// in `parent` ("Save a copy").
+        #[cfg(windows)]
+        pub(super) fn create_published_zone_identifier(
+            &self,
+            parent: &Path,
+            name: &str,
+        ) -> io::Result<File> {
+            oma_fs::create_new_private(&naming::zone_identifier(&naming::child(parent, name)))
         }
 
         pub(super) fn sync_subdirs(&self) -> io::Result<()> {

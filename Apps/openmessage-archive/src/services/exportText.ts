@@ -81,8 +81,8 @@ export const FORMAT_UNAVAILABLE: Partial<Record<ExportFormatInput, string>> = {
   xlsx: 'Not available in this version. Excel workbooks will come in a later update; CSV opens in Excel and LibreOffice meanwhile.',
 };
 
-export const EVENTS_ALWAYS =
-  'Group and system events are always included in this version; leaving them out is not available yet.';
+export const EVENTS_NOTE =
+  'Off: group and system events (a participant added or removed, a group renamed, a photo changed, …) are left out, with any reactions to them; the count is recorded in manifest.json or "About this export".';
 
 export const ZONE_CHOICE_LABEL: Record<ZoneChoiceInput, string> = {
   system: "This computer's zone",
@@ -194,6 +194,9 @@ export function reviewLines(p: ExportPreviewDto, copies: boolean): string[] {
   out.push(
     `${plural(p.timelineRows, 'item', 'items', sat)} (${plural(p.distinctMessages, 'message', 'messages', sat)}) from ${plural(p.conversations, 'conversation', 'conversations', sat)}.`,
   );
+  if (p.eventsLeftOut > 0) {
+    out.push(`${plural(p.eventsLeftOut, 'group or system event is', 'group or system events are', sat)} left out, with any reactions to them.`);
+  }
   if (p.unassigned > 0) {
     out.push(`${plural(p.unassigned, 'message belongs', 'messages belong', sat)} to no conversation and go to a "No conversation" file.`);
   }
@@ -242,9 +245,13 @@ export function searchLines(p: ExportPreviewDto): string[] {
   return out;
 }
 
-/** "These search results: N matches in K conversations" (§10 step 1). */
-export function searchScopeLine(matches: number, conversations: number): string {
-  return `${SCOPE_LABEL.searchResults}: ${plural(matches, 'match', 'matches')} in ${plural(conversations, 'conversation', 'conversations')}`;
+/**
+ * "These search results: N matches in K conversations" (§10 step 1); the
+ * conversations are named only when every hit has been loaded.
+ */
+export function searchScopeLine(matches: number, conversations: number | null): string {
+  const where = conversations === null ? '' : ` in ${plural(conversations, 'conversation', 'conversations')}`;
+  return `${SCOPE_LABEL.searchResults}: ${plural(matches, 'match', 'matches')}${where}`;
 }
 export const SEARCH_CAPPED = 'Only the first 10,000 matches are in this set.';
 export const ALL_MATCHES = 'Include all matches (searches again during the export)';
@@ -319,6 +326,8 @@ export const SAVES_AS: Record<PackagingDto, string> = {
 // --- Progress and result --------------------------------------------------------
 
 export const CANCEL_EXPORT = 'Cancel export';
+export const CONTINUE_IN_BACKGROUND = 'Continue in background';
+export const BACKGROUND_NOTE = 'The export continues while you browse. Its progress is shown at the top of the window.';
 /** Stops the count and discards the draft (§10 step 4). */
 export const CANCEL_COUNT = 'Cancel';
 export const CANCEL_NOTE = 'Cancelling removes the unfinished export.';
@@ -392,6 +401,10 @@ export function resultNotes(s: ExportSummaryDto): string[] {
     out.push(`${plural(s.timesOutsideZoneWindow, 'time is', 'times are', sat)} shown in UTC because ${s.timesOutsideZoneWindow === 1 ? 'it lies' : 'they lie'} outside the time zone's range.`);
   }
   if (s.undatedExcluded > 0) out.push(`${plural(s.undatedExcluded, 'undated item was', 'undated items were', sat)} left out of the date range.`);
+  if (s.eventsNotIncluded > 0) {
+    out.push(`${plural(s.eventsNotIncluded, 'group or system event was', 'group or system events were', sat)} left out, with any reactions to them.`);
+  }
+  if (s.motwMissing) out.push(MOTW_MISSING);
   if (s.searchHitsExcluded !== null && s.searchHitsExcluded > 0) {
     out.push(`${plural(s.searchHitsExcluded, 'search match was', 'search matches were', sat)} left out because ${s.searchHitsExcluded === 1 ? 'it' : 'they'} matched only text this export does not include.`);
   }
@@ -437,3 +450,54 @@ export const FORMAT_NEEDED = 'Choose at least one format.';
 export const NEXT = 'Next';
 export const BACK = 'Back';
 export const CLOSE = 'Close';
+
+// --- "Save a copy" of one attachment (§6.6, slice 6k2) -------------------------
+
+export const COPY_TITLE = 'Save a copy';
+export const COPY_LEGEND: Partial<Record<ExportStep, string>> = {
+  review: 'Save a copy of this attachment',
+  destination: 'Where to save the copy',
+  progress: 'Saving the copy',
+  result: 'Copy saved',
+};
+export const COPY_READING = 'Reading the attachment…';
+export const COPY_DISCLOSURE =
+  'A saved copy is the original file, byte for byte, metadata included (which can include location). Once saved, the app cannot protect, track or delete it.';
+export function copySizeLine(bytesCount: number): string {
+  return `One file, ${bytes(bytesCount, false)}.`;
+}
+export const COPY_EARLIER_CONFIRM =
+  'This attachment was captured before the sender unsent part of the message; the app normally hides it. Save it anyway. The phones involved no longer show unsent content.';
+export const COPY_SAVES_AS = 'The copy will be saved as';
+export const COPY_RISKY_PREFIX = 'This file type can run programs. Save it as “';
+export const COPY_RISKY_SUFFIX = '” anyway';
+export const COPY_START = 'Save copy';
+export const COPY_SAVED = 'Copy saved.';
+export const COPY_CANCEL = 'Cancel saving';
+export const COPY_RESULT = 'The attachment was saved as one file. It was checked against the archive’s checksum while it was copied.';
+export const SAVE_A_COPY = 'Save a copy…';
+export const MOTW_MISSING =
+  'Windows could not mark a copied file as downloaded from the internet (Mark of the Web), for example on a FAT or exFAT drive.';
+
+// --- The navbar chip and the entry points (slice 6k2) -----------------------------
+
+export const CHIP_TEXT = {
+  running: 'Exporting…',
+  cancelling: 'Cancelling the export…',
+  finished: 'Export finished',
+  failed: 'Export failed',
+  cancelled: 'Export cancelled',
+  show: 'Show export progress',
+  showResult: 'Show the export result',
+} as const;
+
+export const ENTRY_TEXT = {
+  conversation: 'Export conversation…',
+  searchResults: 'Export results…',
+  searchRunning: 'Wait for the search to finish before exporting its results.',
+  archive: 'Export…',
+  archiveHelp:
+    'Export this archive, a date range or one conversation as PDF, HTML, plain text, CSV or JSON. An export is a plaintext copy you keep elsewhere.',
+  exportingHere: 'Exporting from this archive',
+  showExport: 'Show export',
+} as const;

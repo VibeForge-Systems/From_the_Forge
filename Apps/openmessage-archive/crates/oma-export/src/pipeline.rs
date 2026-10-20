@@ -35,11 +35,16 @@
 //! succeeded (the shell's `stagingRemoved`, slice 6h1). Progress reports
 //! the step and the rows written after every batch. Nothing here logs.
 //!
-//! Not yet here: the "events" option off (refused with
-//! `OptionDoesNotApply` until the scope index can leave events out without
-//! a gap; the shell refuses it before a draft exists), `importSessions`
-//! (the session facts need a new snapshot read) and the export-render
-//! helper's formats (6i, 6j).
+//! **Events off (slice 6k2).** With the "events" option off, the run
+//! tells the snapshot to leave group and system events out
+//! (`ExportSnapshot::leave_out_events`) before the pre-count: the
+//! pre-count, the scope index and every cursor then skip the same rows
+//! (each event, and each reaction row folded into one), so ordinals have
+//! no gaps, the row checks below still hold, and the manifest's
+//! `eventsNotIncluded` is the pre-count's number of rows left out.
+//!
+//! Not yet here: `importSessions` (the session facts need a new snapshot
+//! read).
 //!
 //! **Previews (slice 6h2).** With a [`PreviewFeed`] in the run (the
 //! caller builds the HTML writer over [`PreviewFeed::source`]), every
@@ -58,12 +63,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use oma_archive::{
-    CancelToken, ChatId, ExportDepth, ExportMessage, ExportScopeIds, ExportSnapshot,
-    PreviewOptions, TimeRange,
+    CancelToken, ChatId, ExportDepth, ExportMessage, ExportScopeIds, ExportSnapshot, TimeRange,
 };
 
 use crate::attach::{read_preview_input, AttachCounts, AttachPolicy, Attacher};
-use crate::error::{ExportError, LimitKind, PlanRefusal};
+use crate::error::{ExportError, LimitKind};
 use crate::ids::Ordinals;
 use crate::manifest::{
     write_provenance, DerivationFacts, ManifestBody, ManifestCounts, ManifestInput, SearchFacts,
@@ -587,16 +591,13 @@ pub fn run_detailed(
     progress: &mut dyn FnMut(ExportProgress),
 ) -> Result<ExportReport, ExportFailure> {
     let plan = run.plan;
-    if !plan.options().events {
-        return Err(ExportError::Plan(PlanRefusal::OptionDoesNotApply).into());
+    let leave_out_events = !plan.options().events;
+    if leave_out_events {
+        snap.leave_out_events();
     }
     progress(ExportProgress::default());
     // 1. Pre-count and consent, under the lock, in this snapshot.
-    let pre = snap.precount(
-        run.scope,
-        PreviewOptions::new(plan.reveal(), plan.depth()),
-        &mut |_| {},
-    )?;
+    let pre = snap.precount(run.scope, plan.preview_options(), &mut |_| {})?;
     plan.check_confirmation(
         pre.messages_with_flagged_code,
         pre.messages_with_earlier_content,
@@ -767,6 +768,7 @@ fn body(
     counts.folded_reaction_rows = totals.folded_rows;
     counts.items = totals.items;
     counts.undated_excluded = pre.undated_excluded;
+    counts.events_not_included = pre.events_left_out;
     counts.attachments.names_shortened = attach.names_shortened;
     counts.attachments.motw_not_written = attach.motw_not_written;
     if counts.attachments.files_written != attach.files_written {

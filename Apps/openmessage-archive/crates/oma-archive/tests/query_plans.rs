@@ -753,6 +753,14 @@ const PINNED: &[(&str, &[&str])] = &[
         &["SEARCH handle USING INTEGER PRIMARY KEY (rowid=?)"],
     ),
     (
+        "export item kind",
+        &["SEARCH message USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export attachment messages",
+        &["SEARCH message_attachment USING COVERING INDEX message_attachment_by_attachment (attachment_id=?)"],
+    ),
+    (
         "export attachment kept by a part",
         &[
             "SEARCH a USING INTEGER PRIMARY KEY (rowid=?)",

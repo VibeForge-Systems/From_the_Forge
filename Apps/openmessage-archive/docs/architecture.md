@@ -84,7 +84,7 @@ flowchart LR
 | `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them. From M4: `copy_file_to` streams one listed file's plaintext into a caller's writer, hashing it, under `Limits::attachment_bytes` and per-file stamps | ✔ M2, M3, M4 (slice 4b) |
 | `crates/oma-messages` | Scans and probes the sms.db schema by capability, streams typed records (handles, chats, the joins, messages, attachments, Recently Deleted links) as `Col<T>` values, decodes `attributedBody` with a clean-room typedstream decoder, and produces the aggregate `ExtractionReport`. Persists nothing. From M4: stable `KnownColumn` codes, raw values of unreadable cells (`raw_issues`), `payload_data` on request, the raw association columns, key-only passes and the storage class of text cells | ✔ M3, M4 (slice 4c) |
 | `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep; slices 4e–4j the import; slice 4k the report-only verifier and `open_blob`. Used by the shell since slice 4l. From M5: the viewer reads (`view/`, `sortkey.rs`, phased budgets), search (`search/`) and media sniffing, checks and rendering (`media/`, `blobs::open_range`) | ✔ M4 (slices 4d–4k), M5 (slices 5a–5d) |
-| `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX. Tauri-free and SQLite-free: it reads only through `oma-archive`'s export APIs. Slice 6d ships the record core: the validated plan, the code registry, the column ledger, the canonical record and its mapping, export-local ordinals, the Rust word tables, time zones and local-day bounds, and the hidden-character markers. Slice 6e1 adds the files core: names, staging and publish, leftovers, the manifest and the writer trait. Slice 6e2 adds the attachment copy, the TXT writer and the pipeline (`pipeline::run`); 6f the JSON and CSV writers; 6g the HTML writer; 6h2 the preview feed between the pipeline and the decode-helper pool. Driven by the shell's export job (slice 6h1). PDF and XLSX are PR B: slice 6i adds the export-render helper and the output check, 6j1 the PDF layout (parley, krilla, behind the `render` feature) with the pinned fonts, 6j2 the PDF writer | ✔ M6 PR A (slices 6d–6h2); PR B: 6i, 6j1, 6j2 built; XLSX deferred; the Export dialog is built (6k1) but no control opens it until 6k2 |
+| `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX. Tauri-free and SQLite-free: it reads only through `oma-archive`'s export APIs. Slice 6d ships the record core: the validated plan, the code registry, the column ledger, the canonical record and its mapping, export-local ordinals, the Rust word tables, time zones and local-day bounds, and the hidden-character markers. Slice 6e1 adds the files core: names, staging and publish, leftovers, the manifest and the writer trait. Slice 6e2 adds the attachment copy, the TXT writer and the pipeline (`pipeline::run`); 6f the JSON and CSV writers; 6g the HTML writer; 6h2 the preview feed between the pipeline and the decode-helper pool. Driven by the shell's export job (slice 6h1). PDF and XLSX are PR B: slice 6i adds the export-render helper and the output check, 6j1 the PDF layout (parley, krilla, behind the `render` feature) with the pinned fonts, 6j2 the PDF writer | ✔ M6 PR A (slices 6d–6h2); PR B: 6i, 6j1, 6j2 built; XLSX deferred; the Export dialog (6k1) with its entry points, chip, events off and "Save a copy" (6k2) |
 | `crates/oma-device` | Detects devices and creates backups behind a platform trait | planned, M7 |
 
 Each library crate can be built and tested without Tauri. The shell only
@@ -4830,6 +4830,161 @@ abort, yielding, ICU's Europe/Berlin 2024 and New York 1900–2028), and
 `tests/frontend/dst/zone-table.spec.ts` (in each of the four DST zones,
 the table for this computer's zone against `Date`'s offsets from 2005 to
 2027, including Apia's skipped day).
+
+### Entry points, the status chip, events off and "Save a copy" (M6 slice 6k2)
+
+Slice 6k2 completes the UI row (spec §10, §6.6) and builds the two things
+PR A refused at the draft: leaving events out and "Save a copy" of one
+attachment. Exports are now `available` in `services/roadmap.ts`; XLSX
+stays refused (`exportUnavailable`) and is said to be unavailable in the
+roadmap's sentence and the dialog.
+
+- **Entry points.** The thread header has **Export conversation…**
+  (scope `conversation`, this conversation); the search panel has
+  **Export results…** for a finished set (shown disabled, with the reason,
+  while a search runs; the set goes by its `searchId`, never the query;
+  "in K conversations" is said only once every hit is loaded, because the
+  panel pages its hits); the Archive page has an **Export** card with
+  **Export…** (scope `archive`). Each opens the one dialog with a fresh
+  form; while an export runs, each shows its progress instead.
+- **"Continue in background" and the chip.** Progress has **Continue in
+  background** (and so does the Escape prompt). It closes the dialog; the
+  job runs on. `components/ExportStatusChip.vue`, in the navigation bar,
+  shows while a job runs with its dialog closed (also after the privacy
+  screen closed it) and, once such a job ended, until its result is read:
+  "Exporting…", "Cancelling the export…", "Export finished", "Export
+  failed" or "Export cancelled", in a polite live region. Activating it
+  reopens the dialog at the progress or the result (`reopen`); **Done**
+  removes it. An end while the dialog is closed is also a toast. Nothing
+  is persisted: the chip is gone after a reload.
+- **The Archive page's "Exporting" state.** Rust already reported
+  `exporting` for an archive this app's export holds (the list badge and
+  the status sentence). The Export card of that archive now shows
+  "Exporting from this archive" with the job's progress, **Cancel export**
+  and **Show export**; import, verify and export are disabled meanwhile
+  (one job at a time; Rust refuses them anyway).
+- **Events off** (spec §4.2 "Events", §9.2). The option "Group and system
+  events" is now a working checkbox (on by default). Off, the export
+  snapshot leaves out every timeline row whose derived `item_kind` is a
+  group or system event (2–13: participants added or removed, a group
+  renamed, a photo or background changed, a legacy shared location, an
+  audio message kept, SharePlay) and every reaction row folded into one;
+  a message of an unknown kind (0) stays, because it may be a message
+  this version does not map. The rule is applied in `oma-archive`
+  (`ExportSnapshot::leave_out_events`, set by the pre-count's
+  `PreviewOptions::leaving_out_events` and by the pipeline): the walk
+  behind the preview, the pre-count and the scope index, the timeline and
+  id cursors, and the search scope (an event hit is "not written") all
+  skip the same rows, so the counts agree by construction and ordinals
+  have no gaps (each row costs one primary-key seek of `item_kind`,
+  pinned in `tests/query_plans.rs`). The preview and the manifest say how
+  many rows were left out (`eventsLeftOut`, `counts.eventsNotIncluded`,
+  also in a single file's "About this export" and the result).
+  `ExportPlan::preview_options` is the one source of the options every
+  count of a plan runs under.
+- **"Save a copy"** (spec §6.6, owner Q3b, Q3c, Q4). **Save a copy…** is on
+  an attachment card whose inspection read a stored file, in the details
+  panel beside a stored file, and in the media viewer (which closes
+  first). It is the Export dialog without a form:
+  - `preview_export` takes scope `attachment { viewer, attachmentId }` with
+    no formats and one fixed option set (`input::copy_options_apply`;
+    the webview's `COPY_OPTIONS`); anything else is `invalidInput`. Rust
+    serves only an attachment the viewer session surfaced (as
+    `inspect_attachment` does; otherwise `attachmentUnavailable`, before
+    any draft exists). The draft is its own kind (`DraftWork::Copy`).
+  - Its "count" is `ArchiveReader::attachment_copy_preview`, one read
+    transaction: the stored file and its length, the kind its first 4 KiB
+    sniff as (through the verifying reader), and whether it is an
+    attachment of an unsent part under the export's rule (§3.8) over
+    **every** message that links it (one is enough; the rule errs towards
+    withholding). The channel answers `copyReady { earlierContent,
+    fileBytes }`; an attachment with no readable stored file is
+    `failed: attachmentUnavailable`.
+  - Review shows the size and its own disclosure (the original bytes,
+    metadata included); an attachment of an unsent part needs a
+    confirmation, which `start_export` carries as `reveal:
+    { earlierContent: 1 }` (nothing else is accepted, and nothing is
+    accepted for any other attachment).
+  - **Choose where to save…** opens a save dialog (titled "Save a copy",
+    plus " — includes content captured before an unsend" for such an
+    attachment) offering `naming::copy_name`: the bundle rule without the
+    ordinal (hidden characters removed, `sanitize_filename_max` within
+    120 bytes, `attachment.<ext>` from the sniffed kind when nameless,
+    `.blocked` appended unless the extension is passive for that kind).
+    The name the user keeps or types is checked by `destination::inspect`
+    (`Picked::Copy`): refused when `sanitize_filename` would change it or
+    it starts with `.oma-export-`; `riskyName` when its extension is
+    neither passive for the sniffed kind nor `.blocked`
+    (`naming::risky_copy_name`), which needs "This file type can run
+    programs. Save it as '<name>' anyway" and `keepRiskyExtension`
+    (required exactly then). An existing file needs the app's own
+    **Replace**, as for a single-file export.
+  - The job (`exports::copy::run_copy`) reserves the archive and takes its
+    lock like an export, re-reads the facts in its snapshot (a changed
+    generation or attachment is `exportConfirmationStale`), and calls
+    `oma_export::copy::save_copy`: bytes only from `open_blob`, into the
+    `.oma-export-<32 hex>.partial-file` beside the target
+    (`Staging::create_verified`, now allowed for a single file), 1 MiB
+    chunks with the cancel token per chunk, the kind sniffed again from
+    the stream (another kind than the name was checked against refuses
+    before anything is created), a FAT12/16/32 file of 4 GiB or more
+    refused before it is read, a digest or length mismatch refused with
+    the partial file removed ("The file does not match its recorded
+    checksum and was not saved", `attachmentUnavailable`), then the
+    no-replace or confirmed placement and, on Windows, a Mark of the Web
+    beside the published file (`Staging::mark_published_file`; a failure
+    is reported as `motwMissing`, never fatal; its effect is
+    **UNVERIFIED**). No manifest. It ends with `exportFinished` (one
+    file, its size bucket, `.blocked` counted), `cancelled` or `failed`,
+    with the phases `preparingExport`, `copyingAttachments`,
+    `finishingExport` and `removingPartial`; **Show in folder** opens its
+    folder.
+- **DTOs.** `PreviewEvent::CopyReady` and `CopyPreviewDto` (in the export
+  walk), `ExportDestinationDto.riskyName`, `ExportPreviewDto.eventsLeftOut`,
+  and `ExportSummaryDto.eventsNotIncluded` and `motwMissing` (a boolean,
+  so `exportFinished` stays under 1 KiB at its largest). Logs gain kinds
+  and booleans only (`scope = "attachment"`, `earlier_content`,
+  `risky_name`, `replaced`, the Mark of the Web outcome); the log-hygiene
+  run saves a copy into its sentinel folder and exports with events off.
+
+Deviations from the spec, each recorded here:
+
+- The Archive page's **Export…** is a card of its own below "Import and
+  check", not a button among the import actions.
+- **Save a copy…** on a card is a small button under the card, not an item
+  of a card menu (cards have no menu); in the media viewer it closes the
+  viewer first, so only one modal is open.
+- Events left out are counted in the manifest, the preview, the result and
+  a single file's "About this export"; a bundle's per-conversation pages
+  do not repeat the count (spec §4.2 asks for each conversation's About
+  part).
+- The chip's live region announces its state words; the phase sentence is
+  announced by the dialog's progress, not by the chip.
+- "Save a copy" re-reads the stored file's first 4 KiB in the preview
+  through the verifying reader (the full verification happens only in the
+  job, while the bytes are copied).
+
+Not verified here: any of this in a real window (jsdom only), on Windows,
+the native save dialog's own overwrite prompt, the Mark of the Web, a
+screen reader reading the chip or the dialog.
+
+Tests: `crates/oma-archive/tests/export_scope.rs`
+(`events_left_out_are_skipped_by_every_read_and_counted`: three scopes,
+the walk against the cursors and an oracle, ordinals without gaps, an
+unknown kind kept, a reaction folded into an event left out with it;
+`a_copy_names_its_file_and_withholds_unsent_parts`), the two new plan
+pins, `crates/oma-export/tests/events.rs` (a JSON export with events on and
+off: counts, no event written, ordinals 1..N), `crates/oma-export/tests/copy.rs`
+(4: byte-identical copy and no other file, replace only when confirmed, a
+cancel, another kind, a short and a long mismatch, a volume limit, names
+offered and typed), the shell's `exports::tests` (copy end to end through
+a viewer session; events off counted by the preview and the job; the
+fixed copy options; the unbuilt refusals now XLSX only),
+`src-tauri/tests/log_hygiene.rs`, and the frontend's `export-copy.spec.ts`
+(10), `export-dialog.spec.ts` (events sent), `search-panel.spec.ts` (2),
+`thread-view.spec.ts` (1), `archive-view.spec.ts` (1 new, 1 changed),
+`attachment-card.spec.ts` (1 new, 1 changed) and `roadmap.spec.ts` (the
+flip, and XLSX never claimed).
 
 ### Status and qualifiers (D43)
 

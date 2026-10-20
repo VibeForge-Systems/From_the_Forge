@@ -3,12 +3,19 @@
 //! Every combination that does not apply is refused (`invalidInput`), never
 //! ignored, through `oma_export::ExportPlan::new`. What this version does
 //! not build is refused with `exportUnavailable` and its own sentence:
-//! XLSX (deferred), "Save a copy" of one attachment, and leaving events
-//! out. PDF is built from slice 6j2. Image previews are built (slice 6h2:
-//! the export's decode-helper pool) and apply to HTML and PDF.
+//! XLSX (deferred until its writer crate is old enough to pin). PDF is
+//! built from slice 6j2. Image previews are built (slice 6h2: the export's
+//! decode-helper pool) and apply to HTML and PDF. Leaving events out and
+//! "Save a copy" of one attachment are built from slice 6k2.
 //! Nothing is faked.
+//!
+//! **"Save a copy"** ([`parse_request`] → [`Parsed::Copy`]) has no format
+//! and no records, so its request is fixed: no formats, and the options
+//! [`copy_options_apply`] accepts (every option off, files copied, UTC).
+//! Its one sensitive choice, content captured before an unsend, is
+//! confirmed at `start_export` against the attachment's own facts.
 
-use oma_archive::{ArchiveId, ChatId};
+use oma_archive::{ArchiveId, AttachmentId, ChatId};
 use oma_export::plan::{Clock, LineEndings, PageSize, ZoneChoice};
 use oma_export::{
     AttachmentMode, CivilDate, CsvProfile, ExportOptions, ExportPlan, Format, IdentifierMode,
@@ -35,6 +42,21 @@ pub enum Source {
         search_id: u32,
         all_matches: bool,
     },
+}
+
+/// "Save a copy" of one attachment the viewer surfaced (§6.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CopySpec {
+    /// The viewer session's generation.
+    pub viewer: u32,
+    pub attachment: AttachmentId,
+}
+
+/// A parsed `preview_export` request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Parsed {
+    Export(DraftSpec),
+    Copy(CopySpec),
 }
 
 /// A parsed, validated request: the plan's parts, without the reveal's
@@ -157,16 +179,58 @@ fn scope(s: &ExportScopeInput) -> IpcResult<(Source, ScopePlan)> {
         ExportScopeInput::Archive { archive_id } => {
             (Source::Archive(parse_id(archive_id)?), ScopePlan::Archive)
         }
-        ExportScopeInput::Attachment { .. } => {
-            return Err(em::unavailable(em::UNAVAILABLE_ATTACHMENT))
-        }
+        // "Save a copy" is not an export plan (`parse_request`).
+        ExportScopeInput::Attachment { .. } => return Err(em::invalid()),
     })
 }
 
+/// The one option set "Save a copy" accepts: the file is copied, every
+/// other option is off (none applies to one file without records), and
+/// the zone is UTC (nothing is placed in time). Earlier content is
+/// confirmed at start, never asked for here.
+pub fn copy_options_apply(o: &ExportOptionsInput) -> bool {
+    let ExportOptionsInput {
+        attachments,
+        keep_extensions,
+        previews,
+        larger_previews,
+        history,
+        reactions,
+        events,
+        reveal_one_time_codes,
+        reveal_earlier_content,
+        hidden_character_markers,
+        seconds,
+        include_identifiers,
+        clock,
+        line_endings,
+        csv_profile,
+        page_size,
+        zone,
+    } = *o;
+    attachments == AttachmentModeInput::CopyOriginals
+        && ![
+            keep_extensions,
+            previews,
+            larger_previews,
+            history,
+            reactions,
+            events,
+            reveal_one_time_codes,
+            reveal_earlier_content,
+            hidden_character_markers,
+            seconds,
+            include_identifiers,
+        ]
+        .contains(&true)
+        && clock == ClockInput::H23
+        && line_endings == LineEndingsInput::Lf
+        && csv_profile.is_none()
+        && page_size.is_none()
+        && zone == ZoneChoiceInput::Utc
+}
+
 fn options(o: &ExportOptionsInput) -> IpcResult<ExportOptions> {
-    if !o.events {
-        return Err(em::unavailable(em::UNAVAILABLE_EVENTS));
-    }
     Ok(ExportOptions {
         attachments: match o.attachments {
             AttachmentModeInput::None => AttachmentMode::None,
@@ -215,7 +279,32 @@ fn options(o: &ExportOptionsInput) -> IpcResult<ExportOptions> {
     })
 }
 
-/// Parse and validate `preview_export`'s request (the zone table aside).
+/// Parse and validate `preview_export`'s request: an export, or "Save a
+/// copy" of one attachment (no formats, [`copy_options_apply`], no zone
+/// table).
+pub fn parse_request(req: &PreviewExportRequest) -> IpcResult<Parsed> {
+    if let ExportScopeInput::Attachment {
+        viewer,
+        attachment_id,
+    } = &req.scope
+    {
+        if !req.formats.is_empty() || req.zone.is_some() || !copy_options_apply(&req.options) {
+            return Err(IpcError::new(
+                ErrorCode::InvalidInput,
+                em::OPTIONS_DO_NOT_APPLY,
+            ));
+        }
+        let attachment = AttachmentId::new(attachment_id.get().map_err(|_| em::invalid())?);
+        return Ok(Parsed::Copy(CopySpec {
+            viewer: *viewer,
+            attachment,
+        }));
+    }
+    parse(req).map(Parsed::Export)
+}
+
+/// Parse and validate an export's request (the zone table aside). "Save a
+/// copy" is [`parse_request`]'s.
 pub fn parse(req: &PreviewExportRequest) -> IpcResult<DraftSpec> {
     if req.formats.is_empty() || req.formats.len() > Format::ALL.len() {
         return Err(IpcError::new(

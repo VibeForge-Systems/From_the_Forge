@@ -29,6 +29,7 @@ import AttachmentView from '@/components/viewer/AttachmentView.vue';
 import MediaViewer from '@/components/viewer/MediaViewer.vue';
 import PlayConfirmDialog from '@/components/viewer/PlayConfirmDialog.vue';
 import { useViewer } from '@/stores/viewer';
+import { useExports } from '@/stores/exports';
 import { useSettings } from '@/stores/settings';
 import { mediaUrl } from '@/services/media';
 import { MEDIA_UI_TEXT, PLAYBACK_TEXT } from '@/services/viewerText';
@@ -356,9 +357,37 @@ describe('the media viewer', () => {
     await full.trigger('load');
     await flushPromises();
     expect(w.find('.oma-dialog').text()).toContain('Preview, re-encoded, at most 2048 px; original 4032×3024');
-    // No download, open or share control.
+    // No download, open or share control; the one way to keep the file
+    // is "Save a copy…" (M6 §6.6), which closes this viewer and hands the
+    // attachment to the Export dialog's copy flow (Rust checks it again).
     const labels = w.find('.oma-dialog').findAll('button').map((b) => b.text().toLowerCase());
-    for (const l of labels) expect(l).not.toMatch(/download|save|open|share/);
+    for (const l of labels.filter((x) => x !== 'save a copy…')) expect(l).not.toMatch(/download|save|open|share/);
+    expect(labels).toContain('save a copy…');
+    const save = w.find('.oma-dialog').findAll('button').find((b) => b.text() === 'Save a copy…');
+    await save!.trigger('click');
+    await flushPromises();
+    expect(useViewer().media).toBeNull();
+    const x = useExports();
+    expect(x.open).toBe(true);
+    expect(x.copyTarget).toEqual({ archiveId: ARCHIVE_ID, viewer: viewerSession().viewer, attachmentId: 1 });
+    const preview = fake.calls.find(([n]) => n === 'previewExport')?.[1] as unknown[];
+    expect(preview[0]).toMatchObject({
+      scope: { kind: 'attachment', viewer: viewerSession().viewer, attachmentId: 1 },
+      formats: [],
+    });
+  });
+
+  it('offers "Save a copy…" on a card only for a stored file the inspection read', async () => {
+    setup();
+    answer((r) =>
+      r.attachmentId === 2
+        ? inspection(r.attachmentId, { content: { kind: 'noFile' } })
+        : inspection(r.attachmentId),
+    );
+    const w = mountHost([attachment(1), attachment(2)]);
+    await flushPromises();
+    const saves = w.findAll('figure').map((f) => f.findAll('button').some((b) => b.text() === 'Save a copy…'));
+    expect(saves).toEqual([true, false]);
   });
 });
 

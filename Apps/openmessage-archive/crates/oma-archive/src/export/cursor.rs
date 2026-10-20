@@ -34,6 +34,7 @@
 use sha2::{Digest, Sha256};
 
 use super::measure::{cut, measure_one, BatchLimits, ExportDepth};
+use super::scope::left_out;
 use super::ExportSnapshot;
 use crate::error::ArchiveError;
 use crate::schema::codes::{DisplayNoneReason, EditLabelCode};
@@ -289,15 +290,18 @@ impl<'a, 's> TimelineCursor<'a, 's> {
             // The batch statement has been reset: the fold checks and the
             // measure run alone on the connection.
             let mut folds: Vec<Option<i64>> = Vec::with_capacity(rows.len());
+            let mut skip: Vec<bool> = Vec::with_capacity(rows.len());
             for (id, _) in &rows {
-                folds.push(match self.chat {
+                let fold = match self.chat {
                     Some(chat) => self.snap.run(|| folds_into(&self.snap.stmts, chat, *id))?,
                     None => None,
-                });
+                };
+                skip.push(left_out(self.snap, *id, fold)?);
+                folds.push(fold);
             }
             let mut sizes = Vec::new();
-            for ((id, _), fold) in rows.iter().zip(&folds) {
-                if fold.is_none() {
+            for (((id, _), fold), skipped) in rows.iter().zip(&folds).zip(&skip) {
+                if fold.is_none() && !skipped {
                     sizes.push(
                         self.snap
                             .run(|| measure_one(&self.snap.stmts, *id, self.depth))?,
@@ -307,12 +311,15 @@ impl<'a, 's> TimelineCursor<'a, 's> {
             let take = cut(&sizes, self.limits);
             let mut batch = CursorBatch::default();
             let mut consumed = 0usize;
-            for ((id, _), fold) in rows.iter().zip(&folds) {
-                match fold {
-                    Some(target) => batch
+            for (((id, _), fold), skipped) in rows.iter().zip(&folds).zip(&skip) {
+                match (fold, skipped) {
+                    // Left out (an event, or a reaction folded into one):
+                    // passed over, never returned.
+                    (_, true) => {}
+                    (Some(target), false) => batch
                         .folded
                         .push((MessageId::new(*id), MessageId::new(*target))),
-                    None => {
+                    (None, false) => {
                         if batch.items.len() == take {
                             break;
                         }
@@ -326,6 +333,10 @@ impl<'a, 's> TimelineCursor<'a, 's> {
             if let Some((id, key)) = consumed.checked_sub(1).and_then(|i| rows.get(i)) {
                 self.after_key.clone_from(key);
                 self.after_id = *id;
+            }
+            if batch.items.is_empty() && batch.folded.is_empty() {
+                // Every row read was left out: read on.
+                continue;
             }
             return Ok(Some(batch));
         }
@@ -384,31 +395,53 @@ impl<'a, 's> IdCursor<'a, 's> {
         self.next = 0;
     }
 
-    /// The next batch, or `None` at the end.
+    /// The next batch, or `None` at the end. Ids the snapshot leaves out
+    /// (events, when it leaves them out) are passed over.
     pub fn next_batch(&mut self) -> Result<Option<CursorBatch>, ArchiveError> {
-        self.snap.checkpoint()?;
-        let rest = self.ids.get(self.next..).unwrap_or(&[]);
-        if rest.is_empty() {
-            return Ok(None);
+        loop {
+            self.snap.checkpoint()?;
+            let rest = self.ids.get(self.next..).unwrap_or(&[]);
+            if rest.is_empty() {
+                return Ok(None);
+            }
+            // (id, its size; `None`: left out)
+            let mut read: Vec<(i64, Option<u64>)> = Vec::new();
+            for id in rest.iter().take(self.limits.max_ids) {
+                let size = if left_out(self.snap, *id, None)? {
+                    None
+                } else {
+                    Some(
+                        self.snap
+                            .run(|| measure_one(&self.snap.stmts, *id, self.depth))?,
+                    )
+                };
+                read.push((*id, size));
+            }
+            let sizes: Vec<u64> = read.iter().filter_map(|(_, s)| *s).collect();
+            let take = cut(&sizes, self.limits);
+            let mut items = Vec::new();
+            let mut measured = 0u64;
+            let mut consumed = 0usize;
+            for (id, size) in &read {
+                if let Some(size) = size {
+                    if items.len() == take {
+                        break;
+                    }
+                    items.push(MessageId::new(*id));
+                    measured = measured.saturating_add(*size);
+                }
+                consumed += 1;
+            }
+            self.next += consumed;
+            if items.is_empty() {
+                continue;
+            }
+            return Ok(Some(CursorBatch {
+                items,
+                folded: Vec::new(),
+                measured_bytes: measured,
+            }));
         }
-        let mut sizes = Vec::new();
-        for id in rest.iter().take(self.limits.max_ids) {
-            sizes.push(
-                self.snap
-                    .run(|| measure_one(&self.snap.stmts, *id, self.depth))?,
-            );
-        }
-        let take = cut(&sizes, self.limits);
-        let items: Vec<MessageId> = rest.iter().take(take).map(|i| MessageId::new(*i)).collect();
-        self.next += take;
-        Ok(Some(CursorBatch {
-            items,
-            folded: Vec::new(),
-            measured_bytes: sizes
-                .iter()
-                .take(take)
-                .fold(0u64, |a, b| a.saturating_add(*b)),
-        }))
     }
 }
 

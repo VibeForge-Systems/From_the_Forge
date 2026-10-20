@@ -24,12 +24,21 @@
 // - **Paths never reach the webview** (I4): the destination is a token and
 //   a display name, rendered by `SafeText`.
 // - **The privacy screen** closes the dialog and drops the draft
-//   (`closeForPrivacy`); a running export continues, and its end is
-//   announced by a toast.
+//   (`closeForPrivacy`); a running export continues, shown by the navbar's
+//   status chip, and its end is announced by a toast.
+// - **Continue in background** (slice 6k2) closes the dialog while the
+//   job runs; the navbar's chip (`chipVisible`) reopens it at its progress
+//   or, once it ended unseen, at its result (`reopen`).
+// - **"Save a copy"** (`openSaveCopy`, slice 6k2, spec §6.6) is the same
+//   dialog with no form: the attachment's facts (`copyReady`), the
+//   disclosure and, for an attachment of an unsent part, the
+//   earlier-content confirmation; then a save dialog, whose name Rust
+//   checks (`riskyName` needs its own confirmation); then the job.
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { IpcError, ipc } from '@/services/ipc';
 import {
+  COPY_SAVED,
   INFORMATIONAL_WARNINGS,
   OUTCOME_TEXT,
   cancelledSentence,
@@ -47,6 +56,7 @@ import {
 import type {
   AttachmentModeInput,
   ClockInput,
+  CopyPreviewDto,
   CsvProfileInput,
   DraftId,
   ErrorCode,
@@ -77,9 +87,17 @@ export interface ExportSearchContext {
   viewer: number;
   searchId: number;
   matches: number;
-  conversations: number;
+  /** `null` when not every hit has been loaded, so the number is not known. */
+  conversations: number | null;
   /** Only the first 10,000 matches are in the set. */
   capped: boolean;
+}
+
+/** The attachment "Save a copy" saves: one the viewer surfaced. */
+export interface ExportCopyTarget {
+  archiveId: string;
+  viewer: number;
+  attachmentId: SafeId;
 }
 
 /** Where the dialog was opened, and so which scopes it offers. */
@@ -108,6 +126,7 @@ export interface ExportForm {
   largerPreviews: boolean;
   history: boolean;
   reactions: boolean;
+  events: boolean;
   revealOneTimeCodes: boolean;
   revealEarlierContent: boolean;
   hiddenCharacterMarkers: boolean;
@@ -134,6 +153,7 @@ export type CountState =
   | { kind: 'zone' }
   | { kind: 'zoneFailed'; reason: ZoneFailure }
   | { kind: 'ready'; preview: ExportPreviewDto }
+  | { kind: 'copyReady'; copy: CopyPreviewDto }
   | { kind: 'failed'; error: StoredExportError };
 
 export interface ExportJobState extends ProgressJob {
@@ -142,7 +162,15 @@ export interface ExportJobState extends ProgressJob {
 }
 
 export type ExportResult =
-  | { kind: 'finished'; jobId: string; outcome: ExportOutcomeDto; summary: ExportSummaryDto; formats: ExportFormatInput[] }
+  | {
+      kind: 'finished';
+      jobId: string;
+      outcome: ExportOutcomeDto;
+      summary: ExportSummaryDto;
+      formats: ExportFormatInput[];
+      /** "Save a copy" of one attachment. */
+      copy: boolean;
+    }
   | { kind: 'failed'; error: StoredExportError; stagingRemoved: boolean }
   | { kind: 'cancelled'; stagingRemoved: boolean };
 
@@ -222,6 +250,7 @@ export function freshForm(ctx: ExportOpenContext, systemZone: string | null): Ex
     largerPreviews: false,
     history: true,
     reactions: true,
+    events: true,
     revealOneTimeCodes: false,
     revealEarlierContent: false,
     hiddenCharacterMarkers: true,
@@ -236,6 +265,29 @@ export function freshForm(ctx: ExportOpenContext, systemZone: string | null): Ex
   };
 }
 
+/**
+ * "Save a copy"'s fixed options: the file is copied and every other option
+ * is off (none applies to one file without records), in UTC. Rust accepts
+ * exactly this set for a copy and refuses any other.
+ */
+export const COPY_OPTIONS: ExportOptionsInput = {
+  attachments: 'copyOriginals',
+  keepExtensions: false,
+  previews: false,
+  largerPreviews: false,
+  history: false,
+  reactions: false,
+  events: false,
+  revealOneTimeCodes: false,
+  revealEarlierContent: false,
+  hiddenCharacterMarkers: false,
+  seconds: false,
+  includeIdentifiers: false,
+  clock: 'h23',
+  lineEndings: 'lf',
+  zone: 'utc',
+};
+
 const DRAFT_FALLBACK = 'The export could not be counted. Close the dialog and try again.';
 /** `failed` on the preview channel carries a code only. */
 const PREVIEW_FAILED: Partial<Record<ErrorCode, string>> = {
@@ -247,6 +299,8 @@ const PREVIEW_FAILED: Partial<Record<ErrorCode, string>> = {
   archiveNewer: 'The archive was made by a newer version of the app.',
   archiveNewerRules: 'The archive was made by a newer version of the app.',
   invalidInput: 'The conversation or message to export is not in this archive. Review the export again.',
+  attachmentUnavailable:
+    'This attachment has no stored file that can be saved, or it is no longer shown. Open it again in the viewer and try again.',
   viewerClosed: 'The viewer was closed, so its search results can no longer be exported.',
   searchSuperseded: 'A newer search replaced these results. Export the new results instead.',
   queryTooBroad: 'The search is too broad to export. Narrow it and try again.',
@@ -261,6 +315,8 @@ function stored(error: unknown): StoredExportError {
 export const useExports = defineStore('exports', () => {
   const open = ref(false);
   const context = ref<ExportOpenContext | null>(null);
+  /** Set for "Save a copy"; `null` for an export. */
+  const copyTarget = ref<ExportCopyTarget | null>(null);
   const form = ref<ExportForm | null>(null);
   const step = ref<ExportStep>('what');
   const optionsOpen = ref(false);
@@ -276,6 +332,10 @@ export const useExports = defineStore('exports', () => {
   const confirmCodes = ref(false);
   const confirmEarlier = ref(false);
   const confirmKeepExtensions = ref(false);
+  /** "Save a copy" of an attachment of an unsent part (owner Q4). */
+  const confirmCopyEarlier = ref(false);
+  /** "Save a copy" under a name that can run programs (§6.6). */
+  const confirmRiskyName = ref(false);
 
   const destination = ref<ExportDestinationDto | null>(null);
   const choosing = ref(false);
@@ -288,7 +348,11 @@ export const useExports = defineStore('exports', () => {
   const starting = ref(false);
 
   const job = ref<ExportJobState | null>(null);
+  /** The archive the job reads (the Archive page's "Exporting" state). */
+  const jobArchiveId = ref<string | null>(null);
   const result = ref<ExportResult | null>(null);
+  /** The job ended while the dialog was closed, and its result is unread. */
+  const resultUnseen = ref(false);
   const askCancel = ref(false);
   const showingFolder = ref(false);
 
@@ -300,8 +364,12 @@ export const useExports = defineStore('exports', () => {
   let pending: PreviewEvent[] = [];
   let zoneAbort: AbortController | null = null;
   let formatsAtStart: ExportFormatInput[] = [];
+  let copyAtStart = false;
 
   const liveJob = computed(() => (job.value && !job.value.ended ? job.value : null));
+  const isCopy = computed(() => copyTarget.value !== null);
+  /** The navbar chip: a job runs, or ended unseen, while the dialog is closed. */
+  const chipVisible = computed(() => !open.value && (liveJob.value !== null || resultUnseen.value));
 
   // --- Derived form facts ------------------------------------------------------
 
@@ -335,9 +403,12 @@ export const useExports = defineStore('exports', () => {
   });
 
   const preview = computed(() => (count.value.kind === 'ready' ? count.value.preview : null));
+  const copyFacts = computed(() => (count.value.kind === 'copyReady' ? count.value.copy : null));
   const codesCount = computed(() => preview.value?.messagesWithFlaggedCode ?? 0);
   const earlierCount = computed(() => preview.value?.messagesWithEarlierContent ?? 0);
   const reviewConfirmed = computed(() => {
+    const c = copyFacts.value;
+    if (isCopy.value) return c !== null && (!c.earlierContent || confirmCopyEarlier.value);
     const f = form.value;
     if (!f || !preview.value) return false;
     if (f.revealOneTimeCodes && codesCount.value > 0 && !confirmCodes.value) return false;
@@ -353,6 +424,7 @@ export const useExports = defineStore('exports', () => {
     if (!d || !draftId.value || needsReview.value || starting.value || liveJob.value) return false;
     if (!reviewConfirmed.value) return false;
     if (warningsToConfirm.value.some((w) => !confirmedWarnings.value.includes(w))) return false;
+    if (d.riskyName && !confirmRiskyName.value) return false;
     return !d.targetExists || replaceConfirmed.value;
   });
 
@@ -361,6 +433,8 @@ export const useExports = defineStore('exports', () => {
   function scopeInput(): ExportScopeInput | null {
     const f = form.value;
     const ctx = context.value;
+    const t = copyTarget.value;
+    if (t) return { kind: 'attachment', viewer: t.viewer, attachmentId: t.attachmentId };
     if (!f || !ctx) return null;
     switch (f.scope) {
       case 'conversation':
@@ -402,8 +476,7 @@ export const useExports = defineStore('exports', () => {
       largerPreviews: previews && f.largerPreviews,
       history: f.history,
       reactions: f.reactions,
-      // Leaving events out is refused in this version (exportUnavailable).
-      events: true,
+      events: f.events,
       revealOneTimeCodes: f.revealOneTimeCodes,
       revealEarlierContent: f.revealEarlierContent,
       hiddenCharacterMarkers: f.hiddenCharacterMarkers,
@@ -419,6 +492,7 @@ export const useExports = defineStore('exports', () => {
 
   function request(zone?: ZoneTableInputDto): PreviewExportRequest | null {
     const scope = scopeInput();
+    if (scope?.kind === 'attachment') return { scope, formats: [], options: { ...COPY_OPTIONS } };
     const options = optionsInput();
     const f = form.value;
     if (!scope || !options || !f) return null;
@@ -438,23 +512,60 @@ export const useExports = defineStore('exports', () => {
    */
   function openExport(ctx: ExportOpenContext): void {
     if (liveJob.value) {
-      step.value = 'progress';
-      open.value = true;
+      reopen();
       return;
     }
+    begin(ctx, null);
+    step.value = 'what';
+    open.value = true;
+  }
+
+  /**
+   * "Save a copy" of one surfaced attachment (§6.6): straight to the
+   * attachment's facts and the disclosure, then where to save.
+   */
+  function openSaveCopy(target: ExportCopyTarget): void {
+    if (liveJob.value) {
+      reopen();
+      return;
+    }
+    begin({ archiveId: target.archiveId, scope: 'archive' }, target);
+    step.value = 'review';
+    open.value = true;
+    void startCount();
+  }
+
+  /** A fresh dialog: nothing carries over from an earlier opening. */
+  function begin(ctx: ExportOpenContext, target: ExportCopyTarget | null): void {
     supersede();
     systemZone.value = systemZoneName();
     zones.value = supportedZones();
     context.value = ctx;
+    copyTarget.value = target;
     form.value = freshForm(ctx, systemZone.value);
-    step.value = 'what';
     optionsOpen.value = false;
     result.value = null;
+    resultUnseen.value = false;
     job.value = null;
     notice.value = null;
     askCancel.value = false;
     resetReview();
+  }
+
+  /** Show the running job's progress, or its unread result (the chip). */
+  function reopen(): void {
+    if (liveJob.value) step.value = 'progress';
+    else if (result.value) step.value = 'result';
+    else return;
+    resultUnseen.value = false;
     open.value = true;
+  }
+
+  /** Close the dialog and let the export run on (§10 step 6). */
+  function continueInBackground(): void {
+    if (!liveJob.value) return;
+    askCancel.value = false;
+    open.value = false;
   }
 
   function resetReview(): void {
@@ -464,6 +575,7 @@ export const useExports = defineStore('exports', () => {
     confirmCodes.value = false;
     confirmEarlier.value = false;
     confirmKeepExtensions.value = false;
+    confirmCopyEarlier.value = false;
     resetDestination();
   }
 
@@ -473,6 +585,7 @@ export const useExports = defineStore('exports', () => {
     confirmedWarnings.value = [];
     removeLeftovers.value = false;
     replaceConfirmed.value = false;
+    confirmRiskyName.value = false;
     needsReview.value = false;
   }
 
@@ -501,6 +614,8 @@ export const useExports = defineStore('exports', () => {
     resetReview();
     open.value = false;
     askCancel.value = false;
+    // A result read in the dialog needs no chip.
+    if (!liveJob.value) resultUnseen.value = false;
   }
 
   /**
@@ -525,8 +640,10 @@ export const useExports = defineStore('exports', () => {
       }
     }
     step.value = next;
-    // Back from the destination keeps the counted draft.
-    if (next === 'review' && (draftId.value === null || count.value.kind !== 'ready')) void startCount();
+    // Back from the destination keeps the counted draft (an export's
+    // counts, or a copy's facts).
+    const counted = count.value.kind === 'ready' || count.value.kind === 'copyReady';
+    if (next === 'review' && (draftId.value === null || !counted)) void startCount();
   }
 
   // --- Counting ----------------------------------------------------------------------
@@ -592,6 +709,9 @@ export const useExports = defineStore('exports', () => {
         await startCount(built.table);
         return;
       }
+      case 'copyReady':
+        count.value = { kind: 'copyReady', copy: e.copy };
+        return;
       case 'ready': {
         const window = e.preview.zoneWindowUtcMs;
         if (window && !zoneAttached) {
@@ -644,7 +764,7 @@ export const useExports = defineStore('exports', () => {
 
   async function chooseDestination(): Promise<void> {
     const id = draftId.value;
-    if (!id || !preview.value || !reviewConfirmed.value || choosing.value) return;
+    if (!id || !(preview.value || copyFacts.value) || !reviewConfirmed.value || choosing.value) return;
     choosing.value = true;
     destinationError.value = null;
     const zone = zoneTable.value && !zoneAttached ? { zone: zoneTable.value } : {};
@@ -679,6 +799,18 @@ export const useExports = defineStore('exports', () => {
   // --- The job ------------------------------------------------------------------------
 
   function confirmations(): ExportConfirmationsInput {
+    const d = destination.value;
+    const c = copyFacts.value;
+    if (isCopy.value) {
+      return {
+        warnings: warningsToConfirm.value.filter((w) => confirmedWarnings.value.includes(w)),
+        replace: (d?.targetExists ?? false) && replaceConfirmed.value,
+        // The one attachment, confirmed (owner Q4).
+        reveal: c?.earlierContent ? { earlierContent: 1 } : null,
+        keepRiskyExtension: (d?.riskyName ?? false) && confirmRiskyName.value,
+        removeLeftovers: (d?.leftovers ?? 0) > 0 && removeLeftovers.value,
+      };
+    }
     const f = form.value;
     const reveal =
       f && (f.revealOneTimeCodes || f.revealEarlierContent)
@@ -702,7 +834,9 @@ export const useExports = defineStore('exports', () => {
     if (!canStart.value || !id || !d || !form.value) return;
     starting.value = true;
     const c = confirmations();
-    formatsAtStart = AVAILABLE_FORMATS.filter((x) => form.value?.formats.includes(x));
+    copyAtStart = isCopy.value;
+    formatsAtStart = copyAtStart ? [] : AVAILABLE_FORMATS.filter((x) => form.value?.formats.includes(x));
+    jobArchiveId.value = context.value?.archiveId ?? null;
     // `start_export` consumes the draft, whatever its answer.
     draftId.value = null;
     countEpoch += 1;
@@ -778,8 +912,14 @@ export const useExports = defineStore('exports', () => {
           outcome: event.outcome,
           summary: event.summary,
           formats: formatsAtStart,
+          copy: copyAtStart,
         };
-        if (!open.value) toast(event.outcome === 'completed' ? 'success' : 'warning', OUTCOME_TEXT[event.outcome]);
+        if (!open.value) {
+          toast(
+            event.outcome === 'completed' ? 'success' : 'warning',
+            copyAtStart ? COPY_SAVED : OUTCOME_TEXT[event.outcome],
+          );
+        }
         break;
       case 'failed':
         result.value = {
@@ -800,6 +940,7 @@ export const useExports = defineStore('exports', () => {
     current.ended = true;
     askCancel.value = false;
     step.value = 'result';
+    if (!open.value) resultUnseen.value = true;
   }
 
   async function showInFolder(): Promise<void> {
@@ -818,6 +959,17 @@ export const useExports = defineStore('exports', () => {
   return {
     open,
     context,
+    copyTarget,
+    isCopy,
+    copyFacts,
+    confirmCopyEarlier,
+    confirmRiskyName,
+    jobArchiveId,
+    resultUnseen,
+    chipVisible,
+    openSaveCopy,
+    reopen,
+    continueInBackground,
     form,
     step,
     optionsOpen,

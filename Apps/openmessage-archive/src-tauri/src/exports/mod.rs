@@ -32,9 +32,16 @@
 //! - **The PDF fonts** ([`pdf_fonts`], slice 6j1): read from the resource
 //!   folder and checked against their SHA-256 pins before any byte can be
 //!   sent to the helper.
+//! - **"Save a copy"** ([`copy`], slice 6k2): a draft of its own kind
+//!   ([`DraftWork::Copy`]) for one attachment the viewer surfaced; its
+//!   facts (the stored file, its sniffed kind, whether it belongs to an
+//!   unsent part) take the place of counts, its dialog is a save dialog
+//!   offering the defused name, and its job copies the verified bytes
+//!   under the archive's lock.
 //! - **Logs** carry kinds, buckets and outcomes only (I6): never a path, a
 //!   name, an id, a zone, a query, an exact count or content.
 
+pub mod copy;
 pub mod destination;
 pub mod dto;
 pub mod input;
@@ -67,7 +74,7 @@ use dto::{
     DraftId, ExportPreviewDto, PreviewEvent, PreviewExportRequest, SearchPreviewDto,
     ZoneTableInputDto,
 };
-use input::{DraftSpec, Source};
+use input::{CopySpec, DraftSpec, Parsed, Source};
 use messages as em;
 
 /// How long a draft stays usable (spec §9.2).
@@ -101,13 +108,61 @@ pub struct Counted {
     pub search: Option<SearchPreviewDto>,
 }
 
+/// "Save a copy"'s facts, read by its preview: they take the place of an
+/// export's counts. `offered` is the name the save dialog offers
+/// (content: never log it).
+#[derive(Clone)]
+pub struct CopyFacts {
+    pub preview: oma_archive::CopyPreview,
+    pub offered: String,
+}
+
+impl std::fmt::Debug for CopyFacts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CopyFacts")
+            .field("preview", &self.preview)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A "Save a copy" draft.
+#[derive(Debug, Clone)]
+pub struct CopyDraft {
+    pub spec: CopySpec,
+    /// `None` until its preview has read them.
+    pub facts: Option<CopyFacts>,
+}
+
+impl CopyDraft {
+    /// What the space checks need: the one file.
+    pub fn needs(&self) -> SpaceNeeds {
+        let len = self
+            .facts
+            .as_ref()
+            .and_then(|f| f.preview.copy.blob)
+            .map_or(0, |(_, len)| len);
+        SpaceNeeds {
+            copied_bytes: len,
+            largest_copied: len,
+            estimate: len,
+        }
+    }
+}
+
+/// What a draft prepares.
+#[derive(Debug)]
+pub enum DraftWork {
+    Export(DraftSpec),
+    Copy(CopyDraft),
+}
+
 /// A prepared export (spec §9.2).
 #[derive(Debug)]
 pub struct Draft {
     pub id: DraftId,
     created: Duration,
     pub archive: ArchiveId,
-    pub spec: DraftSpec,
+    pub work: DraftWork,
     pub search: Option<DraftSearch>,
     /// `None` until a table arrives (any zone but UTC).
     pub zone: Option<ExportZone>,
@@ -334,6 +389,8 @@ pub fn zone_table(z: &ZoneTableInputDto, window: (i64, i64), now_ms: i64) -> Ipc
 
 /// What a preview's count runs over.
 pub enum CountWhat {
+    /// "Save a copy": the attachment's facts.
+    Copy(oma_archive::AttachmentId),
     Scope(ExportScopeIds),
     Search {
         request: SearchRequest,
@@ -351,7 +408,8 @@ pub enum CountWhat {
 pub struct CountWork {
     pub draft: DraftId,
     pub archive: ArchiveId,
-    pub plan: ExportPlan,
+    /// `None` for "Save a copy".
+    pub plan: Option<ExportPlan>,
     pub opts: PreviewOptions,
     pub what: CountWhat,
     pub token: CancelToken,
@@ -369,7 +427,10 @@ pub fn begin_preview(
     req: &PreviewExportRequest,
     now_ms: i64,
 ) -> IpcResult<CountWork> {
-    let spec = input::parse(req)?;
+    let spec = match input::parse_request(req)? {
+        Parsed::Export(spec) => spec,
+        Parsed::Copy(c) => return begin_copy(host, viewer, c),
+    };
     let plan = spec.probe_plan()?;
     let (archive, search) = match &spec.source {
         Source::Archive(id) => (id.clone(), None),
@@ -408,7 +469,7 @@ pub fn begin_preview(
             ))
         }
     };
-    let opts = PreviewOptions::new(plan.reveal(), plan.depth());
+    let opts = plan.preview_options();
     let what = match (&search, &zone, date_window) {
         (Some(s), _, _) => CountWhat::Search {
             request: s.request.clone(),
@@ -432,7 +493,7 @@ pub fn begin_preview(
         id: id.clone(),
         created: host.now(),
         archive: archive.clone(),
-        spec,
+        work: DraftWork::Export(spec),
         search,
         zone,
         counted: None,
@@ -448,11 +509,48 @@ pub fn begin_preview(
     Ok(CountWork {
         draft: id,
         archive,
-        plan,
+        plan: Some(plan),
         opts,
         what,
         token,
         zone_set,
+    })
+}
+
+/// "Save a copy"'s synchronous part: only an attachment the viewer
+/// surfaced (as `inspect_attachment` requires), in the viewer's archive.
+fn begin_copy(host: &ExportHost, viewer: &ViewerHost, c: CopySpec) -> IpcResult<CountWork> {
+    let s = viewer.get(c.viewer)?;
+    if !s.is_surfaced(c.attachment)? {
+        return Err(crate::viewer::messages::attachment_unavailable());
+    }
+    let archive = s.archive.clone();
+    let id = DraftId::random().ok_or_else(|| IpcError::internal("draft id"))?;
+    let token = CancelToken::new();
+    host.install(Draft {
+        id: id.clone(),
+        created: host.now(),
+        archive: archive.clone(),
+        work: DraftWork::Copy(CopyDraft {
+            spec: c,
+            facts: None,
+        }),
+        search: None,
+        // Nothing is placed in time.
+        zone: Some(ExportZone::Utc),
+        counted: None,
+        count: token.clone(),
+        destination: None,
+    })?;
+    tracing::info!(scope = "attachment", "export draft");
+    Ok(CountWork {
+        draft: id,
+        archive,
+        plan: None,
+        opts: PreviewOptions::default(),
+        what: CountWhat::Copy(c.attachment),
+        token,
+        zone_set: true,
     })
 }
 
@@ -490,6 +588,19 @@ pub fn run_count(
         });
         return;
     }
+    if let CountWhat::Copy(attachment) = what {
+        copy::run_copy_preview(
+            host, env, library, &draft, &archive, attachment, &token, emit,
+        );
+        return;
+    }
+    let Some(plan) = plan else {
+        emit(PreviewEvent::Failed {
+            draft_id: draft,
+            code: ErrorCode::Internal,
+        });
+        return;
+    };
     let started = std::time::Instant::now();
     let result = {
         let mut last = 0u64;
@@ -589,7 +700,9 @@ fn count(
                 reader.export_search_preview(&request, &set, cap, opts, token, progress)?;
             Ok((p, Some(search_dto(&sc, rerun))))
         }
-        CountWhat::NeedsZone { .. } => Err(ArchiveError::Internal("nothing to count")),
+        CountWhat::NeedsZone { .. } | CountWhat::Copy(_) => {
+            Err(ArchiveError::Internal("nothing to count"))
+        }
     }
 }
 
@@ -615,6 +728,10 @@ pub fn prepare_destination(
     now_ms: i64,
 ) -> IpcResult<DialogPlan> {
     host.with_draft(id, |d| {
+        let spec = match &d.work {
+            DraftWork::Copy(c) => return copy::dialog_plan(c, zone),
+            DraftWork::Export(spec) => spec.clone(),
+        };
         let Some(counted) = &d.counted else {
             return Err(IpcError::new(ErrorCode::InvalidInput, em::NOT_PREPARED));
         };
@@ -637,7 +754,7 @@ pub fn prepare_destination(
             }
             (Some(_), None) => {}
         }
-        let plan = d.spec.probe_plan()?;
+        let plan = spec.probe_plan()?;
         let zone = d.zone.clone().unwrap_or(ExportZone::Utc);
         let base = destination::default_name(&zone, now_ms.saturating_mul(1_000_000));
         let picked = match destination::single_format(&plan) {
@@ -646,7 +763,7 @@ pub fn prepare_destination(
         };
         let default_name = match picked {
             destination::Picked::File(f) => format!("{base}.{}", f.extension()),
-            destination::Picked::Folder => base,
+            destination::Picked::Folder | destination::Picked::Copy(_) => base,
         };
         Ok(DialogPlan {
             title: destination::dialog_title(&plan),
@@ -669,7 +786,7 @@ pub fn attach_destination(
 ) -> IpcResult<dto::ExportDestinationDto> {
     let bundle_name = match plan.picked {
         destination::Picked::Folder => plan.default_name.as_str(),
-        destination::Picked::File(_) => "",
+        destination::Picked::File(_) | destination::Picked::Copy(_) => "",
     };
     let chosen = destination::inspect(
         picked_path,

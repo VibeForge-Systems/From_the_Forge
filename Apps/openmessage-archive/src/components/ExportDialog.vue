@@ -5,6 +5,10 @@
 // first control. No path is ever shown: the destination is the name Rust
 // returns, rendered by `SafeText`. A format this version cannot write
 // (XLSX) is shown disabled with its reason, never as a working control.
+// "Save a copy" of one attachment (slice 6k2) uses the same dialog from
+// its Review step: the attachment's facts and the disclosure, then where
+// to save, progress and the result. While an export runs, "Continue in
+// background" closes the dialog and the navbar's chip reopens it.
 import { computed, nextTick, ref, watch } from 'vue';
 import JobProgress from '@/components/JobProgress.vue';
 import ModalDialog from '@/components/ModalDialog.vue';
@@ -13,6 +17,7 @@ import { untrustedContent } from '@/services/safeText';
 import {
   ALL_MATCHES,
   ASK_CANCEL,
+  BACKGROUND_NOTE,
   BACK,
   CANCEL_EXPORT,
   CANCEL_COUNT,
@@ -22,6 +27,19 @@ import {
   CHOOSE_DESTINATION,
   CLOCK_LABEL,
   CLOSE,
+  CONTINUE_IN_BACKGROUND,
+  COPY_CANCEL,
+  COPY_DISCLOSURE,
+  COPY_EARLIER_CONFIRM,
+  COPY_LEGEND,
+  COPY_READING,
+  COPY_RESULT,
+  COPY_RISKY_PREFIX,
+  COPY_RISKY_SUFFIX,
+  COPY_SAVED,
+  COPY_SAVES_AS,
+  COPY_START,
+  COPY_TITLE,
   COUNTING,
   CSV_DATA_TOOLS_WARNING,
   CSV_PROFILE_LABEL,
@@ -32,8 +50,9 @@ import {
   DATE_THIS,
   DATE_THROUGH,
   DISCLOSURE,
+  DIALOG_TITLE,
   DONE,
-  EVENTS_ALWAYS,
+  EVENTS_NOTE,
   FORMAT_NEEDED,
   FORMAT_ORDER,
   FORMAT_TEXT,
@@ -65,6 +84,7 @@ import {
   ZONE_CHOICE_LABEL,
   ZONE_FAILED,
   cancelledSentence,
+  copySizeLine,
   failedNote,
   freeSpaceLine,
   leftoversLine,
@@ -89,7 +109,8 @@ const nf = new Intl.NumberFormat();
 
 const f = computed(() => x.form);
 const ctx = computed(() => x.context);
-const legend = computed(() => STEP_LEGEND[x.step]);
+const legend = computed(() => (x.isCopy ? (COPY_LEGEND[x.step] ?? STEP_LEGEND[x.step]) : STEP_LEGEND[x.step]));
+const dialogTitle = computed(() => (x.isCopy ? COPY_TITLE : DIALOG_TITLE));
 
 const attachmentsModel = computed<AttachmentModeInput>({
   get: () => x.attachments,
@@ -130,6 +151,7 @@ const informational = computed(() => (x.destination?.warnings ?? []).filter((w) 
 
 const countStatus = computed(() => {
   const c = x.count;
+  if (x.isCopy && (c.kind === 'counting' || c.kind === 'idle')) return COPY_READING;
   if (c.kind === 'counting') return c.rows > 0 ? `${COUNTING} (${nf.format(c.rows)} rows so far)` : COUNTING;
   if (c.kind === 'zone') return PREPARING_ZONE;
   return '';
@@ -162,9 +184,18 @@ function next(): void {
   if (to && canNext.value) x.goTo(to);
 }
 
+/** "Save a copy" starts at Review: there is nothing before it. */
+const canBack = computed(() => x.step !== 'what' && !(x.isCopy && x.step === 'review'));
+
 function back(): void {
   const to = PREV_STEP[x.step];
-  if (to) x.goTo(to);
+  if (to && canBack.value) x.goTo(to);
+}
+
+/** Cancel while counting: back to Options, or, for a copy, close. */
+function cancelCount(): void {
+  if (x.isCopy) x.close();
+  else x.goTo('options');
 }
 
 /** Move focus to the step's first enabled control. */
@@ -186,14 +217,17 @@ watch(
 </script>
 
 <template>
-  <ModalDialog :open="x.open" title="Export" guard-escape @close="x.requestClose()">
+  <ModalDialog :open="x.open" :title="dialogTitle" guard-escape @close="x.requestClose()">
     <div v-if="x.open && f && ctx" ref="body" class="oma-export">
       <div v-if="x.askCancel" class="alert alert-warning" role="alert">
         <p class="mb-2">{{ ASK_CANCEL }}</p>
-        <div class="d-flex gap-2">
+        <div class="d-flex flex-wrap gap-2">
           <button type="button" class="btn btn-sm btn-danger" @click="x.cancelExport()">{{ CANCEL_EXPORT }}</button>
           <button type="button" class="btn btn-sm btn-outline-secondary" @click="x.askCancel = false">
             {{ KEEP_EXPORTING }}
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" @click="x.continueInBackground()">
+            {{ CONTINUE_IN_BACKGROUND }}
           </button>
         </div>
       </div>
@@ -391,14 +425,13 @@ watch(
           <div class="form-check">
             <input
               id="export-events"
+              v-model="f.events"
               class="form-check-input"
               type="checkbox"
-              checked
-              disabled
               aria-describedby="export-events-note"
             />
             <label class="form-check-label" for="export-events">{{ OPTION_TEXT.events }}</label>
-            <div id="export-events-note" class="small text-body-secondary">{{ EVENTS_ALWAYS }}</div>
+            <div id="export-events-note" class="small text-body-secondary">{{ EVENTS_NOTE }}</div>
           </div>
 
           <h3 class="fs-6 mt-3">{{ OPTION_GROUP.sensitive }}</h3>
@@ -546,7 +579,7 @@ watch(
           <p class="mb-2" aria-hidden="true">
             <span class="spinner-border spinner-border-sm text-primary me-2"></span>{{ countStatus || COUNTING }}
           </p>
-          <button type="button" class="btn btn-sm btn-outline-secondary" @click="x.goTo('options')">{{ CANCEL_COUNT }}</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" @click="cancelCount()">{{ CANCEL_COUNT }}</button>
         </div>
         <div v-else-if="x.count.kind === 'zoneFailed'" class="alert alert-warning" role="alert">
           <p class="mb-2">{{ ZONE_FAILED[x.count.reason] }}</p>
@@ -556,6 +589,31 @@ watch(
           <p class="mb-2">{{ x.count.error.message }}</p>
           <button type="button" class="btn btn-sm btn-outline-secondary" @click="x.reviewAgain()">{{ REVIEW_AGAIN }}</button>
         </div>
+        <template v-else-if="x.copyFacts">
+          <p class="mb-2">{{ copySizeLine(x.copyFacts.fileBytes) }}</p>
+          <p class="alert alert-secondary small mb-2">{{ COPY_DISCLOSURE }}</p>
+          <div v-if="x.copyFacts.earlierContent" class="form-check mb-2">
+            <input
+              id="export-confirm-copy-earlier"
+              v-model="x.confirmCopyEarlier"
+              class="form-check-input"
+              type="checkbox"
+              required
+            />
+            <label class="form-check-label" for="export-confirm-copy-earlier">{{ COPY_EARLIER_CONFIRM }}</label>
+          </div>
+          <p v-if="x.destinationError" class="alert alert-danger py-2 mb-2" role="alert">
+            {{ x.destinationError.message }}
+          </p>
+          <button
+            type="button"
+            class="btn btn-primary"
+            :disabled="!x.reviewConfirmed || x.choosing"
+            @click="x.chooseDestination()"
+          >
+            {{ CHOOSE_DESTINATION }}
+          </button>
+        </template>
         <template v-else-if="x.preview">
           <p v-if="x.notice" class="alert alert-info py-2" role="status">{{ x.notice }}</p>
           <ul class="mb-2">
@@ -618,8 +676,17 @@ watch(
       <fieldset v-else-if="x.step === 'destination' && x.destination">
         <legend class="fs-6 fw-semibold">{{ legend }}</legend>
         <p class="mb-2">
-          {{ SAVES_AS[x.destination.packaging] }}{{ ' ' }}<SafeText v-if="displayName" :value="displayName" mode="identifier" />.
+          {{ x.isCopy ? COPY_SAVES_AS : SAVES_AS[x.destination.packaging] }}{{ ' '
+          }}<SafeText v-if="displayName" :value="displayName" mode="identifier" />.
         </p>
+        <div v-if="x.destination.riskyName" class="form-check mb-2">
+          <input id="export-confirm-risky" v-model="x.confirmRiskyName" class="form-check-input" type="checkbox" required />
+          <label class="form-check-label" for="export-confirm-risky">
+            {{ COPY_RISKY_PREFIX }}<SafeText v-if="displayName" :value="displayName" mode="identifier" quiet />{{
+              COPY_RISKY_SUFFIX
+            }}
+          </label>
+        </div>
         <div v-if="x.destination.targetExists" class="alert alert-warning py-2" role="alert">
           <p class="mb-2">
             {{ REPLACE_PROMPT_PREFIX }}<SafeText v-if="displayName" :value="displayName" mode="identifier" quiet />{{
@@ -668,22 +735,46 @@ watch(
           >
             {{ x.destination.packaging === 'singleFile' ? CHOOSE_ANOTHER : CHOOSE_ANOTHER_FOLDER }}
           </button>
-          <button type="button" class="btn btn-primary" :disabled="!x.canStart" @click="x.start()">{{ START }}</button>
+          <button type="button" class="btn btn-primary" :disabled="!x.canStart" @click="x.start()">
+            {{ x.isCopy ? COPY_START : START }}
+          </button>
         </div>
       </fieldset>
 
       <!-- 6. Progress -->
       <fieldset v-else-if="x.step === 'progress'">
         <legend class="fs-6 fw-semibold">{{ legend }}</legend>
-        <JobProgress v-if="x.job" :job="x.job" :cancel-label="CANCEL_EXPORT" @cancel="x.cancelExport()" />
-        <p class="small text-body-secondary mt-2 mb-0">{{ CANCEL_NOTE }}</p>
+        <JobProgress
+          v-if="x.job"
+          :job="x.job"
+          :cancel-label="x.isCopy ? COPY_CANCEL : CANCEL_EXPORT"
+          @cancel="x.cancelExport()"
+        />
+        <p class="small text-body-secondary mt-2 mb-2">{{ CANCEL_NOTE }}</p>
+        <button
+          v-if="x.liveJob"
+          type="button"
+          class="btn btn-sm btn-outline-secondary"
+          aria-describedby="export-background-note"
+          @click="x.continueInBackground()"
+        >
+          {{ CONTINUE_IN_BACKGROUND }}
+        </button>
+        <p id="export-background-note" class="small text-body-secondary mt-1 mb-0">{{ BACKGROUND_NOTE }}</p>
       </fieldset>
 
       <!-- 7. Result -->
       <fieldset v-else-if="x.step === 'result' && x.result">
         <legend class="fs-6 fw-semibold">{{ legend }}</legend>
         <div role="status">
-          <template v-if="x.result.kind === 'finished'">
+          <template v-if="x.result.kind === 'finished' && x.result.copy">
+            <p class="fw-semibold mb-1">{{ COPY_SAVED }}</p>
+            <p class="mb-2">{{ COPY_RESULT }}</p>
+            <ul class="small mb-2">
+              <li v-for="(line, i) in resultNotes(x.result.summary)" :key="i">{{ line }}</li>
+            </ul>
+          </template>
+          <template v-else-if="x.result.kind === 'finished'">
             <p class="fw-semibold mb-1">{{ OUTCOME_TEXT[x.result.outcome] }}</p>
             <p class="mb-2">{{ resultSentence(x.result.summary, x.result.formats) }}</p>
             <ul class="small mb-2">
@@ -713,7 +804,7 @@ watch(
     </div>
     <template #footer>
       <template v-if="x.step === 'what' || x.step === 'format' || x.step === 'options' || x.step === 'review' || x.step === 'destination'">
-        <button v-if="x.step !== 'what'" type="button" class="btn btn-outline-secondary me-auto" @click="back()">{{ BACK }}</button>
+        <button v-if="canBack" type="button" class="btn btn-outline-secondary me-auto" @click="back()">{{ BACK }}</button>
         <button type="button" class="btn btn-outline-secondary" @click="x.close()">{{ CLOSE }}</button>
         <button
           v-if="x.step === 'what' || x.step === 'format' || x.step === 'options'"

@@ -170,8 +170,11 @@ fn rows_of(s: Snap<'_, '_>, scope: &ExportScopeIds) -> Vec<(Option<i64>, i64, bo
         }
         ExportScopeIds::Messages(groups) => {
             for g in groups {
-                for m in &g.messages {
-                    out.push((g.chat.map(ChatId::get), m.get(), false));
+                let mut cur = s.by_ids(&g.messages);
+                while let Some(b) = cur.next_batch().expect("batch") {
+                    for m in &b.items {
+                        out.push((g.chat.map(ChatId::get), m.get(), false));
+                    }
                 }
             }
         }
@@ -1518,4 +1521,211 @@ fn no_masked_text_reaches_any_export_read_unless_revealed() {
     for s in earlier.iter().chain(&["SYNTHOTCCODE"]) {
         assert!(shown.contains(s), "{s} revealed");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Events left out (slice 6k2)
+// ---------------------------------------------------------------------------
+
+/// `item_kind` 5 (`GroupRenamed`): a group event.
+const EVENT_KIND: i64 = 5;
+
+#[test]
+fn events_left_out_are_skipped_by_every_read_and_counted() {
+    let (tmp, lib, id) = bulk(2_000);
+    let c = raw(&db_path(&tmp, &id));
+    add_blobs(&c);
+    let r = lib.open_read(&id).expect("reader");
+    let big = ChatId::new(one(
+        &c,
+        "SELECT chat_id FROM chat_message GROUP BY chat_id ORDER BY count(*) DESC LIMIT 1",
+        &[],
+    ));
+    // A folded reaction's target becomes an event: the reaction row goes
+    // with it. Then every 9th plain message of the archive is an event,
+    // and one message is of an unknown kind (it stays).
+    let all = ExportScopeIds::Archive {
+        range: TimeRange::All,
+    };
+    let folded_target = snapshot(&r, &lib, &id, |s| {
+        let mut cur = s.timeline(big, TimeRange::All);
+        while let Some(b) = cur.next_batch()? {
+            if let Some((_, t)) = b.folded.first() {
+                return Ok(Some(t.get()));
+            }
+        }
+        Ok(None)
+    })
+    .expect("a folded reaction in the big conversation");
+    c.execute(
+        "UPDATE message SET item_kind = ?1 WHERE id = ?2",
+        [EVENT_KIND, folded_target],
+    )
+    .expect("event target");
+    c.execute(
+        "UPDATE message SET item_kind = ?1 WHERE assoc_present = 0 AND item_kind = 1 \
+           AND id % 9 = 0",
+        [EVENT_KIND],
+    )
+    .expect("events");
+    let unknown = one(
+        &c,
+        "SELECT min(id) FROM message WHERE assoc_present = 0 AND item_kind = 1",
+        &[],
+    );
+    c.execute("UPDATE message SET item_kind = 0 WHERE id = ?1", [unknown])
+        .expect("unknown");
+    let events: BTreeSet<i64> = ints(
+        &c,
+        "SELECT id FROM message WHERE item_kind NOT IN (0, 1)",
+        &[],
+    )
+    .into_iter()
+    .collect();
+    assert!(events.len() > 50);
+    let some: Vec<MessageId> = ints(&c, "SELECT id FROM message ORDER BY id DESC LIMIT 60", &[])
+        .into_iter()
+        .map(MessageId::new)
+        .collect();
+    let scopes = [
+        all.clone(),
+        ExportScopeIds::Conversation {
+            chat: big,
+            range: TimeRange::All,
+        },
+        ExportScopeIds::Messages(vec![ScopeGroup::new(None, some)]),
+    ];
+    let keep = PreviewOptions::new(Reveal::default(), ExportDepth::Items);
+    let drop = keep.leaving_out_events(true);
+    for scope in &scopes {
+        let (with, targets) = snapshot(&r, &lib, &id, |s| {
+            Ok((rows_of(s, scope), fold_targets(s, scope)))
+        });
+        let p = r
+            .export_preview(scope, drop, &CancelToken::new(), &mut |_| {})
+            .expect("preview");
+        let (pre, rows, index) = snapshot(&r, &lib, &id, |s| {
+            let pre = s.precount(scope, drop, &mut |_| {})?;
+            assert!(s.leaves_out_events(), "the pre-count set the snapshot");
+            Ok((pre, rows_of(s, scope), s.scope_index(scope)?))
+        });
+        assert_eq!(pre, p, "{scope:?}: the pre-count equals the preview");
+        // Exactly the events and the reactions folded into them are gone.
+        let expect: Vec<_> = with
+            .iter()
+            .filter(|row| !events.contains(&row.1))
+            .filter(|row| {
+                !(row.2
+                    && targets
+                        .get(&(row.0, row.1))
+                        .is_some_and(|t| events.contains(t)))
+            })
+            .copied()
+            .collect();
+        assert_eq!(rows, expect, "{scope:?}");
+        assert!(rows.iter().all(|row| !events.contains(&row.1)));
+        assert_eq!(
+            rows.iter().any(|row| row.1 == unknown),
+            with.iter().any(|row| row.1 == unknown),
+            "an unknown kind stays"
+        );
+        assert_eq!(
+            p.events_left_out,
+            (with.len() - rows.len()) as u64,
+            "{scope:?}"
+        );
+        let mut got = counts(&p);
+        let mut want = oracle(&c, &rows, scope);
+        for k in ["span_first_ms", "span_last_ms"] {
+            got.remove(k);
+            want.remove(k);
+        }
+        assert_eq!(got, want, "{scope:?}");
+        // Ordinals have no gaps.
+        let ids: BTreeSet<i64> = rows.iter().map(|r| r.1).collect();
+        assert_eq!(index.len(), ids.len());
+        for (n, m) in ids.iter().enumerate() {
+            assert_eq!(index.ordinal(MessageId::new(*m)), Some(n as u64 + 1));
+        }
+        for e in &events {
+            assert_eq!(index.ordinal(MessageId::new(*e)), None);
+        }
+        // Included, nothing is left out.
+        let p = r
+            .export_preview(scope, keep, &CancelToken::new(), &mut |_| {})
+            .expect("preview");
+        assert_eq!(p.events_left_out, 0);
+        assert_eq!(p.timeline_rows, with.len() as u64);
+    }
+    let whole = r
+        .export_preview(&all, drop, &CancelToken::new(), &mut |_| {})
+        .expect("preview");
+    assert!(whole.events_left_out > events.len() as u64 - 1);
+}
+
+/// The target of every folded row of `scope`, by (chat, row).
+fn fold_targets(s: Snap<'_, '_>, scope: &ExportScopeIds) -> BTreeMap<(Option<i64>, i64), i64> {
+    let mut out = BTreeMap::new();
+    let mut drain = |chat: ChatId| {
+        let mut cur = s.timeline(chat, TimeRange::All);
+        while let Some(b) = cur.next_batch().expect("batch") {
+            for (row, t) in &b.folded {
+                out.insert((Some(chat.get()), row.get()), t.get());
+            }
+        }
+    };
+    match scope {
+        ExportScopeIds::Conversation { chat, .. } => drain(*chat),
+        ExportScopeIds::Archive { .. } => {
+            for chat in s.chat_ids().expect("chats") {
+                drain(chat);
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
+#[test]
+fn a_copy_names_its_file_and_withholds_unsent_parts() {
+    let (tmp, lib, id) = bulk(300);
+    let c = raw(&db_path(&tmp, &id));
+    let (_m, body, atts) = three_attachments(&c);
+    let r = lib.open_read(&id).expect("reader");
+    let preview = |a: i64| {
+        r.attachment_copy_preview(oma_archive::AttachmentId::new(a), &CancelToken::new())
+            .expect("copy preview")
+    };
+    let p = preview(atts[1].0);
+    assert!(!p.copy.of_unsent_part);
+    assert_eq!(p.copy.blob, Some((BlobId::new(atts[1].1), 5001)));
+    assert!(p.copy.name.text().is_some());
+    // No store file was written for these blobs: nothing to sniff.
+    assert_eq!(p.sniffed, None);
+    assert_eq!(p.generation, r.archive_generation().expect("generation"));
+    // Its part unsent: the copy needs the earlier-content confirmation;
+    // the others do not.
+    unsent(&c, body, 1);
+    assert!(preview(atts[1].0).copy.of_unsent_part);
+    assert!(!preview(atts[0].0).copy.of_unsent_part);
+    // The job's read under the lock agrees, and the Debug form names
+    // nothing.
+    let (copy, dbg) = snapshot(&r, &lib, &id, |s| {
+        let x = s.attachment_copy(oma_archive::AttachmentId::new(atts[1].0))?;
+        let dbg = format!("{x:?}");
+        Ok((x, dbg))
+    });
+    assert_eq!(copy, preview(atts[1].0).copy);
+    assert!(!dbg.contains("SYNTH") && !dbg.contains("5001"), "{dbg}");
+    // An attachment that does not exist.
+    let missing = r
+        .attachment_copy_preview(
+            oma_archive::AttachmentId::new(9_999_999),
+            &CancelToken::new(),
+        )
+        .expect_err("missing");
+    assert!(
+        matches!(missing, ArchiveError::AnchorNotFound),
+        "{missing:?}"
+    );
 }

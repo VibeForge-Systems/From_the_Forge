@@ -98,12 +98,12 @@ pub use error::{
 };
 pub use export::{
     AltTextSource, AltTextWithheld, AlternativeText, ArchiveGeneration, AttachmentAccess,
-    BatchLimits, ChatColumns, ChatMembership, CursorBatch, Derivation, DetailColumns, ExcludedHits,
-    ExportAttachment, ExportDepth, ExportHold, ExportMessage, ExportPreview, ExportScopeIds,
-    ExportSnapshot, HandleColumns, HistoryCursor, HistoryState, IdCursor, MessageRawColumns,
-    PreviewOptions, PreviewProgress, ReactionRow, RecentlyDeletedRow, ScopeGroup, ScopeIndex,
-    SearchScope, SourceIdentifiers, SourceOf, TimeRange, TimelineCursor, ValueHistoryEntry,
-    VersionCodes, EXPORT_SEARCH_CAP,
+    AttachmentCopy, BatchLimits, ChatColumns, ChatMembership, CopyPreview, CursorBatch, Derivation,
+    DetailColumns, ExcludedHits, ExportAttachment, ExportDepth, ExportHold, ExportMessage,
+    ExportPreview, ExportScopeIds, ExportSnapshot, HandleColumns, HistoryCursor, HistoryState,
+    IdCursor, MessageRawColumns, PreviewOptions, PreviewProgress, ReactionRow, RecentlyDeletedRow,
+    ScopeGroup, ScopeIndex, SearchScope, SourceIdentifiers, SourceOf, TimeRange, TimelineCursor,
+    ValueHistoryEntry, VersionCodes, EXPORT_SEARCH_CAP,
 };
 pub use id::{ArchiveId, IdError, Label, LabelState, ARCHIVE_ID_LEN, LABEL_MAX_BYTES};
 pub use import::{

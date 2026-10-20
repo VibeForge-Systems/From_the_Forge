@@ -21,6 +21,7 @@ vi.mock('@/services/ipc', async (importOriginal) => {
 import { ipc } from '@/services/ipc';
 import ArchiveView from '@/views/ArchiveView.vue';
 import { useArchives } from '@/stores/archives';
+import { useExports } from '@/stores/exports';
 import { useSettings } from '@/stores/settings';
 import type { ArchiveStatusDto } from '@/types';
 import {
@@ -85,7 +86,7 @@ function button(w: ReturnType<typeof mountView>, text: string) {
 }
 
 describe('ArchiveView', () => {
-  it('welcomes a new user with one working action and only exports marked planned', () => {
+  it('welcomes a new user with one working action and nothing marked planned', () => {
     const settings = useSettings();
     settings.loaded = true;
     settings.snapshot = snapshot();
@@ -94,7 +95,8 @@ describe('ArchiveView', () => {
     expect(wrapper.text()).toContain('Welcome to OpenMessage Archive');
     const choose = wrapper.findAll('button').find((b) => b.text().includes('Choose archive folder'));
     expect(choose?.attributes('disabled')).toBeUndefined();
-    expect(wrapper.findAll('.oma-planned').map((b) => b.text())).toEqual(['Planned · M6']);
+    // Exports are available from M6 (slice 6k2).
+    expect(wrapper.findAll('.oma-planned').map((b) => b.text())).toEqual([]);
     expect(api.listArchives).not.toHaveBeenCalled();
     const steps = wrapper.findAll('.oma-steps li').map((li) => li.text());
     expect(steps).toHaveLength(4);
@@ -103,8 +105,8 @@ describe('ArchiveView', () => {
     expect(wrapper.find('.oma-steps a[href="/backups"]').exists()).toBe(true);
     expect(steps[2]).toContain('Import messages.');
     expect(steps[2]).not.toContain('Planned');
-    expect(steps[3]).toContain('Read and search your conversations in the viewer.');
-    expect(steps[3]).toContain('Planned · M6');
+    expect(steps[3]).toContain('Read and search your conversations in the viewer, and export them');
+    expect(steps[3]).not.toContain('Planned · M6');
     expect(steps[3]).not.toContain('Planned · M5');
   });
 
@@ -209,6 +211,34 @@ describe('ArchiveView', () => {
     expect(api.verifyArchive).toHaveBeenCalledWith(ARCHIVE_ID, 'full', expect.any(Function));
     expect(wrapper.find('.oma-job').exists()).toBe(true);
     expect(wrapper.find('.progress').attributes('aria-label')).toBe('Verification progress');
+  });
+
+  it('opens the Export dialog for the whole archive, and shows Exporting while this app exports from it (6k2)', async () => {
+    api.listArchives.mockResolvedValue(archiveListing([archiveEntry()]));
+    const wrapper = await mountReady();
+    const x = useExports();
+    await button(wrapper, 'Export…')?.trigger('click');
+    await flushPromises();
+    expect(x.open).toBe(true);
+    expect(x.context).toEqual({ archiveId: ARCHIVE_ID, scope: 'archive' });
+    expect(x.form?.scope).toBe('archive');
+    x.close();
+    // The dialog continues in the background: the page shows the job.
+    x.job = { kind: 'export', jobId: 'job-3', phase: 'writingMessages', done: 5, total: 10, cancelling: false, ended: false };
+    x.jobArchiveId = ARCHIVE_ID;
+    await flushPromises();
+    expect(wrapper.text()).toContain('Exporting from this archive');
+    expect(wrapper.find('.oma-job-label').text()).toBe('Writing messages (5 of 10)');
+    expect(button(wrapper, 'Export…')).toBeUndefined();
+    // One job at a time: no import or verify meanwhile.
+    expect(button(wrapper, 'Import from a backup')?.attributes('disabled')).toBeDefined();
+    expect(button(wrapper, 'Verify archive (quick)')?.attributes('disabled')).toBeDefined();
+    await button(wrapper, 'Show export')?.trigger('click');
+    expect(x.open).toBe(true);
+    expect(x.step).toBe('progress');
+    await button(wrapper, 'Cancel export')?.trigger('click');
+    await flushPromises();
+    expect(api.cancelJob).toHaveBeenCalledWith('job-3');
   });
 
   it('shows a job it cannot hear from the details, with a working Cancel', async () => {

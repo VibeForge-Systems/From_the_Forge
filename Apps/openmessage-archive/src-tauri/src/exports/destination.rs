@@ -115,6 +115,8 @@ pub struct Chosen {
     pub target_exists: bool,
     pub warnings: Vec<ExportWarningDto>,
     pub leftovers: Vec<Leftover>,
+    /// "Save a copy": the name needs `keepRiskyExtension` (§6.6).
+    pub risky_name: bool,
     pub dto: ExportDestinationDto,
 }
 
@@ -256,11 +258,23 @@ fn facts(
 }
 
 /// What the dialog returned, by packaging: a folder for a bundle, a file
-/// path for a single file.
+/// path for a single file, or a file path for "Save a copy" (whose kind
+/// the name's extension is checked against).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Picked {
     Folder,
     File(Format),
+    Copy(Option<oma_archive::SniffedKind>),
+}
+
+/// The save dialog's title for "Save a copy" (§6.6): it names content
+/// captured before an unsend, from the draft's facts.
+pub fn copy_title(of_unsent_part: bool) -> String {
+    if of_unsent_part {
+        "Save a copy — includes content captured before an unsend".to_owned()
+    } else {
+        "Save a copy".to_owned()
+    }
 }
 
 /// Check the location the dialog returned (`picked`) for a draft's
@@ -274,21 +288,31 @@ pub fn inspect(
     needs: SpaceNeeds,
     probe: &dyn DestinationProbe,
 ) -> IpcResult<Chosen> {
+    let name_refused = |_| IpcError::new(ErrorCode::ExportNameRefused, em::NAME_REFUSED);
+    let split = || match (
+        picked_path.parent(),
+        picked_path.file_name().and_then(|n| n.to_str()),
+    ) {
+        (Some(dir), Some(name)) => Ok((dir, name)),
+        _ => Err(refused(em::DESTINATION_NOT_A_FOLDER)),
+    };
+    let mut risky_name = false;
     let (dir, target, packaging) = match picked {
         Picked::Folder => {
-            let target = TargetName::new(bundle_name)
-                .map_err(|_| IpcError::new(ErrorCode::ExportNameRefused, em::NAME_REFUSED))?;
+            let target = TargetName::new(bundle_name).map_err(name_refused)?;
             (picked_path.to_path_buf(), target, Packaging::Bundle)
         }
         Picked::File(format) => {
-            let (Some(dir), Some(name)) = (
-                picked_path.parent(),
-                picked_path.file_name().and_then(|n| n.to_str()),
-            ) else {
-                return Err(refused(em::DESTINATION_NOT_A_FOLDER));
-            };
-            let target = TargetName::for_single_file(name, format)
-                .map_err(|_| IpcError::new(ErrorCode::ExportNameRefused, em::NAME_REFUSED))?;
+            let (dir, name) = split()?;
+            let target = TargetName::for_single_file(name, format).map_err(name_refused)?;
+            (dir.to_path_buf(), target, Packaging::SingleFile)
+        }
+        Picked::Copy(sniffed) => {
+            // The name is kept as typed (never changed); one that could
+            // run programs needs the app's own confirmation (§6.6).
+            let (dir, name) = split()?;
+            let target = TargetName::new(name).map_err(name_refused)?;
+            risky_name = oma_export::naming::risky_copy_name(target.as_str(), sniffed);
             (dir.to_path_buf(), target, Packaging::SingleFile)
         }
     };
@@ -336,6 +360,7 @@ pub fn inspect(
         free_space: available.map(FreeSpaceDto::of),
         enough,
         leftovers: u32::try_from(leftovers.len()).unwrap_or(u32::MAX),
+        risky_name,
     };
     Ok(Chosen {
         token,
@@ -345,6 +370,7 @@ pub fn inspect(
         target_exists,
         warnings,
         leftovers,
+        risky_name,
         dto,
     })
 }

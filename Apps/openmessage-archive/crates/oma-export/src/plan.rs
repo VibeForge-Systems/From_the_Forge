@@ -394,6 +394,15 @@ impl ExportPlan {
         }
     }
 
+    /// What the archive's preview and the job's pre-count count under:
+    /// the reveal, the depth, and whether events are left out. Every count
+    /// of this plan (the draft's preview, the job's pre-count, a search
+    /// scope) uses this one value, so they agree.
+    pub fn preview_options(&self) -> oma_archive::PreviewOptions {
+        oma_archive::PreviewOptions::new(self.reveal(), self.depth())
+            .leaving_out_events(!self.options.events)
+    }
+
     /// The options the record mapping applies.
     pub fn record_options(&self) -> RecordOptions {
         RecordOptions {

@@ -28,6 +28,7 @@ import VirtualFeed from '@/components/viewer/VirtualFeed.vue';
 import DateJumpDialog from '@/components/viewer/DateJumpDialog.vue';
 import { useViewer } from '@/stores/viewer';
 import { useSettings } from '@/stores/settings';
+import { useExports } from '@/stores/exports';
 import { dayKey } from '@/services/time';
 import type { GetThreadPageRequest, MessageDto, ThreadPageDto } from '@/types';
 import { TIME_ZONE_NOTE } from '@/services/viewerText';
@@ -372,6 +373,21 @@ describe('ThreadView', () => {
     useSettings().snapshot = snapshot();
     const single = await mountThread();
     expect(single.findAll('.oma-item-sender').every((s) => s.classes().includes('visually-hidden'))).toBe(true);
+  });
+});
+
+describe('ThreadView: export (M6 slice 6k2)', () => {
+  it('opens the Export dialog with this conversation pre-selected', async () => {
+    const w = await mountThread();
+    const b = w.findAll('button').find((x) => x.text() === 'Export conversation…');
+    expect(b?.attributes('disabled')).toBeUndefined();
+    await b!.trigger('click');
+    await flushPromises();
+    const x = useExports();
+    expect(x.open).toBe(true);
+    expect(x.context).toEqual({ archiveId: ARCHIVE_ID, chatId: sid(CHAT), scope: 'conversation' });
+    expect(x.form?.scope).toBe('conversation');
+    w.unmount();
   });
 });
 
