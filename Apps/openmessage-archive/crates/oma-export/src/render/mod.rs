@@ -183,6 +183,8 @@ fn send_output(w: &mut dyn Write, out: &Output) -> std::io::Result<()> {
 
 /// What to do after a backend call.
 enum Next {
+    /// Carry on (only the debug-only test backend's raw writes return it).
+    #[cfg_attr(not(debug_assertions), allow(dead_code))]
     Go,
     Exit(i32),
 }

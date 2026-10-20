@@ -484,26 +484,38 @@ impl PreviewFeed {
         Box::new(FeedSource(self.clone()))
     }
 
+    /// Attachment `a`'s preview. The answer stays in the feed until the
+    /// item is cleared, so every writer that shows previews (HTML and
+    /// PDF, slice 6j2) gets the same one from a single decode;
+    /// `display` only filters what this caller receives.
     fn take(&self, a: &AttachmentRecord, display: bool) -> Result<Preview, ExportError> {
-        let entry = self
-            .state
-            .lock()
-            .map_err(|_| feed_poisoned())?
-            .entries
-            .remove(&a.n);
+        let only = |p: Preview| match p {
+            Preview::Ready { thumb, display: d } => Preview::Ready {
+                thumb,
+                display: if display { d } else { None },
+            },
+            other => other,
+        };
+        let entry = {
+            let mut st = self.state.lock().map_err(|_| feed_poisoned())?;
+            match st.entries.remove(&a.n) {
+                Some(Entry::Done(p)) => {
+                    st.entries.insert(a.n, Entry::Done(p.clone()));
+                    return Ok(only(p));
+                }
+                other => other,
+            }
+        };
         let outcome = match entry {
             None => return Ok(Preview::None),
-            Some(Entry::Done(p)) => return Ok(p),
+            Some(Entry::Done(p)) => return Ok(only(p)),
             Some(Entry::Pending(t)) => t.wait(&self.cancel)?,
         };
         let mut st = self.state.lock().map_err(|_| feed_poisoned())?;
-        Ok(match outcome {
+        let full = match outcome {
             PoolOutcome::Ready { thumb, display: d } => {
                 st.crashes_in_a_row = 0;
-                Preview::Ready {
-                    thumb,
-                    display: if display { d } else { None },
-                }
+                Preview::Ready { thumb, display: d }
             }
             PoolOutcome::Unavailable => {
                 st.crashes_in_a_row = 0;
@@ -516,11 +528,13 @@ impl PreviewFeed {
                 }
                 Preview::Unavailable
             }
-        })
+        };
+        st.entries.insert(a.n, Entry::Done(full.clone()));
+        Ok(only(full))
     }
 }
 
-/// The HTML writer's [`PreviewSource`] over a [`PreviewFeed`].
+/// The HTML and PDF writers' [`PreviewSource`] over a [`PreviewFeed`].
 struct FeedSource(PreviewFeed);
 
 impl PreviewSource for FeedSource {

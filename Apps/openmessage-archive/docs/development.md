@@ -605,8 +605,7 @@ cargo test -p openmessage-archive --lib backups::             # the job table's 
   the test backend (`oma_export::render::stub`, debug builds only). Its
   timeouts are shortened to 2 s through `SessionLimits`, so the whole
   file runs in about 2 s here. The `/dev/full` case runs on Linux only.
-- No export format uses the helper yet. Slice 6j1 adds its PDF backend
-  and the PDF text-layer oracle (below).
+- PDF uses the helper from slice 6j2 (below); XLSX stays refused.
 - Windows: the helper code was only compiled and linted for
   `x86_64-pc-windows-msvc` through a scratch harness that includes
   `helper/`, `check/` and `render/` by path; the process tests run on the
@@ -650,6 +649,59 @@ python3 -I scripts/oracles/pdf_text.py --samples /tmp/oma-pdf
   test builds (the root `Cargo.toml`).
 - Windows: nothing in 6j1 is platform-specific, and nothing of it ran on
   Windows here; the CI `windows-2022` job runs the Rust tests.
+
+### The PDF writer and the PDF export oracle (M6 slice 6j2)
+
+```sh
+cargo test -p oma-export --lib writer::                      # the estimate, volume paths
+cargo test -p oma-export --test pdf_writer                   # every catalogue entry to PDF, blocks, volumes, previews, hostile text
+cargo test -p oma-export --test golden_txt                   # TXT unchanged by the shared line functions
+cargo test -p openmessage-archive --lib exports::            # PDF accepted, a PDF job, missing fonts
+cargo test -p openmessage-archive --test export_helper       # the real helper: previews, titles, volumes
+cargo test -p openmessage-archive --test log_hygiene         # HTML + PDF through both real helpers
+
+# The independent PDF export oracle (Linux; in the oracle virtual
+# environment; needs poppler-utils):
+OMA_ORACLE_PDF_OUT=/tmp/oma-pdf-exports cargo test -p oma-export --test pdf_writer -- \
+  --ignored --exact write_oracle_pdf
+python3 -I scripts/oracles/pdf_oracle.py --exports /tmp/oma-pdf-exports
+for b in /tmp/oma-pdf-exports/*/files/*/ /tmp/oma-pdf-exports/*/names/*/; do
+  (cd "$b" && sha256sum --quiet -c SHA256SUMS)
+done
+
+# Scale, by hand (release build; delete target/release afterwards):
+cargo test -p oma-export --release --test perf_smoke -- --ignored --exact \
+  eighty_thousand_messages_to_pdf --nocapture
+```
+
+- `pdf_writer.rs` runs the PDF backend in the test's own process
+  (`render::pdf::InProcess`, on a thread of its own because krilla's
+  document is not `Send`) and checks every volume with
+  `check::check_output`, as the helper's host does; its `Recorder`
+  renderer instead records the decoded blocks the writer sends. About
+  6 s here (dev build; krilla and parley at `opt-level = 3`).
+- `write_oracle_pdf` exports every catalogue entry to JSON + PDF (copies,
+  previews from a fake source, markers on; and names only, markers off)
+  and the export catalogue's entries with both reveals.
+  `pdf_oracle.py` checks titles, structure trees, embedded fonts,
+  forbidden names, every item in order (pdftotext), printable-ASCII
+  texts (both tools), the masking sentinels and the positive control.
+  Run here: Python 3.13.16, pypdf 6.19.0, poppler 24.02.0: 49 bundles,
+  77 volumes, 1,138 items (802 texts compared), 31 images, 14 sentinels
+  scanned for, 12 found revealed, 4,168 checks, 0 failed. A mutation run
+  (the revealed bundles listed as the default ones) failed with 14 leaks,
+  as it should. CI's `ubuntu-22.04` (Python 3.10, poppler 22.02) is
+  **UNVERIFIED** until the CI run.
+- The scale run takes about 5 minutes (three exports of a generated
+  80,000-message archive); its figures are in `docs/architecture.md`
+  ("The PDF writer, volumes, previews and tags"). The memory bound is
+  asserted; times are printed only.
+- The release binary (`npx tauri build --no-bundle`) is 17.7 MB here
+  (Linux x86-64, already stripped by the release profile), and
+  `tauri build` copies the fonts (about 30 MB) to `target/release/fonts/`
+  through `bundle.resources`. A release-profile build of `main` at
+  abd531f (no export-render helper) measured 11.5 MB here, so the helper
+  and the PDF backend add about 6.25 MB (`docs/architecture.md`).
 
 ### The bulk generator (M5)
 

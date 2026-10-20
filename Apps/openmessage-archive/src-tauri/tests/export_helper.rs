@@ -177,6 +177,7 @@ fn the_pdf_backend_makes_a_checked_pdf_in_the_helper_process() {
     let heading = Block::Heading {
         level: HeadingLevel::Conversation,
         text: PdfText::ours("Conversation 1"),
+        title: None,
     };
     s.conversation(&heading.encode()).expect("conversation");
     let mut n = MarkCounts::default();
@@ -513,4 +514,84 @@ fn the_helper_exits_on_an_oversized_request() {
     drop(input);
     assert_eq!(status.code(), Some(oma_export::render::EXIT_PROTOCOL));
     assert!(out.is_empty());
+}
+
+/// A real 1 × 1 PNG (every chunk's CRC is right).
+const PNG_1X1: &str = "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da636460f85f0f0002870180eb47ba920000000049454e44ae426082";
+
+/// Slice 6j2: the PDF writer's renderers (`HelperRenderers`) through the
+/// real helper: the kill handle is handed over at start, a preview image
+/// is drawn as a tagged figure, a volume's document title comes from its
+/// conversation heading, and a second volume follows the first in the
+/// same process.
+#[test]
+fn the_pdf_writers_renderer_draws_previews_and_titles_volumes() {
+    use oma_export::writer::pdf::{HelperRenderers, PdfRendererFactory};
+    use std::sync::{Arc, Mutex};
+
+    let fonts = pdf_fonts::load(&fonts_dir()).expect("the pinned fonts");
+    let kills = Arc::new(Mutex::new(0usize));
+    let k = Arc::clone(&kills);
+    let mut factory = HelperRenderers::new(
+        launch(),
+        fonts,
+        CancelToken::new(),
+        Box::new(move |_kill| *k.lock().expect("lock") += 1),
+    );
+    let stderr = factory.stderr_counter();
+    let options = PdfOptions {
+        page: PageSize::Letter,
+        han: HanFace::Simplified,
+        title: "Messages export".into(),
+    };
+    let mut r = factory.start(&options).expect("start");
+    assert_eq!(*kills.lock().expect("lock"), 1, "the kill is handed over");
+    let png: Vec<u8> = (0..PNG_1X1.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&PNG_1X1[i..i + 2], 16).expect("hex"))
+        .collect();
+    for volume in 1..=2u32 {
+        let heading = Block::Heading {
+            level: HeadingLevel::Conversation,
+            text: PdfText::ours("Conversation 1"),
+            title: Some(format!(
+                "Messages export \u{2014} conversation 1, part {volume}"
+            )),
+        };
+        r.conversation(&heading.encode()).expect("conversation");
+        r.image(7, &png).expect("image");
+        let mut n = MarkCounts::default();
+        let mut body = Para::recorded(2, "a preview follows", true, &mut n);
+        body.push(Para::figure(2, 7));
+        let entry = Block::Entry {
+            head: vec![
+                PdfText::ours("2024-03-10 14:02:11 +00:00"),
+                PdfText::ours("item 1"),
+            ],
+            body,
+        };
+        r.item(&entry.encode()).expect("item");
+        let v = r.end_volume(false).expect("a checked volume");
+        assert_eq!(v.counts.figures, 1, "{:?}", v.counts);
+        let has = |needle: &[u8]| v.bytes.windows(needle.len()).any(|w| w == needle);
+        assert!(
+            has(b"/StructTreeRoot") && has(b"/Figure"),
+            "tagged, with a figure"
+        );
+        assert!(has(b"/Image"), "the preview is an image XObject");
+    }
+    // A figure whose image was never sent is refused.
+    let mut n = MarkCounts::default();
+    let mut body = Para::recorded(2, "x", true, &mut n);
+    body.push(Para::figure(2, 99));
+    let entry = Block::Entry {
+        head: Vec::new(),
+        body,
+    };
+    let refused = r
+        .item(&entry.encode())
+        .and_then(|()| r.end_volume(true).map(|_| ()));
+    assert!(refused.is_err(), "{refused:?}");
+    r.close();
+    assert_eq!(stderr.load(std::sync::atomic::Ordering::Relaxed), 0);
 }

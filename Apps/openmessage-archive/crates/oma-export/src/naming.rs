@@ -429,6 +429,25 @@ impl BundlePath {
         }
     }
 
+    /// A PDF volume of a conversation file (spec §5.6): `pdf/c0001.pdf`,
+    /// then `pdf/c0001-2.pdf` … for the volumes after a cut
+    /// (`no-conversation.pdf`, `no-conversation-2.pdf` …). `part` counts
+    /// from 1.
+    pub fn pdf_volume(stem: FileStem, part: u32) -> BundlePath {
+        let base = BundlePath::format_file(Format::Pdf, stem, FileExt::Pdf);
+        if part <= 1 {
+            return base;
+        }
+        let file = match base.file.strip_suffix(".pdf") {
+            Some(s) => format!("{s}-{part}.pdf"),
+            None => base.file.clone(),
+        };
+        BundlePath {
+            dirs: base.dirs,
+            file,
+        }
+    }
+
     /// `html/index.html`: the bundle's list of conversations.
     pub fn html_index() -> BundlePath {
         BundlePath {

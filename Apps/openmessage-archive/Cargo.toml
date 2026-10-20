@@ -95,7 +95,7 @@ miniz_oxide = { version = "=0.8.9", default-features = false, features = ["with-
 # from the pinned bundled set. krilla needs Rust 1.92 (the workspace
 # `rust-version` above) and brings `arrayref` (BSD-2-Clause, the per-crate
 # exception in deny.toml). Both MIT OR Apache-2.0; see docs/dependencies.md.
-krilla = { version = "=0.8.2", default-features = false }
+krilla = { version = "=0.8.2", default-features = false, features = ["raster-images"] }
 parley = { version = "=0.11.1", default-features = false, features = ["std", "complex-scripts"] }
 
 oma-fs = { path = "crates/oma-fs" }

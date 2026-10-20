@@ -26,6 +26,13 @@
 //! failure), and only the byte count of the helpers' stderr is logged, as
 //! a bucket.
 //!
+//! **PDF (slice 6j2).** With PDF in the plan, the fonts are read from the
+//! app's resource folder and checked against their pins
+//! ([`super::pdf_fonts::load`]) before anything is written (a missing or
+//! altered font fails the export, `HelperFailure::Fonts`); the PDF writer
+//! then starts one export-render helper ([`PdfSource`]), whose kill is
+//! on the job's cancel path.
+//!
 //! Phases: `preparingExport`, `writingMessages` (timeline rows),
 //! `finishingExport`, and `removingPartial` while a cancelled or failed
 //! export's staging is removed (the job keeps its slot and the lock until
@@ -33,22 +40,25 @@
 
 use std::cell::RefCell;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use oma_archive::{
     ArchiveGeneration, ArchiveId, CancelToken, ExportHold, PreviewOptions, SearchRan, SenderFilter,
     EXPORT_SEARCH_CAP,
 };
+use oma_export::helper::{HelperKill, HelperLaunch};
 use oma_export::manifest::SearchFacts;
 use oma_export::pipeline::{self, ExportFailure, ExportProgress, ExportReport, ExportStep};
 use oma_export::preview::{PreviewFeed, RenditionPool};
 use oma_export::writer::csv::CsvWriter;
 use oma_export::writer::html::HtmlWriter;
 use oma_export::writer::json::JsonWriter;
+use oma_export::writer::pdf::{HelperRenderers, PdfRendererFactory, PdfWriter};
 use oma_export::writer::txt::TxtWriter;
 use oma_export::{
-    EntryId, ExportError, ExportPlan, ExportWriter, ExportZone, Format, LimitKind, Replace,
+    EntryId, ExportError, ExportPlan, ExportWriter, ExportZone, Format, HelperFailure, LimitKind,
+    Replace,
 };
 
 use super::destination::{self, Chosen, DestinationProbe};
@@ -231,14 +241,80 @@ pub struct ExportSpec {
     /// The decode helpers' backends (the app's: this binary with
     /// `--oma-decode-helper`; tests give fakes).
     pub renderers: BackendFactory,
+    /// Where the PDF writer's renderer comes from.
+    pub pdf: PdfSource,
 }
 
-/// One writer per format of the plan; HTML reads previews from `feed`
-/// when there is one. PDF and XLSX never reach here (refused when the
-/// draft was made).
+/// The PDF writer's renderer (slice 6j2).
+pub enum PdfSource {
+    /// The app: an export-render helper (`launch`; `None` when the
+    /// binary's path is unknown), given the fonts read from `fonts` (the
+    /// resource folder Tauri resolved; `None` when it could not).
+    Helper {
+        launch: Option<HelperLaunch>,
+        fonts: Option<PathBuf>,
+    },
+    /// Tests: a renderer factory given directly.
+    #[cfg(test)]
+    Given(std::sync::Mutex<Option<Box<dyn PdfRendererFactory>>>),
+}
+
+impl std::fmt::Debug for PdfSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never a path.
+        f.write_str("PdfSource")
+    }
+}
+
+/// The helpers' kills, run by the job's cancel hook.
+pub type KillSlot = Arc<Mutex<Vec<HelperKill>>>;
+
+/// The PDF renderer factory for this export: the fonts are loaded and
+/// checked first (`HelperFailure::Fonts` otherwise), so nothing unchecked
+/// can reach a helper.
+fn pdf_factory(
+    spec: &ExportSpec,
+    kills: &KillSlot,
+    stderr: &mut Option<Arc<std::sync::atomic::AtomicU64>>,
+) -> Result<Box<dyn PdfRendererFactory>, ExportError> {
+    match &spec.pdf {
+        PdfSource::Helper { launch, fonts } => {
+            let fonts_err = || ExportError::HelperFailed(HelperFailure::Fonts);
+            let dir = fonts.as_ref().ok_or_else(fonts_err)?;
+            let fonts = super::pdf_fonts::load(dir).map_err(|_| fonts_err())?;
+            let launch = launch
+                .clone()
+                .ok_or(ExportError::HelperFailed(HelperFailure::Spawn))?;
+            let slot = Arc::clone(kills);
+            let r = HelperRenderers::new(
+                launch,
+                fonts,
+                spec.cancel.clone(),
+                Box::new(move |k: HelperKill| {
+                    if let Ok(mut v) = slot.lock() {
+                        v.push(k);
+                    }
+                }),
+            );
+            *stderr = Some(r.stderr_counter());
+            Ok(Box::new(r))
+        }
+        #[cfg(test)]
+        PdfSource::Given(f) => f
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take())
+            .ok_or(ExportError::HelperFailed(HelperFailure::Spawn)),
+    }
+}
+
+/// One writer per format of the plan; HTML and PDF read previews from
+/// `feed` when there is one, and PDF renders with `pdf`. XLSX never
+/// reaches here (refused when the draft was made).
 fn writers(
     plan: &ExportPlan,
     feed: Option<&PreviewFeed>,
+    pdf: &mut Option<Box<dyn PdfRendererFactory>>,
 ) -> Result<Vec<Box<dyn ExportWriter>>, ExportError> {
     plan.formats()
         .iter()
@@ -251,9 +327,13 @@ fn writers(
                     Some(feed) => Box::new(HtmlWriter::with_previews(feed.source())),
                     None => Box::new(HtmlWriter::new()),
                 },
-                Format::Pdf | Format::Xlsx => {
-                    return Err(ExportError::Limit(LimitKind::UnmappedVariant))
+                Format::Pdf => {
+                    let factory = pdf
+                        .take()
+                        .ok_or(ExportError::Limit(LimitKind::UnmappedVariant))?;
+                    Box::new(PdfWriter::new(factory, feed.map(PreviewFeed::source)))
                 }
+                Format::Xlsx => return Err(ExportError::Limit(LimitKind::UnmappedVariant)),
             })
         })
         .collect()
@@ -321,9 +401,18 @@ fn phase(step: ExportStep) -> JobPhase {
 fn export(
     spec: &ExportSpec,
     search: Option<DraftSearch>,
+    kills: &KillSlot,
     progress: &mut dyn FnMut(ExportProgress),
 ) -> Result<(ExportReport, Option<u64>), ExportFailure> {
     let p = &spec.prepared;
+    // The PDF fonts are checked before the archive is read or anything is
+    // written.
+    let mut pdf_stderr = None;
+    let mut pdf = if p.plan.formats().contains(&Format::Pdf) {
+        Some(pdf_factory(spec, kills, &mut pdf_stderr)?)
+    } else {
+        None
+    };
     let reader = spec
         .env
         .library(&spec.library)
@@ -387,12 +476,19 @@ fn export(
             search: facts,
             previews: feed.clone(),
         };
-        let result = match writers(&p.plan, feed.as_ref()) {
+        let result = match writers(&p.plan, feed.as_ref(), &mut pdf) {
             Ok(w) => pipeline::run_detailed(snap, &run, w, &spec.cancel, progress),
             Err(e) => Err(e.into()),
         };
         drop(run);
         drop(feed);
+        if let Some(n) = pdf_stderr.as_ref() {
+            let n = n.load(std::sync::atomic::Ordering::Relaxed);
+            tracing::debug!(
+                stderr_size = bucket(usize::try_from(n).unwrap_or(usize::MAX)),
+                "export pdf helper"
+            );
+        }
         if let Some(pool) = pool.and_then(|p| Arc::try_unwrap(p).ok()) {
             let stderr = pool.shutdown(result.is_err());
             tracing::debug!(
@@ -511,6 +607,21 @@ pub fn run_export(spec: ExportSpec, jobs: &Jobs, sink: &mut dyn JobEventSink) {
     }
     let mut spec = spec;
     let search = spec.prepared.search.take();
+    // A cancel kills the export-render helpers at once (slice 6i's hook).
+    let kills: KillSlot = Arc::default();
+    {
+        let slot = Arc::clone(&kills);
+        jobs.on_cancel(
+            &job_id,
+            Arc::new(move || {
+                if let Ok(v) = slot.lock() {
+                    for k in v.iter() {
+                        k.kill();
+                    }
+                }
+            }),
+        );
+    }
     let is_bundle = spec.prepared.plan.packaging() == oma_export::Packaging::Bundle;
     let result = {
         let throttle = RefCell::new(Throttle::new(&job_id, jobs, &mut *sink));
@@ -541,7 +652,7 @@ pub fn run_export(spec: ExportSpec, jobs: &Jobs, sink: &mut dyn JobEventSink) {
         if spec.cancel.is_cancelled() {
             Err(ExportError::Cancelled.into())
         } else {
-            export(&spec, search, &mut forward)
+            export(&spec, search, &kills, &mut forward)
         }
     };
     let ExportSpec {

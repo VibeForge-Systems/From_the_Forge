@@ -10,7 +10,8 @@
 //!
 //! Layout and serialisation (parley and krilla) run only in the helper
 //! (`render::pdf`, feature `render`). The record-to-block mapping, the
-//! volume estimate and the export pipeline's PDF writer are slice 6j2's.
+//! volume estimate and the export pipeline's PDF writer are
+//! `writer::pdf` (slice 6j2).
 
 pub mod doc;
 pub mod fonts;

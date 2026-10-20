@@ -1489,6 +1489,33 @@ any exported PDF opened in Acrobat, a browser, a desktop viewer or a
 screen reader; tagged structure (not built); no export writes PDF until
 slice 6j2.
 
+### Milestone 6 PR B, slice 6j2: the PDF writer (Linux container only)
+
+Run on 2026-10-20 in the same Linux container (Ubuntu 24.04.5 LTS, Rust
+1.97.0), on `feat/oma-m6-export-ui`, synthetic data only:
+
+| What | Result here |
+|---|---|
+| `cargo test --workspace` | 1,590 passed, 25 ignored, 0 failed; 7 min 54 s wall clock, compiling included |
+| `cargo test -p oma-export --test pdf_writer` | 7 passed, 1 ignored (`write_oracle_pdf`), in about 6 s: every catalogue entry to checked, tagged PDFs; blocks never draw a masking sentinel; volumes cut by the estimate; a single file with About; previews; the hostile catalogue's 1 MiB body (496 pages through the real backend) |
+| `cargo test -p oma-export --test golden_txt` | Pass: the TXT goldens did not move when the item's lines moved to `writer/lines.rs` |
+| `cargo test -p openmessage-archive --test export_helper` and `--test log_hygiene` | 16 and 1 passed: the real helper draws a preview as a tagged figure and titles two volumes; an HTML + PDF export runs through both real helpers with nothing identifying logged |
+| `scripts/oracles/pdf_oracle.py` (pypdf 6.19.0, poppler `pdftotext` 24.02.0, Python 3.13.16) | 49 bundles, 77 volumes, 1,138 items in order (802 texts compared with both tools), 31 images, 14 sentinels scanned for, 12 found with both reveals; 4,168 checks, 0 failed. A mutation run (revealed bundles listed as the default ones) reported 14 leaks |
+| `scripts/oracles/pdf_text.py` (6j1's samples, re-run) | 11 samples, 0 errors |
+| Scale (release, `perf_smoke`, 80,000 messages, 20 % CJK and 20 % emoji, 321 volumes) | No previews 65.0 s, peak RSS of the whole child 170 MiB; 1,566 JPEG previews 69.5 s, 159 MiB; 1,566 PNG previews 121.3 s, 97 MiB. The 200 MiB bound holds; the spec's 30 s target is **not met** |
+| `npx tauri build --no-bundle` | Built; the release binary is 17.7 MB (`main` at abd531f, release profile: 11.5 MB; +6.25 MB) and `target/release/fonts/` holds the 12 fonts and `OFL.txt`; started with `--oma-export-helper` it exits 0 on an empty stdin and 2 on garbage |
+| Two exported PDFs rendered with `pdftoppm` and looked at (headings, item heads, labels, the 1 × 1 test previews) | As intended |
+| `cargo clippy --workspace --all-targets -- -D warnings` (and with `heic`), `cargo fmt --all`, `cargo deny check` | Pass |
+
+**Not run, so UNVERIFIED:** anything on Windows (the new code is
+platform-neutral, but it was not compiled for `x86_64-pc-windows-msvc`
+here); the fonts' resource folder in an installed bundle (`.deb`,
+AppImage, MSI); CI's `ubuntu-22.04` (Python 3.10, poppler 22.02) running
+the new oracle; any exported PDF opened in Acrobat, a browser, a desktop
+viewer or a screen reader, and so how the tagged structure reads (no
+PDF/UA claim); real archives and real photo previews (the scale run used
+a 48 KiB synthetic JPEG and a generated PNG); XLSX (deferred).
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI

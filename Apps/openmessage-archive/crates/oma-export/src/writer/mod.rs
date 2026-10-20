@@ -21,7 +21,7 @@
 //! whose report disagrees with what it was given (`RowCountMismatch`, the
 //! manifest's "counts equal the writer reports"). The writers themselves
 //! are [`txt`] (slice 6e2), [`json`] and [`csv`] (6f), then HTML (6g),
-//! and XLSX and PDF through the export-render helper (6i, 6j).
+//! PDF through the export-render helper ([`pdf`], 6j2), and XLSX later.
 //!
 //! The sentence lookup ([`Words`]), the phrase table and the placeholder
 //! form are shared by the writers that print words (TXT, CSV).
@@ -29,6 +29,8 @@
 pub mod csv;
 pub mod html;
 pub mod json;
+mod lines;
+pub mod pdf;
 mod shared;
 pub mod txt;
 

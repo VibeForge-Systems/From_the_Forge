@@ -797,6 +797,8 @@ fn body(
     counts.combining_runs_limited = sum(&reports, "combiningRunsLimited");
     counts.neutralised_cells = sum(&reports, "neutralisedCells");
     counts.continuation_rows = sum(&reports, "continuationRows");
+    counts.pdf_undrawable_characters = sum(&reports, "pdfUndrawableCharacters");
+    counts.pdf_forced_wraps = sum(&reports, "pdfForcedWraps");
     counts.attachments.previews_embedded = sum(&reports, "previewsEmbedded");
     counts.attachments.previews_unavailable = sum(&reports, "previewsUnavailable");
     counts.attachments.previews_skipped_after_helper_failures = run

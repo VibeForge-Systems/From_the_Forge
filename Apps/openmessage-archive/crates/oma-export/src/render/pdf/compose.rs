@@ -14,18 +14,38 @@
 //! every glyph is drawn with its paragraph's text as krilla's text, so
 //! the text layer (ToUnicode, and ActualText where a glyph's text is not
 //! its own) is exactly the drawn text (§4.7).
+//!
+//! **Previews (slice 6j2).** A figure paragraph draws the checked
+//! rendition the `Image` frame before its block sent, scaled to fit
+//! [`FIGURE_MAX`] and the line, never upscaled; an image waits (at most
+//! [`MAX_PENDING_IMAGES`]) until its figure draws it, then is dropped.
+//!
+//! **Tagged structure (slice 6j2), with no conformance claim (§0.2).**
+//! A conversation or section heading is an `H1`, a day heading an `H2`,
+//! an entry a `Div` holding a `P` for its header row, a `P` per
+//! paragraph and a `Figure` per preview (its alternative text is our own
+//! words, "Preview of attachment N"). Every drawn line is one marked
+//! span under its group, so the tag tree's reading order is the
+//! transcript's order. Whether a screen reader reads it well is
+//! **UNVERIFIED** (§21).
+
+use std::collections::BTreeMap;
+use std::num::NonZeroU16;
 
 use krilla::destination::XyzDestination;
-use krilla::geom::Point;
+use krilla::geom::{Point, Size, Transform};
+use krilla::image::Image;
 use krilla::metadata::Metadata;
 use krilla::outline::{Outline, OutlineNode};
 use krilla::page::PageSettings;
+use krilla::surface::Surface;
+use krilla::tagging::{ContentTag, Identifier, Node, SpanTag, Tag, TagGroup, TagKind, TagTree};
 use krilla::text::{GlyphId, KrillaGlyph};
 use krilla::Document;
 
 use super::layout::{Paragraph, PlacedLine, Typesetter};
 use super::library::Library;
-use crate::pdf::doc::{HeadingLevel, PageSize, Para, PdfText};
+use crate::pdf::doc::{HeadingLevel, PageSize, Para, ParaRole, PdfText};
 
 /// Millimetres to points.
 const MM: f32 = 72.0 / 25.4;
@@ -45,16 +65,72 @@ const PIECE_GAP: f32 = 0.45;
 const ENTRY_GAP: f32 = 4.0;
 /// The space before a heading.
 const HEADING_GAP: f32 = 8.0;
+/// The largest a preview is drawn, in points (either side).
+pub const FIGURE_MAX: f32 = 180.0;
+/// The space around a preview.
+const FIGURE_GAP: f32 = 3.0;
+/// The most images waiting for their block.
+pub const MAX_PENDING_IMAGES: usize = 64;
+// The main process sends a block's images just before it, at most this
+// many a block.
+const _: () = assert!(crate::writer::pdf::MAX_FIGURES_PER_BLOCK <= MAX_PENDING_IMAGES);
 
-/// A line placed on the current page (no `Debug`: it holds its text).
+/// What a placed piece draws.
+#[derive(Clone)]
+enum Draw {
+    Line {
+        line: PlacedLine,
+        text: std::sync::Arc<str>,
+    },
+    Image {
+        image: Image,
+        width: f32,
+        height: f32,
+    },
+}
+
+/// A piece placed on the current page (no `Debug`: it holds its text).
 #[derive(Clone)]
 struct Placed {
-    /// The left edge of the line's box.
+    /// The left edge of the piece's box.
     x: f32,
-    /// The top of the line.
+    /// The top of the piece.
     y: f32,
-    line: PlacedLine,
-    text: std::sync::Arc<str>,
+    draw: Draw,
+    /// The tag group it belongs to.
+    tag: usize,
+}
+
+/// A tag group of the volume, children in reading order.
+struct TagNode {
+    kind: GroupKind,
+    children: Vec<TagChild>,
+}
+
+enum TagChild {
+    Group(usize),
+    Leaf(Identifier),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum GroupKind {
+    H1,
+    H2,
+    Div,
+    P,
+    Figure(u64),
+}
+
+impl GroupKind {
+    fn tag(&self) -> TagKind {
+        match self {
+            GroupKind::H1 => Tag::Hn(NonZeroU16::MIN, None).into(),
+            GroupKind::H2 => Tag::Hn(NonZeroU16::MIN.saturating_add(1), None).into(),
+            GroupKind::Div => Tag::Div.into(),
+            GroupKind::P => Tag::P.into(),
+            GroupKind::Figure(n) => Tag::Figure(Some(format!("Preview of attachment {n}"))).into(),
+        }
+    }
 }
 
 /// What the document's glyphs covered (tests check no glyph is clipped).
@@ -74,14 +150,23 @@ pub struct VolumeCounts {
     pub notdef_chars: u64,
     pub wrapped_tokens: u64,
     pub combining_runs: u64,
+    /// Previews drawn.
+    pub figures: u64,
 }
 
 /// One volume being composed.
 pub struct Composer {
     page: (f32, f32),
     title: String,
+    /// The title came from a conversation heading (the first wins).
+    titled: bool,
     doc: Document,
     placed: Vec<Placed>,
+    /// Images sent for the next block, by attachment record number.
+    images: BTreeMap<u64, Image>,
+    /// The volume's tag groups, and the top-level ones in order.
+    tags: Vec<TagNode>,
+    roots: Vec<usize>,
     /// The next line's top on the current page.
     y: f32,
     /// Pages finished so far (the current page's index).
@@ -108,6 +193,9 @@ pub enum ComposeError {
     Page,
     /// krilla could not serialise the document.
     Serialise,
+    /// A figure names an image that was not sent, or too many images
+    /// wait for their block.
+    Image,
 }
 
 fn count_combining_markers(text: &str) -> u64 {
@@ -120,8 +208,12 @@ impl Composer {
         Composer {
             page: size.points(),
             title: title.to_owned(),
+            titled: false,
             doc: Document::new(),
             placed: Vec::new(),
+            images: BTreeMap::new(),
+            tags: Vec::new(),
+            roots: Vec::new(),
             y: MARGIN,
             pages: 0,
             outline: Outline::new(),
@@ -133,6 +225,38 @@ impl Composer {
 
     fn content_width(&self) -> f32 {
         self.page.0 - 2.0 * MARGIN
+    }
+
+    /// A new tag group under `parent` (top level with `None`).
+    fn group(&mut self, kind: GroupKind, parent: Option<usize>) -> usize {
+        let at = self.tags.len();
+        self.tags.push(TagNode {
+            kind,
+            children: Vec::new(),
+        });
+        match parent.and_then(|p| self.tags.get_mut(p)) {
+            Some(p) => p.children.push(TagChild::Group(at)),
+            None => self.roots.push(at),
+        }
+        at
+    }
+
+    /// The volume's document title, from the first conversation heading
+    /// that carries one.
+    pub fn set_title(&mut self, title: &str) {
+        if !self.titled {
+            self.title = title.to_owned();
+            self.titled = true;
+        }
+    }
+
+    /// A checked rendition for the next block's figure `n`.
+    pub fn add_image(&mut self, n: u64, image: Image) -> Result<(), ComposeError> {
+        if self.images.len() >= MAX_PENDING_IMAGES && !self.images.contains_key(&n) {
+            return Err(ComposeError::Image);
+        }
+        self.images.insert(n, image);
+        Ok(())
     }
 
     fn bottom(&self) -> f32 {
@@ -157,49 +281,34 @@ impl Composer {
         let mut extent = self.extent;
         let mut page = self.doc.start_page_with(settings);
         let mut surface = page.surface();
+        let tags = &mut self.tags;
         for p in &placed {
-            let baseline = p.y + p.line.baseline;
-            for r in &p.line.runs {
-                let Some(font) = fonts.krilla_font(r.slot) else {
+            let (line, text) = match &p.draw {
+                Draw::Line { line, text } => (line, text),
+                Draw::Image {
+                    image,
+                    width,
+                    height,
+                } => {
+                    let Some(size) = Size::from_wh(*width, *height) else {
+                        continue;
+                    };
+                    let id = surface.start_tagged(ContentTag::Other);
+                    surface.push_transform(&Transform::from_translate(p.x, p.y));
+                    surface.draw_image(image.clone(), size);
+                    surface.pop();
+                    surface.end_tagged();
+                    leaf(tags, p.tag, id);
                     continue;
-                };
-                let glyphs: Vec<KrillaGlyph> = r
-                    .glyphs
-                    .iter()
-                    .map(|g| {
-                        KrillaGlyph::new(
-                            GlyphId::new(g.id),
-                            g.x_advance,
-                            g.x_offset,
-                            g.y_offset,
-                            0.0,
-                            g.range.clone(),
-                            None,
-                        )
-                    })
-                    .collect();
-                let x0 = p.x + r.x;
-                let e = extent.get_or_insert(Extent {
-                    min_x: x0,
-                    max_x: x0,
-                    min_y: p.y,
-                    max_y: p.y,
-                    glyphs: 0,
-                });
-                e.min_x = e.min_x.min(x0);
-                e.max_x = e.max_x.max(x0 + r.advance);
-                e.min_y = e.min_y.min(p.y);
-                e.max_y = e.max_y.max(p.y + p.line.height);
-                e.glyphs += u64::try_from(glyphs.len()).unwrap_or(0);
-                surface.draw_glyphs(
-                    Point::from_xy(x0, baseline),
-                    &glyphs,
-                    font,
-                    &p.text,
-                    r.size,
-                    false,
-                );
+                }
+            };
+            if line.runs.is_empty() {
+                continue;
             }
+            let id = surface.start_tagged(ContentTag::Span(SpanTag::empty()));
+            draw_line(&mut surface, fonts, p, line, text, &mut extent);
+            surface.end_tagged();
+            leaf(tags, p.tag, id);
         }
         surface.finish();
         page.finish();
@@ -208,7 +317,68 @@ impl Composer {
         self.y = MARGIN;
         Ok(())
     }
+}
 
+fn leaf(tags: &mut [TagNode], group: usize, id: Identifier) {
+    if let Some(g) = tags.get_mut(group) {
+        g.children.push(TagChild::Leaf(id));
+    }
+}
+
+/// Draw one line's glyph runs.
+fn draw_line(
+    surface: &mut Surface<'_>,
+    fonts: &mut Library,
+    p: &Placed,
+    line: &PlacedLine,
+    text: &str,
+    extent: &mut Option<Extent>,
+) {
+    let baseline = p.y + line.baseline;
+    for r in &line.runs {
+        let Some(font) = fonts.krilla_font(r.slot) else {
+            continue;
+        };
+        let glyphs: Vec<KrillaGlyph> = r
+            .glyphs
+            .iter()
+            .map(|g| {
+                KrillaGlyph::new(
+                    GlyphId::new(g.id),
+                    g.x_advance,
+                    g.x_offset,
+                    g.y_offset,
+                    0.0,
+                    g.range.clone(),
+                    None,
+                )
+            })
+            .collect();
+        let x0 = p.x + r.x;
+        let e = extent.get_or_insert(Extent {
+            min_x: x0,
+            max_x: x0,
+            min_y: p.y,
+            max_y: p.y,
+            glyphs: 0,
+        });
+        e.min_x = e.min_x.min(x0);
+        e.max_x = e.max_x.max(x0 + r.advance);
+        e.min_y = e.min_y.min(p.y);
+        e.max_y = e.max_y.max(p.y + line.height);
+        e.glyphs += u64::try_from(glyphs.len()).unwrap_or(0);
+        surface.draw_glyphs(
+            Point::from_xy(x0, baseline),
+            &glyphs,
+            font,
+            text,
+            r.size,
+            false,
+        );
+    }
+}
+
+impl Composer {
     /// Make room for `height` points, starting a new page if needed.
     fn room(&mut self, fonts: &mut Library, height: f32) -> Result<(), ComposeError> {
         if self.y + height > self.bottom() && (self.y > MARGIN || !self.placed.is_empty()) {
@@ -223,14 +393,18 @@ impl Composer {
         x: f32,
         line: PlacedLine,
         text: &std::sync::Arc<str>,
+        tag: usize,
     ) -> Result<(), ComposeError> {
         self.room(fonts, line.height)?;
         let height = line.height;
         self.placed.push(Placed {
             x,
             y: self.y,
-            line,
-            text: std::sync::Arc::clone(text),
+            draw: Draw::Line {
+                line,
+                text: std::sync::Arc::clone(text),
+            },
+            tag,
         });
         self.y += height;
         Ok(())
@@ -291,15 +465,22 @@ impl Composer {
                 None => self.outline.push_child(node),
             },
         }
+        let kind = match level {
+            HeadingLevel::Day => GroupKind::H2,
+            HeadingLevel::Conversation | HeadingLevel::Section => GroupKind::H1,
+        };
+        let tag = self.group(kind, None);
         let text = std::sync::Arc::clone(&para.text);
         for line in para.lines {
-            self.place(&mut ts.fonts, MARGIN, line, &text)?;
+            self.place(&mut ts.fonts, MARGIN, line, &text, tag)?;
         }
         self.y += ENTRY_GAP;
         Ok(())
     }
 
-    /// A transcript entry.
+    /// A transcript entry. A figure paragraph draws (and drops) the image
+    /// sent for it ([`Self::add_image`]); an image waits for its figure,
+    /// which may be in a later block of the same entry.
     pub fn entry(
         &mut self,
         ts: &mut Typesetter,
@@ -308,6 +489,8 @@ impl Composer {
     ) -> Result<(), ComposeError> {
         let width = self.content_width();
         let gap = BODY * PIECE_GAP;
+        let div = self.group(GroupKind::Div, None);
+        let head_tag = self.group(GroupKind::P, Some(div));
         // The header row: pieces flowed left to right, each its own
         // isolate. `row` holds (x within the row, line, text).
         let mut row: Vec<(f32, PlacedLine, std::sync::Arc<str>)> = Vec::new();
@@ -327,29 +510,74 @@ impl Composer {
                 let w = line.advance;
                 let fits = row.is_empty() || row_x + gap + w <= width;
                 if !single || !fits {
-                    self.flush_row(&mut ts.fonts, &mut row)?;
+                    self.flush_row(&mut ts.fonts, &mut row, head_tag)?;
                     row_x = 0.0;
                 }
                 let x = if row.is_empty() { 0.0 } else { row_x + gap };
                 row_x = x + w;
                 row.push((x, line, std::sync::Arc::clone(&text)));
                 if !single {
-                    self.flush_row(&mut ts.fonts, &mut row)?;
+                    self.flush_row(&mut ts.fonts, &mut row, head_tag)?;
                     row_x = 0.0;
                 }
             }
         }
-        self.flush_row(&mut ts.fonts, &mut row)?;
+        self.flush_row(&mut ts.fonts, &mut row, head_tag)?;
         for p in body {
             let indent = f32::from(p.indent) * INDENT;
+            if p.role == ParaRole::Figure {
+                let image = p
+                    .image
+                    .and_then(|n| self.images.remove(&n).map(|i| (n, i)))
+                    .ok_or(ComposeError::Image)?;
+                self.figure(&mut ts.fonts, div, indent, image)?;
+                continue;
+            }
+            let tag = self.group(GroupKind::P, Some(div));
             let para = ts.paragraph(p.text.as_str(), width - indent, BODY);
             self.note(&para);
             let text = std::sync::Arc::clone(&para.text);
             for line in para.lines {
-                self.place(&mut ts.fonts, MARGIN + indent, line, &text)?;
+                self.place(&mut ts.fonts, MARGIN + indent, line, &text, tag)?;
             }
         }
         self.y += ENTRY_GAP;
+        Ok(())
+    }
+
+    /// A preview, scaled to fit [`FIGURE_MAX`] and the line (never
+    /// upscaled), kept whole on one page.
+    fn figure(
+        &mut self,
+        fonts: &mut Library,
+        div: usize,
+        indent: f32,
+        (n, image): (u64, Image),
+    ) -> Result<(), ComposeError> {
+        let (pw, ph) = image.size();
+        #[allow(clippy::cast_precision_loss)] // pixel sizes are at most 2048
+        let (pw, ph) = (pw.max(1) as f32, ph.max(1) as f32);
+        let room_w = (self.content_width() - indent).max(1.0);
+        let scale = (FIGURE_MAX / pw)
+            .min(FIGURE_MAX / ph)
+            .min(room_w / pw)
+            .min(1.0);
+        let (w, h) = (pw * scale, ph * scale);
+        let tag = self.group(GroupKind::Figure(n), Some(div));
+        self.room(fonts, h + 2.0 * FIGURE_GAP)?;
+        self.y += FIGURE_GAP;
+        self.placed.push(Placed {
+            x: MARGIN + indent,
+            y: self.y,
+            draw: Draw::Image {
+                image,
+                width: w,
+                height: h,
+            },
+            tag,
+        });
+        self.y += h + FIGURE_GAP;
+        self.counts.figures += 1;
         Ok(())
     }
 
@@ -358,6 +586,7 @@ impl Composer {
         &mut self,
         fonts: &mut Library,
         row: &mut Vec<(f32, PlacedLine, std::sync::Arc<str>)>,
+        tag: usize,
     ) -> Result<(), ComposeError> {
         if row.is_empty() {
             return Ok(());
@@ -371,16 +600,47 @@ impl Composer {
             self.placed.push(Placed {
                 x: MARGIN + x,
                 y: self.y,
-                line,
-                text,
+                draw: Draw::Line { line, text },
+                tag,
             });
         }
         self.y += height;
         Ok(())
     }
 
-    /// Finish the volume: draw the last page, add the outline and the
-    /// title, and serialise.
+    /// The tag tree, groups in reading order (a group with no drawn
+    /// content is left out).
+    fn tag_tree(&mut self) -> TagTree {
+        fn build(tags: &mut Vec<Option<TagNode>>, at: usize) -> Option<TagGroup> {
+            let node = tags.get_mut(at)?.take()?;
+            let mut children: Vec<Node> = Vec::new();
+            for c in node.children {
+                match c {
+                    TagChild::Leaf(id) => children.push(id.into()),
+                    TagChild::Group(g) => {
+                        if let Some(group) = build(tags, g) {
+                            children.push(group.into());
+                        }
+                    }
+                }
+            }
+            (!children.is_empty()).then(|| TagGroup::with_children(node.kind.tag(), children))
+        }
+        let mut tags: Vec<Option<TagNode>> = std::mem::take(&mut self.tags)
+            .into_iter()
+            .map(Some)
+            .collect();
+        let mut tree = TagTree::new();
+        for r in std::mem::take(&mut self.roots) {
+            if let Some(g) = build(&mut tags, r) {
+                tree.push(g);
+            }
+        }
+        tree
+    }
+
+    /// Finish the volume: draw the last page, add the outline, the tag
+    /// tree and the title, and serialise.
     pub fn finish(
         mut self,
         fonts: &mut Library,
@@ -391,7 +651,9 @@ impl Composer {
         if let Some(done) = self.conversation.take() {
             self.outline.push_child(done);
         }
+        let tree = self.tag_tree();
         self.doc.set_outline(self.outline);
+        self.doc.set_tag_tree(tree);
         self.doc
             .set_metadata(Metadata::new().title(self.title.clone()));
         let mut counts = self.counts;

@@ -3,9 +3,9 @@
 //! Every combination that does not apply is refused (`invalidInput`), never
 //! ignored, through `oma_export::ExportPlan::new`. What this version does
 //! not build is refused with `exportUnavailable` and its own sentence:
-//! PDF and XLSX (slices 6i and 6j), "Save a copy" of one attachment, and
-//! leaving events out. Image previews are built (slice 6h2: the export's
-//! decode-helper pool) and apply to HTML only in this version.
+//! XLSX (deferred), "Save a copy" of one attachment, and leaving events
+//! out. PDF is built from slice 6j2. Image previews are built (slice 6h2:
+//! the export's decode-helper pool) and apply to HTML and PDF.
 //! Nothing is faked.
 
 use oma_archive::{ArchiveId, ChatId};
@@ -93,9 +93,10 @@ fn format(f: ExportFormatInput) -> IpcResult<Format> {
         ExportFormatInput::Csv => Format::Csv,
         ExportFormatInput::Json => Format::Json,
         ExportFormatInput::Html => Format::Html,
-        ExportFormatInput::Pdf | ExportFormatInput::Xlsx => {
-            return Err(em::unavailable(em::UNAVAILABLE_FORMAT))
-        }
+        // PDF from slice 6j2, through the export-render helper.
+        ExportFormatInput::Pdf => Format::Pdf,
+        // XLSX is deferred (its writer crate is not yet 14 days old).
+        ExportFormatInput::Xlsx => return Err(em::unavailable(em::UNAVAILABLE_FORMAT)),
     })
 }
 

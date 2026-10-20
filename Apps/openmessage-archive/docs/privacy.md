@@ -566,10 +566,11 @@ prevent them:
 *Status: PR A of milestone 6, the export engine, is built: the archive's
 export reads, the `oma-export` crate (TXT, CSV, JSON and HTML), the
 export job, its five IPC commands and the decode-helper pool for HTML
-previews. **There is no Export dialog yet** (PR B, slice 6k), so no
-export can be made from the app's interface; PDF, XLSX, "Save a copy" of
-one attachment and leaving events out are refused, never faked ("Save a
-copy" and leaving events out are assigned to slice 6k). Every
+previews; PR B's slice 6j2 adds PDF through the export-render helper.
+**There is no Export dialog yet** (PR B, slice 6k), so no export can be
+made from the app's interface; XLSX, "Save a copy" of one attachment and
+leaving events out are refused, never faked ("Save a copy" and leaving
+events out are assigned to slice 6k). Every
 statement below was tested on Linux with synthetic data only; nothing
 was run on Windows, in a browser (pages were read back by parsers), or in
 a spreadsheet program. Owner decisions are those of 2026-10-19 (Q3, Q4);
@@ -629,7 +630,8 @@ decision Q3).
 the app's decode helper processes, never the original images, and no
 scripts. Their pages block network loads with a Content-Security-Policy
 (whether every browser honours it from a local file is **UNVERIFIED**).
-PDF exports are not built yet.
+PDF exports (slice 6j2, below) carry the same previews, never an
+original image.
 
 **Where files are written.** Only inside the folder you chose.
 Unfinished work goes into a folder or file named `.oma-export-….partial`
@@ -901,8 +903,8 @@ real window:
   forgets it when it closes. Unfinished exports are removed on cancel or
   failure; one a crash leaves is offered for removal the next time the
   same folder is chosen.
-- **Not available yet, and refused rather than faked:** PDF and XLSX,
-  saving one attachment, and leaving events out.
+- **Not available yet, and refused rather than faked:** XLSX, saving one
+  attachment, and leaving events out (PDF is built from slice 6j2).
 
 ### Destinations and previews (slice 6h2)
 
@@ -949,6 +951,42 @@ deferred:
 - **Its error output is never kept**: only its length is counted, and a
   crash inside it prints a location in the source, never the text it was
   working on.
+
+### PDF exports (slice 6j2)
+
+Tested on Linux only, with synthetic data (`crates/oma-export/tests/pdf_writer.rs`,
+`src-tauri/tests/export_helper.rs`, `src-tauri/tests/log_hygiene.rs`,
+`scripts/oracles/pdf_oracle.py`); no PDF was opened in Acrobat, a
+browser, a desktop viewer or a screen reader:
+
+- **What a PDF holds:** the same masked records as the TXT export, laid
+  out by the export-render helper: every recorded value it prints
+  (addresses, names, message text) is in the page text and can be copied
+  and searched; one-time codes and content captured before an unsend or
+  edit stay masked unless you opted in, as in every format. With the
+  hidden-character markers on, a hidden character is drawn and stored as
+  `⟨U+202E⟩`; with them off, the true character is in the text a copy or
+  a search finds, although it is invisible on the page.
+- **The document title** is generic, "Messages export — conversation 1"
+  (with ", part 2" and so on for later volumes), never a conversation's
+  name or an address; the PDF names no device, archive or folder.
+- **Fonts:** only the fonts shipped with the app (checked against their
+  SHA-256 pins before the helper gets them), embedded as subsets: a PDF
+  holds the shapes of the characters it shows, nothing from your
+  computer's fonts. A character no shipped font has is drawn as a box,
+  but the text you copy keeps it.
+- **Previews** are the decode helper's re-encoded thumbnails, checked by
+  the app before the helper draws them; a PDF never contains an original
+  file, a link to one, a script, a form, an attachment or a web link
+  (the app checks each PDF for these before writing it).
+- **Large conversations** are split into several PDF files
+  (`c0001.pdf`, `c0001-2.pdf`, …) by an estimate of 2,000 pages or 40 MiB;
+  a single-file PDF export is never split.
+- **Tagged structure** (headings, paragraphs, figures) is written to help
+  assistive technology; no accessibility standard is claimed, and how a
+  screen reader reads it is **UNVERIFIED**.
+- If the shipped fonts are missing or altered, a PDF export stops before
+  anything is written and says so.
 
 ## Device identifiers (M2)
 

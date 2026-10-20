@@ -97,6 +97,9 @@ pub enum HelperFailure {
     OutputTooLarge,
     /// It refused with this code.
     Refused(crate::helper::frame::HelperErrorCode),
+    /// The PDF fonts the app ships are missing, unreadable or do not match
+    /// their pins (checked before any helper starts; slice 6j2).
+    Fonts,
 }
 
 impl ExportError {

@@ -176,6 +176,34 @@ impl PdfText {
     pub fn ours(s: &str) -> PdfText {
         PdfText(s.to_owned())
     }
+
+    /// This text cut into pieces of at most `max` bytes (at least one
+    /// character each), at character boundaries: an overlong line of
+    /// recorded text becomes several paragraphs (each piece keeps the
+    /// marking it was built with).
+    pub fn split_bytes(&self, max: usize) -> Vec<PdfText> {
+        let s = self.0.as_str();
+        let mut out = Vec::new();
+        let mut start = 0;
+        while start < s.len() {
+            let mut end = start.saturating_add(max.max(1)).min(s.len());
+            while end > start && !s.is_char_boundary(end) {
+                end -= 1;
+            }
+            if end == start {
+                end = s
+                    .get(start..)
+                    .and_then(|r| r.chars().next())
+                    .map_or(s.len(), |c| start + c.len_utf8());
+            }
+            out.push(PdfText(s.get(start..end).unwrap_or("").to_owned()));
+            start = end;
+        }
+        if out.is_empty() {
+            out.push(PdfText::default());
+        }
+        out
+    }
 }
 
 /// Builds one [`PdfText`] from recorded text and our own words.
@@ -216,6 +244,26 @@ impl TextBuilder {
         self
     }
 
+    /// A piece another `TextBuilder` built (its marking was counted
+    /// when it was built).
+    pub fn piece(mut self, t: &PdfText) -> TextBuilder {
+        self.text.push_str(&t.0);
+        self
+    }
+
+    /// Recorded body text without line breaks, marked per
+    /// [`MarkPolicy::text_body`], appended in place.
+    pub fn push_content(&mut self, raw: &str, markers: bool) {
+        let (t, n) = hidden::mark(raw, MarkPolicy::text_body(markers));
+        self.text.push_str(&t);
+        self.counts.add(n);
+    }
+
+    /// Our own words, appended in place.
+    pub fn push_ours(&mut self, s: &str) {
+        self.text.push_str(s);
+    }
+
     /// The text, and what marking changed.
     pub fn build(self) -> (PdfText, MarkCounts) {
         (PdfText(self.text), self.counts)
@@ -230,6 +278,9 @@ pub enum ParaRole {
     Label,
     /// Recorded text, or a line made of it.
     Text,
+    /// A preview image (the `Image` frame sent before the block); its
+    /// text is empty.
+    Figure,
 }
 
 /// One paragraph of an entry.
@@ -240,6 +291,10 @@ pub struct Para {
     pub indent: u8,
     pub role: ParaRole,
     pub text: PdfText,
+    /// For a [`ParaRole::Figure`]: the attachment record's number, as
+    /// the `Image` frame named it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<u64>,
 }
 
 impl Para {
@@ -256,6 +311,7 @@ impl Para {
                     indent: indent.min(MAX_INDENT),
                     role: ParaRole::Text,
                     text,
+                    image: None,
                 }
             })
             .collect()
@@ -267,6 +323,27 @@ impl Para {
             indent: indent.min(MAX_INDENT),
             role: ParaRole::Label,
             text: PdfText::ours(words),
+            image: None,
+        }
+    }
+
+    /// A line built with [`TextBuilder`] (our words and marked values).
+    pub fn built(indent: u8, role: ParaRole, text: PdfText) -> Para {
+        Para {
+            indent: indent.min(MAX_INDENT),
+            role,
+            text,
+            image: None,
+        }
+    }
+
+    /// The preview image of attachment record `n`.
+    pub fn figure(indent: u8, n: u64) -> Para {
+        Para {
+            indent: indent.min(MAX_INDENT),
+            role: ParaRole::Figure,
+            text: PdfText::default(),
+            image: Some(n),
         }
     }
 }
@@ -293,13 +370,15 @@ pub enum Block {
     Heading {
         level: HeadingLevel,
         text: PdfText,
+        /// A conversation heading's document information title (generic
+        /// words only, D112: "Messages export — conversation 1"); the
+        /// first one in a volume is the volume's title.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
     },
     /// A transcript entry: a header line of separate isolates (time,
     /// sender, each qualifier), then its paragraphs.
-    Entry {
-        head: Vec<PdfText>,
-        body: Vec<Para>,
-    },
+    Entry { head: Vec<PdfText>, body: Vec<Para> },
 }
 
 /// Why a block was refused by the helper's parser.
@@ -309,6 +388,12 @@ pub enum BlockRefusal {
     TooManyPieces,
     TooManyParas,
     Indent,
+    /// A figure without an image, an image on another paragraph, or a
+    /// figure with text.
+    Figure,
+    /// A document title that is too long, has a control, or is not on a
+    /// conversation heading.
+    Title,
 }
 
 impl Block {
@@ -327,6 +412,26 @@ impl Block {
             }
             if body.iter().any(|p| p.indent > MAX_INDENT) {
                 return Err(BlockRefusal::Indent);
+            }
+            let figure_ok = |p: &Para| {
+                (p.role == ParaRole::Figure) == p.image.is_some()
+                    && (p.role != ParaRole::Figure || p.text.0.is_empty())
+            };
+            if !body.iter().all(figure_ok) {
+                return Err(BlockRefusal::Figure);
+            }
+        }
+        if let Block::Heading {
+            level,
+            title: Some(t),
+            ..
+        } = &b
+        {
+            let bad = *level != HeadingLevel::Conversation
+                || t.len() > MAX_TITLE_BYTES
+                || t.chars().any(char::is_control);
+            if bad {
+                return Err(BlockRefusal::Title);
             }
         }
         Ok(b)
@@ -415,6 +520,7 @@ mod tests {
         let h = Block::Heading {
             level: HeadingLevel::Day,
             text: PdfText::ours("2024-03-10"),
+            title: None,
         };
         assert_eq!(Block::decode(&h.encode()), Ok(h));
         assert_eq!(Block::decode(b"{}"), Err(BlockRefusal::Malformed));
@@ -427,6 +533,35 @@ mod tests {
                 br#"{"kind":"entry","head":[],"body":[{"indent":4,"role":"text","text":"x"}]}"#
             ),
             Err(BlockRefusal::Indent)
+        );
+        // A figure needs its image and no text; a title only on a
+        // conversation heading.
+        let fig = Block::Entry {
+            head: Vec::new(),
+            body: vec![Para::figure(1, 7)],
+        };
+        assert_eq!(Block::decode(&fig.encode()), Ok(fig));
+        assert_eq!(
+            Block::decode(
+                br#"{"kind":"entry","head":[],"body":[{"indent":1,"role":"figure","text":""}]}"#
+            ),
+            Err(BlockRefusal::Figure)
+        );
+        assert_eq!(
+            Block::decode(
+                br#"{"kind":"entry","head":[],"body":[{"indent":1,"role":"text","text":"x","image":3}]}"#
+            ),
+            Err(BlockRefusal::Figure)
+        );
+        assert_eq!(
+            Block::decode(br#"{"kind":"heading","level":"day","text":"x","title":"t"}"#),
+            Err(BlockRefusal::Title)
+        );
+        assert_eq!(
+            Block::decode(
+                br#"{"kind":"heading","level":"conversation","text":"x","title":"a\nb"}"#
+            ),
+            Err(BlockRefusal::Title)
         );
         let many = Block::Entry {
             head: vec![PdfText::ours("x"); MAX_HEAD_PIECES + 1],

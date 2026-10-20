@@ -206,7 +206,9 @@ fn compose(
     let mut c = Composer::new(page, "Messages export — conversation 1");
     for b in blocks {
         match b {
-            Block::Heading { level, text } => c.heading(&mut ts, *level, text).expect("heading"),
+            Block::Heading { level, text, .. } => {
+                c.heading(&mut ts, *level, text).expect("heading")
+            }
             Block::Entry { head, body } => c.entry(&mut ts, head, body).expect("entry"),
         }
     }
@@ -228,18 +230,24 @@ fn hostile_corpus() -> Vec<Block> {
     let mut blocks = vec![Block::Heading {
         level: HeadingLevel::Conversation,
         text: PdfText::ours("Conversation 1"),
+        title: None,
     }];
     blocks.push(Block::Heading {
         level: HeadingLevel::Day,
         text: PdfText::ours("2024-03-10"),
+        title: None,
     });
     let long = "x".repeat(5_000);
     let flood = format!("e{}", "\u{301}".repeat(10_000));
     let bidi = "\u{202E}\u{2067}\u{202B}".repeat(500);
+    // Characters no bundled font draws (Tibetan, Linear B, Cherokee),
+    // many times over: each is a counted `.notdef`.
+    let missing = "བོད 𐀀𐀁 ᏣᎳᎩ ".repeat(300);
     for body in [
         long.as_str(),
         flood.as_str(),
         bidi.as_str(),
+        missing.as_str(),
         "Mixed: مرحبا 123 שלום ok 中文 日本語のテキスト 한국어 😀 👍🏽",
         "ภาษาไทยไม่มีการเว้นวรรค",
         "",
@@ -271,6 +279,7 @@ fn a_hostile_corpus_paginates_without_clipping() {
     assert!(counts.pages > 5, "{counts:?}");
     assert_eq!(counts.combining_runs, 1);
     assert!(counts.wrapped_tokens > 20, "{counts:?}");
+    assert!(counts.notdef_chars >= 8 * 300, "{counts:?}");
     let e = extent.expect("glyphs");
     let (w, h) = PageSize::A4.points();
     assert!(e.min_x >= MARGIN - 0.5, "{e:?}");
@@ -419,6 +428,7 @@ fn a_whole_session_through_serve_returns_a_checked_pdf() {
         Block::Heading {
             level: HeadingLevel::Conversation,
             text: PdfText::ours("Conversation 1"),
+            title: None,
         },
     )];
     blocks.push((
@@ -426,6 +436,7 @@ fn a_whole_session_through_serve_returns_a_checked_pdf() {
         Block::Heading {
             level: HeadingLevel::Day,
             text: PdfText::ours("2024-03-10"),
+            title: None,
         },
     ));
     blocks.push((
@@ -452,7 +463,7 @@ fn a_whole_session_through_serve_returns_a_checked_pdf() {
     assert!(find(&pdf, b"/Outlines").is_some(), "an outline");
 
     // A conversation heading in an Item frame, an entry in a Conversation
-    // frame, a tampered font, and an image are refused.
+    // frame, a tampered font, and an image that is not one are refused.
     let refused = |input: Vec<u8>, code: HelperErrorCode| {
         let mut out = Vec::new();
         assert_eq!(serve(&mut input.as_slice(), &mut out), 3);
@@ -482,7 +493,8 @@ fn a_whole_session_through_serve_returns_a_checked_pdf() {
     let mut img = 1u64.to_le_bytes().to_vec();
     img.extend_from_slice(b"\x89PNG");
     input.extend(request(FrameKind::Image, &img));
-    refused(input, HelperErrorCode::Unsupported);
+    // Slice 6j2 draws previews: an image that does not decode is refused.
+    refused(input, HelperErrorCode::BadRequest);
 }
 
 /// Writes sample PDFs and their expectations for
@@ -504,6 +516,7 @@ fn write_samples() {
             Block::Heading {
                 level: HeadingLevel::Conversation,
                 text: PdfText::ours("Conversation 1"),
+                title: None,
             },
             entry(&["[2024-03-10 14:02:11 +01:00]", "Alice"], body, markers),
         ]

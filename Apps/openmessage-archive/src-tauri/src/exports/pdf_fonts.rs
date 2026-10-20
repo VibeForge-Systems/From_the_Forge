@@ -10,9 +10,9 @@
 //! can be sent to the export-render helper (`RenderSession::send_fonts`),
 //! so no unchecked byte reaches the helper.
 //!
-//! Errors carry a slot number and a kind only: never a path. The PDF
-//! export that calls this (and resolves the resource folder through
-//! Tauri) is slice 6j2's.
+//! Errors carry a slot number and a kind only: never a path. The export
+//! job calls this (slice 6j2) with the resource folder `start_export`
+//! resolved through Tauri (`bundle.resources` copies the fonts there).
 
 use std::io::Read;
 use std::path::Path;

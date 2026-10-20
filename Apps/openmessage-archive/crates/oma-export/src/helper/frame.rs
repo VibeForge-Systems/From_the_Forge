@@ -55,7 +55,7 @@ pub const RESOURCE_HEADER: usize = 1 + 8 + 8;
 /// The fixed part of an `Image` payload.
 pub const IMAGE_HEADER: usize = 8;
 /// The size of a `Done` payload.
-pub const DONE_BYTES: usize = 5 * 8;
+pub const DONE_BYTES: usize = 6 * 8;
 /// The most resource slots a session may fill.
 pub const MAX_RESOURCE_SLOTS: u8 = 16;
 /// The most resource bytes, over all slots, one session may send (the
@@ -370,6 +370,8 @@ pub struct DoneCounts {
     pub wrapped_tokens: u64,
     /// Combining runs that were limited.
     pub combining_runs: u64,
+    /// Preview images drawn (PDF).
+    pub figures: u64,
     /// The output's length in bytes: the sum of its chunks.
     pub total_bytes: u64,
 }
@@ -381,6 +383,7 @@ impl DoneCounts {
             self.notdef_chars,
             self.wrapped_tokens,
             self.combining_runs,
+            self.figures,
             self.total_bytes,
         ]
         .iter()
@@ -398,7 +401,8 @@ impl DoneCounts {
             notdef_chars: at(1)?,
             wrapped_tokens: at(2)?,
             combining_runs: at(3)?,
-            total_bytes: at(4)?,
+            figures: at(4)?,
+            total_bytes: at(5)?,
         })
     }
 }
@@ -577,10 +581,11 @@ mod tests {
             notdef_chars: 2,
             wrapped_tokens: 3,
             combining_runs: 4,
+            figures: 6,
             total_bytes: 5,
         };
         assert_eq!(DoneCounts::decode(&d.encode()), Some(d));
-        assert!(DoneCounts::decode(&[0; 39]).is_none());
+        assert!(DoneCounts::decode(&[0; 47]).is_none());
 
         for c in HelperErrorCode::ALL {
             assert_eq!(HelperErrorCode::from_code(c.code()), Some(c));

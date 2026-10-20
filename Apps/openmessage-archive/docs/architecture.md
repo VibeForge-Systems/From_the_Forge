@@ -4545,6 +4545,171 @@ Devanagari, Thai and Hebrew differs and those samples are held to
 on Windows, and no exported PDF was opened in a viewer or screen reader
 (**UNVERIFIED**).
 
+### The PDF writer, volumes, previews and tags (M6 slice 6j2)
+
+Slice 6j2 makes PDF an export format: `start_export` accepts it (XLSX
+alone stays refused with `exportUnavailable`), and the pipeline's
+`writer::pdf::PdfWriter` sends each record as blocks to the export-render
+helper and stages the checked volumes it returns.
+
+**One set of words for TXT and PDF.** The item's lines (body, details,
+attachments, reactions, value history, stored versions) moved from
+`writer/txt.rs` into `writer/lines.rs`, generic over an `Emit`ter. A line
+is a list of `Part`s: our words (`Part::Ours`) or a recorded value the
+emitter has already marked (`Part::Value`; TXT: header policy plus the
+`[` `]` escapes; PDF: `TextBuilder::header`). Recorded text with line
+breaks goes through `Emit::text` as runs, which each emitter splits and
+marks with its body policy. The TXT goldens did not move. The PDF never
+passes recorded text as our own words: `TextBuilder::piece` appends a
+`PdfText` another builder made, and `PdfText::split_bytes` cuts an
+overlong line without re-marking it.
+
+**What a PDF holds.** Per conversation file: a conversation heading (a
+new page, an outline entry, and the volume's document title, generic per
+D112: "Messages export — conversation N", "… messages in no
+conversation", with ", part K" after a cut), the notice and the
+conversation's facts, a day heading per local day ("Undated" last), and
+per item a header row of separate isolates (the time, `item N`, the
+sender, each tag in brackets as its own piece) and the same labels and
+recorded text as TXT, then the file's footer (counts and the PDF legend,
+`words::pdf_text`). A single file ends with "About this export" (§7.3):
+the manifest's fields without `files`, each line marked as TXT does.
+
+**Volumes (§5.6).** A bundle has one PDF per conversation file,
+`pdf/c0001.pdf` (`naming::BundlePath::pdf_volume`), cut at an item
+boundary into `pdf/c0001-2.pdf` … when the volume's **estimate** would
+pass 2,000 pages or 40 MiB (`VolumeLimits::SPEC`). krilla serialises at
+the end, so the estimate is all the main process has: lines (85 width
+units a line, a CJK or emoji character two, 52 lines a page, 16 a
+preview, a page per conversation heading), and bytes (4 per drawn
+character, the subset cost of each character the volume has not drawn
+yet: 8 KiB for an emoji, 512 bytes for a CJK character, 256 otherwise,
+the previews' bytes and 1 MiB fixed). Measured: the hostile
+catalogue's 1 MiB body drew about 1.5 bytes a character, so the
+estimate errs towards cutting early. After a cut the next volume repeats
+the conversation heading with "(part N)" and the current day heading. An
+entry's day heading is sent with the entry, after any cut, so a volume
+never ends with a day heading of a day it holds nothing of. A
+single file is never cut; its bound is the helper's 256 MiB output limit.
+Each volume is one `EndVolume`, so one helper serves the whole export.
+
+**Block bounds.** A line of recorded text over 32 KiB becomes several
+paragraphs (each split counted with `pdfForcedWraps`), and an entry whose
+encoded block would pass 4 MiB continues in further blocks with an empty
+header row, so no frame nears its 16 MiB bound (the hostile catalogue's
+1 MiB body is the test).
+
+**Previews (§6.5).** With previews on, `PdfWriter` asks the export's
+`PreviewSource` (the decode-helper pool's feed, shared with HTML) after
+each attachment's lines, only for attachments whose access is `included`
+or `revealed`. A thumbnail passes `preview::check_rendition` and is sent
+as an `Image` frame before its block; the block's `Figure` paragraph
+names it. The helper decodes it with krilla's `raster-images` (a JPEG is
+embedded as it is; a PNG is decoded and deflated again) and draws it at
+most 180 points a side, never upscaled. Each block's images are sent just
+before it, and a block draws at most 32 previews
+(`writer::pdf::MAX_FIGURES_PER_BLOCK`; an entry with more continues in
+further blocks), so the helper, which holds at most 64 images waiting for
+their figure, never refuses an entry for having many; a figure naming an
+image that was not sent is refused. An unavailable preview is the line
+"Preview unavailable" and is counted. **The feed now keeps each answer until the item is cleared**, so
+HTML and PDF in one export get the same renditions from one decode.
+
+**Tagged structure, with no conformance claim (§0.2).** krilla's tagging:
+a conversation or section heading is an `H1`, a day heading an `H2`, an
+entry a `Div` holding a `P` for its header row, a `P` per paragraph and a
+`Figure` per preview (alternative text of our own: "Preview of
+attachment N"). Every drawn line is one marked span under its group, in
+reading order. Whether a screen reader reads it well is **UNVERIFIED**.
+
+**The shell.** With PDF in the plan, the worker reads the fonts from the
+resource folder Tauri resolves (`bundle.resources` copies
+`resources/fonts/*` to `fonts/` beside the binary; `tauri build` and the
+dev build both copy them) and checks them against their pins before the
+archive is read; a missing or altered font fails the export with its own
+sentence (`HelperFailure::Fonts`, code `exportHelperFailed`, never a
+path). `HelperRenderers` starts the helper and hands each session's kill
+to a slot the job's cancel hook empties, so a cancel kills it at once;
+the helpers' stderr is logged as a size bucket only. `PdfSource::Given`
+lets the shell's unit tests give a renderer; the real helper is
+exercised by `tests/log_hygiene.rs` (an HTML + PDF export with previews
+from the real decode helper) and `tests/export_helper.rs`.
+
+**Manifest.** `pdfUndrawableCharacters` and `pdfForcedWraps` now come
+from the PDF writer; the PDF's `previewsEmbedded` is the helper's own
+count of the figures it drew (the `Done` frame's `figures`), and a volume
+whose count differs from the previews sent for it fails the export
+(`HelperFailure::Protocol`) before it is staged. `previewsEmbedded` and
+`previewsUnavailable` add the
+PDF's to the HTML's (like the other per-writer counts, a sum over
+formats).
+
+**Deviations from the spec.** Records are mapped to blocks in the main
+process (as in 6j1); the Han face is always SC (the plan has no TC option
+yet); the volume's estimate counts characters, not glyphs; the
+`Done` frame gained a `figures` count; and a bundle's legend points to
+`README.txt` and `manifest.json` instead of carrying "About this export".
+
+**Scale (re-measured, release build, Linux container).** 80,000
+messages from the bulk generator with 20 % CJK and 20 % emoji bodies, 320
+conversations (so 321 volumes), through the PDF writer with the backend
+in the child process (whose peak RSS bounds the helper's):
+
+| Previews | Time | Peak RSS (whole child) | Output |
+|---|---|---|---|
+| none | 65.0 s | 170 MiB | 237 MB |
+| 1,566 JPEG (48 KiB each) | 69.5 s | 159 MiB | 252 MB |
+| 1,566 PNG (640 × 480) | 121.3 s | 97 MiB | 508 MB |
+
+The memory bound (helper under 200 MiB) holds; **the spec's "under 30 s"
+does not**. Most of the time is layout (every header piece is its own
+parley paragraph, about six layouts an item) and the per-volume font
+subsets (each of the 321 volumes embeds its own CJK and colour-emoji
+subsets, which also makes the output about 0.7 MB a volume larger than
+the Latin-only scratch figures). PNG previews are decoded and deflated
+again by krilla; the decode helper's renditions of photos are JPEG,
+which are embedded as they are. Not optimised in this slice.
+
+**Binary size (re-measured).** Release-profile builds of the shell
+binary (stripped by the profile) in this container: 11,478,584 bytes
+from `main` at abd531f (PR A, no export-render helper) and 17,731,544
+bytes from this branch with slice 6j2 (the helper, krilla, parley with
+its ICU segmenter data, `raster-images`): **+6.25 MB**, close to the
+scratch estimate of +6.3 MB. The fonts are not in the binary; they ship
+beside it as resources (30,355,252 bytes). Other platforms' sizes were
+not measured.
+
+**Hostile corpus.** `tests/pdf_layout.rs` lays out a 5,000-character
+token, `e` with 10,000 combining marks, 1,500 bidi controls, 3,000
+characters no bundled font has (Tibetan, Linear B, Cherokee; each a
+counted `.notdef`), mixed Arabic, Hebrew, CJK, Hangul and emoji, and
+unspaced Thai, on A4 and Letter, with every glyph inside the margins;
+`tests/pdf_writer.rs` sends the hostile viewer catalogue's entry (its
+1 MiB body among them) through the whole writer and the real backend.
+
+**Tests:** `writer/pdf.rs` (width units, the estimate, volume paths; an
+entry with 70 previews sends each block's images just before it, at most
+32 a block),
+`pdf/doc.rs` (figures and titles bounded), `crates/oma-export/tests/pdf_writer.rs`
+(every catalogue entry to checked, tagged PDFs with an outline, one file
+per volume, manifest counts, sums; the blocks never draw a masking
+sentinel and draw every text sentinel with both reveals; a one-page limit
+cuts volumes with "(part 2)" titles and never ends a volume with a day
+heading, the default does not cut; a single file
+is never cut and ends with About; item heads; previews drawn as tagged
+image figures, a bad rendition fails the export with nothing published,
+and so does a renderer that draws fewer previews than it was sent;
+the hostile catalogue's 1 MiB body split under the bound, no raw control
+or bidi override drawn, 496 pages through the real backend),
+`tests/pdf_layout.rs` (an image that is not one is refused), the shell's
+`exports::tests` (PDF accepted, XLSX refused; a PDF export publishes a
+volume per conversation file; missing or wrong fonts fail before
+writing), `tests/export_helper.rs` (the real helper draws a preview as a
+tagged figure, titles two volumes and refuses a figure without its
+image), `tests/log_hygiene.rs` (HTML + PDF through both real helpers),
+`tests/perf_smoke.rs` (the ignored 80,000-message PDF run), and
+`scripts/oracles/pdf_oracle.py` (below, and `docs/development.md`).
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`
@@ -4779,7 +4944,7 @@ marked PR B are decided but not built in PR A.
 | D127 | Destination (lean; slices 6h1, 6h2) | Rust-opened dialogs whose titles name sensitive options; the folder kept in the draft, never crossing IPC, behind an opaque destination token bound to the draft (the latest choice's token starts the export); names generated in Rust; the format's extension enforced; `.oma-export-*` names refused; refusals per I1 plus the archive folder; warnings to confirm, checked again at start; no remembered destination | A name or path from the webview | I4, I3; `settings.json` stays content-free |
 | D136 | Export DTOs (slice 6h1) | A new export walk disjoint from the others but for three shared types; `exportFinished` inside the archive guard's walk, counts only; warnings and providers as closed codes | Reuse the viewer walk | Walks stay disjoint and events small |
 | D131 | XLSX (lean; **deferred** to a follow-up slice after 2026-10-31) | rust_xlsxwriter 0.100.0 in constant-memory mode in the export-render helper; `quotePrefix`; our own 32,767 UTF-16 limit with continuation rows; temp directory in staging. Slice 6i built the helper without it: 0.100.0 (published 2026-10-17) is not 14 days old until 2026-10-31, and 0.99.x is rejected (advisories), so XLSX stays refused | In-process | A panic on temp-file I/O cannot end the app; exact values |
-| D133 | Export-render helper (**owner-confirmed Q1, Q2**; **PR B**, slices 6i, 6j) | PDF layout and XLSX writing in `--oma-export-helper`; bounded frames; main-process output checks; PDF with krilla 0.8.2 + parley 0.12.0 (a per-crate BSD-2-Clause exception for `arrayref` only; `rust-version` 1.92); fonts: the base scripts, Noto Sans CJK and Noto Color Emoji, pinned by SHA-256. Slice 6j1 applied it with parley **0.11.1** until 0.12.0 is 14 days old (2026-10-23), the regional CJK subsets, the COLRv1 emoji build and Noto Sans Math added for the marker's brackets | In-process; our own PDF writer | Hostile text and full disks cannot end the app |
+| D133 | Export-render helper (**owner-confirmed Q1, Q2**; **PR B**, slices 6i, 6j) | PDF layout and XLSX writing in `--oma-export-helper`; bounded frames; main-process output checks; PDF with krilla 0.8.2 + parley 0.12.0 (a per-crate BSD-2-Clause exception for `arrayref` only; `rust-version` 1.92); fonts: the base scripts, Noto Sans CJK and Noto Color Emoji, pinned by SHA-256. Slice 6j1 applied it with parley **0.11.1** until 0.12.0 is 14 days old (2026-10-23), the regional CJK subsets, the COLRv1 emoji build and Noto Sans Math added for the marker's brackets; slice 6j2 wired the PDF writer (volumes by estimate, previews, tagged structure), with krilla's `raster-images` on for the previews | In-process; our own PDF writer | Hostile text and full disks cannot end the app |
 | D139 | Job (slice 6h1) | `JobKind::Export` on the archive subject, holding the archive lock until its cleanup ends; its own reader, so damaged or migrating archives are refused; survives the viewer closing; `removingPartial` keeps the slot | A viewer-session task | One job model; excludes writers in every instance |
 
 ## Logging

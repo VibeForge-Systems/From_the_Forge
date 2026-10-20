@@ -60,9 +60,10 @@ the TXT, CSV, JSON and HTML writers, the shell's export job, its five
 IPC commands and the export's decode-helper pool. It has run only in a
 Linux container (not on CI, not on Windows). No export can be made from
 the UI until PR B (PDF, the Export dialog, slices 6i–6l). PR B's slice
-6i (the export-render helper) and slice 6j1 (its PDF backend: parley
-layout and krilla output with the pinned Noto fonts; no export uses it
-until 6j2) are built on `feat/oma-m6-export-ui`; **XLSX is deferred** to a follow-up slice after
+6i (the export-render helper), slice 6j1 (its PDF backend: parley
+layout and krilla output with the pinned Noto fonts) and slice 6j2 (the
+PDF writer: PDF is an export format, with volumes, previews and tagged
+structure) are built on `feat/oma-m6-export-ui`; **XLSX is deferred** to a follow-up slice after
 2026-10-31 (its writer crate is not yet 14 days old) and stays refused. The owner
 answered M6's Q1–Q4 on 2026-10-19 (Q5 is a lean awaiting confirmation;
 `docs/architecture.md`, "Milestone 6 decisions").
@@ -743,8 +744,8 @@ Never hand-edit generated files.
   and sends one terminal event (`exportFinished` with counts only,
   `cancelled` or `failed`, each with `stagingRemoved`). `close_viewer` and
   `hide_viewer` go through `AppState::{close_viewer, hide_viewer}`, which
-  discard the draft first; keep it so. What PR A does not build (PDF,
-  XLSX, the attachment scope, events off) is refused at the
+  discard the draft first; keep it so. What is not built (XLSX, the
+  attachment scope, events off; PDF until slice 6j2) is refused at the
   draft with `exportUnavailable`, never faked. Export DTOs live in
   `exports/dto.rs`: a new one goes into `ts_guard::M6_EXPORT_TYPES` (or
   `M6_EVENT_TYPES` if `JobEvent` reaches it, which the archive guard then
@@ -816,6 +817,27 @@ Never hand-edit generated files.
   and the PDF text oracle (`write_samples`, `scripts/oracles/pdf_text.py`);
   pypdf does not apply ActualText, so complex scripts are held to
   `pdftotext` only. parley is 0.11.1 until 0.12.0 is 14 days old.
+- **The PDF writer (M6 slice 6j2, `oma-export`'s `writer/pdf.rs` and
+  `writer/lines.rs`; the shell's `exports/worker.rs`).** TXT and PDF say
+  an item's lines through the same functions in `writer/lines.rs`,
+  generic over `Emit`: add a sentence there, never to one format, and
+  keep recorded values as `Part::Value` (marked by the emitter), never
+  inside a `Part::Ours` string; the TXT goldens must not move. The PDF
+  writer sends blocks to a `PdfRenderer` (the helper through
+  `HelperRenderers`; tests use `render::pdf::InProcess` or a recording
+  renderer) and stages only volumes the renderer returned checked. A
+  bundle has `pdf/<stem>.pdf` per conversation file, cut into
+  `<stem>-N.pdf` by the estimate (`VolumeLimits::SPEC`: 2,000 pages or
+  40 MiB); a single file is never cut. Previews come only from the
+  export's `PreviewSource`, pass `check_rendition`, and go as `Image`
+  frames before the block whose `Figure` paragraph names them; the
+  preview feed keeps each answer until the item is cleared, so HTML and
+  PDF share one decode. The shell reads the fonts from the resource
+  folder (`bundle.resources` copies `resources/fonts/*` to `fonts/`)
+  through `exports::pdf_fonts::load` before the archive is read; a
+  missing or altered font is `HelperFailure::Fonts`. A change to what a
+  PDF draws runs `tests/pdf_writer.rs` and `scripts/oracles/pdf_oracle.py`
+  (`write_oracle_pdf`); the tags are produced with no PDF/UA claim.
 - **`oma-export` in one place (M6 PR A).** One record model and ledger;
   masking happens in `oma-archive` before any writer sees text; paths
   only from `naming.rs`; on Linux every write relative to the staging

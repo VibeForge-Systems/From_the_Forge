@@ -6,7 +6,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -220,7 +220,25 @@ fn run_job(
     c: ExportConfirmationsInput,
     cancel_on_rows: bool,
 ) -> IpcResult<Vec<JobEvent>> {
-    run_job_with(host, jobs, f, id, c, cancel_on_rows, fake_renderers(), None)
+    run_job_with(
+        host,
+        jobs,
+        f,
+        id,
+        c,
+        cancel_on_rows,
+        fake_renderers(),
+        None,
+        no_pdf(),
+    )
+}
+
+/// No PDF renderer (an export without PDF never asks for one).
+fn no_pdf() -> worker::PdfSource {
+    worker::PdfSource::Helper {
+        launch: None,
+        fonts: None,
+    }
 }
 
 /// A hook that gets the job's cancel token before the worker runs.
@@ -237,6 +255,7 @@ fn run_job_with(
     cancel_on_rows: bool,
     renderers: crate::viewer::media::helper::BackendFactory,
     canceller: Option<Canceller>,
+    pdf: worker::PdfSource,
 ) -> IpcResult<Vec<JobEvent>> {
     let token = token_of(host, id);
     let draft = host.take_for_start(id, &token)?;
@@ -270,6 +289,7 @@ fn run_job_with(
         cancel: r.cancel.clone(),
         host: Arc::clone(host),
         renderers,
+        pdf,
     };
     if let Some(c) = canceller {
         c(r.cancel.clone());
@@ -464,12 +484,13 @@ fn unbuilt_formats_and_bad_combinations_are_refused() {
             .and_then(|r| input::parse(&r).map(|_| ()))
             .expect_err("refused")
     };
+    // PDF is built from slice 6j2.
+    assert!(
+        preview_req(scope.clone(), json!(["pdf"]), json!({ "pageSize": "a4" }))
+            .and_then(|r| input::parse(&r).map(|_| ()))
+            .is_ok()
+    );
     for (formats, over, sentence) in [
-        (
-            json!(["pdf"]),
-            json!({ "pageSize": "a4" }),
-            messages::UNAVAILABLE_FORMAT,
-        ),
         (
             json!(["txt", "xlsx"]),
             json!({}),
@@ -1129,6 +1150,7 @@ fn an_export_holds_the_lock_and_publishes() {
         cancel: r.cancel.clone(),
         host: Arc::clone(&host),
         renderers: fake_renderers(),
+        pdf: no_pdf(),
     };
     worker::run_export(spec, &state.jobs, &mut sink);
     drop(r.done);
@@ -1460,6 +1482,7 @@ fn a_search_scope_exports_the_live_set() {
             cancel: r.cancel.clone(),
             host: Arc::clone(&state.exports),
             renderers: fake_renderers(),
+            pdf: no_pdf(),
         },
         &state.jobs,
         &mut sink,
@@ -1950,6 +1973,7 @@ fn an_html_export_with_previews_embeds_the_pools_renditions() {
         false,
         factory,
         None,
+        no_pdf(),
     )
     .expect("ran");
     assert!(
@@ -2040,6 +2064,7 @@ fn a_cancel_during_a_hung_preview_ends_the_job_within_a_second() {
         false,
         factory,
         Some(canceller),
+        no_pdf(),
     )
     .expect("ran");
     let ended = std::time::Instant::now();
@@ -2061,4 +2086,142 @@ fn a_cancel_during_a_hung_preview_ends_the_job_within_a_second() {
     );
     assert!(latency < Duration::from_secs(1), "{latency:?}");
     assert!(entries(&f.dest).is_empty(), "{:?}", entries(&f.dest));
+}
+
+/// A renderer factory for the worker's PDF tests: each volume is a
+/// minimal PDF the output check accepts (the real backend runs in the
+/// export-render helper, `tests/log_hygiene.rs` and
+/// `tests/export_helper.rs`).
+struct MinimalPdf(Arc<AtomicUsize>);
+
+struct MinimalRenderer(Arc<AtomicUsize>);
+
+impl oma_export::writer::pdf::PdfRenderer for MinimalRenderer {
+    fn conversation(&mut self, _b: &[u8]) -> Result<(), oma_export::ExportError> {
+        Ok(())
+    }
+    fn item(&mut self, _b: &[u8]) -> Result<(), oma_export::ExportError> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+    fn image(&mut self, _n: u64, _b: &[u8]) -> Result<(), oma_export::ExportError> {
+        Ok(())
+    }
+    fn end_volume(
+        &mut self,
+        _last: bool,
+    ) -> Result<oma_export::helper::Volume, oma_export::ExportError> {
+        Ok(oma_export::helper::Volume {
+            bytes: b"%PDF-1.7\n%%EOF\n".to_vec(),
+            counts: oma_export::helper::DoneCounts {
+                units: 1,
+                ..Default::default()
+            },
+        })
+    }
+    fn close(self: Box<Self>) -> u64 {
+        0
+    }
+}
+
+impl oma_export::writer::pdf::PdfRendererFactory for MinimalPdf {
+    fn start(
+        &mut self,
+        _o: &oma_export::pdf::doc::PdfOptions,
+    ) -> Result<Box<dyn oma_export::writer::pdf::PdfRenderer>, oma_export::ExportError> {
+        Ok(Box::new(MinimalRenderer(Arc::clone(&self.0))))
+    }
+}
+
+/// A PDF export runs the PDF writer with the export's renderer and
+/// publishes one file per conversation file.
+#[test]
+fn a_pdf_export_publishes_a_volume_per_conversation_file() {
+    let f = fx();
+    let host = Arc::new(ExportHost::default());
+    let jobs = Jobs::default();
+    let req = preview_req(
+        archive_scope(&f),
+        json!(["pdf", "txt"]),
+        json!({ "pageSize": "letter" }),
+    )
+    .expect("req");
+    let (id, _) = chosen(&host, &f, &req);
+    let blocks = Arc::new(AtomicUsize::new(0));
+    let pdf = worker::PdfSource::Given(std::sync::Mutex::new(Some(Box::new(MinimalPdf(
+        Arc::clone(&blocks),
+    )))));
+    let events = run_job_with(
+        &host,
+        &jobs,
+        &f,
+        &id,
+        confirmations(json!({})),
+        false,
+        fake_renderers(),
+        None,
+        pdf,
+    )
+    .expect("ran");
+    assert!(
+        matches!(events.last(), Some(JobEvent::ExportFinished { .. })),
+        "{events:?}"
+    );
+    assert!(blocks.load(Ordering::SeqCst) > 0);
+    let names = entries(&f.dest);
+    let bundle = f.dest.join(&names[0]);
+    let pdfs: Vec<String> = std::fs::read_dir(bundle.join("pdf"))
+        .expect("pdf folder")
+        .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+        .collect();
+    let txts = std::fs::read_dir(bundle.join("txt")).expect("txt").count();
+    assert_eq!(pdfs.len(), txts, "{pdfs:?}");
+    assert!(pdfs.iter().all(|n| n.ends_with(".pdf")));
+}
+
+/// Missing or altered fonts stop a PDF export before anything is written,
+/// with their own sentence (never a path).
+#[test]
+fn a_pdf_export_without_its_fonts_fails_before_writing() {
+    let f = fx();
+    let host = Arc::new(ExportHost::default());
+    let jobs = Jobs::default();
+    let empty = tempfile::tempdir().expect("tempdir");
+    for fonts in [None, Some(empty.path().to_path_buf())] {
+        let req = preview_req(
+            archive_scope(&f),
+            json!(["pdf"]),
+            json!({ "pageSize": "a4" }),
+        )
+        .expect("req");
+        let (id, _) = chosen(&host, &f, &req);
+        let events = run_job_with(
+            &host,
+            &jobs,
+            &f,
+            &id,
+            confirmations(json!({})),
+            false,
+            fake_renderers(),
+            None,
+            worker::PdfSource::Helper {
+                launch: None,
+                fonts,
+            },
+        )
+        .expect("ran");
+        match events.last() {
+            Some(JobEvent::Failed {
+                error,
+                staging_removed,
+                ..
+            }) => {
+                assert_eq!(error.code, ErrorCode::ExportHelperFailed);
+                assert_eq!(error.message, messages::FONTS_DAMAGED);
+                assert!(*staging_removed);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(entries(&f.dest).is_empty(), "nothing written");
+    }
 }

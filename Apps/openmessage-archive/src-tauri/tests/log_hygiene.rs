@@ -732,7 +732,16 @@ fn exercise_export(
             json!({ "previews": true, "largerPreviews": true, "attachments": "none" }),
         ),
         (json!(["html", "json"]), json!({ "previews": true })),
+        // Slice 6j2: PDF through the real export-render helper, with
+        // previews from the real decode helper and the committed fonts.
+        (
+            json!(["html", "pdf"]),
+            json!({ "previews": true, "pageSize": "a4" }),
+        ),
     ];
+    let pdf_fonts = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("resources")
+        .join("fonts");
     for (formats, over) in runs {
         let req: PreviewExportRequest = serde_json::from_value(json!({
             "scope": { "kind": "archive", "archiveId": id },
@@ -783,6 +792,13 @@ fn exercise_export(
                 cancel: r.cancel.clone(),
                 host: Arc::clone(&host),
                 renderers: Arc::clone(&helper),
+                pdf: worker::PdfSource::Helper {
+                    launch: Some(oma_export::helper::HelperLaunch::new(
+                        PathBuf::from(env!("CARGO_BIN_EXE_openmessage-archive")),
+                        vec![std::ffi::OsString::from("--oma-export-helper")],
+                    )),
+                    fonts: Some(pdf_fonts.clone()),
+                },
             },
             &jobs,
             &mut sink,
@@ -817,6 +833,7 @@ fn exercise_export(
     // The sizes of everything written.
     let mut sizes = Vec::new();
     let mut embedded = 0;
+    let mut pdfs = 0;
     let mut stack = vec![dest.clone()];
     while let Some(d) = stack.pop() {
         for e in std::fs::read_dir(&d).expect("read_dir") {
@@ -826,6 +843,11 @@ fn exercise_export(
                 stack.push(e.path());
             } else {
                 sizes.push(m.len());
+                if e.path().extension().is_some_and(|x| x == "pdf") {
+                    let pdf = std::fs::read(e.path()).expect("pdf");
+                    assert!(pdf.starts_with(b"%PDF-"), "a PDF from the helper");
+                    pdfs += 1;
+                }
                 if e.path().extension().is_some_and(|x| x == "html") {
                     let page = std::fs::read_to_string(e.path()).expect("page");
                     embedded += usize::from(page.contains("src=\"data:image/"));
@@ -834,6 +856,7 @@ fn exercise_export(
         }
     }
     assert!(sizes.len() > 10, "the exports wrote files");
+    assert!(pdfs >= 1, "the PDF export wrote its files");
     (sizes, embedded)
 }
 

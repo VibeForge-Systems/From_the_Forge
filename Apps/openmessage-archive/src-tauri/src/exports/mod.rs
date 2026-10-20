@@ -27,8 +27,8 @@
 //! - **The export-render helper** ([`render_helper`], slice 6i): the
 //!   `--oma-export-helper` entry, how the app launches it, and its kill
 //!   on the job's cancel path. Its first backend, PDF, exists from slice
-//!   6j1, but no export uses it yet: PDF (until slice 6j2 wires its
-//!   writer) and XLSX stay refused at the draft with `exportUnavailable`.
+//!   6j1 and is an export format from slice 6j2 ([`worker::PdfSource`]);
+//!   XLSX stays refused at the draft with `exportUnavailable`.
 //! - **The PDF fonts** ([`pdf_fonts`], slice 6j1): read from the resource
 //!   folder and checked against their SHA-256 pins before any byte can be
 //!   sent to the helper.

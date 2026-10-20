@@ -140,6 +140,7 @@ pub async fn choose_export_destination(
 /// arrive on `on_event`.
 #[tauri::command]
 pub async fn start_export(
+    app: AppHandle,
     state: State<'_, AppState>,
     request: Request<'_>,
     on_event: Channel<JobEvent>,
@@ -199,6 +200,12 @@ pub async fn start_export(
         cancel: reservation.cancel,
         host: Arc::clone(&state.exports),
         renderers: crate::viewer::media::helper::process_factory(),
+        // The PDF fonts ship as resources (`bundle.resources`); a path
+        // Rust resolved, never one from the webview.
+        pdf: worker::PdfSource::Helper {
+            launch: crate::exports::render_helper::launch(),
+            fonts: app.path().resource_dir().ok().map(|d| d.join("fonts")),
+        },
     };
     if job_worker::spawn_with(
         &job_id,

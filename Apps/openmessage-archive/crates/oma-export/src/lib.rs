@@ -94,6 +94,11 @@
 //! - `render::pdf` (feature `render`): the helper's PDF backend, parley
 //!   for shaping, bidi and line breaking, krilla for the PDF.
 //!
+//! Slice 6j2, the PDF writer: `writer::pdf` maps records to blocks (the
+//! item's lines shared with TXT through `writer::lines`), cuts volumes by
+//! an estimate, sends checked previews, and stages the volumes the helper
+//! returns checked.
+//!
 //! PDF is the helper's first real backend; XLSX is deferred
 //! (its writer crate is not yet old enough to pin) and stays refused.
 //! Nothing here logs; errors carry kinds only (I6).

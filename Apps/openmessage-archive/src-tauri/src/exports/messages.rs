@@ -43,7 +43,8 @@ pub const NO_SPACE_FOR_FILES: &str =
 pub const HELPER_FAILED: &str =
     "A helper process of the export failed, or its output was refused. Nothing was published.";
 pub const UNAVAILABLE_FORMAT: &str =
-    "PDF and spreadsheet (XLSX) exports are not available in this version.";
+    "Spreadsheet (XLSX) exports are not available in this version.";
+pub const FONTS_DAMAGED: &str = "The fonts the app uses for PDF exports are missing or damaged. Reinstall the app. Nothing was published.";
 pub const UNAVAILABLE_ATTACHMENT: &str =
     "Saving a copy of one attachment is not available in this version.";
 pub const UNAVAILABLE_EVENTS: &str =
@@ -114,6 +115,9 @@ pub fn to_ipc(e: &ExportError) -> IpcError {
         ExportError::DestinationChanged => {
             IpcError::new(C::ExportDestinationRefused, DESTINATION_CHANGED)
         }
+        ExportError::HelperFailed(oma_export::HelperFailure::Fonts) => {
+            IpcError::new(C::ExportHelperFailed, FONTS_DAMAGED)
+        }
         ExportError::HelperOutputRejected
         | ExportError::HelperFailed(_)
         | ExportError::Limit(LimitKind::FrameTooLarge) => {
@@ -166,6 +170,7 @@ pub(crate) const ALL: &[&str] = &[
     NO_SPACE,
     NO_SPACE_FOR_FILES,
     HELPER_FAILED,
+    FONTS_DAMAGED,
     UNAVAILABLE_FORMAT,
     UNAVAILABLE_ATTACHMENT,
     UNAVAILABLE_EVENTS,
