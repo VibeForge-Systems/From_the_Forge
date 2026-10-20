@@ -15,12 +15,63 @@
 //! The walk visits every **timeline row** of the scope: each
 //! conversation's `chat_message` rows in range (a timeline item, or a
 //! reaction folded into its target) and each message in no conversation.
+//!
+//! **Events left out (slice 6k2).** When the snapshot leaves events out
+//! ([`ExportSnapshot::leave_out_events`]), the walk skips every row
+//! [`left_out`] names (a group or system event, and a reaction row folded
+//! into one) and returns how many it skipped: the pre-count, the scope
+//! index and the cursors all skip the same rows, so the numbers still
+//! agree and ordinals have no gaps.
+
+use rusqlite::OptionalExtension;
 
 use super::cursor::TimeRange;
 use super::measure::BatchLimits;
 use super::ExportSnapshot;
 use crate::error::ArchiveError;
+use crate::schema::codes::ItemKindCode;
 use crate::view::{ChatId, MessageId};
+
+/// A message's derived item kind (one primary-key seek).
+pub(crate) const SQL_ITEM_KIND: &str = "SELECT item_kind FROM message WHERE id = ?1";
+
+/// Whether message `id` is a group or system event: an item kind that is
+/// neither a message nor unknown (an unknown kind may be a message of a
+/// type this version does not map, so it stays). A missing row is not
+/// an event.
+pub(crate) fn is_event(snap: &ExportSnapshot<'_>, id: i64) -> Result<bool, ArchiveError> {
+    let kind: Option<i64> = snap.run(|| {
+        snap.stmts
+            .prepare(SQL_ITEM_KIND)?
+            .query_row([id], |r| r.get(0))
+            .optional()
+    })?;
+    Ok(
+        kind.is_some_and(|k| {
+            k != ItemKindCode::Message.code() && k != ItemKindCode::Unknown.code()
+        }),
+    )
+}
+
+/// Whether the timeline row `id` (folded into `folded_into`, if it folds)
+/// is left out of this snapshot's export: never unless the snapshot
+/// leaves events out; then an event, or a reaction row folded into one.
+pub(crate) fn left_out(
+    snap: &ExportSnapshot<'_>,
+    id: i64,
+    folded_into: Option<i64>,
+) -> Result<bool, ArchiveError> {
+    if !snap.leaves_out_events() {
+        return Ok(false);
+    }
+    if is_event(snap, id)? {
+        return Ok(true);
+    }
+    match folded_into {
+        Some(target) => is_event(snap, target),
+        None => Ok(false),
+    }
+}
 
 /// The scope of an export, as ids.
 #[derive(Clone, PartialEq, Eq)]
@@ -145,12 +196,21 @@ pub(crate) struct ScopeRow {
 const WALK_BATCH: usize = 4_096;
 
 /// Visit every timeline row of `scope`, in export order, materialised
-/// batch by batch (no cursor statement steps while `f` runs).
+/// batch by batch (no cursor statement steps while `f` runs). Rows the
+/// snapshot leaves out ([`left_out`]) are skipped; returns how many.
 pub(crate) fn walk(
     snap: &ExportSnapshot<'_>,
     scope: &ExportScopeIds,
     f: &mut dyn FnMut(ScopeRow) -> Result<(), ArchiveError>,
-) -> Result<(), ArchiveError> {
+) -> Result<u64, ArchiveError> {
+    let mut skipped = 0u64;
+    let mut f = |row: ScopeRow| -> Result<(), ArchiveError> {
+        if left_out(snap, row.id, row.folded_into)? {
+            skipped += 1;
+            return Ok(());
+        }
+        f(row)
+    };
     let limits = BatchLimits::new(WALK_BATCH, u64::MAX);
     let mut timeline = |chat: Option<ChatId>, range: TimeRange| -> Result<(), ArchiveError> {
         let mut cur = match chat {
@@ -171,12 +231,12 @@ pub(crate) fn walk(
         Ok(())
     };
     match scope {
-        ExportScopeIds::Conversation { chat, range } => timeline(Some(*chat), *range),
+        ExportScopeIds::Conversation { chat, range } => timeline(Some(*chat), *range)?,
         ExportScopeIds::Archive { range } => {
             for chat in snap.chat_ids()? {
                 timeline(Some(chat), *range)?;
             }
-            timeline(None, *range)
+            timeline(None, *range)?;
         }
         ExportScopeIds::Messages(groups) => {
             for g in groups {
@@ -191,9 +251,9 @@ pub(crate) fn walk(
                     })?;
                 }
             }
-            Ok(())
         }
     }
+    Ok(skipped)
 }
 
 /// The scope index of `scope` (§4.9).

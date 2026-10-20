@@ -177,9 +177,10 @@ pub enum ExportFormatInput {
     Csv,
     Json,
     Html,
-    /// Refused with `exportUnavailable` until slice 6j.
+    /// Built from slice 6j2 (the export-render helper).
     Pdf,
-    /// Refused with `exportUnavailable` until slice 6i.
+    /// Refused with `exportUnavailable`: deferred until its writer crate
+    /// is old enough to pin.
     Xlsx,
 }
 
@@ -217,8 +218,8 @@ pub enum ExportScopeInput {
     },
     /// Every conversation, then the messages in no conversation.
     Archive { archive_id: String },
-    /// "Save a copy" of one attachment: refused with `exportUnavailable`
-    /// in this version.
+    /// "Save a copy" of one attachment the viewer surfaced (slice 6k2):
+    /// `formats` empty and the fixed copy options.
     Attachment {
         viewer: u32,
         #[ts(as = "SafeId")]
@@ -513,8 +514,23 @@ pub struct ExportPreviewDto {
     pub zone_window_utc_ms: Option<[i64; 2]>,
     /// For a search scope.
     pub search: Option<SearchPreviewDto>,
+    /// Timeline rows left out because events are left out (events and the
+    /// reactions folded into them); 0 when events are included.
+    pub events_left_out: u64,
     /// A count above 2^53 − 1 was clamped.
     pub clamped: bool,
+}
+
+/// "Save a copy"'s facts (slice 6k2), for the disclosure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct CopyPreviewDto {
+    /// An attachment of an unsent part (owner Q4): `start_export` needs the
+    /// earlier-content confirmation (`reveal.earlierContent: 1`).
+    pub earlier_content: bool,
+    /// The stored file's size, for the space check.
+    pub file_bytes: u64,
 }
 
 /// Bytes per timeline row each format adds beyond the text, for the
@@ -572,6 +588,7 @@ impl ExportPreviewDto {
             span_utc_ms: p.span_utc_ms.map(|(a, b)| [a, b]),
             zone_window_utc_ms: zone_window.map(|(a, b)| [a, b]),
             search,
+            events_left_out: c(p.events_left_out),
             clamped,
         }
     }
@@ -596,6 +613,11 @@ pub enum PreviewEvent {
     Ready {
         draft_id: DraftId,
         preview: ExportPreviewDto,
+    },
+    /// "Save a copy": the attachment's facts.
+    CopyReady {
+        draft_id: DraftId,
+        copy: CopyPreviewDto,
     },
     /// A date range in a zone other than UTC: build the zone table for
     /// `windowUtcMs`, then call `preview_export` again with it. Nothing
@@ -730,6 +752,11 @@ pub struct ExportDestinationDto {
     pub enough: SpaceVerdictDto,
     /// Unfinished exports found in this folder (§8.5).
     pub leftovers: u32,
+    /// "Save a copy": the chosen name's extension can run programs (it is
+    /// neither `.blocked` nor on the passive allowlist for the file's
+    /// kind), so `start_export` needs `keepRiskyExtension`. Always
+    /// `false` for an export.
+    pub risky_name: bool,
 }
 
 // ------------------------------------------------- the terminal job event
@@ -814,6 +841,11 @@ pub struct ExportSummaryDto {
     pub neutralised_cells: u64,
     pub times_outside_zone_window: u64,
     pub undated_excluded: u64,
+    /// Timeline rows left out because events were left out.
+    pub events_not_included: u64,
+    /// Windows: a Mark of the Web could not be written beside some copy
+    /// (owner Q3c; never fatal).
+    pub motw_missing: bool,
     /// For a search scope: hits left out because they match only hidden
     /// content (shown in the result only, never written).
     pub search_hits_excluded: Option<u64>,

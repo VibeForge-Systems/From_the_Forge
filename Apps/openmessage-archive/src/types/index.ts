@@ -279,6 +279,7 @@ export type { AttachmentExclusionsDto } from './generated/AttachmentExclusionsDt
 export type { AttachmentModeInput } from './generated/AttachmentModeInput';
 export type { ChooseExportDestinationRequest } from './generated/ChooseExportDestinationRequest';
 export type { ClockInput } from './generated/ClockInput';
+export type { CopyPreviewDto } from './generated/CopyPreviewDto';
 export type { CsvProfileInput } from './generated/CsvProfileInput';
 export type { DraftId } from './generated/DraftId';
 export type { DestinationToken } from './generated/DestinationToken';

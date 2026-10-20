@@ -10,7 +10,7 @@ describe('roadmap', () => {
     }
   });
 
-  it('claims milestones 1 to 4 and the M5 viewer (5h3), search (5i) and privacy screen (5j) as available, and everything else as planned', () => {
+  it('claims milestones 1 to 4, the M5 viewer (5h3), search (5i) and privacy screen (5j), and M6 exports (6k2) as available, and everything else as planned', () => {
     const available = CAPABILITIES.filter((c) => c.status === 'available').map((c) => c.id);
     expect(available).toEqual([
       'shell',
@@ -20,12 +20,24 @@ describe('roadmap', () => {
       'viewer',
       'search',
       'privacy-screen',
+      'exports',
     ]);
     // It never claims to be a lock.
     expect(capability('privacy-screen').summary).toContain('it is not a lock');
     for (const c of CAPABILITIES) {
-      if (c.milestone >= 6) expect(c.status).toBe('planned');
+      if (c.milestone >= 7) expect(c.status).toBe('planned');
     }
+  });
+
+  it('describes exports as built, with XLSX said to be unavailable, never claimed', () => {
+    const e = capability('exports');
+    expect(e.milestone).toBe(6);
+    expect(e.status).toBe('available');
+    for (const f of ['PDF', 'HTML', 'plain text', 'CSV', 'JSON']) expect(e.summary).toContain(f);
+    expect(e.summary).toContain('save a copy of one attachment');
+    expect(e.summary).toContain('Excel (XLSX) workbooks are not available yet.');
+    // XLSX appears only in that sentence.
+    expect(e.summary.split('XLSX').length).toBe(2);
   });
 
   it('describes the viewer without claiming search, exports or saving', () => {

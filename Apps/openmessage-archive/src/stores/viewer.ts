@@ -50,6 +50,7 @@ import { computed, markRaw, nextTick, ref, shallowRef } from 'vue';
 import { IpcError, ipc } from '@/services/ipc';
 import { devNote } from '@/services/devlog';
 import { playGate } from '@/services/media';
+import { useExports } from './exports';
 import { VIEWER_ERROR_TEXT } from '@/services/viewerText';
 import type { LinkRun } from '@/services/copyText';
 import type {
@@ -927,6 +928,19 @@ export const useViewer = defineStore('viewer', () => {
   }
 
   /**
+   * "Save a copy…" of a surfaced attachment (M6 §6.6, slice 6k2): the
+   * Export dialog's copy flow. The media viewer closes first, so only one
+   * dialog is open; Rust checks again that the attachment was surfaced.
+   */
+  function saveCopy(attachmentId: SafeId): void {
+    const s = session.value;
+    const archive = archiveId.value;
+    if (!s || archive === null) return;
+    media.value = null;
+    useExports().openSaveCopy({ archiveId: archive, viewer: s.viewer, attachmentId });
+  }
+
+  /**
    * Play: Rust's checks first (the structural check and the full hash),
    * then the confirmation under `confirm`, then the media viewer.
    */
@@ -1291,6 +1305,9 @@ export const useViewer = defineStore('viewer', () => {
    */
   function closeDialogs(): void {
     dialogEpoch += 1;
+    // The Export dialog too, with its draft (M6 §10); a running export
+    // continues.
+    useExports().closeForPrivacy();
     media.value = null;
     pendingPlay.value = null;
     dateJumpOpen.value = false;
@@ -1312,6 +1329,7 @@ export const useViewer = defineStore('viewer', () => {
   return {
     session,
     archiveId,
+    saveCopy,
     opening,
     error,
     viewer,

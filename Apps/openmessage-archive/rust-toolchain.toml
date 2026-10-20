@@ -1,5 +1,6 @@
 # Pinned so local builds and CI compile with the same compiler.
-# Upgrade deliberately; the MSRV in Cargo.toml (1.90, from Tauri 2.12) is the floor.
+# Upgrade deliberately; the MSRV in Cargo.toml (1.92, from krilla 0.8.2 since
+# M6 slice 6j1; Tauri 2.12 needs 1.90) is the floor.
 [toolchain]
 channel = "1.97.0"
 components = ["rustfmt", "clippy"]

@@ -11,8 +11,10 @@
 # release with CPython 3.10 wheels. Its two hashes are the cp310 wheel (CI)
 # and the cp313 wheel (the reference fixture environment). Every other
 # package is a pure-Python wheel. PR A needs jsonschema (and its
-# dependencies) and html5lib (and its dependencies); openpyxl and pypdf
-# arrive with the XLSX and PDF slices. Every addition or upgrade is
+# dependencies) and html5lib (and its dependencies); pypdf arrived with
+# the PDF slice 6j1 (6.19.0, the newest release at least 14 days old on
+# 2026-10-20; its only dependency, typing-extensions on Python < 3.11, is
+# already here); openpyxl arrives with the XLSX slice. Every addition or upgrade is
 # recorded in docs/dependencies.md.
 attrs==26.1.0 \
     --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
@@ -22,6 +24,8 @@ jsonschema==4.26.0 \
     --hash=sha256:d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce
 jsonschema-specifications==2025.9.1 \
     --hash=sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe
+pypdf==6.19.0 \
+    --hash=sha256:7e5d6e730e7dae87d560a2cee218b852f6498c8be61966f3cd02ead971e48d14
 referencing==0.37.0 \
     --hash=sha256:381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231
 rpds-py==0.30.0 \

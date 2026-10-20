@@ -6,7 +6,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -144,6 +144,20 @@ fn options(over: Value) -> Value {
     o
 }
 
+/// "Save a copy"'s fixed options, with `over` applied.
+fn copy_options(over: Value) -> Value {
+    let mut o = json!({
+        "attachments": "copyOriginals", "reactions": false, "events": false,
+        "hiddenCharacterMarkers": false, "seconds": false,
+    });
+    if let (Some(o), Some(over)) = (o.as_object_mut(), over.as_object()) {
+        for (k, v) in over {
+            o.insert(k.clone(), v.clone());
+        }
+    }
+    o
+}
+
 fn body(request: Value) -> Value {
     json!({ "request": request })
 }
@@ -185,6 +199,7 @@ fn chosen(host: &ExportHost, f: &Fx, req: &PreviewExportRequest) -> (DraftId, Ex
     let picked = match plan.picked {
         Picked::Folder => f.dest.clone(),
         Picked::File(_) => f.dest.join("chat.txt"),
+        Picked::Copy(_) => f.dest.join("copy.bin"),
     };
     attach_destination(
         host,
@@ -220,7 +235,25 @@ fn run_job(
     c: ExportConfirmationsInput,
     cancel_on_rows: bool,
 ) -> IpcResult<Vec<JobEvent>> {
-    run_job_with(host, jobs, f, id, c, cancel_on_rows, fake_renderers(), None)
+    run_job_with(
+        host,
+        jobs,
+        f,
+        id,
+        c,
+        cancel_on_rows,
+        fake_renderers(),
+        None,
+        no_pdf(),
+    )
+}
+
+/// No PDF renderer (an export without PDF never asks for one).
+fn no_pdf() -> worker::PdfSource {
+    worker::PdfSource::Helper {
+        launch: None,
+        fonts: None,
+    }
 }
 
 /// A hook that gets the job's cancel token before the worker runs.
@@ -237,6 +270,7 @@ fn run_job_with(
     cancel_on_rows: bool,
     renderers: crate::viewer::media::helper::BackendFactory,
     canceller: Option<Canceller>,
+    pdf: worker::PdfSource,
 ) -> IpcResult<Vec<JobEvent>> {
     let token = token_of(host, id);
     let draft = host.take_for_start(id, &token)?;
@@ -270,6 +304,7 @@ fn run_job_with(
         cancel: r.cancel.clone(),
         host: Arc::clone(host),
         renderers,
+        pdf,
     };
     if let Some(c) = canceller {
         c(r.cancel.clone());
@@ -464,35 +499,53 @@ fn unbuilt_formats_and_bad_combinations_are_refused() {
             .and_then(|r| input::parse(&r).map(|_| ()))
             .expect_err("refused")
     };
-    for (formats, over, sentence) in [
-        (
-            json!(["pdf"]),
-            json!({ "pageSize": "a4" }),
-            messages::UNAVAILABLE_FORMAT,
-        ),
-        (
-            json!(["txt", "xlsx"]),
-            json!({}),
-            messages::UNAVAILABLE_FORMAT,
-        ),
-        (
-            json!(["txt"]),
-            json!({ "events": false }),
-            messages::UNAVAILABLE_EVENTS,
-        ),
-    ] {
-        let e = refused(formats, over, &scope);
-        assert_eq!(
-            (e.code, e.message.as_str()),
-            (ErrorCode::ExportUnavailable, sentence)
-        );
-    }
-    let e = refused(
-        json!(["txt"]),
-        json!({}),
-        &json!({ "kind": "attachment", "viewer": 1, "attachmentId": 3 }),
+    // PDF is built from slice 6j2.
+    assert!(
+        preview_req(scope.clone(), json!(["pdf"]), json!({ "pageSize": "a4" }))
+            .and_then(|r| input::parse(&r).map(|_| ()))
+            .is_ok()
     );
-    assert_eq!(e.code, ErrorCode::ExportUnavailable);
+    let e = refused(json!(["txt", "xlsx"]), json!({}), &scope);
+    assert_eq!(
+        (e.code, e.message.as_str()),
+        (ErrorCode::ExportUnavailable, messages::UNAVAILABLE_FORMAT)
+    );
+    // Leaving events out is built from slice 6k2.
+    assert!(
+        preview_req(scope.clone(), json!(["txt"]), json!({ "events": false }))
+            .and_then(|r| input::parse(&r).map(|_| ()))
+            .is_ok()
+    );
+    // "Save a copy" takes no formats and only its fixed options; the
+    // export parser never takes it.
+    let att = json!({ "kind": "attachment", "viewer": 1, "attachmentId": 3 });
+    let e = refused(json!(["txt"]), json!({}), &att);
+    assert_eq!(e.code, ErrorCode::InvalidInput);
+    let copy = |formats: Value, over: Value| {
+        preview_req(att.clone(), formats, over).and_then(|r| input::parse_request(&r))
+    };
+    assert_eq!(
+        copy(json!([]), copy_options(json!({}))).expect("copy"),
+        input::Parsed::Copy(input::CopySpec {
+            viewer: 1,
+            attachment: oma_archive::AttachmentId::new(3),
+        })
+    );
+    for (formats, over) in [
+        (json!(["txt"]), copy_options(json!({}))),
+        (json!([]), copy_options(json!({ "history": true }))),
+        (
+            json!([]),
+            copy_options(json!({ "revealEarlierContent": true })),
+        ),
+        (json!([]), copy_options(json!({ "keepExtensions": true }))),
+        (json!([]), copy_options(json!({ "zone": "system" }))),
+        (json!([]), copy_options(json!({ "attachments": "none" }))),
+        (json!([]), copy_options(json!({ "pageSize": "a4" }))),
+    ] {
+        let e = copy(formats.clone(), over.clone()).expect_err("refused");
+        assert_eq!(e.code, ErrorCode::InvalidInput, "{formats} {over}");
+    }
     for (formats, over) in [
         (json!([]), json!({})),
         (json!(["txt", "txt"]), json!({})),
@@ -1129,6 +1182,7 @@ fn an_export_holds_the_lock_and_publishes() {
         cancel: r.cancel.clone(),
         host: Arc::clone(&host),
         renderers: fake_renderers(),
+        pdf: no_pdf(),
     };
     worker::run_export(spec, &state.jobs, &mut sink);
     drop(r.done);
@@ -1460,6 +1514,7 @@ fn a_search_scope_exports_the_live_set() {
             cancel: r.cancel.clone(),
             host: Arc::clone(&state.exports),
             renderers: fake_renderers(),
+            pdf: no_pdf(),
         },
         &state.jobs,
         &mut sink,
@@ -1523,6 +1578,8 @@ fn export_finished_is_small() {
         neutralised_cells: m,
         times_outside_zone_window: m,
         undated_excluded: m,
+        events_not_included: m,
+        motw_missing: true,
         search_hits_excluded: Some(m),
         bundle: true,
         size: ExportSizeBucketDto::AtLeast10Gb,
@@ -1580,6 +1637,20 @@ fn every_export_code_has_a_sentence() {
         (E::NameRefused, C::ExportNameRefused),
         (E::DestinationChanged, C::ExportDestinationRefused),
         (E::HelperOutputRejected, C::ExportHelperFailed),
+        (
+            E::HelperFailed(oma_export::HelperFailure::Crashed),
+            C::ExportHelperFailed,
+        ),
+        (
+            E::HelperFailed(oma_export::HelperFailure::Refused(
+                oma_export::helper::HelperErrorCode::Unsupported,
+            )),
+            C::ExportHelperFailed,
+        ),
+        (
+            E::Limit(oma_export::LimitKind::FrameTooLarge),
+            C::ExportHelperFailed,
+        ),
         (
             E::Archive(oma_archive::ArchiveError::AnchorNotFound),
             C::InvalidInput,
@@ -1936,6 +2007,7 @@ fn an_html_export_with_previews_embeds_the_pools_renditions() {
         false,
         factory,
         None,
+        no_pdf(),
     )
     .expect("ran");
     assert!(
@@ -2026,6 +2098,7 @@ fn a_cancel_during_a_hung_preview_ends_the_job_within_a_second() {
         false,
         factory,
         Some(canceller),
+        no_pdf(),
     )
     .expect("ran");
     let ended = std::time::Instant::now();
@@ -2047,4 +2120,407 @@ fn a_cancel_during_a_hung_preview_ends_the_job_within_a_second() {
     );
     assert!(latency < Duration::from_secs(1), "{latency:?}");
     assert!(entries(&f.dest).is_empty(), "{:?}", entries(&f.dest));
+}
+
+/// A renderer factory for the worker's PDF tests: each volume is a
+/// minimal PDF the output check accepts (the real backend runs in the
+/// export-render helper, `tests/log_hygiene.rs` and
+/// `tests/export_helper.rs`).
+struct MinimalPdf(Arc<AtomicUsize>);
+
+struct MinimalRenderer(Arc<AtomicUsize>);
+
+impl oma_export::writer::pdf::PdfRenderer for MinimalRenderer {
+    fn conversation(&mut self, _b: &[u8]) -> Result<(), oma_export::ExportError> {
+        Ok(())
+    }
+    fn item(&mut self, _b: &[u8]) -> Result<(), oma_export::ExportError> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+    fn image(&mut self, _n: u64, _b: &[u8]) -> Result<(), oma_export::ExportError> {
+        Ok(())
+    }
+    fn end_volume(
+        &mut self,
+        _last: bool,
+    ) -> Result<oma_export::helper::Volume, oma_export::ExportError> {
+        Ok(oma_export::helper::Volume {
+            bytes: b"%PDF-1.7\n%%EOF\n".to_vec(),
+            counts: oma_export::helper::DoneCounts {
+                units: 1,
+                ..Default::default()
+            },
+        })
+    }
+    fn close(self: Box<Self>) -> u64 {
+        0
+    }
+}
+
+impl oma_export::writer::pdf::PdfRendererFactory for MinimalPdf {
+    fn start(
+        &mut self,
+        _o: &oma_export::pdf::doc::PdfOptions,
+    ) -> Result<Box<dyn oma_export::writer::pdf::PdfRenderer>, oma_export::ExportError> {
+        Ok(Box::new(MinimalRenderer(Arc::clone(&self.0))))
+    }
+}
+
+/// A PDF export runs the PDF writer with the export's renderer and
+/// publishes one file per conversation file.
+#[test]
+fn a_pdf_export_publishes_a_volume_per_conversation_file() {
+    let f = fx();
+    let host = Arc::new(ExportHost::default());
+    let jobs = Jobs::default();
+    let req = preview_req(
+        archive_scope(&f),
+        json!(["pdf", "txt"]),
+        json!({ "pageSize": "letter" }),
+    )
+    .expect("req");
+    let (id, _) = chosen(&host, &f, &req);
+    let blocks = Arc::new(AtomicUsize::new(0));
+    let pdf = worker::PdfSource::Given(std::sync::Mutex::new(Some(Box::new(MinimalPdf(
+        Arc::clone(&blocks),
+    )))));
+    let events = run_job_with(
+        &host,
+        &jobs,
+        &f,
+        &id,
+        confirmations(json!({})),
+        false,
+        fake_renderers(),
+        None,
+        pdf,
+    )
+    .expect("ran");
+    assert!(
+        matches!(events.last(), Some(JobEvent::ExportFinished { .. })),
+        "{events:?}"
+    );
+    assert!(blocks.load(Ordering::SeqCst) > 0);
+    let names = entries(&f.dest);
+    let bundle = f.dest.join(&names[0]);
+    let pdfs: Vec<String> = std::fs::read_dir(bundle.join("pdf"))
+        .expect("pdf folder")
+        .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+        .collect();
+    let txts = std::fs::read_dir(bundle.join("txt")).expect("txt").count();
+    assert_eq!(pdfs.len(), txts, "{pdfs:?}");
+    assert!(pdfs.iter().all(|n| n.ends_with(".pdf")));
+}
+
+/// Missing or altered fonts stop a PDF export before anything is written,
+/// with their own sentence (never a path).
+#[test]
+fn a_pdf_export_without_its_fonts_fails_before_writing() {
+    let f = fx();
+    let host = Arc::new(ExportHost::default());
+    let jobs = Jobs::default();
+    let empty = tempfile::tempdir().expect("tempdir");
+    for fonts in [None, Some(empty.path().to_path_buf())] {
+        let req = preview_req(
+            archive_scope(&f),
+            json!(["pdf"]),
+            json!({ "pageSize": "a4" }),
+        )
+        .expect("req");
+        let (id, _) = chosen(&host, &f, &req);
+        let events = run_job_with(
+            &host,
+            &jobs,
+            &f,
+            &id,
+            confirmations(json!({})),
+            false,
+            fake_renderers(),
+            None,
+            worker::PdfSource::Helper {
+                launch: None,
+                fonts,
+            },
+        )
+        .expect("ran");
+        match events.last() {
+            Some(JobEvent::Failed {
+                error,
+                staging_removed,
+                ..
+            }) => {
+                assert_eq!(error.code, ErrorCode::ExportHelperFailed);
+                assert_eq!(error.message, messages::FONTS_DAMAGED);
+                assert!(*staging_removed);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(entries(&f.dest).is_empty(), "nothing written");
+    }
+}
+
+// ------------------------------------------------- slice 6k2: save a copy
+
+/// Make a copy draft for `attachment` and read its facts.
+fn copy_counted(
+    state: &AppState,
+    library: &Path,
+    viewer: u32,
+    attachment: u64,
+) -> IpcResult<(DraftId, Vec<PreviewEvent>)> {
+    let req = preview_req(
+        json!({ "kind": "attachment", "viewer": viewer, "attachmentId": attachment }),
+        json!([]),
+        copy_options(json!({})),
+    )?;
+    let work = begin_preview(&state.exports, &state.viewer, &req, NOW_MS)?;
+    let id = work.draft.clone();
+    let mut events = Vec::new();
+    run_count(&state.exports, &env(), library, work, NOW_MS, &mut |e| {
+        events.push(e)
+    });
+    Ok((id, events))
+}
+
+/// Run a copy draft as `start_export` would, synchronously.
+fn run_copy_job(
+    state: &AppState,
+    f: &Fx,
+    id: &DraftId,
+    c: ExportConfirmationsInput,
+) -> IpcResult<(String, Vec<JobEvent>)> {
+    let token = token_of(&state.exports, id);
+    let draft = state.exports.take_for_start(id, &token)?;
+    let start = worker::prepare_start(draft, &c)?;
+    worker::recheck_start(
+        &start,
+        &env(),
+        &f.library,
+        &c.warnings,
+        &FakeProbe::default(),
+    )?;
+    let worker::Start::Copy(prepared) = start else {
+        panic!("not a copy");
+    };
+    let prepared = *prepared;
+    let r = state.jobs.reserve(
+        JobSubject::archive(prepared.archive.as_str()),
+        JobKind::Export,
+    )?;
+    let hold = env()
+        .library(&f.library)
+        .and_then(|l| l.hold_for_export(&prepared.archive))
+        .map_err(|e| messages::archive(&e))?;
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let mut sink = Rec {
+        events: Arc::clone(&events),
+        cancel_on_rows: None,
+    };
+    let job = copy::CopyJob {
+        job_id: r.job_id.clone(),
+        prepared,
+        library: f.library.clone(),
+        env: env(),
+        hold,
+        cancel: r.cancel.clone(),
+        host: Arc::clone(&state.exports),
+    };
+    copy::run_copy(job, &state.jobs, &mut sink);
+    drop(r.done);
+    let out = events.lock().expect("events").clone();
+    Ok((r.job_id, out))
+}
+
+#[test]
+fn save_a_copy_of_a_surfaced_attachment_end_to_end() {
+    let f = fx_of(Some("view-media-plain"));
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let state = AppState::new(SettingsStore::load(tmp.path().join("settings.json")));
+    let opened = crate::viewer::open(
+        &state.viewer,
+        &f.library,
+        &env(),
+        &state.jobs,
+        f.id.as_str(),
+    )
+    .expect("open");
+    let v = opened.viewer;
+    // Nothing is surfaced yet: refused before any draft exists.
+    let e = copy_counted(&state, &f.library, v, 1).expect_err("not surfaced");
+    assert_eq!(e.code, ErrorCode::AttachmentUnavailable);
+    assert!(!state.exports.has_draft());
+    let s = state.viewer.get(v).expect("session");
+    let mut ids = Vec::new();
+    for page in crate::viewer::tests::walk_threads(&s, v, false) {
+        for m in &page.items {
+            for a in &m.attachments {
+                ids.push(u64::try_from(a.id.get()).expect("id"));
+            }
+        }
+    }
+    assert!(!ids.is_empty());
+    // Every surfaced attachment answers: its facts, or no stored file.
+    let mut ready = None;
+    let mut unavailable = 0;
+    for a in &ids {
+        let (id, events) = copy_counted(&state, &f.library, v, *a).expect("draft");
+        match events.last() {
+            Some(PreviewEvent::CopyReady { copy, draft_id }) => {
+                assert_eq!(draft_id, &id);
+                if ready.is_none() && !copy.earlier_content && copy.file_bytes > 0 {
+                    ready = Some(*a);
+                }
+            }
+            Some(PreviewEvent::Failed { code, .. }) => {
+                assert_eq!(*code, ErrorCode::AttachmentUnavailable);
+                unavailable += 1;
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+    let att = ready.expect("an attachment with a stored file");
+    // The dialog: a save dialog offering the defused name.
+    let (id, _) = copy_counted(&state, &f.library, v, att).expect("draft");
+    let plan = prepare_destination(&state.exports, &id, None, NOW_MS).expect("plan");
+    assert!(
+        matches!(plan.picked, Picked::Copy(Some(_))),
+        "{:?}",
+        plan.picked
+    );
+    assert_eq!(plan.title, "Save a copy");
+    assert!(!plan.default_name.is_empty());
+    // A zone table is refused for a copy.
+    let z: ZoneTableInputDto =
+        id_of(json!({ "name": "UTC", "windowUtcMs": [0, 1], "transitions": [] }));
+    assert_eq!(
+        prepare_destination(&state.exports, &id, Some(&z), NOW_MS)
+            .expect_err("zone")
+            .code,
+        ErrorCode::InvalidInput
+    );
+    // A name that can run programs is flagged and must be confirmed.
+    let d = attach_destination(
+        &state.exports,
+        &id,
+        &f.dest.join("copy.exe"),
+        &plan,
+        Some(&f.library),
+        &FakeProbe::default(),
+    )
+    .expect("destination");
+    assert!(d.risky_name);
+    assert_eq!(d.packaging, PackagingDto::SingleFile);
+    let e = run_copy_job(&state, &f, &id, confirmations(json!({}))).expect_err("risky");
+    assert_eq!(e.message, messages::RISKY_NAME_NOT_CONFIRMED);
+    assert!(entries(&f.dest).is_empty());
+    // The offered name, then the job.
+    let (id, _) = copy_counted(&state, &f.library, v, att).expect("draft");
+    let plan = prepare_destination(&state.exports, &id, None, NOW_MS).expect("plan");
+    let d = attach_destination(
+        &state.exports,
+        &id,
+        &f.dest.join(&plan.default_name),
+        &plan,
+        Some(&f.library),
+        &FakeProbe::default(),
+    )
+    .expect("destination");
+    assert!(!d.risky_name, "the offered name is safe");
+    // An earlier-content confirmation the attachment does not need.
+    let e = run_copy_job(
+        &state,
+        &f,
+        &id,
+        confirmations(json!({ "reveal": { "earlierContent": 1 } })),
+    )
+    .expect_err("not needed");
+    assert_eq!(e.message, messages::REVEAL_NOT_CONFIRMED);
+    let (id, events) = copy_counted(&state, &f.library, v, att).expect("draft");
+    let Some(PreviewEvent::CopyReady { copy, .. }) = events.last().cloned() else {
+        panic!("not ready");
+    };
+    let plan = prepare_destination(&state.exports, &id, None, NOW_MS).expect("plan");
+    attach_destination(
+        &state.exports,
+        &id,
+        &f.dest.join(&plan.default_name),
+        &plan,
+        Some(&f.library),
+        &FakeProbe::default(),
+    )
+    .expect("destination");
+    let (job_id, events) = run_copy_job(&state, &f, &id, confirmations(json!({}))).expect("job");
+    let phases: Vec<JobPhase> = events
+        .iter()
+        .filter_map(|e| match e {
+            JobEvent::Progress { phase, .. } => Some(*phase),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(phases.first(), Some(&JobPhase::PreparingExport));
+    assert!(phases.contains(&JobPhase::CopyingAttachments), "{phases:?}");
+    match events.last() {
+        Some(JobEvent::ExportFinished {
+            outcome,
+            summary,
+            staging_removed,
+            ..
+        }) => {
+            assert_eq!(*outcome, ExportOutcomeDto::Completed);
+            assert!(*staging_removed);
+            assert_eq!((summary.files_written, summary.attachments_copied), (1, 1));
+            assert!(!summary.bundle);
+            assert_eq!(summary.items, 0);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(entries(&f.dest), vec![plan.default_name.clone()]);
+    let saved = std::fs::metadata(f.dest.join(&plan.default_name)).expect("saved");
+    assert_eq!(saved.len(), copy.file_bytes);
+    assert_eq!(state.exports.finished_folder(&job_id), Some(f.dest.clone()));
+    // The same name again: the app's own replace confirmation.
+    let (id, _) = copy_counted(&state, &f.library, v, att).expect("draft");
+    let plan = prepare_destination(&state.exports, &id, None, NOW_MS).expect("plan");
+    let d = attach_destination(
+        &state.exports,
+        &id,
+        &f.dest.join(&plan.default_name),
+        &plan,
+        Some(&f.library),
+        &FakeProbe::default(),
+    )
+    .expect("destination");
+    assert!(d.target_exists);
+    let e = run_copy_job(&state, &f, &id, confirmations(json!({}))).expect_err("exists");
+    assert_eq!(e.code, ErrorCode::ExportTargetExists);
+    let _ = unavailable;
+}
+
+#[test]
+fn events_left_out_are_counted_by_the_preview_and_the_job() {
+    let f = fx();
+    let host = Arc::new(ExportHost::default());
+    let jobs = Jobs::default();
+    let req = preview_req(
+        archive_scope(&f),
+        json!(["json"]),
+        json!({ "events": false }),
+    )
+    .expect("req");
+    let (id, p) = chosen(&host, &f, &req);
+    // The main catalogue records group events.
+    assert!(p.events_left_out > 0);
+    let events = run_job(&host, &jobs, &f, &id, confirmations(json!({})), false).expect("job");
+    match events.last() {
+        Some(JobEvent::ExportFinished { summary, .. }) => {
+            assert_eq!(summary.events_not_included, p.events_left_out);
+        }
+        other => panic!("{other:?}"),
+    }
+    let bundle = f.dest.join(entries(&f.dest).first().expect("bundle"));
+    let m: Value =
+        serde_json::from_slice(&std::fs::read(bundle.join("manifest.json")).expect("manifest"))
+            .expect("json");
+    assert_eq!(m["options"]["events"], false);
 }

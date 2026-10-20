@@ -396,6 +396,12 @@ impl BundlePath {
         BundlePath::top(SUMS)
     }
 
+    /// The one output of "Save a copy" (slice 6k2): a single file, so it
+    /// is staged as the `.partial-file` whatever this names.
+    pub fn saved_copy() -> BundlePath {
+        BundlePath::top("copy")
+    }
+
     /// `<format>/<stem>.<ext>`: `txt/c0001.txt`, `json/no-conversation.jsonl`,
     /// `csv/messages.csv`.
     pub fn format_file(format: Format, stem: FileStem, ext: FileExt) -> BundlePath {
@@ -421,6 +427,25 @@ impl BundlePath {
         }
         let file = match base.file.strip_suffix(".html") {
             Some(s) => format!("{s}-{part}.html"),
+            None => base.file.clone(),
+        };
+        BundlePath {
+            dirs: base.dirs,
+            file,
+        }
+    }
+
+    /// A PDF volume of a conversation file (spec §5.6): `pdf/c0001.pdf`,
+    /// then `pdf/c0001-2.pdf` … for the volumes after a cut
+    /// (`no-conversation.pdf`, `no-conversation-2.pdf` …). `part` counts
+    /// from 1.
+    pub fn pdf_volume(stem: FileStem, part: u32) -> BundlePath {
+        let base = BundlePath::format_file(Format::Pdf, stem, FileExt::Pdf);
+        if part <= 1 {
+            return base;
+        }
+        let file = match base.file.strip_suffix(".pdf") {
+            Some(s) => format!("{s}-{part}.pdf"),
             None => base.file.clone(),
         };
         BundlePath {
@@ -739,6 +764,68 @@ pub fn attachment_name(
         file: name,
         shortened,
         blocked,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// "Save a copy" of one attachment (§6.6, slice 6k2)
+// ---------------------------------------------------------------------------
+
+/// The name the save dialog offers for a copy of one attachment.
+#[derive(Clone, PartialEq, Eq)]
+pub struct CopyName {
+    /// Content (from the archive): never log it.
+    pub name: String,
+    /// `.blocked` was appended (§6.4).
+    pub blocked: bool,
+}
+
+impl std::fmt::Debug for CopyName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CopyName")
+            .field("blocked", &self.blocked)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The name the save dialog offers for a copy (§6.6): the attachment's
+/// `transfer_name` without hidden characters, through
+/// `sanitize_filename_max` within [`MAX_ATTACHMENT_NAME_BYTES`]
+/// (`attachment.<ext>` from the sniffed kind when it has none), with
+/// `.blocked` appended unless its extension is on the passive allowlist
+/// for the kind its bytes sniff as (the bundle rule, without the ordinal).
+pub fn copy_name(transfer_name: Option<&str>, sniffed: Option<SniffedKind>) -> CopyName {
+    let nameless = || match sniffed_extension(sniffed) {
+        Some(e) => format!("attachment.{e}"),
+        None => "attachment".to_owned(),
+    };
+    let visible = match transfer_name {
+        Some(n) if !n.is_empty() => hidden::without_hidden(n),
+        _ => nameless(),
+    };
+    let visible = if visible.trim().is_empty() {
+        nameless()
+    } else {
+        visible
+    };
+    let mut name = oma_fs::sanitize_filename_max(&visible, MAX_ATTACHMENT_NAME_BYTES);
+    let blocked = risky_copy_name(&name, sniffed);
+    if blocked {
+        name.push_str(BLOCKED);
+    }
+    CopyName { name, blocked }
+}
+
+/// Whether a copy saved as `name` could open as something other than a
+/// passive file of the kind its bytes sniff as (§6.6: "This file type can
+/// run programs"): its extension is neither on the passive allowlist for
+/// `sniffed` nor `.blocked` (compared ignoring ASCII case). A name without
+/// an extension is risky too (the platform decides what opens it).
+pub fn risky_copy_name(name: &str, sniffed: Option<SniffedKind>) -> bool {
+    match extension_of(name) {
+        Some(e) if e == BLOCKED.trim_start_matches('.') => false,
+        Some(e) => !allowed_extensions(sniffed).iter().any(|a| *a == e),
+        None => true,
     }
 }
 

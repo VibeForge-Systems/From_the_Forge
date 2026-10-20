@@ -683,7 +683,7 @@ fn exercise_export(
     id: &str,
     dest_root: &Path,
     texts: &mut Vec<String>,
-) -> (Vec<u64>, usize) {
+) -> (Vec<u64>, usize, usize) {
     use openmessage_archive_lib::exports::destination::RealProbe;
     use openmessage_archive_lib::exports::dto::{
         ExportConfirmationsInput, PreviewEvent, PreviewExportRequest,
@@ -732,7 +732,18 @@ fn exercise_export(
             json!({ "previews": true, "largerPreviews": true, "attachments": "none" }),
         ),
         (json!(["html", "json"]), json!({ "previews": true })),
+        // Slice 6j2: PDF through the real export-render helper, with
+        // previews from the real decode helper and the committed fonts.
+        (
+            json!(["html", "pdf"]),
+            json!({ "previews": true, "pageSize": "a4" }),
+        ),
+        // Slice 6k2: events left out.
+        (json!(["txt"]), json!({ "events": false })),
     ];
+    let pdf_fonts = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("resources")
+        .join("fonts");
     for (formats, over) in runs {
         let req: PreviewExportRequest = serde_json::from_value(json!({
             "scope": { "kind": "archive", "archiveId": id },
@@ -783,6 +794,13 @@ fn exercise_export(
                 cancel: r.cancel.clone(),
                 host: Arc::clone(&host),
                 renderers: Arc::clone(&helper),
+                pdf: worker::PdfSource::Helper {
+                    launch: Some(oma_export::helper::HelperLaunch::new(
+                        PathBuf::from(env!("CARGO_BIN_EXE_openmessage-archive")),
+                        vec![std::ffi::OsString::from("--oma-export-helper")],
+                    )),
+                    fonts: Some(pdf_fonts.clone()),
+                },
             },
             &jobs,
             &mut sink,
@@ -801,6 +819,9 @@ fn exercise_export(
                 .map(|e| serde_json::to_string(e).expect("json")),
         );
     }
+    // Slice 6k2: "Save a copy" of one attachment the viewer surfaced, into
+    // the same sentinel-named folder, under the defused name Rust offers.
+    let copies = exercise_copy(library, id, &dest, &env, &host, &viewer, &jobs, texts);
     // A discarded draft, and a refused request carrying a sentinel.
     let req: PreviewExportRequest = serde_json::from_value(json!({
         "scope": { "kind": "archive", "archiveId": id },
@@ -817,6 +838,7 @@ fn exercise_export(
     // The sizes of everything written.
     let mut sizes = Vec::new();
     let mut embedded = 0;
+    let mut pdfs = 0;
     let mut stack = vec![dest.clone()];
     while let Some(d) = stack.pop() {
         for e in std::fs::read_dir(&d).expect("read_dir") {
@@ -826,6 +848,11 @@ fn exercise_export(
                 stack.push(e.path());
             } else {
                 sizes.push(m.len());
+                if e.path().extension().is_some_and(|x| x == "pdf") {
+                    let pdf = std::fs::read(e.path()).expect("pdf");
+                    assert!(pdf.starts_with(b"%PDF-"), "a PDF from the helper");
+                    pdfs += 1;
+                }
                 if e.path().extension().is_some_and(|x| x == "html") {
                     let page = std::fs::read_to_string(e.path()).expect("page");
                     embedded += usize::from(page.contains("src=\"data:image/"));
@@ -834,7 +861,144 @@ fn exercise_export(
         }
     }
     assert!(sizes.len() > 10, "the exports wrote files");
-    (sizes, embedded)
+    assert!(pdfs >= 1, "the PDF export wrote its files");
+    (sizes, embedded, copies)
+}
+
+/// "Save a copy" through every step (slice 6k2): a viewer session surfaces
+/// the archive's attachments; the first with a stored file is saved into
+/// `dest`. Returns how many copies were saved (0 or 1).
+#[allow(clippy::too_many_arguments)]
+fn exercise_copy(
+    library: &Path,
+    id: &str,
+    dest: &Path,
+    env: &ArchiveEnv,
+    host: &Arc<openmessage_archive_lib::exports::ExportHost>,
+    viewer: &openmessage_archive_lib::viewer::ViewerHost,
+    jobs: &Jobs,
+    texts: &mut Vec<String>,
+) -> usize {
+    use openmessage_archive_lib::exports::destination::RealProbe;
+    use openmessage_archive_lib::exports::dto::{
+        ExportConfirmationsInput, PreviewEvent, PreviewExportRequest,
+    };
+    use openmessage_archive_lib::exports::{self, copy, worker};
+    use openmessage_archive_lib::viewer;
+    use serde_json::json;
+
+    let now_ms = 1_792_368_000_000i64;
+    let opened = viewer::open(viewer, library, env, jobs, id).expect("open viewer");
+    let v = opened.viewer;
+    let mut attachments = Vec::new();
+    viewer::with_session(viewer, v, |s| {
+        let index = viewer::list_conversations(s, &req(json!({ "viewer": v, "sort": "recent" })))?;
+        for chat in &index.ids {
+            let page = viewer::thread_page(
+                s,
+                &req(
+                    json!({ "viewer": v, "chatId": chat.get(), "anchor": { "kind": "newest" },
+                             "direction": "older", "limit": 100 }),
+                ),
+            )?;
+            for m in &page.items {
+                attachments.extend(m.attachments.iter().map(|a| a.id.get()));
+            }
+        }
+        Ok(())
+    })
+    .expect("pages");
+    let mut saved = 0;
+    for a in attachments {
+        let req: PreviewExportRequest = serde_json::from_value(json!({
+            "scope": { "kind": "attachment", "viewer": v, "attachmentId": a },
+            "formats": [],
+            "options": {
+                "attachments": "copyOriginals", "keepExtensions": false, "previews": false,
+                "largerPreviews": false, "history": false, "reactions": false, "events": false,
+                "revealOneTimeCodes": false, "revealEarlierContent": false,
+                "hiddenCharacterMarkers": false, "seconds": false, "includeIdentifiers": false,
+                "clock": "h23", "lineEndings": "lf", "zone": "utc",
+            },
+        }))
+        .expect("request");
+        let work = exports::begin_preview(host, viewer, &req, now_ms).expect("copy draft");
+        let draft = work.draft.clone();
+        let mut previews: Vec<PreviewEvent> = Vec::new();
+        exports::run_count(host, env, library, work, now_ms, &mut |e| previews.push(e));
+        texts.extend(
+            previews
+                .iter()
+                .map(|e| serde_json::to_string(e).expect("json")),
+        );
+        let earlier = match previews.last() {
+            Some(PreviewEvent::CopyReady { copy, .. }) => copy.earlier_content,
+            _ => continue,
+        };
+        let plan = exports::prepare_destination(host, &draft, None, now_ms).expect("plan");
+        let chosen = exports::attach_destination(
+            host,
+            &draft,
+            &dest.join(&plan.default_name),
+            &plan,
+            Some(library),
+            &RealProbe,
+        )
+        .expect("destination");
+        texts.push(serde_json::to_string(&chosen).expect("json"));
+        let c: ExportConfirmationsInput = serde_json::from_value(json!({
+            "warnings": chosen.warnings, "replace": chosen.target_exists,
+            "reveal": if earlier { json!({ "earlierContent": 1 }) } else { json!(null) },
+            "keepRiskyExtension": chosen.risky_name, "removeLeftovers": false,
+        }))
+        .expect("confirmations");
+        let taken = host
+            .take_for_start(&draft, &chosen.destination_token)
+            .expect("draft");
+        let start = worker::prepare_start(taken, &c).expect("prepared");
+        worker::recheck_start(&start, env, library, &c.warnings, &RealProbe).expect("recheck");
+        let worker::Start::Copy(prepared) = start else {
+            panic!("a copy draft");
+        };
+        let r = jobs
+            .reserve(JobSubject::archive(id), JobKind::Export)
+            .expect("reserve");
+        let hold = env
+            .library(library)
+            .and_then(|l| l.hold_for_export(&prepared.archive))
+            .expect("hold");
+        let mut sink = Sink::default();
+        copy::run_copy(
+            copy::CopyJob {
+                job_id: r.job_id.clone(),
+                prepared: *prepared,
+                library: library.to_path_buf(),
+                env: env.clone(),
+                hold,
+                cancel: r.cancel.clone(),
+                host: Arc::clone(host),
+            },
+            jobs,
+            &mut sink,
+        );
+        drop(r.done);
+        assert!(
+            sink.0
+                .iter()
+                .any(|e| matches!(e, JobEvent::ExportFinished { .. })),
+            "the copy was saved: {:?}",
+            sink.0.last()
+        );
+        texts.extend(
+            sink.0
+                .iter()
+                .map(|e| serde_json::to_string(e).expect("json")),
+        );
+        saved += 1;
+        break;
+    }
+    viewer.close(v).ok();
+    saved
 }
 
 /// The `name=value` fields of a captured event line.
@@ -963,7 +1127,7 @@ fn nothing_identifying_is_logged() {
         ("view-media-plain", &archive_ids[archive_ids.len() - 1]),
     ] {
         let library = tmp.path().join(format!("implib-{name}"));
-        let (sizes, embedded) = exercise_export(
+        let (sizes, embedded, copies) = exercise_export(
             &library,
             id,
             &tmp.path().join(format!("exports-{name}")),
@@ -972,6 +1136,7 @@ fn nothing_identifying_is_logged() {
         export_sizes.extend(sizes);
         if name == "view-media-plain" {
             assert!(embedded > 0, "the decode helpers made previews");
+            assert_eq!(copies, 1, "a copy of one attachment was saved");
         }
     }
     let export_events: Vec<String> = capture.0.lock().expect("lock")[export_from..].to_vec();

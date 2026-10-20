@@ -197,6 +197,7 @@ pub const M6_EXPORT_TYPES: &[&str] = &[
     "AttachmentModeInput",
     "ChooseExportDestinationRequest",
     "ClockInput",
+    "CopyPreviewDto",
     "CsvProfileInput",
     "DestinationToken",
     "DraftId",

@@ -17,7 +17,7 @@ all-features = false
 # Permissive licenses only in the global list. Copyleft (GPL, LGPL, AGPL,
 # MPL) is not on it: the project is Apache-2.0 and must remain
 # redistributable as such. The only copyleft is the per-crate MPL-2.0
-# exceptions below.
+# exceptions below; the only other exception is BSD-2-Clause for `arrayref`.
 # Adding a license here is a reviewed decision recorded in docs/dependencies.md.
 # Entries are added when a dependency actually needs them, so an unused
 # allowance cannot quietly widen the policy.
@@ -47,6 +47,12 @@ exceptions = [
   { crate = "selectors", allow = ["MPL-2.0"] },
   { crate = "dtoa-short", allow = ["MPL-2.0"] },
   { crate = "option-ext", allow = ["MPL-2.0"] },
+  # BSD-2-Clause is permissive but not on the global list. Owner decision Q1
+  # (M6, 2026-10-19) allows it for this one crate only, which krilla needs
+  # through tiny-skia-path (PDF, export-render helper). Scoped by name like
+  # the MPL exceptions, so any other BSD-2-Clause crate still fails. See
+  # docs/dependencies.md.
+  { crate = "arrayref", allow = ["BSD-2-Clause"] },
 ]
 
 [licenses.private]

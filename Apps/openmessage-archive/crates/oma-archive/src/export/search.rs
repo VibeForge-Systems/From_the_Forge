@@ -74,8 +74,8 @@ pub struct ExcludedHits {
     /// Included only with both reveals.
     pub both: u64,
     /// Matched in nothing this export writes under any reveal (an
-    /// earlier version when history is not included, or a message that no
-    /// longer matches).
+    /// earlier version when history is not included, a message that no
+    /// longer matches, or an event the export leaves out).
     pub not_written: u64,
 }
 
@@ -324,6 +324,14 @@ impl ExportSnapshot<'_> {
                 excluded.not_written += 1;
                 continue;
             };
+            // An event this export leaves out (slice 6k2) is written
+            // nowhere.
+            if (opts.leave_out_events || self.leaves_out_events())
+                && super::scope::is_event(self, id)?
+            {
+                excluded.not_written += 1;
+                continue;
+            }
             let fast = e.current
                 && current == Some(e.body.get())
                 && !self.run(|| has_code(&self.stmts, e.body.get()))?;

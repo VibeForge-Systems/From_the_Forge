@@ -14,13 +14,16 @@
 //   media session's title is the neutral "OpenMessage Archive", never a
 //   file name. Closing the dialog unmounts the element, which stops it.
 // - It shows the recorded type beside the sniffed content and both sizes.
-//   There is no download, open or share action (§5.10).
+//   There is no download, open or share action (§5.10); "Save a copy…"
+//   (M6 §6.6) closes this viewer and opens the Export dialog's copy flow,
+//   which writes the verified original only where the user chooses.
 import { computed, ref, watch } from 'vue';
 import ModalDialog from '@/components/ModalDialog.vue';
 import SafeText from './SafeText.vue';
 import { mediaElementFor, renditionLabel, sizeLine } from '@/services/attachmentView';
 import { NEUTRAL_MEDIA_TITLE, mediaUrl, preloadFor } from '@/services/media';
 import { ATTACHMENT_TEXT, SNIFFED_KIND_TEXT } from '@/services/viewerText';
+import { SAVE_A_COPY } from '@/services/exportText';
 import { useViewer } from '@/stores/viewer';
 
 const viewer = useViewer();
@@ -160,6 +163,11 @@ function close(): void {
         <SafeText v-if="attachment.declaredType.kind === 'text'" :value="attachment.declaredType" mode="identifier" quiet />
         <SafeText v-else :value="attachment.declaredType" quiet />;
         {{ ATTACHMENT_TEXT.content }} {{ SNIFFED_KIND_TEXT[sniffed] }}
+      </p>
+      <p v-if="sniffed" class="mb-0">
+        <button type="button" class="btn btn-sm btn-outline-secondary" @click="viewer.saveCopy(attachment.id)">
+          {{ SAVE_A_COPY }}
+        </button>
       </p>
     </template>
   </ModalDialog>

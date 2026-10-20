@@ -53,13 +53,28 @@ release binary on WebKitGTK 2.52.6 in a Linux container
 manual checklist there (no desktop, audio, screen-reader or WebView2 run
 yet, so no engine floor is established).
 The owner answered the M5 questions (`docs/architecture.md`, "Milestone 5
-decisions"). **Milestone 6 (exports) is in progress: PR A of M6 (the
-engine; no export UI yet) is built** on `feat/oma-m6-export-engine`
-(slices 6a–6h2): the archive's export reads, `crates/oma-export` with
-the TXT, CSV, JSON and HTML writers, the shell's export job, its five
-IPC commands and the export's decode-helper pool. It has run only in a
-Linux container (not on CI, not on Windows). No export can be made from
-the UI until PR B (PDF, XLSX, the Export dialog, slices 6i–6l). The owner
+decisions"). **Milestone 6 (exports) is implemented, except XLSX.**
+PR A (the engine, slices 6a–6h2: the archive's export reads,
+`crates/oma-export` with the TXT, CSV, JSON and HTML writers, the shell's
+export job, its five IPC commands and the export's decode-helper pool)
+is merged into `main` (`abd531f`) after CI passed on `ubuntu-22.04` and
+`windows-2022` ([run 39340011184](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39340011184)).
+PR B (slices 6i–6l, on `feat/oma-m6-export-ui`) adds the export-render
+helper, PDF (parley layout and krilla output with the pinned Noto fonts;
+volumes, previews, tagged structure), the Export dialog with its store,
+words and zone table, its entry points (thread header, search panel,
+the Archive page's Export card, "Save a copy…" on attachments),
+"Continue in background" and the navbar chip, the "Exporting" state,
+leaving events out, "Save a copy" of one attachment, the roadmap's
+`exports` flip and the documents with the M6 manual checklist. PR B has
+run only in a Linux container (the dialog in jsdom and in one headless
+smoke run), not on CI or Windows. **XLSX is deferred** to a follow-up
+slice after 2026-10-31 (its writer crate is not yet 14 days old) and
+stays refused. **Open:** PR A's Windows CI test time is about 30 minutes
+over M6's 6-minute budget, probably because every bundle publish on
+Windows waits through the 9.1 s retry backoff (`docs/development.md`,
+"Test time"); the parley 0.12.0 upgrade is due on or after 2026-10-23.
+Sign-off is pending PR B's CI and the manual checklist. The owner
 answered M6's Q1–Q4 on 2026-10-19 (Q5 is a lean awaiting confirmation;
 `docs/architecture.md`, "Milestone 6 decisions").
 
@@ -69,8 +84,8 @@ Read these before designing anything:
 |---|---|
 | [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, the archive (layout, threat model, import data flow, one section per M4 and M5 slice), the viewer, the exports (M6), and the decision records (D1–D147; D43 is how "do not fabricate" is read for the check) |
 | [`docs/supported-formats.md`](docs/supported-formats.md) | Sourced research on the backup format, encryption, the sms.db schema (columns with sources, timestamps, codes, typedstream) and device tooling. Items marked **UNVERIFIED** are hypotheses, not facts. |
-| [`docs/privacy.md`](docs/privacy.md) | What is copied, where and for how long, including the plaintext copies of sms.db, and what an archive holds (plaintext at rest) |
-| [`docs/compatibility.md`](docs/compatibility.md) | What has actually been tested |
+| [`docs/privacy.md`](docs/privacy.md) | What is copied, where and for how long, including the plaintext copies of sms.db, what an archive holds (plaintext at rest), and what an export contains and where it is written (M6) |
+| [`docs/compatibility.md`](docs/compatibility.md) | What has actually been tested, and the open manual checklists (M2–M6) |
 | [`docs/development.md`](docs/development.md) | Setup and every command |
 
 ## Commands
@@ -111,8 +126,8 @@ them first:
 9. The independent oracles (Linux, in the oracle virtual environment):
    the "Independent oracles (Python)" step's commands, listed in
    `docs/development.md` ("Synthetic export fixtures and the independent
-   oracles", then the TXT, data and HTML oracle commands of slices 6e2,
-   6f and 6g).
+   oracles", then the TXT, data, HTML and PDF oracle commands of slices
+   6e2, 6f, 6g, 6j1 and 6j2; slice 6l's section lists the whole step).
 
 Then run the root gate. Note that the root gate does **not** build this app.
 
@@ -170,12 +185,17 @@ Each one is enforced in code. Keep it that way.
   (names, staging, the manifest, the writer trait) from 6e1, and the
   attachment copy, the TXT writer and the pipeline from 6e2, the JSON
   and CSV writers from 6f, the HTML writer from 6g and the preview feed
-  from 6h2; `oma-device` (M7) is planned. Each must build and test without
+  from 6h2, and in PR B the export-render helper (`helper/`, `render/`
+  behind the `render` feature, `check/`; slice 6i), the PDF layout and
+  fonts (`pdf/`, 6j1), the PDF writer (`writer/pdf.rs`, 6j2), and
+  `copy.rs` ("Save a copy", 6k2); `oma-device` (M7) is planned. Each must build and test without
   Tauri. The shell's `src-tauri/src/backups/` (registry, job table, worker,
   DTOs, messages), `src-tauri/src/archives/` (listing, details, the
   gate, the import and verify workers, DTOs, sentences) and
   `src-tauri/src/exports/` (drafts, destination checks and tokens, the
-  export job, the decode-helper pool, DTOs, sentences; slices 6h1, 6h2)
+  export job, the decode-helper pool, DTOs, sentences; slices 6h1, 6h2;
+  the render helper's host, the font loader, the PDF source and
+  `copy.rs`, PR B)
   have no Tauri types either, so they are
   tested without a window.
 - **Frontend:**
@@ -739,9 +759,9 @@ Never hand-edit generated files.
   and sends one terminal event (`exportFinished` with counts only,
   `cancelled` or `failed`, each with `stagingRemoved`). `close_viewer` and
   `hide_viewer` go through `AppState::{close_viewer, hide_viewer}`, which
-  discard the draft first; keep it so. What PR A does not build (PDF,
-  XLSX, the attachment scope, events off) is refused at the
-  draft with `exportUnavailable`, never faked. Export DTOs live in
+  discard the draft first; keep it so. What is not built (XLSX only:
+  PDF was built in slice 6j2, and the attachment scope and events off in
+  6k2) is refused at the draft with `exportUnavailable`, never faked. Export DTOs live in
   `exports/dto.rs`: a new one goes into `ts_guard::M6_EXPORT_TYPES` (or
   `M6_EVENT_TYPES` if `JobEvent` reaches it, which the archive guard then
   reviews); the walks stay disjoint but for `M6_SHARED_TYPES`, and the
@@ -769,15 +789,134 @@ Never hand-edit generated files.
   `src-tauri/tests/log_hygiene.rs` runs every in-process format into a
   folder named by a sentinel; a new export log line or format goes
   through it.
-- **`oma-export` in one place (M6 PR A).** One record model and ledger;
+- **The export-render helper (M6 slice 6i, `oma-export`'s `helper/`,
+  `check/`, `render/`; the shell's `exports/render_helper.rs`).** PDF
+  (and later XLSX) runs only in this binary started with
+  `--oma-export-helper` (`main` dispatches before Tauri, as for the
+  decode helper). Only the shell enables `oma-export`'s `render`
+  feature, and only `render_helper.rs` names `oma_export::render`
+  (`tests/source_rules.rs`); never run a backend in-process. Frames are
+  `helper/frame.rs` only, at most 16 MiB in both directions, the length
+  checked before allocating. `RenderSession` reads replies on its own
+  thread (never read stdout from the caller), and its supervisor kills
+  on the cancel token, a 120 s stalled write and 120 s after
+  `EndVolume`; an export registers `session.kill_handle()` with
+  `render_helper::register_kill` so `Jobs::cancel` kills the helper
+  itself (`Jobs::on_cancel`; hooks run outside the table lock). Output
+  is returned only after `check::check_output` passed (PDF: forbidden
+  names anywhere a name object can be, streams bounded and inflated with
+  `miniz_oxide`; XLSX: always refused until its package check exists);
+  a new output kind needs its check first. The stub backend
+  (`render/stub.rs`) is debug-only and writes counts, never record
+  bytes; add a fault there and a case to `src-tauri/tests/export_helper.rs`
+  together. Helper stderr is counted, never read into a log.
+- **PDF layout and the fonts (M6 slice 6j1, `oma-export`'s `pdf/` and
+  `render/pdf/`; the shell's `exports/pdf_fonts.rs`).** krilla and parley
+  are optional dependencies behind `render`; only `render/pdf/` names
+  them, and parley's `system` feature stays off (fontique with
+  `system_fonts: false`). The fonts are `src-tauri/resources/fonts/`,
+  each pinned in `pdf::fonts::PINS` (length, SHA-256, family): never
+  commit a font whose hash you did not compute from its upstream download
+  at a pinned commit, and change a file, its pin, `OFL.txt` and
+  `docs/dependencies.md` together. Font bytes reach the helper only as a
+  `VerifiedFonts` (`RenderSession::send_fonts`); the helper checks them
+  again. Every string the helper draws is a `pdf::doc::PdfText` from
+  `TextBuilder` (`content` and `header` mark with TXT's policies; `ours`
+  is for our own words only, never recorded text), and the helper passes
+  that same string to krilla as the glyphs' text, so the text layer is
+  the drawn text (the marker rule, §4.7); never draw from one string and
+  give krilla another. Header pieces are laid out one at a time (each its
+  own isolate); recorded text is one paragraph per line. A new
+  krilla-written binary stream without a `/Type` needs its key in
+  `check/pdf.rs`'s first pass. A layout change runs `tests/pdf_layout.rs`
+  and the PDF text oracle (`write_samples`, `scripts/oracles/pdf_text.py`);
+  pypdf does not apply ActualText, so complex scripts are held to
+  `pdftotext` only. parley is 0.11.1 until 0.12.0 is 14 days old.
+- **The PDF writer (M6 slice 6j2, `oma-export`'s `writer/pdf.rs` and
+  `writer/lines.rs`; the shell's `exports/worker.rs`).** TXT and PDF say
+  an item's lines through the same functions in `writer/lines.rs`,
+  generic over `Emit`: add a sentence there, never to one format, and
+  keep recorded values as `Part::Value` (marked by the emitter), never
+  inside a `Part::Ours` string; the TXT goldens must not move. The PDF
+  writer sends blocks to a `PdfRenderer` (the helper through
+  `HelperRenderers`; tests use `render::pdf::InProcess` or a recording
+  renderer) and stages only volumes the renderer returned checked. A
+  bundle has `pdf/<stem>.pdf` per conversation file, cut into
+  `<stem>-N.pdf` by the estimate (`VolumeLimits::SPEC`: 2,000 pages or
+  40 MiB); a single file is never cut. Previews come only from the
+  export's `PreviewSource`, pass `check_rendition`, and go as `Image`
+  frames before the block whose `Figure` paragraph names them; the
+  preview feed keeps each answer until the item is cleared, so HTML and
+  PDF share one decode. The shell reads the fonts from the resource
+  folder (`bundle.resources` copies `resources/fonts/*` to `fonts/`)
+  through `exports::pdf_fonts::load` before the archive is read; a
+  missing or altered font is `HelperFailure::Fonts`. A change to what a
+  PDF draws runs `tests/pdf_writer.rs` and `scripts/oracles/pdf_oracle.py`
+  (`write_oracle_pdf`); the tags are produced with no PDF/UA claim.
+- **The Export dialog (M6 slice 6k1, `components/ExportDialog.vue`,
+  `stores/exports.ts`, `services/exportText.ts`, `services/zoneTable.ts`).**
+  The store persists nothing and `openExport` builds a fresh form every
+  time: both reveals, kept extensions and identifiers start off on every
+  open; never read the viewer's `revealEarlierText` there. Attachment
+  defaults are `defaultAttachments` (Q3a), which must stay the same rule
+  as `oma_export::plan::default_attachments`. Send every option Rust
+  validates, and an option that does not apply as off (Rust refuses it
+  on); XLSX is shown disabled with its reason, never sent. A reveal is confirmed against the preview's own count and
+  `start_export` sends exactly that count. The zone table is built only
+  by `zoneTable.ts` (6-hour samples, bisected to the second, 10 s bound)
+  for the window Rust names plus its margin, and goes to Rust once: with
+  a date range's second preview, else with the first destination. The
+  destination's name renders only through `SafeText` (`untrustedContent`);
+  no path reaches the webview. Escape goes through `ModalDialog`'s
+  `guardEscape`, so a running export asks before cancelling, and
+  `useViewer().closeDialogs()` calls `closeForPrivacy`. Words live in
+  `exportText.ts`'s exhaustive tables; new dialog bindings go into the
+  source rule's allowlist.
+- **Entry points, events off and "Save a copy" (M6 slice 6k2).** Every
+  entry point calls `useExports().openExport` (or `openSaveCopy` through
+  `useViewer().saveCopy`), which builds a fresh form; never put an id
+  other than the context's in a URL, and never send the search query
+  (the set goes by its `searchId`). The chip (`ExportStatusChip.vue`) and
+  "Continue in background" only close and reopen the dialog; the job
+  never depends on it being open. Events off is one snapshot setting in
+  `oma-archive` (`ExportSnapshot::leave_out_events`): every walk and
+  cursor skips the same rows through `scope::left_out`, so add a new
+  read of the scope there, never a second filter, and take a plan's
+  count options only from `ExportPlan::preview_options`. "Save a copy"
+  is a draft of its own kind (`DraftWork::Copy`) with a fixed option set
+  (`input::copy_options_apply`, the webview's `COPY_OPTIONS`); Rust
+  serves only a surfaced attachment, decides the unsent-part rule over
+  every linking message (`ExportSnapshot::attachment_copy`), checks the
+  typed name (`naming::risky_copy_name`, `riskyName` →
+  `keepRiskyExtension`), and copies only through
+  `oma_export::copy::save_copy` (verified bytes into the `.partial-file`,
+  no manifest, a Mark of the Web after placement on Windows).
+- **`oma-export` in one place (M6).** One record model and ledger;
   masking happens in `oma-archive` before any writer sees text; paths
   only from `naming.rs`; on Linux every write relative to the staging
   directory handles; no temporary file outside staging (and no
   `std::env::temp_dir`); the reserved `⟨` marker; a no-replace publish
   with the marker locked until after it; previews only from checked
-  decode-helper renditions; PDF and XLSX only in the export-render
-  helper (PR B; XLSX rows ascending); logs carry kinds, buckets and
+  decode-helper renditions; PDF (and XLSX, when its slice lands, with
+  ascending rows) only in the export-render helper, and every byte it
+  returns through `check::check_output` before staging; fonts only from
+  the pinned set, checked before they are sent; the UI persists nothing
+  and resets both reveals on every open; logs carry kinds, buckets and
   outcomes only. The per-slice entries above say how each is enforced.
+- **Windows publish delay (M6, open).** PR A's CI shows each bundle
+  export taking about 10 s on `windows-2022` (single files about 1 s),
+  which put seven `oma-export` test binaries at about 200 s each. The
+  probable cause: the publish rename of the staging folder fails while
+  the marker file inside it is open, and `with_retries` sleeps through
+  all of `RETRY_BACKOFF_MS` (9.1 s) before `publish_bundle` closes the
+  marker and retries. Not reproduced on Windows; fix it with a Windows
+  CI run, and re-measure the test time (`docs/development.md`).
+- **Docs claims (M6, slice 6l).** Every statement about exports in the
+  docs names where it ran; anything not run (a Windows desktop, a
+  browser, a PDF viewer, a spreadsheet, a screen reader, a real archive,
+  Mark of the Web's effect) is **UNVERIFIED** or "not tested", and the
+  M6 manual checklist in `docs/compatibility.md` stays open until its
+  rows are run.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush

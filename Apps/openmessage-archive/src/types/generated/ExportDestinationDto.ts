@@ -33,4 +33,11 @@ freeSpace: FreeSpaceDto | null, enough: SpaceVerdictDto,
 /**
  * Unfinished exports found in this folder (§8.5).
  */
-leftovers: number, };
+leftovers: number, 
+/**
+ * "Save a copy": the chosen name's extension can run programs (it is
+ * neither `.blocked` nor on the passive allowlist for the file's
+ * kind), so `start_export` needs `keepRiskyExtension`. Always
+ * `false` for an export.
+ */
+riskyName: boolean, };

@@ -7,5 +7,10 @@ fn main() {
     if openmessage_archive_lib::viewer::media::helper::is_helper_invocation() {
         std::process::exit(openmessage_archive_lib::viewer::media::helper::run_helper());
     }
+    // The export-render helper (M6 §5.7, D133), likewise before anything
+    // else.
+    if openmessage_archive_lib::exports::render_helper::is_export_helper_invocation() {
+        std::process::exit(openmessage_archive_lib::exports::render_helper::run_export_helper());
+    }
     openmessage_archive_lib::run();
 }

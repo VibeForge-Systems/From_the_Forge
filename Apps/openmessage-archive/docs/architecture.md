@@ -1,8 +1,9 @@
 # Architecture
 
-Status: Milestone 5 (the rich viewer) is implemented; its sign-off, like
-that of milestones 2 to 4, is pending (see the README roadmap and the
-manual checklists in `compatibility.md`). Sections marked *planned* describe the intended design for later
+Status: Milestone 6 (exports) is implemented except XLSX (a follow-up
+slice after 2026-10-31); its sign-off, like that of milestones 2 to 5, is
+pending (see the README roadmap and the manual checklists in
+`compatibility.md`). Sections marked *planned* describe the intended design for later
 milestones. They will be revised against evidence as each milestone lands.
 Nothing in them is implemented yet.
 
@@ -59,9 +60,10 @@ flowchart LR
     Shell --> Backup["oma-backup ✔"]
     Shell --> Messages["oma-messages ✔"]
     Shell --> Archive["oma-archive ✔"]
-    Shell --> Export["oma-export (M6 PR A: TXT, CSV, JSON, HTML)"]
+    Shell --> Export["oma-export ✔ (TXT, CSV, JSON, HTML, PDF; XLSX later)"]
     Shell --> Decode["decode helper processes (M5; export pool M6)"]
-    Shell -.-> Render["export-render helper (M6 PR B: PDF, XLSX)"]
+    Shell --> Render["export-render helper (M6: PDF layout; XLSX later)"]
+    Render --> Fonts[("pinned Noto fonts (resources)")]
     Shell -.-> Device["oma-device (M7)"]
     Backup --> FS
     Messages --> Backup
@@ -78,13 +80,13 @@ flowchart LR
 
 | Unit | Responsibility | State |
 |---|---|---|
-| `src/` | Vue 3 UI: views, Pinia stores, the typed IPC client, the shortcut registry, and the capability roadmap | M1, M2 (Backups page), M3 (extraction report), M4 slice 4m (Archive page), M5 slices 5g–5j (the viewer) |
-| `src-tauri/` | Tauri shell. Holds IPC commands, application state, settings persistence, archive-location validation, the backup registry, job table and DTOs, (M3) the report mapping and the panic hook, (M4 slice 4l) the archive commands, the import gate and the import and verify jobs, and (M5 slices 5e, 5f) the viewer session and commands, the `oma-media` protocol handler, the decode helper host and the main window built in Rust, and (M6 slices 6h1, 6h2) the export drafts, destination checks and tokens, the export job and its five commands, and the export's decode-helper pool. Contains no domain logic. | M1, M2, M3, M4 (slice 4l), M5 (slices 5e, 5f), M6 PR A (slices 6h1, 6h2) |
+| `src/` | Vue 3 UI: views, Pinia stores, the typed IPC client, the shortcut registry, and the capability roadmap | M1, M2 (Backups page), M3 (extraction report), M4 slice 4m (Archive page), M5 slices 5g–5j (the viewer), M6 slices 6k1, 6k2 (the Export dialog, `stores/exports.ts`, `services/exportText.ts`, `services/zoneTable.ts`, the entry points and the navbar chip) |
+| `src-tauri/` | Tauri shell. Holds IPC commands, application state, settings persistence, archive-location validation, the backup registry, job table and DTOs, (M3) the report mapping and the panic hook, (M4 slice 4l) the archive commands, the import gate and the import and verify jobs, and (M5 slices 5e, 5f) the viewer session and commands, the `oma-media` protocol handler, the decode helper host and the main window built in Rust, and (M6 slices 6h1, 6h2) the export drafts, destination checks and tokens, the export job and its five commands, and the export's decode-helper pool, and (M6 PR B) the export-render helper's host and entry, the font pin check, the PDF source, "Save a copy" and leaving events out. Contains no domain logic. | M1, M2, M3, M4 (slice 4l), M5 (slices 5e, 5f), M6 (slices 6h1, 6h2, 6i, 6j1, 6j2, 6k2) |
 | `crates/oma-fs` | Filesystem safety: filename sanitization, contained path resolution, and guards for backups, MobileSync, iMazing's default store and cloud sync. From M4: volume facts (`volume`: free space, network/virtualised/FAT detection), the Unix private-permission check (`perm::check_private`), and durable placement (`place`: `fsync_dir`, `create_dir_durable`, `place_noreplace`, `open_nofollow`). From slice 4d: `check_owned_unshared` (the library folder), `rename_dir_noreplace`, `create_new_private` and `total_space` | M1, M4 (slices 4a, 4d) |
 | `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them. From M4: `copy_file_to` streams one listed file's plaintext into a caller's writer, hashing it, under `Limits::attachment_bytes` and per-file stamps | ✔ M2, M3, M4 (slice 4b) |
 | `crates/oma-messages` | Scans and probes the sms.db schema by capability, streams typed records (handles, chats, the joins, messages, attachments, Recently Deleted links) as `Col<T>` values, decodes `attributedBody` with a clean-room typedstream decoder, and produces the aggregate `ExtractionReport`. Persists nothing. From M4: stable `KnownColumn` codes, raw values of unreadable cells (`raw_issues`), `payload_data` on request, the raw association columns, key-only passes and the storage class of text cells | ✔ M3, M4 (slice 4c) |
 | `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep; slices 4e–4j the import; slice 4k the report-only verifier and `open_blob`. Used by the shell since slice 4l. From M5: the viewer reads (`view/`, `sortkey.rs`, phased budgets), search (`search/`) and media sniffing, checks and rendering (`media/`, `blobs::open_range`) | ✔ M4 (slices 4d–4k), M5 (slices 5a–5d) |
-| `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX. Tauri-free and SQLite-free: it reads only through `oma-archive`'s export APIs. Slice 6d ships the record core: the validated plan, the code registry, the column ledger, the canonical record and its mapping, export-local ordinals, the Rust word tables, time zones and local-day bounds, and the hidden-character markers. Slice 6e1 adds the files core: names, staging and publish, leftovers, the manifest and the writer trait. Slice 6e2 adds the attachment copy, the TXT writer and the pipeline (`pipeline::run`); 6f the JSON and CSV writers; 6g the HTML writer; 6h2 the preview feed between the pipeline and the decode-helper pool. Driven by the shell's export job (slice 6h1). PDF and XLSX are PR B | ✔ M6 PR A (slices 6d–6h2); PDF and XLSX in PR B (6i, 6j); no Export dialog until 6k |
+| `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX. Tauri-free and SQLite-free: it reads only through `oma-archive`'s export APIs. Slice 6d ships the record core: the validated plan, the code registry, the column ledger, the canonical record and its mapping, export-local ordinals, the Rust word tables, time zones and local-day bounds, and the hidden-character markers. Slice 6e1 adds the files core: names, staging and publish, leftovers, the manifest and the writer trait. Slice 6e2 adds the attachment copy, the TXT writer and the pipeline (`pipeline::run`); 6f the JSON and CSV writers; 6g the HTML writer; 6h2 the preview feed between the pipeline and the decode-helper pool. Driven by the shell's export job (slice 6h1). PDF and XLSX are PR B: slice 6i adds the export-render helper and the output check, 6j1 the PDF layout (parley, krilla, behind the `render` feature) with the pinned fonts, 6j2 the PDF writer | ✔ M6 (PR A: slices 6d–6h2; PR B: 6i, 6j1, 6j2, 6k2 `copy.rs` and events off); XLSX deferred to a follow-up slice after 2026-10-31 |
 | `crates/oma-device` | Detects devices and creates backups behind a platform trait | planned, M7 |
 
 Each library crate can be built and tested without Tauri. The shell only
@@ -2990,6 +2992,74 @@ short:
   archive encryption will not cover them, and an encrypted export format
   is an M8 candidate (spec §13).
 
+### Exports (M6): what PR B builds, and the milestone as built
+
+PR B (slices 6i–6l, on `feat/oma-m6-export-ui`) adds the export-render
+helper, PDF, the user interface and the documents. The slice sections
+below hold the detail; in short:
+
+- **The export-render helper (slice 6i, D133).** The app's own binary
+  started with `--oma-export-helper`, before Tauri, one per export that
+  includes PDF. Frames are bounded before allocation (16 MiB, resources
+  64 MiB in 16 slots), a reader thread feeds the host, and the cancel
+  path, a crash, two minutes of silence or a malformed frame kill it.
+  The main process checks every byte the helper returns
+  (`check::check_output`: the PDF's syntax, every Flate stream inflated
+  under a bound, forbidden names such as JavaScript, actions, forms,
+  embedded files and links refused) before anything is staged. Its
+  stderr is counted, never logged. It is not an OS sandbox.
+- **PDF (slices 6j1, 6j2; owner Q1, Q2).** The main process maps
+  records to blocks (`writer/pdf.rs`, after masking, with the TXT
+  writer's lines); the helper lays them out with parley (bidi, shaping,
+  line breaking with the Thai dictionary, per-cluster fallback over the
+  bundled fonts only) and writes them with krilla: subset fonts with
+  ToUnicode and ActualText (the hidden-character marker rule), COLRv1
+  emoji, an outline entry per conversation and a heading per local day,
+  generic titles, previews from checked
+  decode-helper renditions, and tagged structure (headings, paragraphs,
+  figures; no PDF/UA claim). Volumes are cut by an estimate (2,000
+  pages or 40 MiB); a single file is never split. The twelve fonts
+  under `src-tauri/resources/fonts/` are pinned by length and SHA-256 in
+  `pdf/fonts.rs`, checked by the main process before the bytes are sent
+  and again by the helper.
+- **The UI (slices 6k1, 6k2; spec §10).** `ExportDialog.vue` (through
+  `ModalDialog`, mounted once in `ArchiveDialogs.vue`) with
+  `stores/exports.ts`, which persists nothing and builds a fresh form on
+  every open (both reveals and kept extensions off), `exportText.ts`
+  (every sentence) and `zoneTable.ts` (the D128 offset table, built from
+  the webview's ICU). Entry points: the thread header, the search panel,
+  the Archive page's Export card, and "Save a copy…" on attachment cards
+  and in the media viewer. "Continue in background" closes the dialog
+  into `ExportStatusChip.vue`; the Archive page shows "Exporting". Every
+  call goes through `services/ipc.ts`; no path reaches the webview.
+- **Two additions beyond the spec's PR B plan (slice 6k2):** leaving
+  group and system events out (`ExportSnapshot::leave_out_events`,
+  counted in the manifest) and "Save a copy" of one attachment
+  (`oma_export::copy::save_copy`, spec §6.6), both through the existing
+  commands.
+- **XLSX is not built.** rust_xlsxwriter 0.100.0 cannot be pinned before
+  2026-10-31 (14-day rule) and 0.99.x is rejected (advisories), so the
+  helper refuses its `Xlsx` backend, the output check accepts no XLSX,
+  the draft refuses it (`exportUnavailable`), and the dialog shows it
+  disabled with that reason. Its writer is a follow-up slice (D131).
+- **Deviations recorded in the slice sections:** blocks are made in the
+  main process, not the helper; the Han face is always SC (no TC option
+  yet); the volume estimate counts characters, not glyphs; a bundle's
+  PDF points to `README.txt` and `manifest.json` instead of carrying
+  "About this export"; the helper's `Done` frame gained a `figures`
+  count; krilla's `raster-images` is on (adding `imagesize`); parley is
+  0.11.1, not the owner's 0.12.0, until 0.12.0 is 14 days old
+  (2026-10-23); Noto Sans Math was added for the marker's brackets;
+  the Options step is a summary with "Change…"; the zone table window
+  is extended by two days; a failed Mark of the Web is reported as
+  yes/no (`motwMissing`) to keep `exportFinished` under 1 KiB.
+- **What has run.** Everything on Linux in one container, with synthetic
+  data; the dialog in jsdom and once headlessly in a real window (slice
+  6l, `compatibility.md`). PR A also passed CI on both runners
+  ([run 39340011184](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39340011184)).
+  PR B has not run on CI or on Windows; no PDF or HTML export was opened
+  in a viewer or browser.
+
 ### Export caps and raw codes (M6 slice 6a)
 
 Slice 6a prepares the assembly layer for exports (M6 spec §3.1, §3.3,
@@ -4291,6 +4361,821 @@ only in this Linux container (not on CI, not on Windows).
 - **Housekeeping.** The stray ts-rs `bindings/` folder is removed and
   ignored, and so is `.venv-oracles/`.
 
+### The export-render helper (M6 slice 6i)
+
+Slice 6i opens PR B with the process that PDF layout (slice 6j) and XLSX
+writing will run in (spec §5.7, D133). **No export uses it yet:** PDF
+and XLSX stay refused at the draft with `exportUnavailable`, and the
+helper has no backend that writes a real format. PDF is its first real
+backend (6j). **XLSX is deferred:** its writer crate, rust_xlsxwriter
+0.100.0, was published on 2026-10-17 and the project pins only releases
+at least 14 days old, so it cannot be added before 2026-10-31; 0.99.x is
+rejected (advisories). The XLSX writer is a follow-up slice after that
+date; until then a helper refuses the `Xlsx` backend and the main
+process refuses any XLSX output (`check::check_output` has no XLSX
+check, so it accepts none).
+
+- **The entry.** `main` runs `exports::render_helper::run_export_helper`
+  when the binary is started with exactly `--oma-export-helper`, before
+  Tauri, logging or settings, as it does for the decode helper. The
+  helper installs the payload-free panic hook (`panic_hook::hook`,
+  writing to stderr) and calls `oma_export::render::serve` on stdin and
+  stdout. `render` is behind `oma-export`'s `render` feature, which only
+  the shell enables; a source rule (`crates/oma-export/tests/source_rules.rs`)
+  checks that nothing in the crate outside `src/render/` and nothing in
+  the shell but `exports/render_helper.rs` names it. The helper is
+  started with `CREATE_NO_WINDOW` on Windows. **It is not an OS
+  sandbox:** it runs as the same user.
+- **Frames** (`oma_export::helper::frame`). `"OMXF" | kind | len u32 |
+  payload` in both directions, `len` at most 16 MiB and checked before
+  anything is allocated: an oversized header is
+  `Limit(FrameTooLarge)` on the host (the helper is killed) and exit
+  code 2 in the helper. Requests: `Begin` (protocol version, backend,
+  options), `Resource` (one piece of a resource: `slot | total | offset
+  | bytes`, contiguous, at most 16 slots and 64 MiB in all), then
+  `Conversation`, `Item` (records, already masked, as opaque bytes),
+  `Image` (`file_ordinal | rendition`, already checked), and
+  `EndVolume` or `End`. Replies: `Chunk`s (at most 1 MiB each) and one
+  `Done` (pages or rows, `.notdef` characters, wrapped tokens, limited
+  combining runs, total bytes), or one `Error` with a closed code
+  (`Unsupported`, `BadRequest`, `ResourceLimit`, `NoSpace`,
+  `OutputLimit`, `Internal`), after which the helper exits. No archive
+  id, name, path or destination crosses.
+- **The host** (`oma_export::helper::RenderSession`). It spawns the
+  helper and starts three threads: a **reader** that reads replies as
+  they arrive (so a helper that writes early cannot deadlock a worker
+  blocked on a full stdin pipe) and kills the helper itself on an
+  oversized frame, a wrong magic, a reply before `EndVolume`, or a
+  volume over 256 MiB; a **supervisor** that wakes every 10 ms and kills
+  the helper when the cancel token is set, when one write has been
+  blocked for 120 s, or when the output has not arrived within 120 s of
+  `EndVolume`; and a **stderr drain** that keeps only the byte count.
+  A kill closes the pipes, so a blocked call returns, and the session
+  says why: `Cancelled`, `HelperFailed(Spawn | Crashed | Timeout |
+  Protocol | OutputTooLarge | Refused(code))`, `Limit(FrameTooLarge)`,
+  or `NoSpace` for the helper's `Error(NoSpace)`. After a failure every
+  call repeats it. `end_volume` checks that the chunks add up to the
+  `Done` total and runs the output check of the session's kind
+  **before** it returns a byte; `end_volume_into` then writes the checked
+  bytes to a staged file (a full disk there is `NoSpace`). Dropping a
+  session kills and reaps its helper.
+- **Kill from the cancel path.** `Jobs` gains cancel hooks
+  (`Jobs::on_cancel`), run by `Jobs::cancel` and by the exit handler's
+  `cancel_all_and_wait` after the token is set, outside the table's
+  lock. `exports::render_helper::register_kill` puts a session's
+  `HelperKill` there, so a cancel kills the helper at once, even while
+  the worker is blocked writing to it; the supervisor's token poll is
+  the second path.
+- **The PDF check** (`oma_export::check::pdf`, C1.17). A `%PDF-x.y`
+  header and a final `%%EOF`; the whole file tokenised with literal and
+  hexadecimal strings and comments skipped; every name object decoded
+  (`#xx` escapes included) and refused if it is `/JavaScript`, `/JS`,
+  `/OpenAction`, `/AA`, `/Launch`, `/URI`, `/SubmitForm`, `/ImportData`,
+  `/GoToR`, `/GoToE`, `/EmbeddedFile`, `/EmbeddedFiles`, `/AcroForm`,
+  `/XFA`, `/RichMedia` or `/Encrypt`; every stream with a direct
+  `/Length` whose data is followed by `endstream`, filtered by nothing,
+  `FlateDecode` or (an image's) `DCTDecode` only; every Flate stream
+  inflated with `miniz_oxide` (the inflate implementation the spec left
+  open, already in the tree through `png`), at most 64 MiB per stream and
+  512 MiB per file; the inflated syntax of content streams, CMaps and
+  forms tokenised with the same name check, refusing inline images and
+  nested streams. Binary streams (images, font programs, ICC profiles,
+  XMP) are inflated but not tokenised, because a name-shaped byte run in
+  them is not a name object. Object streams and cross-reference streams
+  are refused. (The PR B review fixes tightened all of this: the binary
+  exemption, the names, object streams by shape, and the cross-reference
+  table, which is now read; see "Review fixes (M6 PR B)".)
+- **The test backend** (`oma_export::render::stub`, debug builds only;
+  release builds refuse it like any backend they lack). It writes a
+  minimal PDF of counts per volume (never a byte of a record) and plays
+  one fault per session: a crash, a hang, a panic, a stop in reading, an
+  oversized, early or garbage reply, a wrong `Done` total, `Error(NoSpace)`,
+  a planted `/OpenAction /JavaScript`, stderr noise, or padding to an
+  output of several chunks.
+
+**Deviations from the spec:** fonts are not sent in `Begin` but as
+`Resource` frames (one CJK font is close to the 16 MiB frame bound), in
+pieces; the helper also has `End` for an output after which it exits
+(PDF uses `EndVolume` per volume); `HelperOutputRejected` stays without
+a check kind (the kind is `check::check_output`'s result, used by the
+tests, and the user's sentence is the same); the supervisor also ends a
+write blocked for 120 s (the spec timed only the reply); `/Encrypt` is
+refused besides the spec's list; object and cross-reference streams are
+refused rather than parsed (krilla 0.8.2 writes neither for this app,
+observed in slice 6j1's tests; the PR B review fixes refuse them by
+shape, and add more names and the cross-reference check); a whole
+volume is held in the main process's memory (at most 256 MiB) so that it
+is checked before any byte is staged. Not built (XLSX): the temporary
+folder inside staging and the "dies with less than 1 MiB free" `NoSpace`
+classification; the XLSX package check.
+
+**Tests:** `crates/oma-export/src/helper/frame.rs` (frames round-trip in
+their own direction only; an oversized length is refused before the
+payload is read; closed, truncated and garbage pipes; payloads; `Debug`
+without content); `crates/oma-export/src/render/` (PDF and XLSX
+refused; `Begin` first; an oversized request ends the helper without an
+answer; resource pieces contiguous and bounded; the stub's PDF passes
+the check and the planted one does not); `crates/oma-export/tests/pdf_check.rs`
+(every forbidden name refused at the top level, nested, escaped, in an
+inflated content stream and in a form; the same text in strings,
+comments and binary streams accepted; header, end, stream length,
+filters, inflate errors and a 64 MiB inflate bound, object streams,
+inline images, nesting depth); `src-tauri/src/backups/mod.rs` (cancel
+hooks); `src-tauri/tests/export_helper.rs`, the real binary with
+`--oma-export-helper`: a round trip with a resource over one frame,
+records, an image and two volumes; an output of several chunks and one
+over the volume bound; PDF and XLSX refused; a crash and an exit without
+reply; a hang ended by the reply timeout; a blocked write ended by the
+stall timeout; a cancel ending a blocked worker within 2 s through the
+token and through `Jobs::cancel`'s hook; oversized, garbage, early and
+miscounted replies; a planted `/JavaScript` refused before any byte is
+returned; a full disk reported by the helper, met by an injected writer
+and by `/dev/full` (Linux); stderr counted; a panic whose payload never
+reaches stderr; an oversized request refused before it is sent, and by
+the helper itself. Everything ran only in a Linux container; the helper
+code was compiled clippy-clean for `x86_64-pc-windows-msvc` through a
+scratch harness, and nothing ran on Windows.
+
+### PDF layout and pinned fonts (M6 slice 6j1)
+
+Slice 6j1 gives the export-render helper its first real backend: PDF
+layout with parley and serialisation with krilla (owner Q1), drawing
+only with the pinned bundled fonts (owner Q2). **No export uses it
+yet:** the record-to-block mapping, the pipeline's PDF writer, volumes,
+thumbnails and the "About this export" page are slice 6j2's, so PDF stays
+refused at the draft (`exportUnavailable`).
+
+**Where each part runs.**
+
+- *Main process* (`oma-export`'s `pdf/`, always compiled):
+  `pdf::fonts` pins the twelve font files (`PINS`: file, family, length,
+  SHA-256) and `verify` checks a set against them; only a `VerifiedFonts`
+  can be sent (`RenderSession::send_fonts`), so no unchecked byte reaches
+  the helper. The shell's `exports/pdf_fonts.rs` reads the files from a
+  folder Rust chose (the resource folder, from 6j2), refusing a file
+  whose length differs from its pin before reading it. `pdf::doc` is
+  what the helper lays out: `Block::Heading` (conversation, day, section)
+  and `Block::Entry` (a header of separate pieces, then paragraphs), JSON
+  with unknown fields refused, bounded per block; and the backend's
+  `Begin` options (`PdfOptions`: page size, Han face, the generic title).
+- *Helper* (`render/pdf/`, feature `render`): `library` registers the
+  slots with fontique **without system fonts** after checking the pins
+  again and each file's family name; `layout` lays out one paragraph at
+  a time with parley; `compose` places lines on pages and draws them with
+  krilla; `PdfBackend` is the `OutputBackend`. It words, marks and formats
+  nothing.
+
+**The marker rule in the text layer (§4.7).** Every string the helper
+draws is a `PdfText`, built only by `pdf::doc::TextBuilder`: recorded body
+text through `hidden::mark` with `MarkPolicy::text_body(markers)`, header
+fields with `MarkPolicy::text_header()` (the TXT policies: controls
+always escaped, hidden characters marked when the option is on and always
+in header fields, `⟨` escaped, combining runs over 16 cut to 16 plus
+`⟨+N combining marks⟩`), our own words verbatim. The helper gives krilla
+each paragraph's string as the glyphs' text, so ToUnicode and (where a
+glyph's text is not its own) ActualText carry exactly the drawn string:
+with markers on both carry `⟨U+202E⟩`, with markers off both carry
+U+202E. There is no second string a text layer could come from. Recorded
+text is split into paragraphs at every line break (TXT's `split_lines`),
+so a bidi paragraph ends at each break.
+
+**Layout.** A4 (US Letter by option), 15 mm margins, Noto Sans 9.5 pt,
+line height 1.3, headings at 13 pt (conversation, section) and 10.5 pt
+(day); a transcript, not bubbles. Each paragraph's base direction is its
+first strong character's (parley resolves it when none is given) and it
+is aligned to its start, so RTL paragraphs are right-aligned (tested; the
+spec's **UNVERIFIED** is settled). An entry's header pieces (time, sender,
+each qualifier) are laid out **one by one**, each its own paragraph and
+so its own bidi isolate, then flowed left to right and wrapped between
+pieces. `OverflowWrap::Anywhere` never clips; a line parley breaks as an
+emergency is counted as a forced wrap. Font stacks: the default stack is
+Noto Sans, Arabic, Hebrew, Devanagari, Thai, the CJK faces (the export's
+Han face, the other Chinese face, JP, KR), Symbols 2, Math and Noto Color
+Emoji last; a CJK run holding kana is set JP first, one holding hangul KR
+first, any other the Han face first (SC, TC by option); a character with
+VS16 (and its keycap or ZWJ sequence) is set emoji first, one with VS15
+without the emoji font. Characters drawn as glyph 0 are counted once each
+(`.notdef`); the glyphs keep their cluster's text range, so the text
+layer keeps the true characters. A conversation heading starts a page and
+a top-level outline entry; a day heading adds an entry under it and is
+kept with the next line. The document title is the options' generic title
+(D112). `Done` reports pages, `.notdef` characters, forced wraps and the
+limited combining runs (counted from their markers).
+
+**The output check meets krilla.** krilla 0.8.2 writes no object or
+cross-reference streams with its default settings (observed: every
+test PDF passes the check, which refuses them). It does write two
+binary streams without a `/Type`: a font descriptor's `/CIDSet` and its
+`/FontFile2` (with no `/Length1`). The check (`check/pdf.rs`) now makes
+two passes: the first follows the syntax and collects the objects a
+`/CIDSet`, `/FontFile`, `/FontFile2` or `/FontFile3` key references; the
+second inflates those objects' streams without tokenising them. Every
+other stream is checked as in 6i.
+
+**Deviations and choices** (recorded in `docs/dependencies.md`):
+**parley 0.11.1, not 0.12.0** (0.12.0 was published 2026-10-09, under the
+14-day rule until 2026-10-23; same licence, features and deny outcome;
+`parlance` and `font-types` pinned back for the same reason); the CJK
+fonts are the **regional subset OTFs** (SC, TC, JP, KR), not the TTC; the
+emoji font is the **COLRv1 build** of Noto Color Emoji (no raster
+decoders needed); **Noto Sans Math** is added, because no other bundled
+font has the marker's `⟨` and `⟩`; the record-to-block mapping is in the
+main process (spec §5.7 sends `ItemRecord`s): the helper then needs no
+words, zone table or marking, and TXT and PDF share the marking code. The
+krilla features `simple-text` and `raster-images` are off. Not built
+here (6j2): the volume estimate and its cuts, `Image` frames (refused
+with `Unsupported`), tagged structure, the pipeline's PDF writer, the
+fonts in the app bundle, re-measured scale.
+
+**Tests:** `crates/oma-export/src/pdf/` (pins well formed, unique and in
+the budget; a mismatched set refused; options and blocks round-trip and
+are bounded; recorded text marked and split, header fields always marked,
+`Debug` without content); `render/pdf/layout.rs` (CJK runs by script;
+VS15 and VS16 ranges, keycaps and ZWJ sequences);
+`crates/oma-export/tests/pdf_layout.rs` (the committed fonts match their
+pins and register their families, a set in the wrong order is refused;
+each script takes its face, Han unification and the TC option; VS15 and
+VS16 in both directions and emoji-only sequences; `.notdef` counts; RTL
+right-aligned and LTR-first left-aligned; long tokens wrap anywhere
+within the width and Thai breaks by dictionary without forced wraps; a
+hostile corpus (a 5,000-character token, 10,000 combining marks, a bidi
+bomb, mixed scripts, 400 entries) paginates with every glyph inside the
+margins on A4 (its first entries also on Letter) and passes the output
+check; header pieces as
+separate isolates; the marker rule in the ToUnicode maps and ActualText
+with markers on and off; a whole session through `serve` in-process,
+and the refusals of a misplaced heading, a tampered font and an image);
+`src-tauri/src/exports/pdf_fonts.rs` (the committed folder loads and
+holds nothing unpinned; an altered, longer, missing or replaced font is
+refused); `src-tauri/tests/export_helper.rs` (the real binary makes a
+checked PDF from the pinned fonts; fonts off their pins and missing
+options are refused); `scripts/oracles/pdf_text.py` (pypdf and
+`pdftotext` over eleven samples, including the marker pair; a mutation
+run with the markers-off file under the markers-on name failed as it
+should). pypdf 6.19.0 does not apply ActualText, so its text for Arabic,
+Devanagari, Thai and Hebrew differs and those samples are held to
+`pdftotext` only. Everything ran only in a Linux container; nothing ran
+on Windows, and no exported PDF was opened in a viewer or screen reader
+(**UNVERIFIED**).
+
+### The PDF writer, volumes, previews and tags (M6 slice 6j2)
+
+Slice 6j2 makes PDF an export format: `start_export` accepts it (XLSX
+alone stays refused with `exportUnavailable`), and the pipeline's
+`writer::pdf::PdfWriter` sends each record as blocks to the export-render
+helper and stages the checked volumes it returns.
+
+**One set of words for TXT and PDF.** The item's lines (body, details,
+attachments, reactions, value history, stored versions) moved from
+`writer/txt.rs` into `writer/lines.rs`, generic over an `Emit`ter. A line
+is a list of `Part`s: our words (`Part::Ours`) or a recorded value the
+emitter has already marked (`Part::Value`; TXT: header policy plus the
+`[` `]` escapes; PDF: `TextBuilder::header`). Recorded text with line
+breaks goes through `Emit::text` as runs, which each emitter splits and
+marks with its body policy. The TXT goldens did not move. The PDF never
+passes recorded text as our own words: `TextBuilder::piece` appends a
+`PdfText` another builder made, and `PdfText::split_bytes` cuts an
+overlong line without re-marking it.
+
+**What a PDF holds.** Per conversation file: a conversation heading (a
+new page, an outline entry, and the volume's document title, generic per
+D112: "Messages export — conversation N", "… messages in no
+conversation", with ", part K" after a cut), the notice and the
+conversation's facts, a day heading per local day ("Undated" last), and
+per item a header row of separate isolates (the time, `item N`, the
+sender, each tag in brackets as its own piece) and the same labels and
+recorded text as TXT, then the file's footer (counts and the PDF legend,
+`words::pdf_text`). A single file ends with "About this export" (§7.3):
+the manifest's fields without `files`, each line marked as TXT does.
+
+**Volumes (§5.6).** A bundle has one PDF per conversation file,
+`pdf/c0001.pdf` (`naming::BundlePath::pdf_volume`), cut at an item
+boundary into `pdf/c0001-2.pdf` … when the volume's **estimate** would
+pass 2,000 pages or 40 MiB (`VolumeLimits::SPEC`). krilla serialises at
+the end, so the estimate is all the main process has: lines (85 width
+units a line, a CJK or emoji character two, 52 lines a page, 16 a
+preview, a page per conversation heading), and bytes (4 per drawn
+character, the subset cost of each character the volume has not drawn
+yet: 8 KiB for an emoji, 512 bytes for a CJK character, 256 otherwise,
+the previews' bytes and 1 MiB fixed). Measured: the hostile
+catalogue's 1 MiB body drew about 1.5 bytes a character, so the
+estimate errs towards cutting early. After a cut the next volume repeats
+the conversation heading with "(part N)" and the current day heading. An
+entry's day heading is sent with the entry, after any cut, so a volume
+never ends with a day heading of a day it holds nothing of. A
+single file is never cut; its bound is the helper's 256 MiB output limit.
+Each volume is one `EndVolume`, so one helper serves the whole export.
+
+**Block bounds.** A line of recorded text over 32 KiB becomes several
+paragraphs (each split counted with `pdfForcedWraps`), and an entry whose
+encoded block would pass 4 MiB continues in further blocks with an empty
+header row, so no frame nears its 16 MiB bound (the hostile catalogue's
+1 MiB body is the test).
+
+**Previews (§6.5).** With previews on, `PdfWriter` asks the export's
+`PreviewSource` (the decode-helper pool's feed, shared with HTML) after
+each attachment's lines, only for attachments whose access is `included`
+or `revealed`. A thumbnail passes `preview::check_rendition` and is sent
+as an `Image` frame before its block; the block's `Figure` paragraph
+names it. The helper decodes it with krilla's `raster-images` (a JPEG is
+embedded as it is; a PNG is decoded and deflated again) and draws it at
+most 180 points a side, never upscaled. Each block's images are sent just
+before it, and a block draws at most 32 previews
+(`writer::pdf::MAX_FIGURES_PER_BLOCK`; an entry with more continues in
+further blocks), so the helper, which holds at most 64 images waiting for
+their figure, never refuses an entry for having many; a figure naming an
+image that was not sent is refused. An unavailable preview is the line
+"Preview unavailable" and is counted. **The feed now keeps each answer until the item is cleared**, so
+HTML and PDF in one export get the same renditions from one decode.
+
+**Tagged structure, with no conformance claim (§0.2).** krilla's tagging:
+a conversation or section heading is an `H1`, a day heading an `H2`, an
+entry a `Div` holding a `P` for its header row, a `P` per paragraph and a
+`Figure` per preview (alternative text of our own: "Preview of
+attachment N"). Every drawn line is one marked span under its group, in
+reading order. Whether a screen reader reads it well is **UNVERIFIED**.
+
+**The shell.** With PDF in the plan, the worker reads the fonts from the
+resource folder Tauri resolves (`bundle.resources` copies
+`resources/fonts/*` to `fonts/` beside the binary; `tauri build` and the
+dev build both copy them) and checks them against their pins before the
+archive is read; a missing or altered font fails the export with its own
+sentence (`HelperFailure::Fonts`, code `exportHelperFailed`, never a
+path). `HelperRenderers` starts the helper and hands each session's kill
+to a slot the job's cancel hook empties, so a cancel kills it at once;
+the helpers' stderr is logged as a size bucket only. `PdfSource::Given`
+lets the shell's unit tests give a renderer; the real helper is
+exercised by `tests/log_hygiene.rs` (an HTML + PDF export with previews
+from the real decode helper) and `tests/export_helper.rs`.
+
+**Manifest.** `pdfUndrawableCharacters` and `pdfForcedWraps` now come
+from the PDF writer; the PDF's `previewsEmbedded` is the helper's own
+count of the figures it drew (the `Done` frame's `figures`), and a volume
+whose count differs from the previews sent for it fails the export
+(`HelperFailure::Protocol`) before it is staged. `previewsEmbedded` and
+`previewsUnavailable` add the
+PDF's to the HTML's (like the other per-writer counts, a sum over
+formats).
+
+**Deviations from the spec.** Records are mapped to blocks in the main
+process (as in 6j1); the Han face is always SC (the plan has no TC option
+yet); the volume's estimate counts characters, not glyphs; the
+`Done` frame gained a `figures` count; and a bundle's legend points to
+`README.txt` and `manifest.json` instead of carrying "About this export".
+
+**Scale (re-measured, release build, Linux container).** 80,000
+messages from the bulk generator with 20 % CJK and 20 % emoji bodies, 320
+conversations (so 321 volumes), through the PDF writer with the backend
+in the child process (whose peak RSS bounds the helper's):
+
+| Previews | Time | Peak RSS (whole child) | Output |
+|---|---|---|---|
+| none | 65.0 s | 170 MiB | 237 MB |
+| 1,566 JPEG (48 KiB each) | 69.5 s | 159 MiB | 252 MB |
+| 1,566 PNG (640 × 480) | 121.3 s | 97 MiB | 508 MB |
+
+The memory bound (helper under 200 MiB) holds; **the spec's "under 30 s"
+does not**. Most of the time is layout (every header piece is its own
+parley paragraph, about six layouts an item) and the per-volume font
+subsets (each of the 321 volumes embeds its own CJK and colour-emoji
+subsets, which also makes the output about 0.7 MB a volume larger than
+the Latin-only scratch figures). PNG previews are decoded and deflated
+again by krilla; the decode helper's renditions of photos are JPEG,
+which are embedded as they are. Not optimised in this slice.
+
+**Binary size (re-measured).** Release-profile builds of the shell
+binary (stripped by the profile) in this container: 11,478,584 bytes
+from `main` at abd531f (PR A, no export-render helper) and 17,731,544
+bytes from this branch with slice 6j2 (the helper, krilla, parley with
+its ICU segmenter data, `raster-images`): **+6.25 MB**, close to the
+scratch estimate of +6.3 MB. The fonts are not in the binary; they ship
+beside it as resources (30,355,252 bytes). Other platforms' sizes were
+not measured.
+
+**Hostile corpus.** `tests/pdf_layout.rs` lays out a 5,000-character
+token, `e` with 10,000 combining marks, 1,500 bidi controls, 3,000
+characters no bundled font has (Tibetan, Linear B, Cherokee; each a
+counted `.notdef`), mixed Arabic, Hebrew, CJK, Hangul and emoji, and
+unspaced Thai, on A4 and Letter, with every glyph inside the margins;
+`tests/pdf_writer.rs` sends the hostile viewer catalogue's entry (its
+1 MiB body among them) through the whole writer and the real backend.
+
+**Tests:** `writer/pdf.rs` (width units, the estimate, volume paths; an
+entry with 70 previews sends each block's images just before it, at most
+32 a block),
+`pdf/doc.rs` (figures and titles bounded), `crates/oma-export/tests/pdf_writer.rs`
+(every catalogue entry to checked, tagged PDFs with an outline, one file
+per volume, manifest counts, sums; the blocks never draw a masking
+sentinel and draw every text sentinel with both reveals; a one-page limit
+cuts volumes with "(part 2)" titles and never ends a volume with a day
+heading, the default does not cut; a single file
+is never cut and ends with About; item heads; previews drawn as tagged
+image figures, a bad rendition fails the export with nothing published,
+and so does a renderer that draws fewer previews than it was sent;
+the hostile catalogue's 1 MiB body split under the bound, no raw control
+or bidi override drawn, 496 pages through the real backend),
+`tests/pdf_layout.rs` (an image that is not one is refused), the shell's
+`exports::tests` (PDF accepted, XLSX refused; a PDF export publishes a
+volume per conversation file; missing or wrong fonts fail before
+writing), `tests/export_helper.rs` (the real helper draws a preview as a
+tagged figure, titles two volumes and refuses a figure without its
+image), `tests/log_hygiene.rs` (HTML + PDF through both real helpers),
+`tests/perf_smoke.rs` (the ignored 80,000-message PDF run), and
+`scripts/oracles/pdf_oracle.py` (below, and `docs/development.md`).
+
+### The Export dialog and its store (M6 slice 6k1)
+
+Slice 6k1 is the first half of the UI row (spec §10): the dialog, its
+store, its words and the zone table. **No control opens it yet**: the
+entry points (thread header, search panel, Archive page), the status chip,
+the Archive page's "Exporting" state and the roadmap's `exports` flip are
+slice 6k2, so the roadmap still shows exports as planned and nothing in
+the UI looks like it exports.
+
+- **`components/ExportDialog.vue`** is mounted once in
+  `ArchiveDialogs.vue`, through `ModalDialog` with the new `guardEscape`
+  prop: Escape reports `close` instead of closing, so a running export
+  asks first ("Cancel it?" with **Cancel export** / **Keep exporting**).
+  The steps are What, Formats, Options, Review, Where to save, Exporting
+  and the result; each is a `fieldset` with a `legend`, and focus moves to
+  the step's first enabled control.
+- **`stores/exports.ts`** owns the form, the draft, the counts, the zone
+  table, the destination, the job and the result, and **persists
+  nothing**. `openExport(context)` builds a fresh form on every open, so
+  both reveal opt-ins (owner Q4), "Keep original file extensions" (Q3b)
+  and the identifiers opt-in (Q5's lean) start off every time; the
+  viewer's `revealEarlierText` is never read. While an export runs,
+  opening the dialog shows its progress (one job at a time).
+- **Defaults.** Attachments follow Q3a through `defaultAttachments`, the
+  same rule as `oma_export::plan::default_attachments` (tested case by
+  case); the user's choice overrides it. Previews are on where they apply
+  (HTML, PDF), history and reactions on, hidden-character markers on,
+  seconds on, 24-hour, LF, the CSV "spreadsheet" profile, A4, and this
+  computer's zone (UTC when the engine names none Rust accepts). No format
+  is pre-selected.
+- **What Rust refuses is shown as such.** XLSX is a disabled checkbox with
+  its reason ("Not available in this version…"), and is never sent.
+  "Group and system events" is a checked, disabled box with the sentence
+  that leaving them out is not available yet; the request always sends
+  `events: true`. An option that does not apply to the chosen formats is
+  disabled and sent off (Rust refuses it on): previews without HTML or PDF,
+  larger previews without previews, kept extensions without copies,
+  identifiers without JSON or CSV; `csvProfile` and `pageSize` are sent
+  only with CSV and PDF.
+- **The draft and its counts.** Entering Review calls `preview_export`
+  and shows "Counting…" (with the rows so far) and **Cancel**, which
+  discards the draft and returns to Options. Channel events are matched to
+  the draft id; events that arrive before the call resolves wait for it.
+  Going back before Review, closing the dialog or a newer count discards
+  the draft (`discard_export_draft`); a late answer of a discarded count is
+  dropped. A `failed` count shows the sentence of its code from the
+  store's table (the channel carries the code only).
+- **The zone table (`services/zoneTable.ts`, D128, D145).** It samples the
+  zone's offset every 6 hours with `Intl.DateTimeFormat(…).formatToParts`
+  (the wall clock read as UTC, minus the instant), bisects every change to
+  the second, starts with the window's start, yields to the event loop
+  every 4,096 samples and stops after 10 s. It refuses (and the dialog
+  then offers **Use UTC instead**) on the time bound, more than 4,096
+  transitions, a name outside `^[A-Za-z0-9_+\-/]{1,64}$`, an offset beyond
+  ±18 h or a zone the engine does not know. The window Rust names is
+  extended by 2 days at its end, because Rust checks it again against
+  "now" a little later. A date range sends the table with a second
+  `preview_export` when the first answers `needsZoneTable`; every other
+  scope builds it after `ready` (from `zoneWindowUtcMs`) and sends it with
+  the first `choose_export_destination` only. A change undone within one
+  6-hour step is not seen; this is the spec's sampling rule, and a test
+  states it. Building the 1900–2028 window for America/New_York took
+  1.2 s in Node here (jsdom, not a webview).
+- **Review** shows the packaging, the counts and estimated size
+  (`reviewLines`), the search scope's kept and excluded matches
+  (`searchLines`: "N matches are left out because they matched only text
+  this export does not include"), the zone sentence with **Use UTC
+  instead**, the fixed plaintext disclosure every time, and the required
+  confirmations: one checkbox per reveal that is on, each with its own
+  exact count, and one for kept extensions. A reveal whose count is 0
+  needs no checkbox and sends 0. **Choose where to save…** is enabled only
+  when every confirmation is ticked.
+- **Where to save** shows the name Rust returns through `SafeText` in
+  `identifier` mode (`safeText.ts`'s `untrustedContent` computes its
+  badges), so a hidden or direction character in a typed name shows as a
+  token; no path ever reaches the webview. Each warning that needs a
+  confirmation is a checkbox (`fatVolume` is a note), the sync warning
+  names the provider from its closed code, the leftovers are an opt-in,
+  and an existing file needs **Replace** ("Replace '<name>'? This cannot
+  be undone.") or **Choose another name** before **Start export**.
+- **Start** sends exactly the counts the preview showed, the confirmed
+  warnings, `replace`, `keepRiskyExtension` and `removeLeftovers`.
+  `start_export` consumes the draft whatever it answers: a stale
+  confirmation or an expired draft counts again with a notice; any other
+  refusal leaves **Review again**.
+- **Progress** reuses `JobProgress` (its phase sentence is announced in
+  its `aria-live` region; the new `cancelLabel` prop says "Cancel
+  export"), with "Cancelling removes the unfinished export". The result
+  says what was exported (`resultSentence`, `resultNotes`: counts, codes
+  and a size bucket), with **Show in folder** and **Done**, and no "Open
+  file". A job that failed with `exportConfirmationStale` offers **Review
+  again**.
+- **The privacy screen** closes the dialog through
+  `useViewer().closeDialogs()`, which calls `closeForPrivacy`: the draft
+  is dropped (Rust's `hide_viewer` discards it too); a running export
+  continues, and its end is announced by a toast.
+
+Not built in 6k1: "Continue in background" and the navbar chip (6k2; until
+then a running export is closed only by the privacy screen, and reopening
+the dialog shows it), the entry points, the "Exporting" state, "Save a
+copy" of one attachment (refused by Rust with `exportUnavailable`), and a
+run of the dialog in a real window (jsdom only; WebKitGTK and WebView2
+support for `Intl.supportedValuesOf('timeZone')` is **UNVERIFIED**, and
+"Another zone" is disabled where it is missing).
+
+Tests: `tests/frontend/export-dialog.spec.ts` (26: the Q3a rule case by
+case, the fresh form, the date arithmetic, the words, the steps and focus,
+XLSX unavailable, the reset on every open, the request Rust validates,
+"Counting…" with Cancel, early events, both reveal confirmations with
+exact counts, kept extensions, the zone table sent once, "Use UTC
+instead", a date range's second preview, the excluded-hits sentence, the
+replace prompt and no path, a hidden character in the name, warnings and
+leftovers, the stale path at start and in the job, progress with Escape
+and cancel, the result, the privacy screen), `tests/frontend/zone-table.spec.ts`
+(14: 6-hour sampling, bisection to the second, several changes, the
+undone-change limit, the time bound, the transition limit, refusals,
+abort, yielding, ICU's Europe/Berlin 2024 and New York 1900–2028), and
+`tests/frontend/dst/zone-table.spec.ts` (in each of the four DST zones,
+the table for this computer's zone against `Date`'s offsets from 2005 to
+2027, including Apia's skipped day).
+
+### Entry points, the status chip, events off and "Save a copy" (M6 slice 6k2)
+
+Slice 6k2 completes the UI row (spec §10, §6.6) and builds the two things
+PR A refused at the draft: leaving events out and "Save a copy" of one
+attachment. Exports are now `available` in `services/roadmap.ts`; XLSX
+stays refused (`exportUnavailable`) and is said to be unavailable in the
+roadmap's sentence and the dialog.
+
+- **Entry points.** The thread header has **Export conversation…**
+  (scope `conversation`, this conversation); the search panel has
+  **Export results…** for a finished set (shown disabled, with the reason,
+  while a search runs; the set goes by its `searchId`, never the query;
+  "in K conversations" is said only once every hit is loaded, because the
+  panel pages its hits); the Archive page has an **Export** card with
+  **Export…** (scope `archive`). Each opens the one dialog with a fresh
+  form; while an export runs, each shows its progress instead.
+- **"Continue in background" and the chip.** Progress has **Continue in
+  background** (and so does the Escape prompt). It closes the dialog; the
+  job runs on. `components/ExportStatusChip.vue`, in the navigation bar,
+  shows while a job runs with its dialog closed (also after the privacy
+  screen closed it) and, once such a job ended, until its result is read:
+  "Exporting…", "Cancelling the export…", "Export finished", "Export
+  failed" or "Export cancelled", in a polite live region. Activating it
+  reopens the dialog at the progress or the result (`reopen`); **Done**
+  removes it. An end while the dialog is closed is also a toast. Nothing
+  is persisted: the chip is gone after a reload.
+- **The Archive page's "Exporting" state.** Rust already reported
+  `exporting` for an archive this app's export holds (the list badge and
+  the status sentence). The Export card of that archive now shows
+  "Exporting from this archive" with the job's progress, **Cancel export**
+  and **Show export**; import, verify and export are disabled meanwhile
+  (one job at a time; Rust refuses them anyway).
+- **Events off** (spec §4.2 "Events", §9.2). The option "Group and system
+  events" is now a working checkbox (on by default). Off, the export
+  snapshot leaves out every timeline row whose derived `item_kind` is a
+  group or system event (2–13: participants added or removed, a group
+  renamed, a photo or background changed, a legacy shared location, an
+  audio message kept, SharePlay) and every reaction row folded into one;
+  a message of an unknown kind (0) stays, because it may be a message
+  this version does not map. The rule is applied in `oma-archive`
+  (`ExportSnapshot::leave_out_events`, set by the pre-count's
+  `PreviewOptions::leaving_out_events` and by the pipeline): the walk
+  behind the preview, the pre-count and the scope index, the timeline and
+  id cursors, and the search scope (an event hit is "not written") all
+  skip the same rows, so the counts agree by construction and ordinals
+  have no gaps (each row costs one primary-key seek of `item_kind`,
+  pinned in `tests/query_plans.rs`). The preview and the manifest say how
+  many rows were left out (`eventsLeftOut`, `counts.eventsNotIncluded`,
+  also in a single file's "About this export" and the result).
+  `ExportPlan::preview_options` is the one source of the options every
+  count of a plan runs under.
+- **"Save a copy"** (spec §6.6, owner Q3b, Q3c, Q4). **Save a copy…** is on
+  an attachment card whose inspection read a stored file, in the details
+  panel beside a stored file, and in the media viewer (which closes
+  first). It is the Export dialog without a form:
+  - `preview_export` takes scope `attachment { viewer, attachmentId }` with
+    no formats and one fixed option set (`input::copy_options_apply`;
+    the webview's `COPY_OPTIONS`); anything else is `invalidInput`. Rust
+    serves only an attachment the viewer session surfaced (as
+    `inspect_attachment` does; otherwise `attachmentUnavailable`, before
+    any draft exists). The draft is its own kind (`DraftWork::Copy`).
+  - Its "count" is `ArchiveReader::attachment_copy_preview`, one read
+    transaction: the stored file and its length, the kind its first 4 KiB
+    sniff as (through the verifying reader), and whether it is an
+    attachment of an unsent part under the export's rule (§3.8) over
+    **every** message that links it (one is enough; the rule errs towards
+    withholding). The channel answers `copyReady { earlierContent,
+    fileBytes }`; an attachment with no readable stored file is
+    `failed: attachmentUnavailable`.
+  - Review shows the size and its own disclosure (the original bytes,
+    metadata included); an attachment of an unsent part needs a
+    confirmation, which `start_export` carries as `reveal:
+    { earlierContent: 1 }` (nothing else is accepted, and nothing is
+    accepted for any other attachment).
+  - **Choose where to save…** opens a save dialog (titled "Save a copy",
+    plus " — includes content captured before an unsend" for such an
+    attachment) offering `naming::copy_name`: the bundle rule without the
+    ordinal (hidden characters removed, `sanitize_filename_max` within
+    120 bytes, `attachment.<ext>` from the sniffed kind when nameless,
+    `.blocked` appended unless the extension is passive for that kind).
+    The name the user keeps or types is checked by `destination::inspect`
+    (`Picked::Copy`): refused when `sanitize_filename` would change it or
+    it starts with `.oma-export-`; `riskyName` when its extension is
+    neither passive for the sniffed kind nor `.blocked`
+    (`naming::risky_copy_name`), which needs "This file type can run
+    programs. Save it as '<name>' anyway" and `keepRiskyExtension`
+    (required exactly then). An existing file needs the app's own
+    **Replace**, as for a single-file export.
+  - The job (`exports::copy::run_copy`) reserves the archive and takes its
+    lock like an export, re-reads the facts in its snapshot (a changed
+    generation or attachment is `exportConfirmationStale`), and calls
+    `oma_export::copy::save_copy`: bytes only from `open_blob`, into the
+    `.oma-export-<32 hex>.partial-file` beside the target
+    (`Staging::create_verified`, now allowed for a single file), 1 MiB
+    chunks with the cancel token per chunk, the kind sniffed again from
+    the stream (another kind than the name was checked against refuses
+    before anything is created), a FAT12/16/32 file of 4 GiB or more
+    refused before it is read, a digest or length mismatch refused with
+    the partial file removed ("The file does not match its recorded
+    checksum and was not saved", `attachmentUnavailable`), then the
+    no-replace or confirmed placement and, on Windows, a Mark of the Web
+    beside the published file (`Staging::mark_published_file`; a failure
+    is reported as `motwMissing`, never fatal; its effect is
+    **UNVERIFIED**). No manifest. It ends with `exportFinished` (one
+    file, its size bucket, `.blocked` counted), `cancelled` or `failed`,
+    with the phases `preparingExport`, `copyingAttachments`,
+    `finishingExport` and `removingPartial`; **Show in folder** opens its
+    folder.
+- **DTOs.** `PreviewEvent::CopyReady` and `CopyPreviewDto` (in the export
+  walk), `ExportDestinationDto.riskyName`, `ExportPreviewDto.eventsLeftOut`,
+  and `ExportSummaryDto.eventsNotIncluded` and `motwMissing` (a boolean,
+  so `exportFinished` stays under 1 KiB at its largest). Logs gain kinds
+  and booleans only (`scope = "attachment"`, `earlier_content`,
+  `risky_name`, `replaced`, the Mark of the Web outcome); the log-hygiene
+  run saves a copy into its sentinel folder and exports with events off.
+
+Deviations from the spec, each recorded here:
+
+- The Archive page's **Export…** is a card of its own below "Import and
+  check", not a button among the import actions.
+- **Save a copy…** on a card is a small button under the card, not an item
+  of a card menu (cards have no menu); in the media viewer it closes the
+  viewer first, so only one modal is open.
+- Events left out are counted in the manifest, the preview, the result and
+  a single file's "About this export"; a bundle's per-conversation pages
+  do not repeat the count (spec §4.2 asks for each conversation's About
+  part).
+- The chip's live region announces its state words; the phase sentence is
+  announced by the dialog's progress, not by the chip.
+- "Save a copy" re-reads the stored file's first 4 KiB in the preview
+  through the verifying reader (the full verification happens only in the
+  job, while the bytes are copied).
+
+Not verified here: any of this in a real window (jsdom only), on Windows,
+the native save dialog's own overwrite prompt, the Mark of the Web, a
+screen reader reading the chip or the dialog.
+
+Tests: `crates/oma-archive/tests/export_scope.rs`
+(`events_left_out_are_skipped_by_every_read_and_counted`: three scopes,
+the walk against the cursors and an oracle, ordinals without gaps, an
+unknown kind kept, a reaction folded into an event left out with it;
+`a_copy_names_its_file_and_withholds_unsent_parts`), the two new plan
+pins, `crates/oma-export/tests/events.rs` (a JSON export with events on and
+off: counts, no event written, ordinals 1..N), `crates/oma-export/tests/copy.rs`
+(4: byte-identical copy and no other file, replace only when confirmed, a
+cancel, another kind, a short and a long mismatch, a volume limit, names
+offered and typed), the shell's `exports::tests` (copy end to end through
+a viewer session; events off counted by the preview and the job; the
+fixed copy options; the unbuilt refusals now XLSX only),
+`src-tauri/tests/log_hygiene.rs`, and the frontend's `export-copy.spec.ts`
+(10), `export-dialog.spec.ts` (events sent), `search-panel.spec.ts` (2),
+`thread-view.spec.ts` (1), `archive-view.spec.ts` (1 new, 1 changed),
+`attachment-card.spec.ts` (1 new, 1 changed) and `roadmap.spec.ts` (the
+flip, and XLSX never claimed).
+
+### Review fixes (M6 PR B)
+
+The review of PR B found the defects below; each was fixed in one commit
+(`fix(openmessage-archive): address M6 PR B review findings`), with a
+regression test where one could be written. Everything here ran only in
+this Linux container (not on CI, not on Windows, and never in a PDF
+viewer, a browser or a screen reader).
+
+- **The PDF check sees every object a lenient reader loads**
+  (`check/pdf.rs`, C1.17). A compromised helper could hide a catalog
+  with an `/OpenAction` inside an untyped object stream (pdf.js reads
+  one by its `/First` and `/N`, and the check took a stream with `/N`
+  and no `/Type` for an ICC profile and did not tokenise it), behind
+  `startxref` pointing at an untyped cross-reference stream, or among an
+  image's raw bytes with an xref entry pointing there. Now: a stream
+  dictionary with `/First`, `/W` or `/Index` is refused whatever its
+  `/Type`; only the binary streams krilla writes are exempt from
+  tokenising (an image XObject, and the objects that `/FontFile*` or
+  `/CIDSet`, an `[/ICCBased n 0 R]` array or `/Metadata` reference, each
+  in krilla's shape; the `/N` and `/Length1` heuristics are gone);
+  `/DecodeParms`, `/DP` and the external-file keys `/F`, `/FFilter`,
+  `/FDecodeParms` are refused on every stream; and the cross-reference
+  table is read: exactly one classic table, one trailer without `/Prev`,
+  one `startxref` pointing at that table, every in-use entry pointing
+  exactly at an `N G obj` header the top-level pass saw (never inside
+  stream data) with the same number and generation, and every indirect
+  reference naming an in-use entry, so no reader goes looking for an
+  object in repair mode. A new refusal kind, `CrossReference`, says so.
+- **File attachments, annotations and every action are refused**
+  (`FORBIDDEN_NAMES`, `FORBIDDEN_KEYS`). An embedded file needs no
+  `/Type /EmbeddedFile`, and a `FileAttachment` annotation reaches it
+  through names that were not listed. The list now also has `/Annots`
+  (krilla writes no annotation for this app; the outline uses `/Dest`),
+  `/EF`, `/FileAttachment`, `/Filespec`, `/FS`, `/Thread`,
+  `/Rendition`, `/Movie`, `/Sound`, `/Screen`, `/3D`, `/3DD`,
+  `/OnInstantiate`, `/URL` and `/XRefStm`, and the key `/A` is refused
+  in every dictionary, so with `/OpenAction` and `/AA` no action of any
+  kind can be reached. `scripts/oracles/pdf_oracle.py` no longer copies
+  the Rust list: it has its own, by category from spec §5.6 (actions,
+  scripts, annotations, attachments, forms, external links and media,
+  3D, encryption), and also asks pypdf for object streams and a
+  `/Prev` or `/XRefStm`.
+- **A flood of `Error` frames cannot exhaust the main process**
+  (`helper/host.rs`, `helper/frame.rs`). The reader forwarded every
+  `Error` frame (each up to 16 MiB) into an unbounded channel while the
+  worker could be blocked writing for up to the 120 s stall timeout.
+  Now an `Error` frame is terminal (forwarded, the helper killed with no
+  stop reason so its code is what the session reports, the reader
+  stops), `read_frame` refuses an `Error` longer than its one byte or a
+  `Done` longer than `DONE_BYTES` before allocating
+  (`FrameKind::max_payload`), and the reply channel is a
+  `sync_channel` of four frames, so a fast helper meets back-pressure.
+  The stub's new `FloodErrors` fault plays both floods against a real
+  helper process.
+- **A combining flood split across formatting segments is cut**
+  (`writer/pdf.rs`, `writer/txt.rs`, §4.7). Each segment was marked
+  alone, so 16 marks per bold, italic or mention segment reached one
+  base character uncut. The recorded text between two placeholders or
+  line breaks is now marked as one string (neither format draws
+  styles). No golden changed.
+- **Volume cuts keep every item exactly once.** The cut test now checks
+  that the items sent across the cut volumes equal the uncut export's,
+  in order and without repeats; `write_oracle_pdf` adds a `cut` bundle
+  per entry (names only, 2-page volumes), and `pdf_oracle.py` requires
+  each item's own header exactly once across a file's volumes (a
+  "Reply to item N" reference is not counted) and at least 5 files cut
+  into more than one volume, and checks that each volume's outline has
+  entries under its conversation's (the per-day entries).
+- **The dialog is never lost** (`ModalDialog.vue`). In Chromium engines
+  (WebView2) a second Escape's `cancel` is not cancelable without a user
+  activation between, so the element closed while the store kept
+  `open`, and nothing could show it again. When the parent declines a
+  native close, the dialog now shows itself again. The engine behaviour
+  itself is **UNVERIFIED** here (jsdom only).
+- **Focus and announcements** (`ExportDialog.vue`). When counting ends,
+  focus moves to Review's first control (it fell to `<body>` with the
+  removed Cancel button), and the live region says "Counts ready…" (or
+  that a copy's facts are ready) instead of going silent. "Keep
+  exporting" moves focus to the progress, and "Replace" to Start.
+- **Notices, legends and words.** The stale or expired notice is
+  cleared when the user goes back to change the export, and shown in the
+  "Save a copy" branch too. The result's legend says how the job ended
+  ("Export failed", "Export cancelled"; "Copy not saved", "Copy
+  cancelled"), and a copy's chip, cancelled sentence and toasts speak of
+  the copy (the store's `jobCopy`). The Archive page's help no longer
+  offers "one conversation", which cannot be chosen there.
+- **No second draft while starting.** Back, Close and "Choose another…"
+  are disabled while `start_export` is in flight, Close goes through
+  `requestClose` (a starting or running job asks first), and `goTo` does
+  nothing while starting or while a job runs.
+- **Notices and documents.** `NOTICE` now carries arrayref 0.3.9's
+  copyright line and BSD-2-Clause text and a paragraph on the bundled
+  OFL-1.1 fonts, and `bundle.resources` installs it beside the fonts
+  (whether it lands in each installer is **UNVERIFIED**: no installer
+  was built); the About view names both. Stale statements were
+  corrected in `README.md` (the roadmap row, the CSP claim), `AGENTS.md`
+  (what is refused with `exportUnavailable`), `docs/privacy.md` (the
+  dialog and the identifiers opt-in are built), `docs/compatibility.md`
+  (checklist row 7's outline wording), `docs/supported-formats.md` and
+  `docs/dependencies.md` (the image row's MSRV floor is 1.92).
+
+Tests: `crates/oma-export/tests/pdf_check.rs` (14, 4 new: the review's
+object-stream file, the FileAttachment annotation and an untyped
+embedded file, a catalog hidden in an image with an xref entry pointing
+there and the other cross-reference shapes, decode parameters and
+external stream files; the binary-stream test now references each
+binary stream as krilla does and shows the same stream tokenised when it
+is not), `helper/frame.rs` (`Error` and `Done` bounded before
+allocation), `src-tauri/tests/export_helper.rs`
+(`a_flood_of_error_frames_is_not_queued`, with the peak resident set
+bounded on Linux), `writer/txt.rs` and `writer/pdf.rs` (a flood split
+across 600 segments), `tests/pdf_writer.rs` (items exactly once across
+cut volumes), and the frontend's `modal-dialog.spec.ts`,
+`export-dialog.spec.ts` (7 new) and `export-copy.spec.ts` (2 new). The
+new tests were written after the fixes and were not run against the
+code before them.
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`
@@ -4499,7 +5384,8 @@ engine and fonts, apply to PR B: D133; Q3 is D134; Q4 is D125). Q5
 (identifiers, D141) was not put to the owner: its lean is applied and
 awaits confirmation. Every other row is the spec's engineering lean,
 applied as the decision; the owner may still override any of them. Rows
-marked PR B are decided but not built in PR A.
+marked PR B are decided but not built in PR A. The status of each, as
+of slice 6l, is in the table after this one.
 
 | # | Topic | Choice | Main alternative | Trade-off |
 |---|---|---|---|---|
@@ -4524,9 +5410,44 @@ marked PR B are decided but not built in PR A.
 | D147 | Consent and drift (slice 6b2; compared from slice 6h1) | Exact, cancellable counts; the archive generation in the draft, compared at start and again inside the job's snapshot; a recount under the lock before writing; reveal counts that never understate (folded reactions and, with history, edit text counted); each reveal confirmed against its own count, which must equal the draft's at start | Budgeted "at least" counts | "N messages" is never an understatement |
 | D127 | Destination (lean; slices 6h1, 6h2) | Rust-opened dialogs whose titles name sensitive options; the folder kept in the draft, never crossing IPC, behind an opaque destination token bound to the draft (the latest choice's token starts the export); names generated in Rust; the format's extension enforced; `.oma-export-*` names refused; refusals per I1 plus the archive folder; warnings to confirm, checked again at start; no remembered destination | A name or path from the webview | I4, I3; `settings.json` stays content-free |
 | D136 | Export DTOs (slice 6h1) | A new export walk disjoint from the others but for three shared types; `exportFinished` inside the archive guard's walk, counts only; warnings and providers as closed codes | Reuse the viewer walk | Walks stay disjoint and events small |
-| D131 | XLSX (lean; **PR B**, slice 6i) | rust_xlsxwriter in constant-memory mode in the export-render helper; `quotePrefix`; our own 32,767 UTF-16 limit with continuation rows; temp directory in staging | In-process | A panic on temp-file I/O cannot end the app; exact values |
-| D133 | Export-render helper (**owner-confirmed Q1, Q2**; **PR B**, slices 6i, 6j) | PDF layout and XLSX writing in `--oma-export-helper`; bounded frames; main-process output checks; PDF with krilla 0.8.2 + parley 0.12.0 (a per-crate BSD-2-Clause exception for `arrayref` only; `rust-version` 1.92); fonts: the base scripts, Noto Sans CJK and Noto Color Emoji, pinned by SHA-256 | In-process; our own PDF writer | Hostile text and full disks cannot end the app |
+| D131 | XLSX (lean; **deferred** to a follow-up slice after 2026-10-31) | rust_xlsxwriter 0.100.0 in constant-memory mode in the export-render helper; `quotePrefix`; our own 32,767 UTF-16 limit with continuation rows; temp directory in staging. Slice 6i built the helper without it: 0.100.0 (published 2026-10-17) is not 14 days old until 2026-10-31, and 0.99.x is rejected (advisories), so XLSX stays refused | In-process | A panic on temp-file I/O cannot end the app; exact values |
+| D133 | Export-render helper (**owner-confirmed Q1, Q2**; **PR B**, slices 6i, 6j) | PDF layout and XLSX writing in `--oma-export-helper`; bounded frames; main-process output checks; PDF with krilla 0.8.2 + parley 0.12.0 (a per-crate BSD-2-Clause exception for `arrayref` only; `rust-version` 1.92); fonts: the base scripts, Noto Sans CJK and Noto Color Emoji, pinned by SHA-256. Slice 6j1 applied it with parley **0.11.1** until 0.12.0 is 14 days old (2026-10-23), the regional CJK subsets, the COLRv1 emoji build and Noto Sans Math added for the marker's brackets; slice 6j2 wired the PDF writer (volumes by estimate, previews, tagged structure), with krilla's `raster-images` on for the previews | In-process; our own PDF writer | Hostile text and full disks cannot end the app |
 | D139 | Job (slice 6h1) | `JobKind::Export` on the archive subject, holding the archive lock until its cleanup ends; its own reader, so damaged or migrating archives are refused; survives the viewer closing; `removingPartial` keeps the slot | A viewer-session task | One job model; excludes writers in every instance |
+
+**Status of D123–D147 after slice 6l.** "Owner-confirmed" means the
+owner's answer of 2026-10-19 to Q1–Q4; "lean" means the spec's choice,
+applied and open to the owner's override; Q5 (D141) is a lean that
+awaits the owner's confirmation. "Built" means implemented and tested on
+Linux with synthetic data; PR A's rows also passed CI on `ubuntu-22.04`
+and `windows-2022` ([run 39340011184](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39340011184)).
+No row has been checked by the M6 manual checklist (`compatibility.md`).
+
+| # | Basis | State |
+|---|---|---|
+| D123 | Lean | Built (PR A; PR B adds the PDF writer behind the same trait) |
+| D124 | Lean | Built (PR A) |
+| D125 | **Owner-confirmed (Q4)** | Built (PR A's reads and opt-ins; PR B's dialog confirms each against its exact count) |
+| D126 | Lean | Built (PR A; "Save a copy" in PR B uses the single-file placement) |
+| D127 | Lean | Built (PR A's dialogs and tokens; PR B's dialog drives them); the native dialogs' own overwrite prompts are not tested |
+| D128, D145 | Lean | Built (PR A in Rust; PR B's `zoneTable.ts` builds the table); WebKitGTK's and WebView2's `Intl` support not tested |
+| D129 | Lean | Built (PR A; PR B's `exportText.ts` for the dialog) |
+| D130 | Lean | Built (PR A) |
+| D131 | Lean | **Not built: XLSX deferred** to a follow-up slice after 2026-10-31 (rust_xlsxwriter 0.100.0 is not 14 days old before then; 0.99.x rejected); XLSX is refused |
+| D132 | Lean | Built (PR A); not opened in any browser |
+| D133 | **Owner-confirmed (Q1, Q2)** | Built for PDF (PR B: slices 6i, 6j1, 6j2), with parley 0.11.1 until 0.12.0 can be pinned (on or after 2026-10-23); its XLSX half waits for D131 |
+| D134 | **Owner-confirmed (Q3a–Q3c)** | Built (PR A; "Save a copy" in PR B applies the same allowlist and Mark of the Web); Mark of the Web written and read back on CI's NTFS, its effect not tested |
+| D135 | Lean | Built (PR A; PR B adds the PDF volumes and the events-left-out count) |
+| D136 | Lean | Built (PR A; PR B adds `copyReady`, `riskyName`, `eventsLeftOut`, `motwMissing`) |
+| D137 | Lean | Built (PR A; PR B's search panel entry point) |
+| D138 | Lean | Built (PR A; PR B's PDF text layer follows the markers) |
+| D139 | Lean | Built (PR A; PR B's "Exporting" state and the navbar chip) |
+| D140 | Lean | Built (PR A) on Linux; Windows ACL inheritance not tested |
+| D141 | **Lean awaiting the owner (Q5)** | Built (PR A; PR B's dialog offers the opt-in for JSON and CSV) |
+| D142 | Lean | Built (PR A) |
+| D143 | Lean | Built (PR A); the Windows residual stays disclosed |
+| D144 | Lean | Built (PR A) |
+| D146 | Lean | Built (PR A's oracles; PR B adds the pypdf and `pdftotext` oracles); openpyxl waits for XLSX |
+| D147 | Lean | Built (PR A; PR B's dialog sends each confirmed count) |
 
 ## Logging
 

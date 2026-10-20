@@ -135,6 +135,30 @@ jobs:
             --ignored --exact write_oracle_html
           "$RUNNER_TEMP/venv-oracles/bin/python" -I scripts/oracles/html_oracle.py --exports "$html"
           for b in "$html"/*/files/*/ "$html"/*/names/*/; do (cd "$b" && sha256sum --quiet -c SHA256SUMS); done
+          # Slice 6j1: sample PDFs from the export-render helper's PDF
+          # backend (every bundled script, emoji, undrawable characters,
+          # the hidden-character markers on and off, a hostile corpus),
+          # read back with pypdf and poppler's pdftotext (an external
+          # program, GPL; nothing of it is copied or shipped).
+          sudo apt-get install -y --no-install-recommends poppler-utils
+          pdftotext -v
+          pdf="$RUNNER_TEMP/oracle-pdf"
+          mkdir -p "$pdf"
+          OMA_PDF_SAMPLES="$pdf" cargo test -p oma-export --locked --test pdf_layout -- \
+            --ignored --exact write_samples
+          "$RUNNER_TEMP/venv-oracles/bin/python" -I scripts/oracles/pdf_text.py --samples "$pdf"
+          # Slice 6j2: every catalogue entry exported to JSON + PDF through
+          # the pipeline (the PDF backend in-process), read back with pypdf
+          # and pdftotext and checked against the bundle's JSON: volumes,
+          # titles, tags, embedded fonts, constructs that are never
+          # present, every item in order and exactly once (also across
+          # volumes cut at 2 pages), masking sentinels and the revealed
+          # positive control.
+          pdfx="$RUNNER_TEMP/oracle-pdf-exports"
+          OMA_ORACLE_PDF_OUT="$pdfx" cargo test -p oma-export --locked --test pdf_writer -- \
+            --ignored --exact write_oracle_pdf
+          "$RUNNER_TEMP/venv-oracles/bin/python" -I scripts/oracles/pdf_oracle.py --exports "$pdfx"
+          for b in "$pdfx"/*/files/*/ "$pdfx"/*/names/*/ "$pdfx"/*/cut/*/; do (cd "$b" && sha256sum --quiet -c SHA256SUMS); done
       - name: IPC bindings are up to date
         run: |
           if ! git diff --exit-code -- src/types/generated; then

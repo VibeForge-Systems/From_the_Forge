@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, useId, watch } from 'vue';
+import { nextTick, onMounted, ref, useId, watch } from 'vue';
 
 // Built on the native <dialog> element: showModal() provides the focus
 // trap, Escape handling, and inert background that a hand-rolled modal
@@ -10,7 +10,10 @@ import { onMounted, ref, useId, watch } from 'vue';
 // a control that was disabled or removed when it was pressed leaves focus
 // on `<body>`, and a control inside another, now closed, dialog cannot be
 // focused.
-const props = defineProps<{ open: boolean; title: string; returnTo?: string | null }>();
+// `guardEscape`: Escape does not close the dialog by itself; it reports
+// `close`, and the parent decides (the Export dialog asks before
+// cancelling a running export).
+const props = defineProps<{ open: boolean; title: string; returnTo?: string | null; guardEscape?: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 
 const dialog = ref<HTMLDialogElement | null>(null);
@@ -58,12 +61,30 @@ watch(() => props.open, sync);
  * the user closed the dialog (Escape) while it was meant to be open; a stale
  * event from a programmatic close that arrives after the dialog was reopened
  * must not close it again.
+ *
+ * The parent may decline the close (a running export asks first). The
+ * element is closed by then, whatever `cancel`'s `preventDefault()` did: a
+ * Chromium engine (WebView2) makes a second Escape's `cancel`
+ * non-cancelable without a user activation in between. So when `open` is
+ * still true after the parent had its say, the dialog is shown again, or
+ * nothing could ever show it (review fix).
  */
-function onNativeClose(): void {
-  if (props.open && !dialog.value?.open) {
-    restoreFocus();
-    emit('close');
+async function onNativeClose(): Promise<void> {
+  if (!props.open || dialog.value?.open) return;
+  emit('close');
+  await nextTick();
+  const el = dialog.value;
+  if (props.open && el && !el.open && typeof el.showModal === 'function') {
+    el.showModal();
+    return;
   }
+  if (!props.open) restoreFocus();
+}
+
+function onCancel(event: Event): void {
+  if (!props.guardEscape) return;
+  event.preventDefault();
+  emit('close');
 }
 
 function onBackdropClick(event: MouseEvent): void {
@@ -77,6 +98,7 @@ function onBackdropClick(event: MouseEvent): void {
     class="oma-dialog p-0"
     :aria-labelledby="titleId"
     @close="onNativeClose"
+    @cancel="onCancel"
     @click="onBackdropClick"
   >
     <div class="modal-content">

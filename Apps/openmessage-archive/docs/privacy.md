@@ -452,8 +452,9 @@ M5 never hands an attachment to another program and never saves one
 (owner-confirmed 2026-10-18, Q1a). The window refuses downloads, new
 windows and permission requests (camera, microphone, location and others)
 in Rust, and may only navigate within the app. Copying attachments into
-an export, and saving a copy of one attachment, are described in
-"Exports (M6)"; saving one attachment is not built yet.
+an export, and saving a copy of one attachment (M6 slice 6k2, the one
+way the viewer can write a file, and only where you choose in a save
+dialog), are described in "Exports (M6)".
 
 ### Memory, cache and the web profile
 
@@ -563,17 +564,24 @@ prevent them:
 
 ## Exports (M6)
 
-*Status: PR A of milestone 6, the export engine, is built: the archive's
-export reads, the `oma-export` crate (TXT, CSV, JSON and HTML), the
-export job, its five IPC commands and the decode-helper pool for HTML
-previews. **There is no Export dialog yet** (PR B, slice 6k), so no
-export can be made from the app's interface; PDF, XLSX, "Save a copy" of
-one attachment and leaving events out are refused, never faked ("Save a
-copy" and leaving events out are assigned to slice 6k). Every
-statement below was tested on Linux with synthetic data only; nothing
-was run on Windows, in a browser (pages were read back by parsers), or in
-a spreadsheet program. Owner decisions are those of 2026-10-19 (Q3, Q4);
-Q5 is a lean awaiting the owner.*
+*Status: milestone 6 is built, except XLSX. PR A, the export engine
+(the archive's export reads, the `oma-export` crate with TXT, CSV, JSON
+and HTML, the export job, its five IPC commands and the decode-helper
+pool for HTML previews), is merged into `main` (`abd531f`) after CI
+passed on `ubuntu-22.04` and `windows-2022`. PR B (on
+`feat/oma-m6-export-ui`) adds PDF through the export-render helper
+(slices 6i–6j2) and the Export dialog with its entry points (a
+conversation, search results, a date range, the whole archive, one
+attachment), leaving events out, and "Save a copy" of one attachment
+(slices 6k1, 6k2). **XLSX is refused, never faked:** its writer crate
+cannot be pinned before 2026-10-31, so it is a follow-up slice. Every
+statement below was tested with synthetic data only: PR A's on CI
+(Linux and Windows) and in a Linux container, PR B's in a Linux
+container only. Nothing was run on a Windows desktop, on a real archive,
+in a browser (pages were read back by parsers), in a PDF viewer, in a
+spreadsheet program or with a screen reader; `compatibility.md` lists
+what ran and the open manual checklist. Owner decisions are those of
+2026-10-19 (Q1–Q4); Q5 is a lean awaiting the owner.*
 
 **An export is a plaintext copy outside the app's control.**
 
@@ -622,14 +630,17 @@ decision Q3).
   or PDF file get `.blocked` added, unless you chose "Keep original file
   extensions" and confirmed it.
 - On Windows they are marked as coming from the internet
-  (`Zone.Identifier`, `ZoneId=3`) where the drive supports it. What
-  Windows does with the mark is **UNVERIFIED**.
+  (`Zone.Identifier`, `ZoneId=3`) where the drive supports it. CI's
+  `windows-2022` runner wrote the mark on NTFS and read it back (PR A's
+  `attach.rs`); what Windows, Explorer or Office then do with it is
+  **UNVERIFIED**.
 
 **HTML exports** contain re-encoded previews without metadata, made by
 the app's decode helper processes, never the original images, and no
 scripts. Their pages block network loads with a Content-Security-Policy
 (whether every browser honours it from a local file is **UNVERIFIED**).
-PDF exports are not built yet.
+PDF exports (slice 6j2, below) carry the same previews, never an
+original image.
 
 **Where files are written.** Only inside the folder you chose.
 Unfinished work goes into a folder or file named `.oma-export-….partial`
@@ -646,7 +657,9 @@ Unfinished work goes into a folder or file named `.oma-export-….partial`
 **Not prevented by the app:**
 
 - Windows Search and GNOME's search indexer index the Documents folder,
-  which is the default start folder of the export dialogs.
+  which is the default start folder of the export dialogs (in the
+  slice 6l smoke run, whose home had no Documents folder, the GTK save
+  dialog started in the app's working directory instead).
 - Thumbnailers (`~/.cache/thumbnails`, the Windows thumbnail cache) decode
   exported original images and videos when the folder is viewed,
   including through "Show in folder".
@@ -694,8 +707,8 @@ What is already decided and enforced in the archive's export reads
   folded into its target is written whole, so it is counted like any
   other message.
   The viewer's "Show earlier text by default" setting (`revealEarlierText`)
-  does **not** carry over into exports. The dialog and the confirmation
-  are not built yet.
+  does **not** carry over into exports. The dialog and its confirmation
+  were built in slice 6k1; see "The Export dialog (slices 6k1, 6k2)".
 - **Only codes the phone marked are masked.** A code in plain text without
   the phone's marking is not detected, in exports as in the viewer.
 - **Search results do not reveal hidden content through membership.** A
@@ -726,7 +739,8 @@ tested there; no export file is written yet):
   off). **Archive ids reveal how many messages the archive holds and
   roughly when they were imported**; GUIDs identify the messages and
   conversations in the phone's own database. The opt-in and its Review
-  sentence are not built yet.
+  sentence were built in slice 6k1; see "The Export dialog (slices 6k1,
+  6k2)".
 - **Read, delivery and sent state is never exported** (D94): no record has
   a field for it, and a test checks every record of the synthetic
   catalogues for those keys.
@@ -865,9 +879,10 @@ browser in this slice, and nothing was run on Windows):
 
 ### The export job and its commands (slice 6h1)
 
-What the shell does, tested on Linux without a window
-(`src-tauri/src/exports/`); nothing here has run on Windows or in a
-real window:
+What the shell does, tested without a window (`src-tauri/src/exports/`):
+on Linux, and as PR A's automated tests on CI's `windows-2022` runner;
+nothing here has run on a Windows desktop or with a native dialog (the
+slice 6l smoke run is in `compatibility.md`):
 
 - **The webview never names a path.** The destination comes from a
   native save dialog or folder picker that Rust opens; Rust keeps the
@@ -901,14 +916,15 @@ real window:
   forgets it when it closes. Unfinished exports are removed on cancel or
   failure; one a crash leaves is offered for removal the next time the
   same folder is chosen.
-- **Not available yet, and refused rather than faked:** PDF and XLSX,
-  saving one attachment, and leaving events out.
+- **Refused rather than faked:** XLSX, until its follow-up slice (after
+  2026-10-31). PDF (slice 6j2), saving one attachment and leaving events
+  out (slice 6k2) are built; see below.
 
 ### Destinations and previews (slice 6h2)
 
-Tested on Linux without a window (`src-tauri/src/exports/`,
-`src-tauri/tests/`); nothing here has run on Windows or with a native
-dialog:
+Tested without a window (`src-tauri/src/exports/`, `src-tauri/tests/`), on
+Linux and as PR A's automated tests on CI's `windows-2022` runner;
+nothing here has run on a Windows desktop or with a native dialog:
 
 - **A chosen folder is a token, not a path.** Each choice returns a
   random token bound to the draft; starting an export must carry the
@@ -928,6 +944,134 @@ dialog:
 - **Helper error output is never kept.** What a helper writes to its
   error stream is read and thrown away; only its length is logged, as a
   size bucket.
+
+### The export-render helper (slice 6i)
+
+Tested on Linux only (`src-tauri/tests/export_helper.rs`); PDF (slice
+6j2) is its only format, as XLSX is deferred:
+
+- **PDF pages are laid out in a separate process**, the app's own
+  binary started for that purpose, one per export that includes PDF. It
+  is given the export's text, already masked and turned into blocks by
+  the app (with export-local numbers instead of archive ids by
+  default), the shipped fonts and checked image previews through a pipe,
+  never a path, a file name, the archive's id or the destination. It
+  writes nothing to disk; its output comes back through the pipe and is
+  checked by the app before any byte of it is written into the export.
+  It is not a sandbox: it runs as the same user.
+- **Cancelling kills it at once**, and so does a helper that crashes,
+  stops answering for two minutes, or sends anything malformed; the
+  unfinished export is then removed as for any other failure.
+- **Its error output is never kept**: only its length is counted, and a
+  crash inside it prints a location in the source, never the text it was
+  working on.
+
+### PDF exports (slice 6j2)
+
+Tested on Linux only, with synthetic data (`crates/oma-export/tests/pdf_writer.rs`,
+`src-tauri/tests/export_helper.rs`, `src-tauri/tests/log_hygiene.rs`,
+`scripts/oracles/pdf_oracle.py`); no PDF was opened in Acrobat, a
+browser, a desktop viewer or a screen reader:
+
+- **What a PDF holds:** the same masked records as the TXT export, laid
+  out by the export-render helper: every recorded value it prints
+  (addresses, names, message text) is in the page text and can be copied
+  and searched; one-time codes and content captured before an unsend or
+  edit stay masked unless you opted in, as in every format. With the
+  hidden-character markers on, a hidden character is drawn and stored as
+  `⟨U+202E⟩`; with them off, the true character is in the text a copy or
+  a search finds, although it is invisible on the page.
+- **The document title** is generic, "Messages export — conversation 1"
+  (with ", part 2" and so on for later volumes), never a conversation's
+  name or an address; the PDF names no device, archive or folder.
+- **Fonts:** only the fonts shipped with the app (checked against their
+  SHA-256 pins before the helper gets them), embedded as subsets: a PDF
+  holds the shapes of the characters it shows, nothing from your
+  computer's fonts. A character no shipped font has is drawn as a box,
+  but the text you copy keeps it.
+- **Previews** are the decode helper's re-encoded thumbnails, checked by
+  the app before the helper draws them; a PDF never contains an original
+  file, a link to one, a script, a form, an attachment or a web link
+  (the app checks each PDF for these before writing it).
+- **Large conversations** are split into several PDF files
+  (`c0001.pdf`, `c0001-2.pdf`, …) by an estimate of 2,000 pages or 40 MiB;
+  a single-file PDF export is never split.
+- **Tagged structure** (headings, paragraphs, figures) is written to help
+  assistive technology; no accessibility standard is claimed, and how a
+  screen reader reads it is **UNVERIFIED**.
+- If the shipped fonts are missing or altered, a PDF export stops before
+  anything is written and says so.
+
+### The Export dialog (slices 6k1, 6k2)
+
+Tested in jsdom with a faked IPC layer (`tests/frontend/export-dialog.spec.ts`,
+`export-copy.spec.ts` and the entry points' tests) and, in slice 6l, in
+one headless smoke run of the release binary on Linux
+(`compatibility.md`); not with a screen reader, not in WebView2:
+
+- **Nothing about an export is kept by the window.** The dialog's form,
+  its draft id, the counts, the chosen destination's display name and
+  the result live in memory only, and the next opening starts from a
+  fresh form. Both reveal opt-ins (owner Q4) and "Keep original file
+  extensions" (Q3b) are off every time the dialog opens, whatever the
+  last export chose; the viewer's "Show earlier text by default" is never
+  read. No export setting is added to `settings.json`.
+- **Review always shows the same disclosure** ("An export is a plaintext
+  copy. Once saved, the app cannot protect, track or delete it. …"). Each
+  reveal that is on needs its own ticked confirmation naming its exact
+  count of messages; with "Keep original file extensions" on, a further
+  confirmation is required. A reveal whose count is 0 needs none.
+- **The time zone.** Times are written in the zone the dialog shows
+  (this computer's, by default), and the zone's name is written into the
+  export with its offsets. Review says "The zone name suggests where you
+  are." and offers **Use UTC instead**. The offsets come from the web
+  engine's own time-zone data, sampled by the window and checked by Rust.
+- **No path is shown or held by the window.** It shows the export's
+  name only (as untrusted text, so hidden characters show as codes); the
+  folder stays in Rust. **Show in folder** asks Rust to open the folder
+  of a finished export, which Rust remembers only until the app closes.
+  There is no "Open file".
+- **The privacy screen** (and idle hide) closes the dialog and discards
+  the draft and its counts; a running export continues. **Continue in
+  background** closes the dialog while the export runs; a chip in the
+  navigation bar shows its progress and reopens it.
+- **The Archive page shows "Exporting"** while this app's export holds an
+  archive; an import or verify of that archive, in this copy of the app
+  or another, is refused until the export ends.
+
+### Leaving events out, and "Save a copy" (slice 6k2)
+
+Tested on Linux with synthetic data only (`crates/oma-archive/tests/export_scope.rs`,
+`crates/oma-export/tests/events.rs`, `crates/oma-export/tests/copy.rs`,
+the shell's `exports::tests`, `src-tauri/tests/log_hygiene.rs`); the
+dialog ran in jsdom only:
+
+- **"Group and system events" off** leaves out every group or system event
+  (a participant added or removed, a group renamed, a photo or background
+  changed, …) and any reaction to one, from every format; how many is
+  recorded in `manifest.json` (or "About this export"). A message of a
+  kind this version does not recognise is kept. Events are on by default.
+- **"Save a copy…"** writes one attachment's stored file, byte for byte
+  (its metadata, which can include location, included), to the name and
+  folder you choose in a save dialog. The app offers the attachment's
+  recorded name made safe: hidden characters removed, and ".blocked"
+  added unless the extension is a passive one that matches the file's
+  content (owner decision Q3b). If you type a name whose extension could
+  run a program, the app asks you to confirm it first. No manifest or
+  record is written beside it.
+- The file is checked against the archive's checksum while it is copied;
+  a mismatch saves nothing. It is written under a temporary
+  `.oma-export-….partial-file` name beside the target, then renamed; an
+  existing file is replaced only after the app's own confirmation.
+- An attachment of a part the sender unsent is hidden by the viewer; if
+  it is shown and you save it, the app asks you to confirm including
+  content captured before an unsend, as an export does (owner decision
+  Q4), and the save dialog's title says so.
+- On Windows a copy gets a Mark of the Web (`ZoneId=3`), as exported
+  attachments do (owner decision Q3c); what Windows does with it is
+  **UNVERIFIED**, and so is everything about "Save a copy" on Windows.
+- The app remembers where a copy went only until it closes, for "Show in
+  folder".
 
 ## Device identifiers (M2)
 
@@ -1096,11 +1240,13 @@ tokens, media URLs, byte ranges or exact file sizes (sizes are bucketed).
 From M6 the export job and commands log kinds, option flags, buckets,
 outcomes and elapsed time only: never a destination, an export's file or
 folder name, a zone name, a draft or destination token, a query, an
-exact count or size, or content; a decode helper's error output is
-counted, never logged. `src-tauri/tests/log_hygiene.rs` checks this over
-the export commands' work and the TXT, CSV, JSON and HTML formats (with
-previews from the real decode helper) on the synthetic hostile and media
-archives, exported into a folder whose name is a sentinel. The persistent diagnostic log file is deferred to M8 (D71, a lean
+exact count or size, or content; the error output of a decode helper or
+of the export-render helper is counted, never logged. `src-tauri/tests/log_hygiene.rs` checks this over
+the export commands' work and the TXT, CSV, JSON, HTML and PDF formats
+(with previews from the real decode helper and PDF from the real
+export-render helper), an export with events left out and one "Save a
+copy", on the synthetic hostile and media archives, exported into a
+folder whose name is a sentinel. The persistent diagnostic log file is deferred to M8 (D71, a lean
 awaiting the owner). Set `OMA_LOG=debug` for more detail. That
 setting changes how much is recorded, not which kinds of data.
 
@@ -1126,3 +1272,9 @@ apply to deletion on modern storage:
 
 Full-disk encryption is the effective protection against recovery of
 deleted data. Deleting an archive cannot replace it.
+
+The same limits apply to **exports** (M6) and to the `.oma-export-*`
+leftovers a crash or a failed cleanup leaves: the app removes leftovers
+with ordinary file deletion, and deleting an export you saved is up to
+you. Neither is secure deletion (a secure-delete statement is an M8
+item).

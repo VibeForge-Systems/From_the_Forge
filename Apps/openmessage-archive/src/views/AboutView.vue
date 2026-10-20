@@ -83,8 +83,12 @@ onMounted(async () => {
       <div class="card-body small">
         OpenMessage Archive is built on Tauri, Vue, Bootstrap, Bootstrap Icons, and Rust crates,
         almost all under permissive licenses (MIT, Apache-2.0, BSD). Five unmodified Rust crates
-        included through Tauri are under the Mozilla Public License 2.0. The complete audited list
-        is in <span class="font-monospace">docs/dependencies.md</span> in the source repository.
+        included through Tauri are under the Mozilla Public License 2.0, and one (arrayref, through
+        the PDF export) under the BSD 2-Clause License. The PDF export bundles unmodified Noto fonts
+        under the SIL Open Font License 1.1, with their licence in
+        <span class="font-monospace">fonts/OFL.txt</span>. The notices are in the
+        <span class="font-monospace">NOTICE</span> file installed with the app; the complete audited
+        list is in <span class="font-monospace">docs/dependencies.md</span> in the source repository.
       </div>
     </section>
   </div>

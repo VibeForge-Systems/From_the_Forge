@@ -14,7 +14,8 @@
 //!   The path stays in Rust (I4).
 //! - `start_export` checks the confirmations, the archive generation and
 //!   the location again, reserves the job on the archive, takes its lock
-//!   and starts the worker; events arrive on its channel.
+//!   and starts the worker (an export's, or "Save a copy"'s for a copy
+//!   draft, slice 6k2); events arrive on its channel.
 //! - `discard_export_draft` drops the draft and stops its count.
 //! - `show_export_in_folder` opens the folder that holds a finished
 //!   export (never the export itself).
@@ -35,13 +36,14 @@ use super::AppState;
 use crate::backups::dto::{JobEvent, JobKind, JobStarted};
 use crate::backups::{worker as job_worker, JobSubject};
 use crate::error::{ErrorCode, IpcError, IpcResult};
+use crate::exports::copy::{self, CopyJob};
 use crate::exports::destination::{Picked, RealProbe};
 use crate::exports::dto::{
     ChooseExportDestinationRequest, DraftRef, ExportDestinationDto, ExportDraftDto, PreviewEvent,
     PreviewExportRequest, ShowExportInFolderRequest, StartExportRequest,
 };
 use crate::exports::messages as em;
-use crate::exports::worker::{self, ExportSpec};
+use crate::exports::worker::{self, ExportSpec, Start};
 use crate::exports::{self};
 use crate::settings::inspect_location;
 use crate::viewer::input::parse_raw;
@@ -108,6 +110,10 @@ pub async fn choose_export_destination(
             Picked::Folder => dialog
                 .set_can_create_directories(true)
                 .blocking_pick_folder(),
+            // "Save a copy": the defused name, no filter (any kind).
+            Picked::Copy(_) => dialog
+                .set_file_name(dialog_plan.default_name.as_str())
+                .blocking_save_file(),
         }
     })
     .await
@@ -136,10 +142,14 @@ pub async fn choose_export_destination(
     .map(Some)
 }
 
+/// A job's worker, run on its own thread.
+type JobWork = Box<dyn FnOnce(&crate::backups::Jobs, &mut dyn crate::backups::JobEventSink) + Send>;
+
 /// Start the export of a prepared draft (which it consumes). Its events
 /// arrive on `on_event`.
 #[tauri::command]
 pub async fn start_export(
+    app: AppHandle,
     state: State<'_, AppState>,
     request: Request<'_>,
     on_event: Channel<JobEvent>,
@@ -148,7 +158,7 @@ pub async fn start_export(
     let draft = state
         .exports
         .take_for_start(&req.draft_id, &req.destination_token)?;
-    let prepared = worker::prepare(draft, &req.confirmations)?;
+    let prepared = worker::prepare_start(draft, &req.confirmations)?;
     let configured = state.settings()?.settings().archive_directory.clone();
     let library = require_library(&state)?;
     let env = state.archive_env.clone();
@@ -163,12 +173,12 @@ pub async fn start_export(
                 crate::archives::messages::NOT_CONFIGURED,
             ));
         }
-        worker::recheck(&prepared, &env, &library, &warnings, &RealProbe)?;
+        worker::recheck_start(&prepared, &env, &library, &warnings, &RealProbe)?;
         Ok(prepared)
     })
     .await?;
     // 4: the job slot on the archive, and the archive's lock.
-    let archive = prepared.archive.clone();
+    let archive = prepared.archive().clone();
     let reservation = state
         .jobs
         .reserve(JobSubject::archive(archive.as_str()), JobKind::Export)?;
@@ -190,22 +200,46 @@ pub async fn start_export(
         }
     };
     // 5: the worker.
-    let spec = ExportSpec {
-        job_id: job_id.clone(),
-        prepared,
-        library,
-        env,
-        hold,
-        cancel: reservation.cancel,
-        host: Arc::clone(&state.exports),
-        renderers: crate::viewer::media::helper::process_factory(),
+    let host = Arc::clone(&state.exports);
+    let run: JobWork = match prepared {
+        Start::Export(prepared) => {
+            let spec = ExportSpec {
+                job_id: job_id.clone(),
+                prepared: *prepared,
+                library,
+                env,
+                hold,
+                cancel: reservation.cancel,
+                host,
+                renderers: crate::viewer::media::helper::process_factory(),
+                // The PDF fonts ship as resources (`bundle.resources`);
+                // a path Rust resolved, never one from the webview.
+                pdf: worker::PdfSource::Helper {
+                    launch: crate::exports::render_helper::launch(),
+                    fonts: app.path().resource_dir().ok().map(|d| d.join("fonts")),
+                },
+            };
+            Box::new(move |jobs, sink| worker::run_export(spec, jobs, sink))
+        }
+        Start::Copy(prepared) => {
+            let job = CopyJob {
+                job_id: job_id.clone(),
+                prepared: *prepared,
+                library,
+                env,
+                hold,
+                cancel: reservation.cancel,
+                host,
+            };
+            Box::new(move |jobs, sink| copy::run_copy(job, jobs, sink))
+        }
     };
     if job_worker::spawn_with(
         &job_id,
         state.jobs.clone(),
         Box::new(ChannelSink(on_event)),
         reservation.done,
-        move |jobs, sink| worker::run_export(spec, jobs, sink),
+        move |jobs, sink| run(jobs, sink),
     )
     .is_err()
     {

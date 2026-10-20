@@ -591,6 +591,204 @@ cargo test -p oma-export --test html -- --nocapture      # prints the RECORD lin
   also runs the held-handle publish test and prints `RECORD
   publish_with_open_handle`; it has not run yet.
 
+### The export-render helper (M6 slice 6i)
+
+```sh
+cargo test -p oma-export --lib -- helper:: render:: check::   # frames, the serve loop, resources, the stub's PDF
+cargo test -p oma-export --test pdf_check                     # the PDF output check: forbidden names and keys, streams, inflate bounds, the xref
+cargo test -p openmessage-archive --test export_helper        # the real binary with --oma-export-helper and the stub's faults
+cargo test -p openmessage-archive --lib backups::             # the job table's cancel hooks
+```
+
+- `export_helper.rs` starts the debug binary Cargo built
+  (`CARGO_BIN_EXE_openmessage-archive`) with `--oma-export-helper` and
+  the test backend (`oma_export::render::stub`, debug builds only). Its
+  timeouts are shortened to 2 s through `SessionLimits`, so the whole
+  file runs in about 2 s here. The `/dev/full` case runs on Linux only.
+- PDF uses the helper from slice 6j2 (below); XLSX stays refused.
+- Windows: the helper code was only compiled and linted for
+  `x86_64-pc-windows-msvc` through a scratch harness that includes
+  `helper/`, `check/` and `render/` by path; the process tests run on the
+  Windows CI job only.
+
+### PDF layout, the fonts and the PDF text oracle (M6 slice 6j1)
+
+```sh
+cargo test -p oma-export --lib -- pdf:: render::            # pins, blocks, options, CJK and emoji ranges
+cargo test -p oma-export --test pdf_layout                  # layout, fonts, the marker rule, a whole session
+cargo test -p openmessage-archive --lib exports::pdf_fonts  # the shell's font loader and its refusals
+cargo test -p openmessage-archive --test export_helper      # the real binary makes a checked PDF
+
+# The independent PDF text oracle (Linux; in the oracle virtual
+# environment; needs poppler-utils for pdftotext):
+OMA_PDF_SAMPLES=/tmp/oma-pdf cargo test -p oma-export --test pdf_layout -- \
+  --ignored --exact write_samples
+python3 -I scripts/oracles/pdf_text.py --samples /tmp/oma-pdf
+```
+
+- **The fonts** are `src-tauri/resources/fonts/` (twelve files and
+  `OFL.txt`, about 30 MB; `.gitattributes` keeps them binary). Their
+  pins are `crates/oma-export/src/pdf/fonts.rs` (`PINS`). To replace a
+  font: fetch it from its upstream repository at a pinned commit (the
+  sources are in `docs/dependencies.md`, "PDF fonts"), compare
+  `git hash-object` of the download with the commit's blob id, compute
+  its length and SHA-256, update `PINS`, `OFL.txt` and the table in
+  `dependencies.md` together, and run the tests above. The tests read the
+  committed files directly; `exports::pdf_fonts`'s test also fails on
+  any file in the folder without a pin.
+- `OMA_PDF_SAMPLES` must be an empty directory. `write_samples` writes
+  eleven PDFs and `expected.json`; `pdf_text.py` checks titles, outlines,
+  embedded fonts, and each sample's must and never strings with
+  `pdftotext` (all samples) and pypdf (the samples it can read; pypdf
+  6.19.0 does not apply ActualText). Run here: poppler 24.02.0, Python
+  3.13.16, 11 samples, 0 errors. CI's `ubuntu-22.04` installs its own
+  `poppler-utils` (22.02); that it gives the same text there is
+  **UNVERIFIED** until the CI run.
+- Layout tests run in about 0.5 s here: krilla, parley and the shaping,
+  segmentation and font crates are built at `opt-level = 3` in dev and
+  test builds (the root `Cargo.toml`).
+- Windows: nothing in 6j1 is platform-specific, and nothing of it ran on
+  Windows here; the CI `windows-2022` job runs the Rust tests.
+
+### The PDF writer and the PDF export oracle (M6 slice 6j2)
+
+```sh
+cargo test -p oma-export --lib writer::                      # the estimate, volume paths
+cargo test -p oma-export --test pdf_writer                   # every catalogue entry to PDF, blocks, volumes, previews, hostile text
+cargo test -p oma-export --test golden_txt                   # TXT unchanged by the shared line functions
+cargo test -p openmessage-archive --lib exports::            # PDF accepted, a PDF job, missing fonts
+cargo test -p openmessage-archive --test export_helper       # the real helper: previews, titles, volumes
+cargo test -p openmessage-archive --test log_hygiene         # HTML + PDF through both real helpers
+
+# The independent PDF export oracle (Linux; in the oracle virtual
+# environment; needs poppler-utils):
+OMA_ORACLE_PDF_OUT=/tmp/oma-pdf-exports cargo test -p oma-export --test pdf_writer -- \
+  --ignored --exact write_oracle_pdf
+python3 -I scripts/oracles/pdf_oracle.py --exports /tmp/oma-pdf-exports
+for b in /tmp/oma-pdf-exports/*/files/*/ /tmp/oma-pdf-exports/*/names/*/; do
+  (cd "$b" && sha256sum --quiet -c SHA256SUMS)
+done
+
+# Scale, by hand (release build; delete target/release afterwards):
+cargo test -p oma-export --release --test perf_smoke -- --ignored --exact \
+  eighty_thousand_messages_to_pdf --nocapture
+```
+
+- `pdf_writer.rs` runs the PDF backend in the test's own process
+  (`render::pdf::InProcess`, on a thread of its own because krilla's
+  document is not `Send`) and checks every volume with
+  `check::check_output`, as the helper's host does; its `Recorder`
+  renderer instead records the decoded blocks the writer sends. About
+  6 s here (dev build; krilla and parley at `opt-level = 3`).
+- `write_oracle_pdf` exports every catalogue entry to JSON + PDF (copies,
+  previews from a fake source, markers on; and names only, markers off)
+  and the export catalogue's entries with both reveals.
+  `pdf_oracle.py` checks titles, structure trees, embedded fonts,
+  forbidden names, every item in order (pdftotext), printable-ASCII
+  texts (both tools), the masking sentinels and the positive control.
+  Run here: Python 3.13.16, pypdf 6.19.0, poppler 24.02.0: 49 bundles,
+  77 volumes, 1,138 items (802 texts compared), 31 images, 14 sentinels
+  scanned for, 12 found revealed, 4,168 checks, 0 failed. After the PR B
+  review fixes (a `cut` bundle per entry, items counted exactly once,
+  the oracle's own list of constructs that are never present): 70
+  bundles, 177 volumes, 1,622 items (1,153 texts compared), 31 images,
+  14 sentinels scanned for, 12 found revealed, 17 files cut, 9,991
+  checks, 0 failed. A mutation run
+  (the revealed bundles listed as the default ones) failed with 14 leaks,
+  as it should. CI's `ubuntu-22.04` (Python 3.10, poppler 22.02) is
+  **UNVERIFIED** until the CI run.
+- The scale run takes about 5 minutes (three exports of a generated
+  80,000-message archive); its figures are in `docs/architecture.md`
+  ("The PDF writer, volumes, previews and tags"). The memory bound is
+  asserted; times are printed only.
+- The release binary (`npx tauri build --no-bundle`) is 17.7 MB here
+  (Linux x86-64, already stripped by the release profile), and
+  `tauri build` copies the fonts (about 30 MB) to `target/release/fonts/`
+  through `bundle.resources`. A release-profile build of `main` at
+  abd531f (no export-render helper) measured 11.5 MB here, so the helper
+  and the PDF backend add about 6.25 MB (`docs/architecture.md`).
+
+### The Export dialog and the zone table (M6 slice 6k1)
+
+```sh
+npx vitest run tests/frontend/export-dialog.spec.ts    # the dialog and its store (26 tests)
+npx vitest run tests/frontend/zone-table.spec.ts       # the zone table (14 tests)
+npx vitest run tests/frontend/dst/zone-table.spec.ts   # this computer's zone, once per DST project
+npm run typecheck                                      # the exhaustive word tables
+```
+
+- The tests fake `ipc` and drive the store through the dialog in jsdom;
+  `showModal` is stubbed as in `privacy.spec.ts`. No control opens the
+  dialog until slice 6k2, so it has not been seen in a real window.
+- `zone-table.spec.ts` uses the engine's ICU for Europe/Berlin (2024) and
+  America/New_York (1900–2028, about 1.2 s here, Node 22's ICU); every
+  other case uses an injected offset source. The DST project runs compare
+  the table for this computer's zone with `Date`'s offsets.
+- This slice changes no Rust code, so the Rust test time is unchanged.
+
+### Entry points, events off and "Save a copy" (M6 slice 6k2)
+
+```sh
+cargo test -p oma-archive --test export_scope -- events_left_out a_copy_names   # the reads
+cargo test -p oma-export --test events          # events on and off through the pipeline
+cargo test -p oma-export --test copy            # save_copy: bytes, names, replace, mismatch, cancel
+cargo test -p openmessage-archive --lib exports:: # the shell: copy drafts and jobs, events off
+cargo test -p openmessage-archive --test log_hygiene   # now saves a copy and exports with events off
+npx vitest run tests/frontend/export-copy.spec.ts       # Save a copy, events words, the chip
+```
+
+- No catalogue holds a group or system event, so the events tests make
+  some in their own copy of an imported archive (`item_type` 2,
+  `item_kind` 5). The archive test checks the walk against the cursors
+  and an oracle for three scopes; the export test checks the manifest's
+  counts and the ordinals.
+- The copy tests use `export-files-plain`'s stored files; the late
+  mismatch grows one store file to 10,000 bytes and records that length,
+  so its digest no longer matches.
+- The shell's copy test opens a viewer session on `view-media-plain`,
+  pages its conversations to surface attachments, and saves the first
+  attachment whose facts are ready.
+- The chip and "Continue in background" are tested in jsdom only.
+- The Windows-only code (the Mark of the Web beside a published copy) was
+  linted for `x86_64-pc-windows-msvc` through the scratch harness that
+  includes `stage.rs` and `naming.rs` by path; it has not run.
+
+### Milestone 6 as a whole: the oracle step, the fonts and a smoke test (slice 6l)
+
+- **The whole oracle step.** The workflow's "Independent oracles
+  (Python)" step runs the six oracles of slices 6c, 6e2, 6f, 6g, 6j1 and
+  6j2 in that order, each with the commands in its section above, plus
+  `sha256sum -c` on every bundle. To run it locally, make the oracle
+  virtual environment once (`python3 -m venv <dir>`, then
+  `<dir>/bin/pip install --require-hashes --only-binary :all: --no-deps
+  -r scripts/oracles/requirements.txt`), install `poppler-utils`, and
+  run the step's lines with `<dir>/bin/python -I` and an empty output
+  folder per oracle. Slice 6l ran all of it in about 5 minutes here
+  (results in `docs/compatibility.md`).
+- **The fonts.** Check the shipped files against the table in
+  `docs/dependencies.md` ("PDF fonts") with
+  `sha256sum src-tauri/resources/fonts/*.ttf src-tauri/resources/fonts/*.otf`;
+  the tests do the same against `PINS` in
+  `crates/oma-export/src/pdf/fonts.rs`. A release build copies them to
+  `target/release/fonts/` (`bundle.resources`); without that folder a
+  PDF export stops before writing anything and says so.
+- **A smoke test of the Export dialog** uses the viewer's prepared
+  library (`smoke_library.rs`, "Headless smoke test" below) and the
+  release binary under Xvfb, started inside `dbus-run-session -- <binary>`
+  so the GTK dialogs get a session bus. The save dialog then accepts a
+  full path typed into its Name field (`xdotool key ctrl+a`, then
+  `xdotool type`), so a single-file export (a thread's "Export
+  conversation…" with one format and names only) can be made through
+  the window; the folder picker opened but could not select a typed
+  folder in the container, so folder exports still need a desktop.
+  Window titles of the native dialogs (which name the sensitive options)
+  are readable with `xdotool getwindowname` for each window id that
+  `xdotool search --name ''` lists (there is no window manager to draw them). Delete
+  `target/release` afterwards. The slice 6l run is recorded in
+  `docs/compatibility.md`.
+- **Test time** for the whole milestone, locally and on CI, is in "Test
+  time" below.
+
 ### The bulk generator (M5)
 
 `crates/oma-archive/tests/common/bulk.rs` writes a schema-valid v1 archive
@@ -920,6 +1118,59 @@ slice). **Windows has not been measured for M6:** PR A has not run on
 CI. With the 4× factor seen in M4 and M5, it would add about 4 minutes on
 `windows-2022`, inside the 6-minute budget; that is an extrapolation
 until CI's run is recorded (slice 6l records it again).
+
+**Milestone 6 as a whole, measured in slice 6l** (spec §0.1), in the same
+container and the same way (`CARGO_INCREMENTAL=0`, after
+`cargo test --workspace --no-run`; 1,601 Rust tests passed, 25 ignored):
+
+| What | Time |
+|---|---|
+| `cargo test --workspace`, wall clock | 3 min 31 s |
+| Sum of all test binaries' run times | 206.3 s |
+| Added since the M6 baseline (`9883217`: 124.2 s) | about 82 s |
+| of which PR B's `pdf_writer.rs`, `pdf_check.rs`, `pdf_layout.rs`, `events.rs`, `copy.rs` (`oma-export`) and the shell's `export_helper.rs` | 7.0 s, 0.9 s, 0.5 s, 0.3 s, 0.4 s, 2.0 s |
+| the shell's unit tests (521) | 34.8 s |
+| `log_hygiene.rs` (now also PDF through the real helper, events off and a copy) | 7.3 s |
+| `npm test` (751 frontend tests in 58 files, the four DST projects included), wall clock | 29 s |
+
+So M6 adds under 1.5 minutes of Rust test time per Linux job here,
+inside the 3-minute budget, plus the CI oracle step outside
+`cargo test`.
+
+**On CI**, PR A's run ([39340011184](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39340011184))
+and the push to `main` after its merge
+([39347992924](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39347992924)),
+against the last `main` run before M6
+([39248435740](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39248435740),
+milestones 1–5), as the sums of the test binaries' own times read from the
+job logs (PR B has not run on CI):
+
+| Job | `main` before M6 | PR A run | `main` after PR A | Added by PR A |
+|---|---|---|---|---|
+| `checks` (ubuntu-22.04) | 97.3 s | 172.5 s | 175.3 s | 75–78 s |
+| `build` (ubuntu-22.04) | 108.5 s | 162.9 s | 164.1 s | 54–56 s |
+| `build` (windows-2022) | 366.1 s | 2,325.0 s | 2,118.5 s | **1,752–1,959 s (29–33 min)** |
+
+**The Windows budget is broken.** M6's budget is 6 more minutes on
+`windows-2022`; PR A alone adds about half an hour (the job's "Rust
+tests" step took 48 min in the PR run and 46 min on `main`). Seven
+binaries account for almost all of it, at 200–213 s each in both runs:
+`oma-export`'s `txt.rs`, `csv.rs`, `json.rs`, `html.rs`, `golden_txt.rs`,
+`golden_data.rs` and `golden_html.rs` (2–5 s each on Linux). The job
+log's timestamps show the pattern: a test that exports one bundle takes
+about 10 s on Windows, a single-file export about 1 s, and the tests that
+export every catalogue entry about 200 s. The **probable cause**, from
+reading the code and those timestamps but not reproduced on Windows: on
+Windows a bundle's publish rename fails while the marker file inside the
+staging folder is open, `stage.rs` retries it through the whole
+`RETRY_BACKOFF_MS` backoff (9.1 s) before it closes the marker and tries
+once more, and so every bundle export waits about 9 s at publish
+(`stage.rs` itself calls whether an open handle blocks the rename
+**UNVERIFIED**). If that is right it is a user-visible delay on Windows,
+not only test time. The fix (close the marker's handle before the first
+retry, or before the rename on Windows) belongs to a code change with a
+Windows CI run, not to this documents slice; it is listed as open in
+`compatibility.md` and the README.
 
 **Export read measurements (slice 6b2; synthetic, one host, no timing
 asserted).** In the same container, debug test build with `oma-archive`

@@ -46,6 +46,7 @@
 //!
 //! Nothing here logs; errors carry kinds only.
 
+pub mod copy;
 pub mod cursor;
 pub mod mask;
 pub mod measure;
@@ -66,6 +67,7 @@ use crate::view::assemble::{Caps, Ctx, Reveal};
 use crate::view::uncapped::{checked, export_item};
 use crate::view::{ChatId, ExportItem, HandleId, MessageId};
 
+pub use copy::{AttachmentCopy, CopyPreview};
 pub use cursor::{CursorBatch, HistoryCursor, IdCursor, TimeRange, TimelineCursor, VersionCodes};
 pub use mask::{AltTextSource, AltTextWithheld, AlternativeText, AttachmentAccess};
 pub use measure::{BatchLimits, ExportDepth};
@@ -134,6 +136,10 @@ pub struct ExportSnapshot<'s> {
     phase: &'s Phase<'s>,
     stmts: StmtCache<'s>,
     ctx: Ctx,
+    /// The export leaves group and system events out (the "events"
+    /// option off, slice 6k2): every walk and cursor of this snapshot
+    /// skips them ([`scope::left_out`]). Set once, never cleared.
+    without_events: std::cell::Cell<bool>,
 }
 
 impl std::fmt::Debug for ExportSnapshot<'_> {
@@ -151,6 +157,11 @@ pub(crate) fn plan_statements() -> Vec<(&'static str, String)> {
     let mut v = vec![
         ("export chat ids", SQL_CHAT_IDS.to_owned()),
         ("export blob row", crate::reader::SQL_BLOB_ROW.to_owned()),
+        ("export item kind", scope::SQL_ITEM_KIND.to_owned()),
+        (
+            "export attachment messages",
+            copy::SQL_ATTACHMENT_MESSAGES.to_owned(),
+        ),
     ];
     v.extend(cursor::plan_statements());
     v.extend(mask::plan_statements());
@@ -188,6 +199,7 @@ impl ArchiveReader {
                 phase,
                 stmts: StmtCache::new(phase.connection()),
                 ctx,
+                without_events: std::cell::Cell::new(false),
             };
             f(&snap)
         })
@@ -214,6 +226,7 @@ impl ArchiveReader {
                 phase,
                 stmts: StmtCache::new(phase.connection()),
                 ctx,
+                without_events: std::cell::Cell::new(false),
             };
             preview::precount(&snap, scope, opts, progress)
         })
@@ -244,6 +257,7 @@ impl ArchiveReader {
                 phase,
                 stmts: StmtCache::new(phase.connection()),
                 ctx,
+                without_events: std::cell::Cell::new(false),
             };
             let rerun;
             let set = match rerun_cap {
@@ -274,6 +288,22 @@ impl<'s> ExportSnapshot<'s> {
     /// interrupt is `Cancelled`, never `Damaged`.
     fn run<T>(&self, f: impl FnOnce() -> rusqlite::Result<T>) -> Result<T, ArchiveError> {
         f().map_err(|e| self.phase.err(&e))
+    }
+
+    /// Leave group and system events out of everything this snapshot
+    /// walks from now on (the "events" option off, slice 6k2): the
+    /// pre-count, the scope index, the search scope and every cursor skip
+    /// each timeline row whose item kind is an event (`item_kind` neither
+    /// a message nor unknown) and each reaction row folded into one, so
+    /// ordinals have no gaps and the counts agree by construction. It
+    /// cannot be undone for the snapshot.
+    pub fn leave_out_events(&self) {
+        self.without_events.set(true);
+    }
+
+    /// Whether [`ExportSnapshot::leave_out_events`] was called.
+    pub fn leaves_out_events(&self) -> bool {
+        self.without_events.get()
     }
 
     /// Stop with `Cancelled` when the job's token is set (between

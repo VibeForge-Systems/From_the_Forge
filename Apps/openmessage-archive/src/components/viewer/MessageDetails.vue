@@ -30,6 +30,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import type { HandleDto, MessageDetailDto, OptContentDto, RawValueDto, ReactionRecordDto, SafeId, TimeDto } from '@/types';
 import SafeText from './SafeText.vue';
 import { bytesText, cardSentence, sizeLine } from '@/services/attachmentView';
+import { SAVE_A_COPY } from '@/services/exportText';
 import { formatInstant, isoAtPrecision, timeText } from '@/services/time';
 import {
   ASSOC_KIND_TEXT,
@@ -416,6 +417,14 @@ async function showEarlier(): Promise<void> {
                 <template v-if="a.file">{{ storedLine(a.file) }}</template>
                 <template v-else>{{ DETAILS_TEXT.noStoredFile }}</template>
                 <span class="d-block oma-body-note">{{ sizeLine(a.file?.storedBytes ?? null, a.declaredBytes.value) }}</span>
+                <button
+                  v-if="a.file"
+                  type="button"
+                  class="btn btn-link btn-sm oma-inline-btn"
+                  @click="viewer.saveCopy(a.id)"
+                >
+                  {{ SAVE_A_COPY }}
+                </button>
               </dd>
               <dt>{{ DETAILS_TEXT.card }}</dt>
               <dd>

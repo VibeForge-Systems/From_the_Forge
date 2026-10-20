@@ -494,10 +494,53 @@ pub fn writers(
                 Format::Json => Box::new(oma_export::writer::json::JsonWriter::new()),
                 Format::Csv => Box::new(oma_export::writer::csv::CsvWriter::new()),
                 Format::Html => Box::new(oma_export::writer::html::HtmlWriter::new()),
+                Format::Pdf => Box::new(pdf_writer(None)),
                 other => panic!("no in-process writer for {other:?}"),
             }
         })
         .collect()
+}
+
+/// The committed PDF fonts, in pin order (read once).
+pub fn font_slots() -> Vec<Vec<u8>> {
+    static FONTS: std::sync::OnceLock<Vec<Vec<u8>>> = std::sync::OnceLock::new();
+    FONTS
+        .get_or_init(|| {
+            let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("..")
+                .join("src-tauri")
+                .join("resources")
+                .join("fonts");
+            oma_export::pdf::fonts::PINS
+                .iter()
+                .map(|p| fs::read(dir.join(p.file)).expect("a committed font"))
+                .collect()
+        })
+        .clone()
+}
+
+/// The PDF backend in this process (the `render` feature; the app runs it
+/// in the export-render helper).
+pub struct InProcessRenderers;
+
+impl oma_export::writer::pdf::PdfRendererFactory for InProcessRenderers {
+    fn start(
+        &mut self,
+        options: &oma_export::pdf::doc::PdfOptions,
+    ) -> Result<Box<dyn oma_export::writer::pdf::PdfRenderer>, ExportError> {
+        Ok(Box::new(oma_export::render::pdf::InProcess::new(
+            options,
+            font_slots(),
+        )?))
+    }
+}
+
+/// A PDF writer over [`InProcessRenderers`].
+pub fn pdf_writer(
+    previews: Option<Box<dyn oma_export::preview::PreviewSource>>,
+) -> oma_export::writer::pdf::PdfWriter {
+    oma_export::writer::pdf::PdfWriter::new(Box::new(InProcessRenderers), previews)
 }
 
 /// Export `i` to `formats` through the whole pipeline (see

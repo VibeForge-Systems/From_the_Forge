@@ -29,6 +29,8 @@ import ConversationLabel from './ConversationLabel.vue';
 import { dateFilter } from '@/services/calendar';
 import { dayBoundaryFor, type DayBoundaryBuilder } from '@/services/time';
 import { SEARCH_RAN_TEXT, SEARCH_TEXT, SENDER_FILTER_TEXT, SCAN_STOP_TEXT, fill } from '@/services/viewerText';
+import { ENTRY_TEXT } from '@/services/exportText';
+import { useExports } from '@/stores/exports';
 import { useSettings } from '@/stores/settings';
 import { SEARCH_DEBOUNCE_MS, useViewer } from '@/stores/viewer';
 
@@ -36,6 +38,7 @@ const props = defineProps<{ build?: DayBoundaryBuilder }>();
 const emit = defineEmits<{ close: []; openChat: [chatId: SafeId] }>();
 const viewer = useViewer();
 const settings = useSettings();
+const exports = useExports();
 
 const query = ref<HTMLInputElement | null>(null);
 const dateProblem = ref<'from' | 'to' | 'order' | 'empty' | null>(null);
@@ -191,6 +194,26 @@ const dateMessage = computed(() =>
           : null,
 );
 
+/**
+ * "Export results…" (M6 §10): the finished set, by its id (never the
+ * query). The conversations are counted only when every hit is loaded.
+ */
+function exportResults(): void {
+  const st = started.value;
+  const v = viewer.viewer;
+  const archiveId = viewer.archiveId;
+  if (!st || state.value.running || v === null || archiveId === null) return;
+  const hits = state.value.hits;
+  const conversations =
+    hits.length === st.total ? new Set(hits.flatMap((h) => (h.chat === null ? [] : [h.chat]))).size : null;
+  exports.openExport({
+    archiveId,
+    chatId: viewer.openChatId,
+    scope: 'searchResults',
+    search: { viewer: v, searchId: st.searchId, matches: st.total, conversations, capped: st.capped },
+  });
+}
+
 function open(hit: SearchHitDto): void {
   if (hit.chat === null) return;
   viewer.focusOnOpen(hit.chat, hit.message);
@@ -320,6 +343,18 @@ function open(hit: SearchHitDto): void {
         </button>
       </div>
       <p v-if="errorText" class="alert alert-warning py-2 my-2" role="alert">{{ errorText }}</p>
+      <div v-if="state.running || (started && started.total > 0)" class="my-2">
+        <button
+          type="button"
+          class="btn btn-sm btn-outline-secondary"
+          :disabled="state.running"
+          aria-describedby="oma-search-export-note"
+          @click="exportResults"
+        >
+          {{ ENTRY_TEXT.searchResults }}
+        </button>
+        <p v-if="state.running" id="oma-search-export-note" class="form-text mt-1 mb-0">{{ ENTRY_TEXT.searchRunning }}</p>
+      </div>
       <template v-if="started && !state.running">
         <p class="oma-search-note">{{ fill(SEARCH_TEXT.ranMode, { mode: SEARCH_RAN_TEXT[started.mode] }) }}</p>
         <p v-if="started.mode === 'exact'" class="oma-search-note">{{ SEARCH_TEXT.exactNote }}</p>

@@ -895,6 +895,30 @@ pub mod html_text {
     ];
 }
 
+/// The fixed text of the PDF format (spec §5.6, slice 6j2). Document
+/// titles stay generic (D112): content is only on the pages.
+pub mod pdf_text {
+    pub const TITLE: &str = "Messages export";
+    pub const NOTICE: &str = "OpenMessage Archive export \u{2014} plaintext copy: anyone who can open this file can read it. What the marks mean is at the end of each conversation.";
+    pub const NOTICE_SINGLE: &str = "OpenMessage Archive export \u{2014} plaintext copy: anyone who can open this file can read it. What the marks mean and how the export was made are at the end of this file.";
+    pub const UNDATED: &str = "Undated";
+    pub const NO_TIME: &str = "No usable time";
+    pub const END: &str = "End of conversation file";
+    pub const LEGEND_HEADING: &str = "Legend:";
+    pub const PREVIEW_UNAVAILABLE: &str = "Preview unavailable";
+    pub const ABOUT: &str = "About this export";
+    pub const ABOUT_BUNDLE: &str = "How this export was made (its scope, options, time zone table, counts and the kinds of data never exported) is recorded in manifest.json and explained in README.txt, in the export\u{2019}s folder.";
+
+    pub const LEGEND: &[&str] = &[
+        "Each item is headed by its recorded time in the zone named at the top, with the offset in force, its number in this export, the sender\u{2019}s address when one is recorded, and tags in brackets. Undated items come last and follow the order of the earliest import that recorded them, which is not a recorded fact.",
+        "[same recorded time; order not known]: the item has the same recorded time as its neighbour, so their order is the order the archive imported them in.",
+        "Values and tags marked \u{2018}derived\u{2019} were worked out by the archive from what the phone recorded, not recorded by the phone itself.",
+        "Text in angle brackets \u{27E8}\u{2026}\u{27E9} is written by the export, never by a message: \u{27E8}U+200B\u{27E9} stands for a character that does not show when printed or that controls the text direction, \u{27E8}+N combining marks\u{27E9} for marks left out of a very long run of accents, and \u{27E8}one-time code hidden\u{27E9} or \u{27E8}Attachment N\u{27E9} for what stood at that place in the text. A literal \u{27E8} in a message is itself written as \u{27E8}U+27E8\u{27E9}.",
+        "A character no bundled font can draw shows as a box, but the copyable text keeps the true character. Bold, italic and other styles are not shown. A very long word is broken where it reaches the edge of the page.",
+        "Images are previews re-encoded by the app, never the original files. Original files, when they were copied, are named by their path in the export\u{2019}s folder but not linked. Web addresses in messages are text, not links.",
+    ];
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WordsDoc {
@@ -969,6 +993,12 @@ mod tests {
             .chain(txt_legend::LINES)
             .chain([&txt_legend::FIRST_LINE])
             .chain(html_text::LEGEND)
+            .chain(pdf_text::LEGEND)
+            .chain([
+                &pdf_text::NOTICE,
+                &pdf_text::NOTICE_SINGLE,
+                &pdf_text::ABOUT_BUNDLE,
+            ])
             .chain([
                 &html_text::NOTICE,
                 &html_text::ABOUT_BUNDLE,

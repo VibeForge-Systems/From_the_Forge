@@ -20,6 +20,15 @@ attachmentsCopied: number,
  */
 attachmentsBlocked: number, attachmentsExcluded: AttachmentExclusionsDto, oneTimeCodesMasked: number, earlierTextWithheld: number, editTextWithheld: number, alternativeTextWithheld: number, hiddenCharactersMarked: number, controlsEscaped: number, neutralisedCells: number, timesOutsideZoneWindow: number, undatedExcluded: number, 
 /**
+ * Timeline rows left out because events were left out.
+ */
+eventsNotIncluded: number, 
+/**
+ * Windows: a Mark of the Web could not be written beside some copy
+ * (owner Q3c; never fatal).
+ */
+motwMissing: boolean, 
+/**
  * For a search scope: hits left out because they match only hidden
  * content (shown in the result only, never written).
  */

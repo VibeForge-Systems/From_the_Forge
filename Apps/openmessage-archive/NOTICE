@@ -4,7 +4,8 @@ Copyright 2026 VibeForge Systems, Inc. and OpenMessage Archive contributors
 This product is licensed under the Apache License, Version 2.0 (LICENSE).
 
 It bundles third-party software, mostly under permissive licenses (MIT,
-Apache-2.0, BSD-3-Clause, and similar). The complete, audited list is in
+Apache-2.0, BSD-3-Clause, and similar), and fonts under the SIL Open Font
+License 1.1 (see "Fonts" below). The complete, audited list is in
 docs/dependencies.md; the Rust audit policy is deny.toml and the JavaScript
 audit is scripts/check-licenses.mjs.
 
@@ -15,6 +16,49 @@ https://crates.io at the versions recorded in Cargo.lock.
 
 Contains SQLite (public domain), compiled in through rusqlite's bundled
 feature.
+
+Contains arrayref 0.3.9 (https://crates.io/crates/arrayref), compiled in
+unmodified through krilla and tiny-skia-path for the PDF export, under the
+BSD 2-Clause License (allowed for this crate by name in deny.toml). Its
+copyright notice and licence text, copied verbatim from the crate's
+LICENSE file:
+
+Copyright (c) 2015 David Roundy <roundyd@physics.oregonstate.edu>
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the
+   distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+Fonts (the PDF export)
+----------------------
+
+The PDF export bundles twelve unmodified Noto fonts under the SIL Open
+Font License, Version 1.1. Their copyright lines and the licence text are
+in fonts/OFL.txt beside them (src-tauri/resources/fonts/OFL.txt in the
+source); their sources, versions and SHA-256 pins are in
+docs/dependencies.md. This NOTICE file ships beside them in the
+installer's resources.
 
 Reference implementations consulted
 -----------------------------------

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
+import ExportStatusChip from '@/components/ExportStatusChip.vue';
 import { useSettings } from '@/stores/settings';
 import { useBackups } from '@/stores/backups';
 import { nextTheme } from '@/composables/useTheme';
@@ -46,6 +47,7 @@ const upcoming = computed(() => THEME_META[nextTheme(settings.theme)]);
       <li class="nav-item">
         <RouterLink class="nav-link" exact-active-class="active" to="/about">About</RouterLink>
       </li>
+      <ExportStatusChip />
     </ul>
     <div class="d-flex gap-1">
       <button

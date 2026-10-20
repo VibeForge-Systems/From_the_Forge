@@ -5,7 +5,9 @@
 //! the file and placement errors (`Write`, `NoSpace`, `TargetExists`,
 //! `NameRefused`, `DestinationChanged`). Slice 6g adds
 //! `HelperOutputRejected` for a decode-helper rendition that fails the
-//! checks of §5.7; `HelperFailed` arrives with slice 6i.
+//! checks of §5.7. Slice 6i adds `HelperFailed` (the export-render helper
+//! crashed, hung, refused or broke the protocol) and
+//! `Limit(FrameTooLarge)` (a frame over 16 MiB, in either direction).
 
 use std::io;
 
@@ -70,6 +72,39 @@ pub enum ExportError {
     /// within its size limits. Nothing of it was written.
     #[error("a helper's output was refused")]
     HelperOutputRejected,
+    /// "Save a copy" (spec §6.6, slice 6k2): the stored file is missing,
+    /// unreadable, or does not match its recorded length or digest. The
+    /// partial copy was removed and nothing was saved.
+    #[error("the stored file does not match its recorded checksum")]
+    ChecksumMismatch,
+    /// The export-render helper failed (spec §5.7): it could not start,
+    /// crashed, did not answer in time, broke the protocol or refused with
+    /// a closed code. The partial output is removed.
+    #[error("the export helper failed ({0:?})")]
+    HelperFailed(HelperFailure),
+}
+
+/// How the export-render helper failed (kinds only; no helper text).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum HelperFailure {
+    /// The helper process could not be started.
+    Spawn,
+    /// It exited or closed its pipes before answering.
+    Crashed,
+    /// It did not answer within its time (`EndVolume` + 120 s, or a write
+    /// blocked as long).
+    Timeout,
+    /// A malformed or unrequested frame, or a `Done` whose total disagrees
+    /// with the chunks.
+    Protocol,
+    /// Its output was larger than one volume may be.
+    OutputTooLarge,
+    /// It refused with this code.
+    Refused(crate::helper::frame::HelperErrorCode),
+    /// The PDF fonts the app ships are missing, unreadable or do not match
+    /// their pins (checked before any helper starts; slice 6j2).
+    Fonts,
 }
 
 impl ExportError {
@@ -144,6 +179,9 @@ pub enum LimitKind {
     /// A staged file was still open when the export was finished or
     /// published.
     FileStillOpen,
+    /// A frame to or from the export-render helper is over 16 MiB (spec
+    /// §5.7): refused before anything was allocated, and the helper killed.
+    FrameTooLarge,
     /// Two files of one export would have the same name ignoring ASCII
     /// case (a defensive check: ordinal prefixes make names unique).
     NameCollision,

@@ -61,6 +61,8 @@ import {
   VIEWER_STATE_TEXT,
   fill,
 } from '@/services/viewerText';
+import { ENTRY_TEXT } from '@/services/exportText';
+import { useExports } from '@/stores/exports';
 import { usePrivacy, type ThreadPlace } from '@/stores/privacy';
 import { useSettings } from '@/stores/settings';
 import { useViewer } from '@/stores/viewer';
@@ -68,6 +70,13 @@ import { useViewer } from '@/stores/viewer';
 const props = defineProps<{ chatId: SafeId }>();
 const emit = defineEmits<{ openChat: [chatId: SafeId] }>();
 const viewer = useViewer();
+const exports = useExports();
+
+/** "Export conversation…" (M6 §10): the dialog with this conversation pre-selected. */
+function exportConversation(): void {
+  const archiveId = viewer.archiveId;
+  if (archiveId !== null) exports.openExport({ archiveId, chatId: props.chatId, scope: 'conversation' });
+}
 const settings = useSettings();
 const privacy = usePrivacy();
 
@@ -459,6 +468,14 @@ function onFeedKeydown(event: KeyboardEvent): void {
         </template>
         <button type="button" class="btn btn-sm btn-outline-secondary" @click="viewer.openSearch(chatId)">
           {{ THREAD_TEXT.searchConversation }}
+        </button>
+        <button
+          type="button"
+          class="btn btn-sm btn-outline-secondary"
+          :disabled="viewer.archiveId === null"
+          @click="exportConversation"
+        >
+          {{ ENTRY_TEXT.conversation }}
         </button>
       </div>
     </header>

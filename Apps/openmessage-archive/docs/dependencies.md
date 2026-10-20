@@ -8,7 +8,8 @@ of this file.
 Two automated audits enforce the license policy:
 
 - **Rust:** [`deny.toml`](../deny.toml), via `cargo deny check`. It allows
-  permissive licenses, plus MPL-2.0 for five named crates (see below). It
+  permissive licenses, plus MPL-2.0 for five named crates and
+  BSD-2-Clause for `arrayref` alone (see below). It
   rejects unknown registries and git sources, and fails on yanked crates
   and vulnerabilities. It runs in CI.
 - **JavaScript:** [`scripts/check-licenses.mjs`](../scripts/check-licenses.mjs),
@@ -42,8 +43,11 @@ Two automated audits enforce the license policy:
 | pbkdf2 (dev only) | 0.13.0 | MIT OR Apache-2.0 | Differential tests against the in-crate PBKDF2; never linked into the app |
 | fs4 | 1.1.0 | MIT OR Apache-2.0 | Free space for the archive's space checks (`oma_fs::available_space`): `statvfs` on Unix, `GetDiskFreeSpaceExW` (caller-scoped, so quotas count) on Windows. Default features off: `sync` (file locking) is not used. It depends on `rustix` (Unix) and `windows-sys` 0.61.2 (Windows), both already in the tree |
 | rustix (Linux only) | 1.1.5 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | `oma-fs` on Linux: `statfs` for the volume kind, `renameat2(RENAME_NOREPLACE)`, `O_NOFOLLOW` opens and `geteuid`, all without `unsafe`. Features `fs` and `process` (plus the default `std`). Already in the tree through Tauri's Linux stack, with both features on |
-| image | 0.25.10 | MIT OR Apache-2.0 | Decodes and re-encodes image renditions in `oma-archive`'s `media::render`, the pure function the decode helper process runs (M5 spec §5.5; a dependency from slice 5d, a dev-dependency in 5a), and encodes the viewer fixtures (`make_viewer_media`, `tests/viewer_fixtures.rs`). Only `media/render.rs` may name it (`tests/source_rules.rs`). Default features off; only `jpeg`, `png`, `gif` and `webp` on (no `avif`, an encoder through `ravif`/`rav1e` that M5 does not need, and no `avif-native`, the decoder, which pulls in MPL-2.0 `mp4parse` and C `dav1d`; no TIFF, EXR or rayon). MSRV 1.88, under the workspace's 1.90 |
+| image | 0.25.10 | MIT OR Apache-2.0 | Decodes and re-encodes image renditions in `oma-archive`'s `media::render`, the pure function the decode helper process runs (M5 spec §5.5; a dependency from slice 5d, a dev-dependency in 5a), and encodes the viewer fixtures (`make_viewer_media`, `tests/viewer_fixtures.rs`). Only `media/render.rs` may name it (`tests/source_rules.rs`). Default features off; only `jpeg`, `png`, `gif` and `webp` on (no `avif`, an encoder through `ravif`/`rav1e` that M5 does not need, and no `avif-native`, the decoder, which pulls in MPL-2.0 `mp4parse` and C `dav1d`; no TIFF, EXR or rayon). MSRV 1.88, under the workspace's 1.92 |
 | csv | 1.4.0 | Unlicense OR MIT | The CSV writer of `oma-export` (M6 slice 6f, spec §5.2, D130): RFC 4180 quoting with CRLF record ends. Used only through `WriterBuilder::from_writer` over a staged file; `from_path` is banned in `oma-export`'s `clippy.toml` and source rules, so it never opens a path. Its tests read CSV back with its `Reader`. It brings `csv-core` 0.1.13 (Unlicense OR MIT) and `ryu` 1.0.23 (Apache-2.0 OR BSL-1.0), both new to the lockfile, and `itoa` 1.0.18 and `serde_core` 1.0.229, already locked; `csv` holds four `unsafe` blocks of its own (the workspace's `forbid` covers our crates only). MSRV 1.73 |
+| miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 | The main process's check on PDF output from the export-render helper (`oma-export`'s `check/pdf.rs`, M6 slice 6i, spec §5.7): every `FlateDecode` stream is inflated with `inflate::decompress_to_vec_zlib_with_limit`, bounded per stream and per file, before its syntax is tokenised. The spec left open whose inflate to use (`zip`'s or krilla's); this one was already in the lockfile through `png` 0.18.1 (`image`) and Tauri's `png` 0.17.16, so no crate is added. Default features off; only `with-alloc` (the `Vec` APIs; the tests also use its `deflate::compress_to_vec_zlib`). Published 2025-06-09, well over 14 days before it was pinned. It forbids `unsafe` code crate-wide (`#![forbid(unsafe_code)]` in its `lib.rs`) |
+| krilla | 0.8.2 | MIT OR Apache-2.0 | PDF serialisation in the export-render helper only (owner Q1; M6 slice 6j1, spec §5.6, D133): pages, embedded and subset fonts with ToUnicode and ActualText, COLR colour glyphs, the outline and the document title. An **optional** dependency of `oma-export` behind its `render` feature, which only the shell enables; only `render/pdf/` names it. Default features off: no `simple-text` (rustybuzz, which would duplicate parley's shaping). **`raster-images` on from slice 6j2** for the previews: a checked JPEG rendition is embedded as it is, a PNG decoded (in the helper only) and deflated again; it brings `png` 0.18.1, `zune-jpeg` 0.5.15, `gif` 0.14.2 and `image-webp` 0.2.4 (all already locked through `image`) and one new crate, `imagesize` 0.14.0 (MIT, published 2025-04-06). It brings `pdf-writer` 0.15.0, `subsetter` 0.2.6, `skrifa` 0.42.1 (with `read-fonts` 0.39.2, `font-types` 0.11.3), `write-fonts` 0.48.1, `tiny-skia-path` 0.12.0 (BSD-3-Clause; it brings `arrayref` 0.3.9, **BSD-2-Clause**, the per-crate exception below, and `strict-num` 0.1.1), `xmp-writer` 0.3.3, `float-cmp` 0.9.0, `kurbo` 0.13.1 (with `euclid` 0.22.14, `arrayvec` 0.7.8, `polycool` 0.4.0) and `bytemuck_derive` 1.12.1; `flate2`, `base64`, `indexmap`, `siphasher`, `smallvec`, `yoke` and `bumpalo` were already locked. **MSRV 1.92**, so the workspace `rust-version` is 1.92 (it was 1.90); the pinned toolchain 1.97.0 is unchanged. Published 2026-06-04 |
+| parley | **0.11.1** (owner Q1 named 0.12.0; see below) | Apache-2.0 OR MIT | Shaping (harfrust), bidi, line breaking (ICU4X segmenters, with the dictionaries for Thai and other scripts without spaces through `complex-scripts`) and per-cluster font fallback, in the export-render helper only, behind `oma-export`'s `render` feature like krilla. `default-features = false`, features `std` and `complex-scripts`: its default `system` feature (system font discovery through fontconfig, ISC `libloading`) stays **off**, and fonts come only from the pinned bundled set through fontique's `Collection { system_fonts: false }`. It brings `fontique` 0.11.1, `parley_data` 0.11.1, `parlance` 0.1.0 (pinned back from 0.1.1, below), `harfrust` 0.12.0, `skrifa` 0.44.0 (with `read-fonts` 0.41.0 and `font-types` 0.12.6, pinned back from 0.12.7), `icu_segmenter` 2.3.0, `icu_segmenter_data` 2.3.0, `icu_locale_fallback` 2.3.0, `icu_locale_fallback_data` 2.3.0 (Unicode-3.0), `linebender_resource_handle` 0.1.1 and `memmap2` 0.9.11 (fontique's memory-mapped system fonts, a code path the bundled-only collection never takes); `icu_normalizer`, `icu_properties` and `hashbrown` were already locked. MSRV 1.88 |
 | heic-rs (optional, never shipped) | 0.1.4 | MIT OR Apache-2.0 | Owner decision Q2 (M5): HEIF decoding behind `oma-archive`'s non-default `heic` feature, inside `media::render` only. **Official and CI release builds never enable it**; CI only runs clippy and `cargo deny` with it on Linux. Pure Rust, `#![forbid(unsafe_code)]`, no C; default features off and `std` on, so its optional `rayon` (the `parallel` feature) is not pulled in and it has **no dependencies**. Its NOTICE says it was written from the ISO/IEC and ITU-T texts without GPL, LGPL or AGPL code, and that it **grants no patent licence to HEVC**. HEVC is pooled-patent technology (Access Advance's HEVC Advance overview lists "All HEVC Software" with per-copy royalties; a reported waiver for application-layer software is UNVERIFIED), so a self-builder who enables the feature takes that legal risk (`privacy.md`). Young: first published 2026-09-12, 0.1.4 on 2026-10-11, edition 2024 and MSRV 1.85 (under the toolchain's 1.97). Its decode path is untested here (no synthetic HEIC image can be made without an encoder). The AGPL `heic` crate and LGPL libheif (and the MIT `libheif-rs` wrapper over it) are not used |
 
 `tracing-subscriber` (above) is also a dev-dependency of `oma-backup` and
@@ -65,7 +69,9 @@ depends only on crates already listed (`rusqlite`, `sha2`, `thiserror`,
 for its tests, `rusqlite` there only to apply the export catalogue's
 `patches` to a test's own archive) and on the workspace crates
 `oma-archive` (and `oma-backup` for its tests); from slice 6f it also
-depends on `csv`. Its Unicode property tables, its JSON schemas and its
+depends on `csv`, and from slice 6i on `miniz_oxide` (the PDF output
+check). Its `render` feature (the export-render helper's side, enabled
+only by the shell) adds no crate. Its Unicode property tables, its JSON schemas and its
 test zone tables are generated by our own scripts (from Node's
 regular-expression engine and ICU, and from the code registry pin), not
 dependencies. No
@@ -110,7 +116,27 @@ is published on crates.io. The NOTICE file says so.
 They are allowed by name in `deny.toml`, not by adding MPL-2.0 to the
 global allowlist. Any new MPL dependency still fails CI. Avoiding them would
 mean leaving Tauri.
-### Milestone 6 owner decisions for PR B (recorded; not applied in PR A)
+
+### BSD-2-Clause for `arrayref` (owner decision Q1, reviewed exception)
+
+`arrayref` 0.3.9 is **BSD-2-Clause**, a permissive licence that is not on
+the global allowlist. It arrives only through krilla → `tiny-skia-path`
+0.12.0 (slice 6j1). The owner allowed it on 2026-10-19 (M6 Q1) as a
+**per-crate exception for `arrayref` only**, written in `deny.toml` the
+way the MPL-2.0 exceptions are: BSD-2-Clause is not added to the global
+list, so any other BSD-2-Clause crate still fails `cargo deny check`. Its
+two conditions (keep the copyright notice and the licence in source and
+binary distributions) are met by `NOTICE`, which carries arrayref
+0.3.9's copyright line and its BSD-2-Clause text verbatim (added by the
+M6 PR B review fixes; before them it did not), and which
+`tauri.conf.json` lists in `bundle.resources` (`"../NOTICE": "NOTICE"`)
+so that it is installed beside the fonts. That the file actually lands in
+a `.deb`, AppImage or MSI is **UNVERIFIED**: no installer has been built
+here (`cargo build` copying it into `target/debug/` is the only check
+run). The reason: krilla gives tagged PDF, bidi,
+complex scripts, colour emoji and font subsetting with ToUnicode, against
+an estimated 1,000–1,500 lines (**UNVERIFIED**) of our own writer.
+### Milestone 6 owner decisions for PR B (Q1 and Q2 applied in slice 6j1)
 
 The owner answered the M6 spec's questions on 2026-10-19. Two of them
 change dependencies and the licence policy in PR B (slices 6i and 6j);
@@ -119,7 +145,7 @@ change dependencies and the licence policy in PR B (slices 6i and 6j);
 
 - **Q1, the PDF engine (owner-confirmed):** krilla 0.8.2 with parley
   0.12.0 (both MIT OR Apache-2.0). krilla's `tiny-skia-path` 0.12.0
-  pulls in `arrayref` 0.3.9, which is **BSD-2-Clause**. It will be
+  pulls in `arrayref` 0.3.9, which is **BSD-2-Clause**. It is
   allowed as a **per-crate exception for `arrayref` only**, named in
   `deny.toml` the way the MPL-2.0 crates above are, and **not** added to
   the global allowlist, so any other BSD-2-Clause crate still fails CI.
@@ -127,21 +153,109 @@ change dependencies and the licence policy in PR B (slices 6i and 6j);
   emoji and subsetting with ToUnicode, against an estimated 1,000–1,500
   lines (**UNVERIFIED**) of our own writer with no tagged structure.
   krilla's MSRV is 1.92, so the workspace `rust-version` rises from 1.90
-  to 1.92 (the pinned toolchain is already 1.97.0). Both changes are
-  recorded in the upgrade log when slice 6j makes them.
+  to 1.92 (the pinned toolchain is already 1.97.0; CI and
+  `rust-toolchain.toml`'s channel did not need to change). Both changes
+  are recorded in the upgrade log (slice 6j1). **Applied in
+  slice 6j1** (2026-10-20), with one deviation: **parley is pinned at
+  0.11.1, not 0.12.0.** parley 0.12.0 (and its `fontique`, `parley_data`
+  and `parlance` 0.1.1 releases) were published on 2026-10-09, eleven
+  days before the slice, and the project pins only releases at least 14
+  days old; 0.11.1 (2026-08-16) has the same licence, the same features
+  (`std`, `complex-scripts`, `system` off) and the same deny outcome. The
+  upgrade to 0.12.0 is a follow-up on or after **2026-10-23**, re-running
+  the layout tests and the PDF oracle. The same rule pinned two
+  transitive crates back with `cargo update --precise`: `parlance` 0.1.0
+  (0.1.1 is from 2026-10-09) and `font-types` 0.12.6 (0.12.7 is from
+  2026-10-15).
 - **Q2, the PDF fonts (owner-confirmed):** the base scripts (Noto Sans,
   Arabic, Hebrew, Devanagari, Thai, Symbols 2) plus Noto Sans CJK and
   Noto Color Emoji, about 32 MB raw, OFL-1.1, shipped under
   `src-tauri/resources/fonts/` with `OFL.txt`. Each file is fetched only
   from its official upstream (the Google Fonts / notofonts GitHub
   releases), pinned by a SHA-256 computed from that download and checked
-  in code before the bytes reach the helper. The exact upstream URLs and
-  versions are recorded here by slice 6j; none is chosen or downloaded
-  yet.
+  in code before the bytes reach the helper. **Applied in slice 6j1:**
+  see "PDF fonts" below for the files, their sources and hashes, and the
+  two choices made there (the regional CJK subsets, and the COLRv1 build
+  of Noto Color Emoji), and one addition (Noto Sans Math).
+
+**XLSX is deferred (slice 6i, 2026-10-20).** The spec's XLSX writer is
+rust_xlsxwriter 0.100.0, which was published on 2026-10-17. The project
+pins only releases at least 14 days old, so it cannot be added before
+2026-10-31, and 0.99.x is rejected (advisories). PR B therefore adds no
+XLSX crate: the export-render helper refuses its `Xlsx` backend, the main
+process accepts no XLSX output, and XLSX stays refused at the draft
+(`exportUnavailable`). The XLSX writer is a follow-up slice after
+2026-10-31, which re-checks the version and its advisories then.
 
 The release binary contains no HTTP client crate (`reqwest`, `hyper`,
 `ureq`). Re-check with
 `cargo tree -e normal | grep -iE 'reqwest|hyper|ureq'`.
+
+### PDF fonts (owner decision Q2, slice 6j1)
+
+The PDF backend draws only with these fonts, shipped unmodified under
+`src-tauri/resources/fonts/` with `OFL.txt` (each file's copyright line,
+then the SIL Open Font License 1.1 text, verbatim from upstream). They are
+assets, not crates. All are **OFL-1.1**, which allows bundling, embedding
+and subsetting (OFL FAQ 1.12); every file's OS/2 `fsType` is `0x0000`
+(installable embedding, no restriction), read from the downloaded files.
+Each is pinned by its length and SHA-256 in
+`crates/oma-export/src/pdf/fonts.rs` (`PINS`); the main process checks
+every file against its pin before any byte reaches the helper
+(`src-tauri/src/exports/pdf_fonts.rs`, `RenderSession::send_fonts`), and
+the helper checks again, including each file's family name.
+
+**Provenance.** GitHub release pages and `api.github.com` return 403 from
+the build container, so each file was fetched on 2026-10-20 from
+`raw.githubusercontent.com` at a **pinned commit** of its official
+upstream repository (commits resolved with `git ls-remote`; no distro
+package, npm repackaging or mirror). Each download was also checked
+against the upstream commit's tree: `git hash-object` of the downloaded
+file equals the blob id `git ls-tree` gives for that path, for every
+file.
+
+| File | Upstream (repository @ commit, path) | Version | Bytes | SHA-256 |
+|---|---|---|---|---|
+| NotoSans-Regular.ttf | notofonts/notofonts.github.io @ `9566151bf4d9138cd83d3563196fb2efa5698eaa`, `fonts/NotoSans/unhinted/ttf/` | 2.015 | 431,364 | `f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8` |
+| NotoSansArabic-Regular.ttf | same, `fonts/NotoSansArabic/unhinted/ttf/` | 2.013 | 142,140 | `bd86ca02f087d7f3c3788ba458fb6b73744c7639ed276b8d870dba6def6c40d0` |
+| NotoSansHebrew-Regular.ttf | same, `fonts/NotoSansHebrew/unhinted/ttf/` | 3.001 | 16,836 | `04272f5600d0ec816d31d0df73b23aa8d3501ea359ebe820da31c11ffcf00853` |
+| NotoSansDevanagari-Regular.ttf | same, `fonts/NotoSansDevanagari/unhinted/ttf/` | 2.007 | 184,228 | `9c7d935139ea6a1e6ad9dbac4f6d27ece1e04bca8123c8888d00a0f9df4724cd` |
+| NotoSansThai-Regular.ttf | same, `fonts/NotoSansThai/unhinted/ttf/` | 2.002 | 20,960 | `d4303fe9c63ebb72759ca8b6d2040c8ae81689f7d08d7b91c656154382b49313` |
+| NotoSansSymbols2-Regular.ttf | same, `fonts/NotoSansSymbols2/unhinted/ttf/` | 2.008 | 671,568 | `c4a0a80f0041ce4be81e2478faad22776d23edb98ae3f0d19bd37044820ecf9d` |
+| NotoSansMath-Regular.ttf | same, `fonts/NotoSansMath/unhinted/ttf/` | 3.000 | 657,440 | `b127e84699212b6b2ef50aff58e0ebebeec04ffe6db1b9eb9e209c8c3d97b4aa` |
+| NotoSansSC-Regular.otf | notofonts/noto-cjk @ `f8d157532fbfaeda587e826d4cd5b21a49186f7c`, `Sans/SubsetOTF/SC/` | 2.004 | 8,331,336 | `faa6c9df652116dde789d351359f3d7e5d2285a2b2a1f04a2d7244df706d5ea9` |
+| NotoSansTC-Regular.otf | same, `Sans/SubsetOTF/TC/` | 2.004 | 5,683,368 | `5bab0cb3c1cf89dde07c4a95a4054b195afbcfe784d69d75c340780712237537` |
+| NotoSansJP-Regular.otf | same, `Sans/SubsetOTF/JP/` | 2.004 | 4,533,028 | `dff723ba59d57d136764a04b9b2d03205544f7cd785a711442d6d2d085ac5073` |
+| NotoSansKR-Regular.otf | same, `Sans/SubsetOTF/KR/` | 2.004 | 4,644,748 | `69975a0ac8472717870aefeab0a4d52739308d90856b9955313b2ad5e0148d68` |
+| Noto-COLRv1.ttf (family "Noto Color Emoji") | googlefonts/noto-emoji @ `e20cbc2bbec1926686be9f9bee7d1d2cfa1fea0e`, `2D/fonts/` | 2.057 (noto-emoji 20260911) | 5,038,236 | `b8e25ea68db82f9e4d0aee921f4420be2be39887bd5c893a2ad98710531f9d0c` |
+
+The licence text in `OFL.txt` is `Sans/LICENSE` of noto-cjk at the commit
+above (byte-identical to noto-emoji's `2D/fonts/LICENSE`; SHA-256
+`6a73f954…e2bf2`); notofonts.github.io's `fonts/LICENSE` carries the same
+text after a copyright line, which `OFL.txt` lists per file. The raw URL
+of each file is
+`https://raw.githubusercontent.com/<repository>/<commit>/<path><file>`.
+The notofonts.github.io commit is the site's build of 2026-10-19; the
+font versions above are the files' own `name` table versions.
+
+**Choices (all inside the owner's ~32 MB budget; total 30,355,252 bytes):**
+
+- **CJK: the regional subset OTFs (SC, TC, JP, KR; 23.2 MB),** not the
+  per-weight collection `Sans/OTC/NotoSansCJK-Regular.ttc` (19.5 MB, every
+  regional face with every glyph) that the spec measured. The task's rule
+  prefers the regional files when they fit the budget, and they do. The
+  cost: each subset holds its region's characters, so a rare ideograph
+  outside all four subsets draws as `.notdef` (counted; the text layer
+  keeps it). HK is not bundled (the spec's rule names SC, TC, JP and KR).
+- **Emoji: the COLRv1 build of Noto Color Emoji (5.0 MB),** not the CBDT
+  bitmap build `NotoColorEmoji.ttf` (10.7 MB, same version). krilla draws
+  COLR glyphs as vectors without its `raster-images` decoders, and the
+  CBDT file would put the total at 35.4 MB with the CJK subsets.
+- **Added: Noto Sans Math (0.66 MB).** No other font of the set has
+  U+27E8 and U+27E9, the reserved marker's brackets (`⟨U+202E⟩`, spec
+  §4.7); without it every marker would draw its brackets as `.notdef`.
+  It is outside the owner's list of base faces, so this addition is
+  recorded here for the owner's review.
 
 ## Direct JavaScript dependencies
 
@@ -203,7 +317,8 @@ Python) and its CPython 3.13 wheel (the reference fixture environment).
 Versions were chosen on 2026-10-19 as the newest releases at least 14 days
 old that still support Python 3.10. They are used as black boxes by
 `scripts/oracles/run_oracles.py`; no code from them is copied, and none is
-shipped. `openpyxl` and `pypdf` arrive with the XLSX and PDF slices (PR B).
+shipped. `pypdf` arrived with the PDF slice 6j1; `openpyxl` arrives with
+the XLSX slice.
 
 | Package | Version | License | Use |
 |---|---|---|---|
@@ -216,6 +331,11 @@ shipped. `openpyxl` and `pypdf` arrive with the XLSX and PDF slices (PR B).
 | html5lib | 1.1 | MIT | The HTML5 tree oracle of slice 6g; installed (and its version printed) from 6c |
 | six | 1.17.0 | MIT | html5lib |
 | webencodings | 0.5.1 | BSD-3-Clause | html5lib |
+| pypdf | 6.19.0 | BSD-3-Clause | The PDF text-layer oracle of slice 6j1 (`scripts/oracles/pdf_text.py`): titles, outlines, embedded fonts and extracted text; and the PDF export oracle of slice 6j2 (`scripts/oracles/pdf_oracle.py`): document titles, structure trees, forbidden names, items in order and masking. The newest release at least 14 days old on 2026-10-20 (published 2026-09-16; 6.20.0 and later are younger). Pure Python; its only dependency, `typing-extensions` on Python below 3.11, is pinned above. PyPI listed no known vulnerability for it on 2026-10-20 |
+
+`pdf_text.py` also runs poppler-utils' `pdftotext` (GPL-2.0-or-later) as
+an **external program**: nothing of it is copied, linked or shipped. CI
+installs the `poppler-utils` distribution package in the oracle step.
 
 ## System and platform components
 
@@ -265,6 +385,25 @@ Tauri); the npm package virtua 0.53.1 added for spike 5s(1) and removed
 again (41 runtime npm packages, as before); `deny.toml` unchanged. Slice 5k
 changed no dependency.
 
+**Milestone 6 in summary** (owner decisions Q1 and Q2 of 2026-10-19):
+PR A added `csv` 1.4.0 (with `csv-core` 0.1.13 and `ryu` 1.0.23) and the
+hash-pinned export oracles in `scripts/oracles/requirements.txt`; PR B
+added `miniz_oxide` 0.8.9 as a direct dependency (already locked),
+krilla 0.8.2 (with `raster-images`, so `imagesize` 0.14.0) and parley
+**0.11.1** (owner Q1 named 0.12.0, which is not 14 days old until
+2026-10-23) with 31 crates they bring, the per-crate BSD-2-Clause
+exception for `arrayref` 0.3.9 in `deny.toml` (BSD-2-Clause stays off
+the global allowlist), the workspace `rust-version` raised from 1.90 to
+1.92 (krilla's MSRV; the pinned toolchain 1.97.0, CI and
+`rust-toolchain.toml`'s channel are unchanged), twelve OFL-1.1 Noto
+fonts (30,355,252 bytes, each pinned by SHA-256, provenance above), and
+pypdf 6.19.0 among the oracles. **No XLSX crate was added:**
+rust_xlsxwriter 0.100.0 (published 2026-10-17) may not be pinned before
+2026-10-31, and 0.99.x is rejected (advisories); the XLSX slice adds it
+then, with `openpyxl` for its oracle. The UI slices (6k1, 6k2) and the
+documents (6l) changed no dependency; `npm run licenses` still reports
+41 runtime packages.
+
 | Date | Change | Reason |
 |---|---|---|
 | 2026-10-17 | Initial set (Milestone 1) | — |
@@ -310,3 +449,9 @@ changed no dependency.
 | on merge (M6, slice 6h1) | No third-party dependency change. The shell (`src-tauri`) gains a dependency on the workspace crate `oma-export` | The export job and its commands (`src-tauri/src/exports/`) drive `oma-export`'s pipeline and writers. `Cargo.lock` changes only in the shell's own dependency list; `deny.toml`, `package.json`, `package-lock.json` and `requirements.txt` are unchanged; `cargo deny check` passes |
 | on merge (M6, slice 6d) | No third-party dependency change. The new workspace crate `oma-export` (`crates/oma-export`, Apache-2.0 like the workspace) is added to `[workspace.dependencies]` and depends only on existing pins: `oma-archive`, `serde`, `serde_json` and `thiserror`; for its tests `oma-backup`, `tempfile`, `rusqlite` and `dunce` | The export record core (M6 spec §4). The only `Cargo.lock` change is the new `oma-export` package with those existing dependencies; no new crate is resolved. `deny.toml`, `package.json` and `package-lock.json` are unchanged. `cargo deny check` passes. The csv crate (=1.4.0) is not added yet: no writer exists until slice 6f |
 | on merge (M6, slice 6h2) | No dependency change | The destination token, `RenditionPair` (with `oma-archive`'s existing `image`), the export's decode-helper pool and its stderr counting use the standard library and existing pins (`getrandom` for the token). `Cargo.lock`, `deny.toml`, `package.json`, `package-lock.json` and `scripts/oracles/requirements.txt` are unchanged; `cargo deny check` passes. PR A's dependency changes in all: csv 1.4.0 (with `csv-core` 0.1.13 and `ryu` 1.0.23) and the hash-pinned oracle packages of slice 6c; the owner decisions above for PR B are recorded, not applied |
+| on merge (M6, slice 6i) | Added miniz_oxide 0.8.9 (`=0.8.9`, default features off, `with-alloc` on) as a workspace dependency and a dependency of `oma-export`; `oma-export` gains a `render` feature (no crates), enabled by the shell (`src-tauri`) and by its own tests | The export-render helper (spec §5.7, D133): the main process inflates every Flate stream of a helper's PDF output before checking its names. No new crate in `Cargo.lock`: 0.8.9 was already locked through `png` (crates.io lists it as published 2025-06-09, checked 2026-10-20 against the 14-day rule); the only lockfile change is `miniz_oxide` in `oma-export`'s own dependency list. `cargo deny check` passes with the unchanged `deny.toml`. No XLSX crate is added (deferred, above); krilla, parley and the fonts are slice 6j's. `package.json`, `package-lock.json` and `scripts/oracles/requirements.txt` are unchanged |
+| on merge (M6, slice 6j1) | Added krilla 0.8.2 (`=0.8.2`, default features off) and parley **0.11.1** (`=0.11.1`, default features off, `std` and `complex-scripts`) as workspace dependencies and **optional** dependencies of `oma-export` behind its `render` feature (only the shell enables it); `deny.toml` gains the per-crate exception `{ crate = "arrayref", allow = ["BSD-2-Clause"] }`; the workspace `rust-version` rises from 1.90 to **1.92** (krilla's MSRV; the pinned toolchain 1.97.0, CI and `rust-toolchain.toml`'s channel are unchanged, only its comment); dev and test builds compile krilla, parley, fontique, harfrust, skrifa, read-fonts, subsetter, icu_segmenter, pdf-writer, flate2 and miniz_oxide at `opt-level = 3`; the twelve PDF fonts (above) under `src-tauri/resources/fonts/`; pypdf 6.19.0 in `scripts/oracles/requirements.txt` | Owner decisions Q1 and Q2: PDF layout and serialisation in the export-render helper (spec §5.6). 31 crates are new in `Cargo.lock` (listed in the krilla and parley rows above), and every one was published at least 14 days before 2026-10-20 (checked against the crates.io API): parley 0.12.0 was not, so 0.11.1 is pinned (owner Q1 named 0.12.0; upgrade on or after 2026-10-23), and `parlance` and `font-types` were pinned back to 0.1.0 and 0.12.6 with `cargo update --precise`. Licences: MIT OR Apache-2.0, Apache-2.0 OR MIT, MIT (`harfrust`, `float-cmp`, `strict-num`), Zlib OR Apache-2.0 OR MIT, Unicode-3.0 (the ICU4X crates), BSD-3-Clause (`tiny-skia-path`) and BSD-2-Clause (`arrayref`, the exception). `cargo deny check` passes. The opt-level entries keep the layout tests (whole documents with the 30 MB font set, in debug builds) fast; release builds are unaffected. The fonts add 30,355,252 bytes to the repository and, from slice 6j2's bundling, to the installer. `package.json` and `package-lock.json` are unchanged |
+| on merge (M6, slice 6j2) | krilla's `raster-images` feature turned on (`features = ["raster-images"]`, still `=0.8.2` with default features off). One crate is new in `Cargo.lock`: **imagesize 0.14.0** (MIT; published 2025-04-06 per the crates.io API, checked 2026-10-20, so well over 14 days old; 0.15.0 of 2026-07-09 is newer but krilla 0.8.2 asks for `^0.14`). krilla now also depends on `png` 0.18.1, `zune-jpeg` 0.5.15, `gif` 0.14.2 and `image-webp` 0.2.4, which were already locked through `image` 0.25.10 at the same versions | The PDF previews (spec §5.6, §6.5): the helper draws the decode helper's checked renditions, so krilla must read JPEG and PNG. The decoders run only in the export-render helper (`render/pdf/`, feature `render`); the main process never decodes an image. `deny.toml`, `package.json`, `package-lock.json` and `scripts/oracles/requirements.txt` are unchanged (the new PDF oracle uses pypdf 6.19.0, pinned in slice 6j1); `cargo deny check` passes. XLSX stays deferred: no XLSX crate was added |
+| on merge (M6, slice 6k1) | No dependency change | The Export dialog, its store, its words and the zone table use Vue, Pinia and the browser's `Intl` only. `Cargo.lock`, `package.json`, `package-lock.json`, `deny.toml` and `scripts/oracles/requirements.txt` are unchanged; `cargo deny check` and `npm run licenses` pass |
+| on merge (M6, slice 6k2) | No dependency change | Entry points, the status chip, events off and "Save a copy" use existing crates and packages only (checked with `git diff` of the five files above across the slice). `cargo deny check` and `npm run licenses` pass |
+| on merge (M6, slice 6l) | No dependency change | Documents, and the krilla comment in `Cargo.toml` corrected (it still said `raster-images` was off). `Cargo.lock` is unchanged; `cargo deny check` passes on the final branch state |

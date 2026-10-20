@@ -185,11 +185,26 @@ pub struct PreviewOptions {
     /// The export's own reveal (never the viewer's setting).
     pub reveal: Reveal,
     pub depth: ExportDepth,
+    /// The "events" option off (slice 6k2): group and system events, and
+    /// reaction rows folded into them, are left out of the counts (and
+    /// the snapshot leaves them out from then on).
+    pub leave_out_events: bool,
 }
 
 impl PreviewOptions {
     pub fn new(reveal: Reveal, depth: ExportDepth) -> PreviewOptions {
-        PreviewOptions { reveal, depth }
+        PreviewOptions {
+            reveal,
+            depth,
+            leave_out_events: false,
+        }
+    }
+
+    /// The same options, leaving events out when `leave_out` is set.
+    #[must_use]
+    pub fn leaving_out_events(mut self, leave_out: bool) -> PreviewOptions {
+        self.leave_out_events = leave_out;
+        self
     }
 }
 
@@ -244,6 +259,10 @@ pub struct ExportPreview {
     /// Attachments with a file whose declared type is an image, for
     /// estimates only.
     pub image_previews: u64,
+    /// Timeline rows left out because the export leaves events out:
+    /// group and system events, and reaction rows folded into them (0
+    /// when events are included).
+    pub events_left_out: u64,
     /// The earliest and latest dated timeline row in scope, in Unix
     /// milliseconds (the first floored, the last rounded up); `None` with
     /// no dated row.
@@ -511,6 +530,9 @@ pub(crate) fn precount(
     opts: PreviewOptions,
     progress: &mut dyn FnMut(PreviewProgress),
 ) -> Result<ExportPreview, ArchiveError> {
+    if opts.leave_out_events {
+        snap.leave_out_events();
+    }
     let generation = snap.generation()?;
     let seeks = snap.run(|| span_seeks(&snap.stmts, scope))?;
     let undated_excluded = match scope {
@@ -549,6 +571,7 @@ pub(crate) fn precount(
             messages_with_earlier_content: 0,
             text_bytes: 0,
             image_previews: 0,
+            events_left_out: 0,
             span_utc_ms: None,
             generation,
         },
@@ -559,7 +582,7 @@ pub(crate) fn precount(
         last_ns: None,
         track_span: seeks.is_none(),
     };
-    walk(snap, scope, &mut |row: ScopeRow| {
+    let skipped = walk(snap, scope, &mut |row: ScopeRow| {
         let p = &mut t.preview;
         p.timeline_rows += 1;
         if p.timeline_rows.is_multiple_of(PROGRESS_EVERY) {
@@ -593,6 +616,7 @@ pub(crate) fn precount(
         }
         Ok(())
     })?;
+    t.preview.events_left_out = skipped;
     if let Some((first, last)) = seeks {
         t.first_ns = first;
         t.last_ns = last;

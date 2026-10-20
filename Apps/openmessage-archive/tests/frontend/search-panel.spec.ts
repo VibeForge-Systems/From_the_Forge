@@ -29,6 +29,7 @@ import SearchPanel from '@/components/viewer/SearchPanel.vue';
 import { SEARCH_TEXT, fill } from '@/services/viewerText';
 import type { DayBoundaryBuilder } from '@/services/time';
 import { SEARCH_DEBOUNCE_MS, useViewer } from '@/stores/viewer';
+import { useExports } from '@/stores/exports';
 import { useSettings } from '@/stores/settings';
 import type { ScanProgressDto, SearchHitDto, SearchMessagesRequest, SearchStartedDto } from '@/types';
 import {
@@ -380,5 +381,42 @@ describe('SearchPanel (review fixes)', () => {
     release();
     await flushPromises();
     expect(w.findAll('.oma-hit')).toHaveLength(80);
+  });
+
+  it('offers "Export results…" for a finished set, by its id only, and not while a search runs', async () => {
+    const w = await mountPanel();
+    expect(w.findAll('button').some((b) => b.text() === 'Export results…')).toBe(false);
+    await typeQuery(w, QUERY);
+    const exportButton = () => w.findAll('button').find((b) => b.text() === 'Export results…');
+    expect(exportButton()?.attributes('disabled')).toBeUndefined();
+    await exportButton()!.trigger('click');
+    await flushPromises();
+    const x = useExports();
+    expect(x.open).toBe(true);
+    // Every hit is loaded, so its conversations are counted (all in chat 4).
+    expect(x.context).toEqual({
+      archiveId: ARCHIVE_ID,
+      chatId: null,
+      scope: 'searchResults',
+      search: { viewer: 5, searchId: 1, matches: 3, conversations: 1, capped: false },
+    });
+    // The query never reaches the export's state.
+    expect(JSON.stringify(x.$state)).not.toContain(QUERY);
+    x.close();
+    // While a new search runs, the button is disabled and says why.
+    fake.handlers.searchMessages = () => new Promise(() => undefined);
+    await typeQuery(w, 'other words');
+    expect(exportButton()?.attributes('disabled')).toBeDefined();
+    expect(w.find('#oma-search-export-note').text()).toBe('Wait for the search to finish before exporting its results.');
+  });
+
+  it('does not name the conversations of a set whose hits are not all loaded', async () => {
+    started = searchStarted(80);
+    hits = Array.from({ length: 80 }, (_, i) => searchHit(i + 1));
+    const w = await mountPanel();
+    await typeQuery(w, QUERY);
+    await w.findAll('button').find((b) => b.text() === 'Export results…')!.trigger('click');
+    await flushPromises();
+    expect(useExports().context?.search?.conversations).toBeNull();
   });
 });
