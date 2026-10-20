@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 import ModalDialog from '@/components/ModalDialog.vue';
 
 describe('ModalDialog', () => {
@@ -42,12 +42,41 @@ describe('ModalDialog', () => {
     expect(document.activeElement?.getAttribute('aria-label')).toBe('Close');
     await w.setProps({ open: false });
     expect(document.activeElement).toBe(opener);
-    // Escape (a native close while meant to be open) restores it too.
-    await w.setProps({ open: true });
+    // Escape (a native close while meant to be open) restores it too, once
+    // the parent agrees and closes it.
+    await w.setProps({ open: true, onClose: () => void w.setProps({ open: false }) });
     const el = w.find('dialog').element as HTMLDialogElement;
     el.removeAttribute('open');
     el.dispatchEvent(new Event('close'));
+    await flushPromises();
     expect(document.activeElement).toBe(opener);
+    w.unmount();
+  });
+
+  it('shows itself again when the parent declines a native close (review fix)', async () => {
+    const proto = HTMLDialogElement.prototype as unknown as Record<string, unknown>;
+    let shown = 0;
+    proto.showModal = function showModal(this: HTMLDialogElement) {
+      shown += 1;
+      this.setAttribute('open', '');
+      this.querySelector('button')?.focus();
+    };
+    proto.close = function close(this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    };
+    // The parent keeps it open (a running export asks before cancelling).
+    const w = mount(ModalDialog, { props: { open: true, title: 'T', guardEscape: true }, attachTo: document.body });
+    const el = w.find('dialog').element as HTMLDialogElement;
+    expect(shown).toBe(1);
+    // A second Escape whose `cancel` could not be prevented: the element
+    // closes natively although `open` is still true.
+    el.removeAttribute('open');
+    el.dispatchEvent(new Event('close'));
+    await flushPromises();
+    expect(w.emitted('close')).toHaveLength(1);
+    expect(shown).toBe(2);
+    expect(el.open).toBe(true);
+    expect(el.contains(document.activeElement)).toBe(true);
     w.unmount();
   });
 

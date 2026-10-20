@@ -45,7 +45,7 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -267,13 +267,26 @@ fn drain_stderr(mut err: impl Read, shared: &Shared) {
     }
 }
 
-fn read_replies(mut out: ChildStdout, shared: &Shared, tx: &Sender<Event>, max_volume: u64) {
+/// How many replies the reader may queue before it waits for the worker
+/// (back-pressure: at most this many frames of [`MAX_FRAME_BYTES`] are
+/// held, however fast a helper writes).
+const QUEUED_REPLIES: usize = 4;
+
+fn read_replies(mut out: ChildStdout, shared: &Shared, tx: &SyncSender<Event>, max_volume: u64) {
     let mut volume = 0u64;
     loop {
         let ev = match frame::read_frame(&mut out, Direction::Reply) {
             Ok(f) => match f.kind {
-                // A refusal may come at any time; the helper exits after it.
-                FrameKind::Error => Event::Frame(f),
+                // A refusal may come at any time; the helper exits after
+                // it, so it is the last thing read: the helper is killed
+                // (with no stop reason, so the refusal's code is what the
+                // session reports) and nothing more is read. A flood of
+                // them cannot queue up (review fix).
+                FrameKind::Error => {
+                    let _ = tx.send(Event::Frame(f));
+                    shared.kill();
+                    break;
+                }
                 FrameKind::Chunk if shared.awaiting.load(Ordering::SeqCst) => {
                     volume = volume.saturating_add(f.payload.len() as u64);
                     if volume > max_volume {
@@ -367,7 +380,7 @@ impl RenderSession {
             deadline: Mutex::new(None),
             stderr: AtomicU64::new(0),
         });
-        let (tx, events) = mpsc::channel();
+        let (tx, events) = mpsc::sync_channel(QUEUED_REPLIES);
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
         let mut session = RenderSession {
             shared: Arc::clone(&shared),

@@ -6,7 +6,7 @@
 // reopens the dialog at the progress or the result. Its words name the
 // state only: never a conversation, a name or a count.
 import { computed } from 'vue';
-import { CHIP_TEXT } from '@/services/exportText';
+import { CHIP_TEXT, COPY_CHIP_TEXT } from '@/services/exportText';
 import { useExports } from '@/stores/exports';
 
 const x = useExports();
@@ -20,7 +20,8 @@ const state = computed<'running' | 'cancelling' | 'finished' | 'failed' | 'cance
   return 'cancelled';
 });
 const running = computed(() => x.liveJob !== null);
-const label = computed(() => CHIP_TEXT[state.value]);
+const words = computed(() => (x.jobCopy ? COPY_CHIP_TEXT : CHIP_TEXT));
+const label = computed(() => words.value[state.value]);
 </script>
 
 <template>
@@ -35,6 +36,6 @@ const label = computed(() => CHIP_TEXT[state.value]);
       <i v-else class="bi bi-box-arrow-up" aria-hidden="true"></i>
       <span role="status" aria-live="polite">{{ label }}</span>
     </button>
-    <span id="oma-export-chip-hint" class="visually-hidden">{{ running ? CHIP_TEXT.show : CHIP_TEXT.showResult }}</span>
+    <span id="oma-export-chip-hint" class="visually-hidden">{{ running ? words.show : words.showResult }}</span>
   </li>
 </template>

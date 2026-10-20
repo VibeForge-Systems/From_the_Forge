@@ -25,8 +25,10 @@ vi.mock('@/services/ipc', async (importOriginal) => {
   };
 });
 import { IpcError, ipc } from '@/services/ipc';
+import { ENTRY_TEXT } from '@/services/exportText';
 import ExportDialog from '@/components/ExportDialog.vue';
 import {
+  COUNTS_READY,
   DISCLOSURE,
   EVENTS_NOTE,
   FORMAT_UNAVAILABLE,
@@ -723,5 +725,129 @@ describe('ExportDialog', () => {
     jobChannel!({ kind: 'exportFinished', jobId: 'job-1', outcome: 'completed', summary: summary(), stagingRemoved: true });
     await flushPromises();
     expect(useNotifications().toasts.map((t) => t.message)).toContain('Export finished.');
+  });
+});
+
+describe('review fixes', () => {
+  it('shows itself again when the engine closes the dialog natively during a running export', async () => {
+    await mountDialog();
+    await toReview(['html'], async () => check('#export-zone-utc'));
+    await ready();
+    await click('Choose where to save…');
+    await click('Start export');
+    jobChannel!({ kind: 'progress', jobId: 'job-1', phase: 'writingMessages', done: 1, total: 120 });
+    await flushPromises();
+    const el = wrapper!.find('dialog').element as HTMLDialogElement;
+    // A second Escape whose cancel event could not be prevented.
+    el.removeAttribute('open');
+    el.dispatchEvent(new Event('close'));
+    await flushPromises();
+    const x = useExports();
+    expect(x.open).toBe(true);
+    expect(el.open).toBe(true);
+    expect(x.askCancel).toBe(true);
+    expect(wrapper!.text()).toContain('The export is still running. Cancel it?');
+    // "Keep exporting" moves focus to the progress, not to <body>.
+    await click('Keep exporting');
+    await flushPromises();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(el.contains(document.activeElement)).toBe(true);
+  });
+
+  it('moves focus and announces the counts when counting ends', async () => {
+    await mountDialog();
+    await toReview(['html'], async () => check('#export-zone-utc'));
+    expect(document.activeElement?.textContent?.trim()).toBe('Cancel');
+    await ready();
+    await flushPromises();
+    const fieldset = wrapper!.find('fieldset').element;
+    expect(fieldset.contains(document.activeElement)).toBe(true);
+    expect(wrapper!.find('[aria-live="polite"]').text()).toBe(COUNTS_READY);
+  });
+
+  it('moves focus to Start after Replace', async () => {
+    api.chooseExportDestination.mockResolvedValue(destination({ targetExists: true }));
+    await mountDialog();
+    await toReview(['html'], async () => check('#export-zone-utc'));
+    await ready();
+    await click('Choose where to save…');
+    await click('Replace');
+    await flushPromises();
+    expect(document.activeElement?.id).toBe('export-start');
+  });
+
+  it('drops the stale notice when the user goes back to change the export', async () => {
+    api.startExport.mockRejectedValueOnce(
+      new IpcError('start_export', 'exportConfirmationStale', 'The archive changed; review the export again.'),
+    );
+    await mountDialog();
+    await toReview(['html'], async () => check('#export-zone-utc'));
+    await ready();
+    await click('Choose where to save…');
+    await click('Start export');
+    await ready({}, DRAFT2);
+    expect(wrapper!.text()).toContain('The archive changed; review the export again.');
+    await click('Back');
+    expect(useExports().notice).toBeNull();
+    await click('Next');
+    await ready({}, DRAFT);
+    expect(wrapper!.text()).not.toContain('The archive changed; review the export again.');
+  });
+
+  it('names how the job ended in the result legend', async () => {
+    await mountDialog();
+    await toReview(['html'], async () => check('#export-zone-utc'));
+    await ready();
+    await click('Choose where to save…');
+    await click('Start export');
+    jobChannel!({ kind: 'cancelled', jobId: 'job-1', stagingRemoved: true });
+    await flushPromises();
+    expect(wrapper!.find('legend').text()).toBe('Export cancelled');
+    await click('Done');
+    useExports().openExport(CONVERSATION);
+    await flushPromises();
+    await toReview(['html'], async () => check('#export-zone-utc'));
+    await ready({}, DRAFT2);
+    await click('Choose where to save…');
+    await click('Start export');
+    jobChannel!({
+      kind: 'failed',
+      jobId: 'job-1',
+      error: { code: 'io', message: 'The disk failed.' },
+      stagingRemoved: true,
+    });
+    await flushPromises();
+    expect(wrapper!.find('legend').text()).toBe('Export failed');
+  });
+
+  it('keeps Back and Close disabled while the export is starting, and Back starts no new count', async () => {
+    let resolveStart: (v: { jobId: string }) => void = () => undefined;
+    api.startExport.mockImplementation((_req, onEvent) => {
+      jobChannel = onEvent;
+      return new Promise((r) => {
+        resolveStart = r;
+      });
+    });
+    await mountDialog();
+    await toReview(['html'], async () => check('#export-zone-utc'));
+    await ready();
+    await click('Choose where to save…');
+    await button('Start export')!.trigger('click');
+    await flushPromises();
+    const x = useExports();
+    expect(x.starting).toBe(true);
+    expect(button('Back')?.attributes('disabled')).toBeDefined();
+    expect(button('Close')?.attributes('disabled')).toBeDefined();
+    expect(button('Choose another name')?.attributes('disabled')).toBeDefined();
+    x.goTo('review');
+    await flushPromises();
+    expect(api.previewExport).toHaveBeenCalledTimes(1);
+    resolveStart({ jobId: 'job-1' });
+    await flushPromises();
+    expect(x.step).toBe('progress');
+  });
+
+  it("does not offer one conversation from the Archive page's help text", () => {
+    expect(ENTRY_TEXT.archiveHelp).not.toContain('conversation');
   });
 });

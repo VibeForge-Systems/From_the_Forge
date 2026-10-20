@@ -595,7 +595,7 @@ cargo test -p oma-export --test html -- --nocapture      # prints the RECORD lin
 
 ```sh
 cargo test -p oma-export --lib -- helper:: render:: check::   # frames, the serve loop, resources, the stub's PDF
-cargo test -p oma-export --test pdf_check                     # the PDF output check: forbidden names, streams, inflate bounds
+cargo test -p oma-export --test pdf_check                     # the PDF output check: forbidden names and keys, streams, inflate bounds, the xref
 cargo test -p openmessage-archive --test export_helper        # the real binary with --oma-export-helper and the stub's faults
 cargo test -p openmessage-archive --lib backups::             # the job table's cancel hooks
 ```
@@ -688,7 +688,12 @@ cargo test -p oma-export --release --test perf_smoke -- --ignored --exact \
   texts (both tools), the masking sentinels and the positive control.
   Run here: Python 3.13.16, pypdf 6.19.0, poppler 24.02.0: 49 bundles,
   77 volumes, 1,138 items (802 texts compared), 31 images, 14 sentinels
-  scanned for, 12 found revealed, 4,168 checks, 0 failed. A mutation run
+  scanned for, 12 found revealed, 4,168 checks, 0 failed. After the PR B
+  review fixes (a `cut` bundle per entry, items counted exactly once,
+  the oracle's own list of constructs that are never present): 70
+  bundles, 177 volumes, 1,622 items (1,153 texts compared), 31 images,
+  14 sentinels scanned for, 12 found revealed, 17 files cut, 9,991
+  checks, 0 failed. A mutation run
   (the revealed bundles listed as the default ones) failed with 14 leaks,
   as it should. CI's `ubuntu-22.04` (Python 3.10, poppler 22.02) is
   **UNVERIFIED** until the CI run.

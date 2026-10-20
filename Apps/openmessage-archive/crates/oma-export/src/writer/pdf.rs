@@ -884,9 +884,23 @@ impl Emit for PdfWriter {
         self.label(label)?;
         let markers = self.markers;
         let mut lines = vec![TextBuilder::new()];
+        // The recorded text between two placeholders or line breaks is
+        // marked as one string: the pieces carry no styles in PDF, and a
+        // combining run split across formatting segments must be cut like
+        // one in a single segment (review fix, §4.7).
+        let mut pending = String::new();
+        let flush = |lines: &mut Vec<TextBuilder>, pending: &mut String| {
+            if !pending.is_empty() {
+                if let Some(l) = lines.last_mut() {
+                    l.push_content(pending, markers);
+                }
+                pending.clear();
+            }
+        };
         for r in runs {
             match r {
                 Run::Placeholder(p) => {
+                    flush(&mut lines, &mut pending);
                     if let Some(l) = lines.last_mut() {
                         l.push_ours(p);
                     }
@@ -894,15 +908,15 @@ impl Emit for PdfWriter {
                 Run::Text(t) => {
                     for (i, part) in split_lines(t).into_iter().enumerate() {
                         if i > 0 {
+                            flush(&mut lines, &mut pending);
                             lines.push(TextBuilder::new());
                         }
-                        if let Some(l) = lines.last_mut() {
-                            l.push_content(part, markers);
-                        }
+                        pending.push_str(part);
                     }
                 }
             }
         }
+        flush(&mut lines, &mut pending);
         for l in lines {
             let t = self.build(l);
             self.pending()?.body.push(Para::built(2, ParaRole::Text, t));
@@ -1285,6 +1299,31 @@ mod tests {
             }
         }
         assert!(waiting.is_empty());
+    }
+
+    /// Review finding: a combining flood split across formatting segments
+    /// reached the PDF uncut, because each segment was marked alone.
+    #[test]
+    fn a_combining_flood_split_across_segments_is_cut_once() {
+        let marks = "\u{301}".repeat(16);
+        let mut runs = vec![Run::Text("e")];
+        for _ in 0..600 {
+            runs.push(Run::Text(&marks));
+        }
+        let mut w = PdfWriter::new(Box::new(NoFactory), None);
+        w.pending = Some(Pending {
+            day: None,
+            head: Vec::new(),
+            body: Vec::new(),
+            images: Vec::new(),
+        });
+        Emit::text(&mut w, Vec::new(), &runs).expect("text");
+        let body = &w.pending.as_ref().expect("pending").body;
+        let text = body.last().expect("a paragraph").text.as_str();
+        let kept = text.chars().filter(|c| *c == '\u{301}').count();
+        assert_eq!(kept, crate::hidden::COMBINING_RUN_LIMIT);
+        assert!(text.ends_with("\u{27E8}+9584 combining marks\u{27E9}"));
+        assert_eq!(w.counts.combining_runs_limited, 1);
     }
 
     #[test]

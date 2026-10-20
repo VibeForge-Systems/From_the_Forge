@@ -43,6 +43,17 @@ export const STEP_LEGEND: Record<ExportStep, string> = {
   result: 'Export finished',
 };
 
+/** The result step's legend, by how the job ended (review fix: a failed
+ * or cancelled job was announced as "Export finished"). */
+export const RESULT_LEGEND: Record<'finished' | 'failed' | 'cancelled', string> = {
+  finished: 'Export finished',
+  failed: 'Export failed',
+  cancelled: 'Export cancelled',
+};
+
+/** Said in Review's live region once the counts have arrived. */
+export const COUNTS_READY = 'Counts ready. Review them below before choosing where to save.';
+
 export const SCOPE_LABEL: Record<ScopeKind, string> = {
   conversation: 'This conversation',
   searchResults: 'These search results',
@@ -412,15 +423,21 @@ export function resultNotes(s: ExportSummaryDto): string[] {
   return out;
 }
 
-export function cancelledSentence(stagingRemoved: boolean): string {
+export function cancelledSentence(stagingRemoved: boolean, copy = false): string {
+  if (copy) {
+    return stagingRemoved
+      ? 'Saving the copy was cancelled. The unfinished copy was removed.'
+      : 'Saving the copy was cancelled. Part of the unfinished copy could not be removed; the next save into that folder offers to remove it.';
+  }
   return stagingRemoved
     ? 'Export cancelled. The unfinished export was removed.'
     : 'Export cancelled. Part of the unfinished export could not be removed; the next export into that folder offers to remove it.';
 }
 
-export function failedNote(stagingRemoved: boolean): string {
-  return stagingRemoved
-    ? 'Nothing was saved.'
+export function failedNote(stagingRemoved: boolean, copy = false): string {
+  if (stagingRemoved) return 'Nothing was saved.';
+  return copy
+    ? 'Part of the unfinished copy could not be removed; the next save into that folder offers to remove it.'
     : 'Part of the unfinished export could not be removed; the next export into that folder offers to remove it.';
 }
 
@@ -460,6 +477,12 @@ export const COPY_LEGEND: Partial<Record<ExportStep, string>> = {
   progress: 'Saving the copy',
   result: 'Copy saved',
 };
+export const COPY_RESULT_LEGEND: Record<'finished' | 'failed' | 'cancelled', string> = {
+  finished: 'Copy saved',
+  failed: 'Copy not saved',
+  cancelled: 'Copy cancelled',
+};
+export const COPY_FACTS_READY = 'The attachment’s facts are ready. Review them below before choosing where to save.';
 export const COPY_READING = 'Reading the attachment…';
 export const COPY_DISCLOSURE =
   'A saved copy is the original file, byte for byte, metadata included (which can include location). Once saved, the app cannot protect, track or delete it.';
@@ -491,13 +514,24 @@ export const CHIP_TEXT = {
   showResult: 'Show the export result',
 } as const;
 
+/** The chip's words while the job is "Save a copy". */
+export const COPY_CHIP_TEXT: Record<keyof typeof CHIP_TEXT, string> = {
+  running: 'Saving a copy…',
+  cancelling: 'Cancelling the copy…',
+  finished: 'Copy saved',
+  failed: 'Copy not saved',
+  cancelled: 'Copy cancelled',
+  show: 'Show the copy’s progress',
+  showResult: 'Show the copy’s result',
+};
+
 export const ENTRY_TEXT = {
   conversation: 'Export conversation…',
   searchResults: 'Export results…',
   searchRunning: 'Wait for the search to finish before exporting its results.',
   archive: 'Export…',
   archiveHelp:
-    'Export this archive, a date range or one conversation as PDF, HTML, plain text, CSV or JSON. An export is a plaintext copy you keep elsewhere.',
+    'Export this archive or a date range as PDF, HTML, plain text, CSV or JSON. An export is a plaintext copy you keep elsewhere.',
   exportingHere: 'Exporting from this archive',
   showExport: 'Show export',
 } as const;

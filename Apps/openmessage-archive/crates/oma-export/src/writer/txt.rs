@@ -232,13 +232,28 @@ impl TxtWriter {
     }
 
     /// The lines of recorded text made of `runs`: text split at line
-    /// breaks and marked per line, placeholders kept as they are.
+    /// breaks, placeholders kept as they are. The recorded text between
+    /// two placeholders or line breaks is marked as one string, so a
+    /// combining run split across formatting segments is cut like one in
+    /// a single segment (review fix; TXT draws no styles).
     fn text_lines(&mut self, runs: &[Run<'_>]) -> Vec<String> {
         let policy = MarkPolicy::text_body(self.markers);
         let mut lines = vec![String::new()];
+        let mut pending = String::new();
+        let flush = |lines: &mut Vec<String>, pending: &mut String, counts: &mut MarkCounts| {
+            if !pending.is_empty() {
+                let (m, n) = hidden::mark(pending, policy);
+                counts.add(n);
+                if let Some(l) = lines.last_mut() {
+                    l.push_str(&m);
+                }
+                pending.clear();
+            }
+        };
         for r in runs {
             match r {
                 Run::Placeholder(p) => {
+                    flush(&mut lines, &mut pending, &mut self.counts);
                     if let Some(l) = lines.last_mut() {
                         l.push_str(p);
                     }
@@ -246,17 +261,15 @@ impl TxtWriter {
                 Run::Text(t) => {
                     for (i, part) in split_lines(t).into_iter().enumerate() {
                         if i > 0 {
+                            flush(&mut lines, &mut pending, &mut self.counts);
                             lines.push(String::new());
                         }
-                        let (m, n) = hidden::mark(part, policy);
-                        self.counts.add(n);
-                        if let Some(l) = lines.last_mut() {
-                            l.push_str(&m);
-                        }
+                        pending.push_str(part);
                     }
                 }
             }
         }
+        flush(&mut lines, &mut pending, &mut self.counts);
         lines
     }
 
@@ -566,6 +579,39 @@ mod tests {
         );
         assert!(!h.contains('[') && !h.contains(']') && !h.contains('\n'));
         assert_eq!(w.brackets_escaped, 4);
+    }
+
+    /// Review finding: a combining flood split across formatting segments
+    /// (one `Run::Text` per segment) is cut like one in a single segment.
+    #[test]
+    fn a_combining_flood_split_across_segments_is_cut_once() {
+        let marks = "\u{301}".repeat(16);
+        let mut runs = vec![Run::Text("e")];
+        for _ in 0..600 {
+            runs.push(Run::Text(&marks));
+        }
+        let mut w = TxtWriter::new();
+        let lines = w.text_lines(&runs);
+        assert_eq!(lines.len(), 1);
+        let kept = lines[0].chars().filter(|c| *c == '\u{301}').count();
+        assert_eq!(kept, crate::hidden::COMBINING_RUN_LIMIT);
+        assert!(
+            lines[0].ends_with("\u{27E8}+9584 combining marks\u{27E9}"),
+            "{}",
+            &lines[0][..40]
+        );
+        assert_eq!(w.counts.combining_runs_limited, 1);
+        // A placeholder or a line break still ends a run.
+        let mut w = TxtWriter::new();
+        let p = placeholder("Attachment 1");
+        let lines = w.text_lines(&[
+            Run::Text("e"),
+            Run::Text(&marks),
+            Run::Placeholder(p),
+            Run::Text(&marks),
+        ]);
+        assert_eq!(lines[0].chars().filter(|c| *c == '\u{301}').count(), 32);
+        assert_eq!(w.counts.combining_runs_limited, 0);
     }
 
     #[test]

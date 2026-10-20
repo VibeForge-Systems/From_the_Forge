@@ -4442,7 +4442,9 @@ check, so it accepts none).
   nested streams. Binary streams (images, font programs, ICC profiles,
   XMP) are inflated but not tokenised, because a name-shaped byte run in
   them is not a name object. Object streams and cross-reference streams
-  are refused, so every object is visible to the check.
+  are refused. (The PR B review fixes tightened all of this: the binary
+  exemption, the names, object streams by shape, and the cross-reference
+  table, which is now read; see "Review fixes (M6 PR B)".)
 - **The test backend** (`oma_export::render::stub`, debug builds only;
   release builds refuse it like any backend they lack). It writes a
   minimal PDF of counts per volume (never a byte of a record) and plays
@@ -4459,8 +4461,9 @@ a check kind (the kind is `check::check_output`'s result, used by the
 tests, and the user's sentence is the same); the supervisor also ends a
 write blocked for 120 s (the spec timed only the reply); `/Encrypt` is
 refused besides the spec's list; object and cross-reference streams are
-refused rather than parsed (whether krilla writes them is **UNVERIFIED**;
-if it does, 6j extends the check to tokenise their objects); a whole
+refused rather than parsed (krilla 0.8.2 writes neither for this app,
+observed in slice 6j1's tests; the PR B review fixes refuse them by
+shape, and add more names and the cross-reference check); a whole
 volume is held in the main process's memory (at most 256 MiB) so that it
 is checked before any byte is staged. Not built (XLSX): the temporary
 folder inside staging and the "dies with less than 1 MiB free" `NoSpace`
@@ -5055,6 +5058,123 @@ fixed copy options; the unbuilt refusals now XLSX only),
 `thread-view.spec.ts` (1), `archive-view.spec.ts` (1 new, 1 changed),
 `attachment-card.spec.ts` (1 new, 1 changed) and `roadmap.spec.ts` (the
 flip, and XLSX never claimed).
+
+### Review fixes (M6 PR B)
+
+The review of PR B found the defects below; each was fixed in one commit
+(`fix(openmessage-archive): address M6 PR B review findings`), with a
+regression test where one could be written. Everything here ran only in
+this Linux container (not on CI, not on Windows, and never in a PDF
+viewer, a browser or a screen reader).
+
+- **The PDF check sees every object a lenient reader loads**
+  (`check/pdf.rs`, C1.17). A compromised helper could hide a catalog
+  with an `/OpenAction` inside an untyped object stream (pdf.js reads
+  one by its `/First` and `/N`, and the check took a stream with `/N`
+  and no `/Type` for an ICC profile and did not tokenise it), behind
+  `startxref` pointing at an untyped cross-reference stream, or among an
+  image's raw bytes with an xref entry pointing there. Now: a stream
+  dictionary with `/First`, `/W` or `/Index` is refused whatever its
+  `/Type`; only the binary streams krilla writes are exempt from
+  tokenising (an image XObject, and the objects that `/FontFile*` or
+  `/CIDSet`, an `[/ICCBased n 0 R]` array or `/Metadata` reference, each
+  in krilla's shape; the `/N` and `/Length1` heuristics are gone);
+  `/DecodeParms`, `/DP` and the external-file keys `/F`, `/FFilter`,
+  `/FDecodeParms` are refused on every stream; and the cross-reference
+  table is read: exactly one classic table, one trailer without `/Prev`,
+  one `startxref` pointing at that table, every in-use entry pointing
+  exactly at an `N G obj` header the top-level pass saw (never inside
+  stream data) with the same number and generation, and every indirect
+  reference naming an in-use entry, so no reader goes looking for an
+  object in repair mode. A new refusal kind, `CrossReference`, says so.
+- **File attachments, annotations and every action are refused**
+  (`FORBIDDEN_NAMES`, `FORBIDDEN_KEYS`). An embedded file needs no
+  `/Type /EmbeddedFile`, and a `FileAttachment` annotation reaches it
+  through names that were not listed. The list now also has `/Annots`
+  (krilla writes no annotation for this app; the outline uses `/Dest`),
+  `/EF`, `/FileAttachment`, `/Filespec`, `/FS`, `/Thread`,
+  `/Rendition`, `/Movie`, `/Sound`, `/Screen`, `/3D`, `/3DD`,
+  `/OnInstantiate`, `/URL` and `/XRefStm`, and the key `/A` is refused
+  in every dictionary, so with `/OpenAction` and `/AA` no action of any
+  kind can be reached. `scripts/oracles/pdf_oracle.py` no longer copies
+  the Rust list: it has its own, by category from spec §5.6 (actions,
+  scripts, annotations, attachments, forms, external links and media,
+  3D, encryption), and also asks pypdf for object streams and a
+  `/Prev` or `/XRefStm`.
+- **A flood of `Error` frames cannot exhaust the main process**
+  (`helper/host.rs`, `helper/frame.rs`). The reader forwarded every
+  `Error` frame (each up to 16 MiB) into an unbounded channel while the
+  worker could be blocked writing for up to the 120 s stall timeout.
+  Now an `Error` frame is terminal (forwarded, the helper killed with no
+  stop reason so its code is what the session reports, the reader
+  stops), `read_frame` refuses an `Error` longer than its one byte or a
+  `Done` longer than `DONE_BYTES` before allocating
+  (`FrameKind::max_payload`), and the reply channel is a
+  `sync_channel` of four frames, so a fast helper meets back-pressure.
+  The stub's new `FloodErrors` fault plays both floods against a real
+  helper process.
+- **A combining flood split across formatting segments is cut**
+  (`writer/pdf.rs`, `writer/txt.rs`, §4.7). Each segment was marked
+  alone, so 16 marks per bold, italic or mention segment reached one
+  base character uncut. The recorded text between two placeholders or
+  line breaks is now marked as one string (neither format draws
+  styles). No golden changed.
+- **Volume cuts keep every item exactly once.** The cut test now checks
+  that the items sent across the cut volumes equal the uncut export's,
+  in order and without repeats; `write_oracle_pdf` adds a `cut` bundle
+  per entry (names only, 2-page volumes), and `pdf_oracle.py` requires
+  each item's own header exactly once across a file's volumes (a
+  "Reply to item N" reference is not counted) and at least 5 files cut
+  into more than one volume, and checks that each volume's outline has
+  entries under its conversation's (the per-day entries).
+- **The dialog is never lost** (`ModalDialog.vue`). In Chromium engines
+  (WebView2) a second Escape's `cancel` is not cancelable without a user
+  activation between, so the element closed while the store kept
+  `open`, and nothing could show it again. When the parent declines a
+  native close, the dialog now shows itself again. The engine behaviour
+  itself is **UNVERIFIED** here (jsdom only).
+- **Focus and announcements** (`ExportDialog.vue`). When counting ends,
+  focus moves to Review's first control (it fell to `<body>` with the
+  removed Cancel button), and the live region says "Counts ready…" (or
+  that a copy's facts are ready) instead of going silent. "Keep
+  exporting" moves focus to the progress, and "Replace" to Start.
+- **Notices, legends and words.** The stale or expired notice is
+  cleared when the user goes back to change the export, and shown in the
+  "Save a copy" branch too. The result's legend says how the job ended
+  ("Export failed", "Export cancelled"; "Copy not saved", "Copy
+  cancelled"), and a copy's chip, cancelled sentence and toasts speak of
+  the copy (the store's `jobCopy`). The Archive page's help no longer
+  offers "one conversation", which cannot be chosen there.
+- **No second draft while starting.** Back, Close and "Choose another…"
+  are disabled while `start_export` is in flight, Close goes through
+  `requestClose` (a starting or running job asks first), and `goTo` does
+  nothing while starting or while a job runs.
+- **Notices and documents.** `NOTICE` now carries arrayref 0.3.9's
+  copyright line and BSD-2-Clause text and a paragraph on the bundled
+  OFL-1.1 fonts, and `bundle.resources` installs it beside the fonts
+  (whether it lands in each installer is **UNVERIFIED**: no installer
+  was built); the About view names both. Stale statements were
+  corrected in `README.md` (the roadmap row, the CSP claim), `AGENTS.md`
+  (what is refused with `exportUnavailable`), `docs/privacy.md` (the
+  dialog and the identifiers opt-in are built), `docs/compatibility.md`
+  (checklist row 7's outline wording), `docs/supported-formats.md` and
+  `docs/dependencies.md` (the image row's MSRV floor is 1.92).
+
+Tests: `crates/oma-export/tests/pdf_check.rs` (14, 4 new: the review's
+object-stream file, the FileAttachment annotation and an untyped
+embedded file, a catalog hidden in an image with an xref entry pointing
+there and the other cross-reference shapes, decode parameters and
+external stream files; the binary-stream test now references each
+binary stream as krilla does and shows the same stream tokenised when it
+is not), `helper/frame.rs` (`Error` and `Done` bounded before
+allocation), `src-tauri/tests/export_helper.rs`
+(`a_flood_of_error_frames_is_not_queued`, with the peak resident set
+bounded on Linux), `writer/txt.rs` and `writer/pdf.rs` (a flood split
+across 600 segments), `tests/pdf_writer.rs` (items exactly once across
+cut volumes), and the frontend's `modal-dialog.spec.ts`,
+`export-dialog.spec.ts` (7 new) and `export-copy.spec.ts` (2 new). The
+new tests were written after the fixes and were not run against the
+code before them.
 
 ### Status and qualifiers (D43)
 

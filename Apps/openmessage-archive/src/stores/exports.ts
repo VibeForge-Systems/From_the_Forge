@@ -364,7 +364,8 @@ export const useExports = defineStore('exports', () => {
   let pending: PreviewEvent[] = [];
   let zoneAbort: AbortController | null = null;
   let formatsAtStart: ExportFormatInput[] = [];
-  let copyAtStart = false;
+  /** The started job is "Save a copy" (its chip, legend and words say so). */
+  const jobCopy = ref(false);
 
   const liveJob = computed(() => (job.value && !job.value.ended ? job.value : null));
   const isCopy = computed(() => copyTarget.value !== null);
@@ -633,6 +634,13 @@ export const useExports = defineStore('exports', () => {
   // --- Steps -----------------------------------------------------------------------
 
   function goTo(next: ExportStep): void {
+    // While `start_export` is in flight or a job runs, the steps before
+    // the progress cannot be reached (review fix: Back started a second
+    // draft beside the starting job).
+    if (starting.value || liveJob.value) return;
+    // A notice belongs to the count it explains; going back to change the
+    // export drops it (review fix).
+    if (next === 'what' || next === 'format' || next === 'options') notice.value = null;
     if (step.value === 'review' || step.value === 'destination') {
       if (next !== 'review' && next !== 'destination') {
         supersede();
@@ -834,7 +842,8 @@ export const useExports = defineStore('exports', () => {
     if (!canStart.value || !id || !d || !form.value) return;
     starting.value = true;
     const c = confirmations();
-    copyAtStart = isCopy.value;
+    jobCopy.value = isCopy.value;
+    const copyAtStart = jobCopy.value;
     formatsAtStart = copyAtStart ? [] : AVAILABLE_FORMATS.filter((x) => form.value?.formats.includes(x));
     jobArchiveId.value = context.value?.archiveId ?? null;
     // `start_export` consumes the draft, whatever its answer.
@@ -912,12 +921,12 @@ export const useExports = defineStore('exports', () => {
           outcome: event.outcome,
           summary: event.summary,
           formats: formatsAtStart,
-          copy: copyAtStart,
+          copy: jobCopy.value,
         };
         if (!open.value) {
           toast(
             event.outcome === 'completed' ? 'success' : 'warning',
-            copyAtStart ? COPY_SAVED : OUTCOME_TEXT[event.outcome],
+            jobCopy.value ? COPY_SAVED : OUTCOME_TEXT[event.outcome],
           );
         }
         break;
@@ -927,11 +936,13 @@ export const useExports = defineStore('exports', () => {
           error: { code: event.error.code, message: event.error.message },
           stagingRemoved: event.stagingRemoved,
         };
-        if (!open.value) toast('danger', `${event.error.message} ${failedNote(event.stagingRemoved)}`);
+        if (!open.value) toast('danger', `${event.error.message} ${failedNote(event.stagingRemoved, jobCopy.value)}`);
         break;
       case 'cancelled':
         result.value = { kind: 'cancelled', stagingRemoved: event.stagingRemoved };
-        if (!open.value) toast(event.stagingRemoved ? 'info' : 'warning', cancelledSentence(event.stagingRemoved));
+        if (!open.value) {
+          toast(event.stagingRemoved ? 'info' : 'warning', cancelledSentence(event.stagingRemoved, jobCopy.value));
+        }
         break;
       // Other jobs' events never arrive on an export's channel.
       default:
@@ -961,6 +972,7 @@ export const useExports = defineStore('exports', () => {
     context,
     copyTarget,
     isCopy,
+    jobCopy,
     copyFacts,
     confirmCopyEarlier,
     confirmRiskyName,

@@ -707,8 +707,8 @@ What is already decided and enforced in the archive's export reads
   folded into its target is written whole, so it is counted like any
   other message.
   The viewer's "Show earlier text by default" setting (`revealEarlierText`)
-  does **not** carry over into exports. The dialog and the confirmation
-  are not built yet.
+  does **not** carry over into exports. The dialog and its confirmation
+  were built in slice 6k1; see "The Export dialog (slices 6k1, 6k2)".
 - **Only codes the phone marked are masked.** A code in plain text without
   the phone's marking is not detected, in exports as in the viewer.
 - **Search results do not reveal hidden content through membership.** A
@@ -739,7 +739,8 @@ tested there; no export file is written yet):
   off). **Archive ids reveal how many messages the archive holds and
   roughly when they were imported**; GUIDs identify the messages and
   conversations in the phone's own database. The opt-in and its Review
-  sentence are not built yet.
+  sentence were built in slice 6k1; see "The Export dialog (slices 6k1,
+  6k2)".
 - **Read, delivery and sent state is never exported** (D94): no record has
   a field for it, and a test checks every record of the synthetic
   catalogues for those keys.

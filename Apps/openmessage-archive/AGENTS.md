@@ -759,9 +759,9 @@ Never hand-edit generated files.
   and sends one terminal event (`exportFinished` with counts only,
   `cancelled` or `failed`, each with `stagingRemoved`). `close_viewer` and
   `hide_viewer` go through `AppState::{close_viewer, hide_viewer}`, which
-  discard the draft first; keep it so. What is not built (XLSX, the
-  attachment scope, events off; PDF until slice 6j2) is refused at the
-  draft with `exportUnavailable`, never faked. Export DTOs live in
+  discard the draft first; keep it so. What is not built (XLSX only:
+  PDF was built in slice 6j2, and the attachment scope and events off in
+  6k2) is refused at the draft with `exportUnavailable`, never faked. Export DTOs live in
   `exports/dto.rs`: a new one goes into `ts_guard::M6_EXPORT_TYPES` (or
   `M6_EVENT_TYPES` if `JobEvent` reaches it, which the archive guard then
   reviews); the walks stay disjoint but for `M6_SHARED_TYPES`, and the
@@ -861,8 +861,7 @@ Never hand-edit generated files.
   defaults are `defaultAttachments` (Q3a), which must stay the same rule
   as `oma_export::plan::default_attachments`. Send every option Rust
   validates, and an option that does not apply as off (Rust refuses it
-  on); XLSX and "events off" are shown disabled with their reason, never
-  sent. A reveal is confirmed against the preview's own count and
+  on); XLSX is shown disabled with its reason, never sent. A reveal is confirmed against the preview's own count and
   `start_export` sends exactly that count. The zone table is built only
   by `zoneTable.ts` (6-hour samples, bisected to the second, 10 s bound)
   for the window Rust names plus its margin, and goes to Rust once: with

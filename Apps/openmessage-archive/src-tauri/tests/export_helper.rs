@@ -10,7 +10,9 @@
 //! fonts and its refusals (fonts off their pins, no options), a crash, a hang (the reply timeout), a
 //! helper that stops reading while the worker is blocked writing (the
 //! stall timeout, the supervisor's cancel and the job's cancel hook), an
-//! oversized frame, garbage, an early write, a `Done` that disagrees with
+//! oversized frame, a flood of `Error` frames while the worker is blocked
+//! writing (never queued: memory stays bounded), garbage, an early write,
+//! a `Done` that disagrees with
 //! its chunks, an output over the volume bound, a planted `/JavaScript`
 //! (refused by the main process's check), a full disk reported by the
 //! helper and met by the main process's write, a panic whose payload never
@@ -342,6 +344,56 @@ fn cancel_kills_a_helper_the_worker_is_blocked_on() {
     assert!(matches!(r, Err(ExportError::Cancelled)), "{r:?}");
     assert!(ended.duration_since(at) < Duration::from_secs(2));
     jobs.finish(&job.job_id, LastOutcome::default());
+}
+
+/// The process's peak resident set in bytes (Linux only).
+#[cfg(target_os = "linux")]
+fn peak_rss() -> u64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find_map(|l| l.strip_prefix("VmHWM:"))
+                .and_then(|v| v.trim().trim_end_matches("kB").trim().parse::<u64>().ok())
+        })
+        .map_or(0, |kb| kb * 1024)
+}
+
+/// Review finding: a helper that stops reading and floods `Error` frames
+/// while the worker is blocked writing. The reader stops at the first
+/// one (or refuses an `Error` longer than its one byte before allocating
+/// it), so the main process's memory stays bounded and the session ends
+/// well before the stall timeout.
+#[test]
+fn a_flood_of_error_frames_is_not_queued() {
+    #[cfg(target_os = "linux")]
+    let before = peak_rss();
+    let t = Instant::now();
+    // 16 MiB frames: refused at the header, a protocol failure.
+    let mut s = start(Fault::FloodErrors, 0, quick());
+    let r = flood(&mut s);
+    assert!(
+        matches!(r, Err(ExportError::HelperFailed(HelperFailure::Protocol))),
+        "{r:?}"
+    );
+    // Valid one-byte frames: the first is the session's answer.
+    let mut s = start(Fault::FloodErrors, 1, quick());
+    let r = flood(&mut s);
+    assert!(
+        matches!(
+            r,
+            Err(ExportError::HelperFailed(HelperFailure::Refused(
+                HelperErrorCode::BadRequest
+            )))
+        ),
+        "{r:?}"
+    );
+    assert!(t.elapsed() < Duration::from_secs(20), "{:?}", t.elapsed());
+    #[cfg(target_os = "linux")]
+    {
+        let grew = peak_rss().saturating_sub(before);
+        assert!(grew < 1 << 30, "peak resident set grew by {grew} bytes");
+    }
 }
 
 #[test]

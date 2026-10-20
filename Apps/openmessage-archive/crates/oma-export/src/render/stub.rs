@@ -50,10 +50,14 @@ pub enum Fault {
     WrongTotal,
     /// Exit with code 0 at `EndVolume`, replying nothing.
     ExitAtEnd,
+    /// Stop reading at the first item and write `Error` frames forever:
+    /// with `arg` 0 each claims 16 MiB (and carries it), otherwise each is
+    /// a valid one-byte `Error(BadRequest)`.
+    FloodErrors,
 }
 
 impl Fault {
-    pub const ALL: [Fault; 14] = [
+    pub const ALL: [Fault; 15] = [
         Fault::None,
         Fault::CrashAtItem,
         Fault::HangAtEnd,
@@ -68,6 +72,7 @@ impl Fault {
         Fault::Pad,
         Fault::WrongTotal,
         Fault::ExitAtEnd,
+        Fault::FloodErrors,
     ];
 
     fn code(self) -> u8 {
@@ -100,6 +105,27 @@ pub struct Stub {
     items: u64,
     images: u64,
     resource_bytes: u64,
+}
+
+/// Write `Error` frames to stdout until the pipe breaks, then sleep.
+fn flood_errors(arg: u64) -> ! {
+    let (len, payload) = if arg == 0 {
+        (
+            frame::MAX_FRAME_BYTES,
+            vec![0u8; frame::MAX_FRAME_BYTES as usize],
+        )
+    } else {
+        (1, vec![HelperErrorCode::BadRequest.code()])
+    };
+    let header = frame::raw_header(FrameKind::Error, len);
+    let mut out = std::io::stdout().lock();
+    while out
+        .write_all(&header)
+        .and_then(|()| out.write_all(&payload))
+        .and_then(|()| out.flush())
+        .is_ok()
+    {}
+    forever()
 }
 
 fn forever() -> ! {
@@ -162,6 +188,7 @@ impl OutputBackend for Stub {
             Fault::CrashAtItem if self.items >= self.arg => Err(Halt::Exit(101)),
             Fault::PanicAtItem => panic!("{PANIC_SENTINEL}"),
             Fault::StopReading => forever(),
+            Fault::FloodErrors => flood_errors(self.arg),
             Fault::WriteEarly if self.items == 1 => {
                 let mut bytes = Vec::new();
                 frame::write_frame(&mut bytes, FrameKind::Chunk, b"%PDF-")

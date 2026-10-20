@@ -24,11 +24,12 @@ vi.mock('@/services/ipc', async (importOriginal) => {
     },
   };
 });
-import { ipc } from '@/services/ipc';
+import { IpcError, ipc } from '@/services/ipc';
 import ExportDialog from '@/components/ExportDialog.vue';
 import ExportStatusChip from '@/components/ExportStatusChip.vue';
 import {
   CHIP_TEXT,
+  COPY_CHIP_TEXT,
   COPY_DISCLOSURE,
   COPY_EARLIER_CONFIRM,
   COPY_SAVED,
@@ -378,5 +379,43 @@ describe('Continue in background and the status chip', () => {
     await flushPromises();
     expect(chip!.find('button').text()).toBe(CHIP_TEXT.cancelled);
     expect(x.resultUnseen).toBe(true);
+  });
+});
+
+describe('Save a copy: review fixes', () => {
+  it('explains why it is back at the facts when the draft expired', async () => {
+    api.chooseExportDestination.mockRejectedValueOnce(
+      new IpcError('choose_export_destination', 'exportDraftExpired', 'The review expired; it was taken again.'),
+    );
+    await openCopy();
+    await copyReady();
+    await click('Choose where to save…');
+    await copyReady();
+    expect(wrapper!.find('legend').text()).toBe('Save a copy of this attachment');
+    expect(wrapper!.find('[role="status"].alert-info').text()).toBe('The review expired; it was taken again.');
+  });
+
+  it('words a failed or cancelled copy as a copy, in the legend, the chip and the toast', async () => {
+    wrapper = mount(ExportDialog, { attachTo: document.body });
+    chip = mount(ExportStatusChip, { attachTo: document.body });
+    useExports().openSaveCopy(TARGET);
+    await flushPromises();
+    await copyReady();
+    await click('Choose where to save…');
+    await click('Save copy');
+    jobChannel!({ kind: 'progress', jobId: 'job-7', phase: 'copyingAttachments', done: 0, total: 1 });
+    await flushPromises();
+    await click('Continue in background');
+    expect(chip!.find('button').text()).toBe(COPY_CHIP_TEXT.running);
+    jobChannel!({ kind: 'cancelled', jobId: 'job-7', stagingRemoved: true });
+    await flushPromises();
+    expect(chip!.find('button').text()).toBe(COPY_CHIP_TEXT.cancelled);
+    expect(useNotifications().toasts.map((t) => t.message)).toContain(
+      'Saving the copy was cancelled. The unfinished copy was removed.',
+    );
+    await chip!.find('button').trigger('click');
+    await flushPromises();
+    expect(wrapper!.find('legend').text()).toBe('Copy cancelled');
+    expect(wrapper!.text()).not.toContain('Export cancelled');
   });
 });

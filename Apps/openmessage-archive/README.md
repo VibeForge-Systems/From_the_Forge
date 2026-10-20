@@ -157,8 +157,10 @@ TypeScript, Bootstrap 5 and SQLite. Licensed **Apache-2.0**.
     fonts (Latin, Arabic, Hebrew, Devanagari, Thai, Chinese, Japanese,
     Korean and colour emoji), embedded as subsets, with tagged structure,
     an outline and image previews; very large conversations are split
-    into volumes. HTML pages are static, script-free and block network
-    loads with a Content-Security-Policy. CSV neutralises formulas by
+    into volumes. HTML pages are static and script-free, and carry a
+    Content-Security-Policy meant to block network loads; whether
+    browsers honour it from a local file is **UNVERIFIED** (see Known
+    limitations). CSV neutralises formulas by
     default.
   - Everything is written inside the chosen folder and published with
     one rename that never replaces anything; cancelling removes the
@@ -221,7 +223,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 3 Extraction check | Locate sms.db, probe the schema, and check that messages, chats, handles and attachment references can be read (counts only) | Implemented; sign-off pending (Windows CI, the clean-room review of the typedstream decoder and the fixture generators, the manual tests) |
 | 4 Archive database | Extract messages and copy attachments into the archive; versioned SQLite schema, transactional and resumable imports, FTS5, integrity verification | Implemented; sign-off pending (CI of slices 4g–4n, two §18.8 Windows tests that are not written yet (a held partial file, a killed lock holder; see `docs/compatibility.md`), the manual tests, the owner's answers on D69, D70, D71, D79 and D82) |
 | 5 Rich viewer | Conversation list, threads, inline media, search, date navigation | Implemented; sign-off pending (CI of PR B, the manual checklist in `docs/compatibility.md`: nothing of the viewer has been used on a desktop or on Windows; only a headless smoke test in a Linux container ran it in a real window). PR A (viewer reads, search, media checks, the viewer commands, the `oma-media` protocol, the image decode helper and the window built in Rust) passed CI on `ubuntu-22.04` and `windows-2022` ([run 39205163013](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39205163013)); PR B (the screens and the documents) is in review |
-| 6 Exports | TXT, CSV, JSON, HTML, PDF, XLSX, and attachments | **Done except XLSX**, which follows as its own slice after 2026-10-31 (its writer crate is not yet 14 days old) and is refused until then; sign-off pending (CI of PR B, the M6 manual checklist in `docs/compatibility.md`: nothing of M6 has run on a Windows desktop, in a browser, a PDF viewer or a spreadsheet program, or on a real archive; Windows test time over budget, see `docs/development.md`). PR A (the engine: TXT, CSV, JSON, HTML) passed CI on `ubuntu-22.04` and `windows-2022` ([run 39340011184](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39340011184)) and is merged; PR B (PDF, the Export dialog and its entry points, "Save a copy", leaving events out, the documents) is on its branch |
+| 6 Exports | TXT, CSV, JSON, HTML, PDF, XLSX, and attachments | Implemented except XLSX, which follows as its own slice after 2026-10-31 (its writer crate is not yet 14 days old) and is refused until then; sign-off pending (CI of PR B, the M6 manual checklist in `docs/compatibility.md`: nothing of M6 has run on a Windows desktop, in a browser, a PDF viewer or a spreadsheet program, or on a real archive; Windows test time over budget, see `docs/development.md`). PR A (the engine: TXT, CSV, JSON, HTML) passed CI on `ubuntu-22.04` and `windows-2022` ([run 39340011184](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39340011184)) and is merged; PR B (PDF, the Export dialog and its entry points, "Save a copy", leaving events out, the documents) is on its branch |
 | 7 Direct device backup | USB device detection and local backup creation | **Next**; planned |
 | 8 Hardening and release | Archive repair, recovery tests, diagnostic log, accessibility, archive encryption at rest (it will not cover exports, `docs/privacy.md`), encrypted exports (a candidate), signed packages | Planned |
 

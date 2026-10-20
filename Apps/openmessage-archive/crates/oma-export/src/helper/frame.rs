@@ -119,6 +119,18 @@ impl FrameKind {
         FrameKind::ALL.into_iter().find(|k| k.code() == code)
     }
 
+    /// The longest payload a frame of this kind may have: an `Error` is
+    /// one code byte and a `Done` exactly [`DONE_BYTES`], so a reader never
+    /// allocates more for them (review fix: a flood of 16 MiB `Error`
+    /// frames); every other kind may use [`MAX_FRAME_BYTES`].
+    pub fn max_payload(self) -> u32 {
+        match self {
+            FrameKind::Error => 1,
+            FrameKind::Done => DONE_BYTES as u32,
+            _ => MAX_FRAME_BYTES,
+        }
+    }
+
     /// The direction the kind travels in.
     pub fn direction(self) -> Direction {
         if self.code() & 0x80 == 0 {
@@ -152,7 +164,8 @@ pub enum FrameError {
     Closed,
     /// The pipe closed, or failed, inside a frame.
     Truncated,
-    /// A wrong magic, an unknown kind, or a kind of the other direction.
+    /// A wrong magic, an unknown kind, a kind of the other direction, or
+    /// a length over the kind's [`FrameKind::max_payload`].
     BadFrame,
     /// The length is over [`MAX_FRAME_BYTES`]; nothing was allocated.
     TooLarge,
@@ -218,6 +231,11 @@ pub fn read_frame(r: &mut dyn Read, direction: Direction) -> Result<Frame, Frame
     let len = u32::from_le_bytes(l);
     if len > MAX_FRAME_BYTES {
         return Err(FrameError::TooLarge);
+    }
+    if len > kind.max_payload() {
+        // An `Error` or `Done` longer than its fixed size; nothing was
+        // allocated.
+        return Err(FrameError::BadFrame);
     }
     let len = usize::try_from(len).map_err(|_| FrameError::TooLarge)?;
     let mut payload = vec![0u8; len];
@@ -466,9 +484,13 @@ mod tests {
     #[test]
     fn frames_round_trip_in_their_own_direction_only() {
         for kind in FrameKind::ALL {
-            let f = roundtrip(kind, b"abc").expect("frame");
+            let payload: &[u8] = match kind {
+                FrameKind::Error => b"a",
+                _ => b"abc",
+            };
+            let f = roundtrip(kind, payload).expect("frame");
             assert_eq!(f.kind, kind);
-            assert_eq!(f.payload, b"abc");
+            assert_eq!(f.payload, payload);
             let mut v = Vec::new();
             write_frame(&mut v, kind, b"").expect("write");
             let other = match kind.direction() {
@@ -494,6 +516,28 @@ mod tests {
             buf[..n].copy_from_slice(&self.0[self.1..self.1 + n]);
             self.1 += n;
             Ok(n)
+        }
+    }
+
+    #[test]
+    fn error_and_done_frames_are_bounded_to_their_fixed_size_before_allocation() {
+        for (kind, max) in [
+            (FrameKind::Error, 1u32),
+            (FrameKind::Done, DONE_BYTES as u32),
+        ] {
+            for len in [max + 1, 1 << 20, MAX_FRAME_BYTES] {
+                let mut r = HeaderOnly(raw_header(kind, len).to_vec(), 0);
+                assert_eq!(
+                    read_frame(&mut r, Direction::Reply),
+                    Err(FrameError::BadFrame),
+                    "{kind:?} {len}"
+                );
+            }
+            let at = vec![0u8; max as usize];
+            assert_eq!(
+                roundtrip(kind, &at).expect("fixed size").payload.len(),
+                at.len()
+            );
         }
     }
 

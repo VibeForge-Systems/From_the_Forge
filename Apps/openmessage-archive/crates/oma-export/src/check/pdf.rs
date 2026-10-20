@@ -2,8 +2,10 @@
 //! every PDF the export-render helper returns, before any byte of it is
 //! staged.
 //!
-//! It is a validator, not a reader: it accepts only the shape a PDF writer
-//! like ours produces and refuses anything it cannot vouch for.
+//! It is a validator, not a reader: it accepts only the shape krilla 0.8.2
+//! writes for this app and refuses anything it cannot vouch for. A helper
+//! that hostile text compromised controls every byte, so the check must
+//! see every object a lenient reader (pdf.js, Acrobat) would load.
 //!
 //! 1. The file starts with `%PDF-<digit>.<digit>` and ends with `%%EOF`
 //!    (trailing white space allowed).
@@ -13,43 +15,60 @@
 //!    `/J#53` is `/JS`) and compared with [`FORBIDDEN_NAMES`]: the spec's
 //!    list (`/JavaScript`, `/JS`, `/OpenAction`, `/AA`, `/Launch`, `/URI`,
 //!    `/SubmitForm`, `/ImportData`, `/GoToR`, `/GoToE`, `/EmbeddedFile`,
-//!    `/EmbeddedFiles`, `/AcroForm`, `/XFA`, `/RichMedia`) plus
-//!    `/Encrypt`, because an encrypted file's strings and streams cannot
-//!    be checked.
+//!    `/EmbeddedFiles`, `/AcroForm`, `/XFA`, `/RichMedia`), `/Encrypt`
+//!    (an encrypted file's strings and streams cannot be checked), and the
+//!    names of every other way to attach a file, start an action or load
+//!    external media: `/Annots` (krilla writes no annotation for this
+//!    app; the outline uses `/Dest`), `/EF`, `/FileAttachment`,
+//!    `/Filespec`, `/FS`, `/Thread`, `/Rendition`, `/Movie`, `/Sound`,
+//!    `/Screen`, `/3D`, `/3DD`, `/OnInstantiate`, `/URL` and `/XRefStm`.
+//!    The key `/A` (an action) is refused in every dictionary
+//!    ([`FORBIDDEN_KEYS`]), so with `/OpenAction`, `/AA` and `/Annots`
+//!    refused no action of any kind can be reached.
 //! 3. Every stream needs a direct `/Length` whose data is followed by
-//!    `endstream`, so a stream cannot hide objects from this check that a
-//!    reader would see. Its filter must be none, `FlateDecode` or (for an
-//!    image) `DCTDecode`; any other filter or chain is refused.
+//!    `endstream`, so a stream cannot hide objects from this check. Its
+//!    filter must be none, `FlateDecode` or (for an image XObject)
+//!    `DCTDecode`; any other filter or chain is refused, and so are
+//!    `/DecodeParms`, `/DP` and the external-file keys `/F`, `/FFilter`
+//!    and `/FDecodeParms` (krilla writes none of them), so the bytes the
+//!    check tokenises are the bytes a reader decodes.
 //! 4. Every `FlateDecode` stream is inflated with `miniz_oxide` (already
-//!    in the tree through `png`; the spec left `zip`'s or krilla's open,
-//!    settled here), bounded per stream ([`MAX_INFLATED_STREAM`]) and per
-//!    file ([`MAX_INFLATED_TOTAL`]). Streams that hold text-like syntax
-//!    (content streams, CMaps, forms) are tokenised too, with the same name
-//!    check; an inline image (`ID`) or a nested `stream` is refused.
-//!    Binary streams (images, font programs, ICC profiles, XMP metadata)
-//!    are inflated but not tokenised: a name-shaped byte run inside them
-//!    is not a name object, and would make legitimate files fail at random.
-//! 5. Compressed object and cross-reference streams (`/Type /ObjStm`,
-//!    `/Type /XRef`) are refused: every object must be visible to step 2.
-//!    krilla 0.8.2 with its default settings writes neither (observed in
-//!    slice 6j1's tests, `tests/pdf_layout.rs`).
-//! 6. A font descriptor's `/CIDSet` stream (a bitset krilla writes for PDF
-//!    1.7) and its `/FontFile2` (krilla writes no `/Length1`) carry no
-//!    type of their own: a first pass collects the objects that a
-//!    `/CIDSet`, `/FontFile`, `/FontFile2` or `/FontFile3` key references,
-//!    and their streams are inflated but not tokenised (slice 6j1). Every
-//!    other stream is checked as above.
+//!    in the tree through `png`), bounded per stream
+//!    ([`MAX_INFLATED_STREAM`]) and per file ([`MAX_INFLATED_TOTAL`]).
+//!    Every stream is tokenised with the same name check (an inline image
+//!    `ID` or a nested `stream` is refused) **unless** it is one of the
+//!    binary streams krilla writes: an image XObject (`/Type /XObject
+//!    /Subtype /Image`, its soft mask included), a font program or
+//!    `/CIDSet` (an object a `/FontFile`, `/FontFile2`, `/FontFile3` or
+//!    `/CIDSet` key references, with no `/Type`), an ICC profile (an
+//!    object an `[/ICCBased n 0 R]` array references, with `/N` and no
+//!    `/Type` or `/Subtype`), or the XMP packet (an object a `/Metadata`
+//!    key references, `/Type /Metadata /Subtype /XML`). The references
+//!    are collected by a first pass. Nothing else is exempt: a stream that
+//!    merely carries `/N` or `/Length1` is tokenised.
+//! 5. Object streams and cross-reference streams are refused by shape,
+//!    whatever their `/Type`: a stream dictionary with `/First`, `/W` or
+//!    `/Index`, or `/Type /ObjStm` or `/Type /XRef`. krilla 0.8.2 with
+//!    this app's settings writes neither (slice 6j1's tests).
+//! 6. The cross-reference table is read: exactly one `xref` table, one
+//!    `trailer` (with no `/Prev` and a `/Root`) and one `startxref`, which
+//!    must point at that `xref` keyword. Every in-use entry must point
+//!    exactly at an `N G obj` header the tokenising pass saw at the top
+//!    level (never inside stream data) with the same number and
+//!    generation, and every indirect reference in the file must name an
+//!    in-use entry, so no reader is sent into repair mode to look for an
+//!    object the check did not see.
 //!
 //! Residual risk (spec §11.1): a parser differential between this check
-//! and a reader, or an action reached through a name not on the list.
+//! and a reader that this list does not foresee.
 
 use std::borrow::Cow;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use miniz_oxide::inflate::{decompress_to_vec_zlib_with_limit, TINFLStatus};
 
 /// Name objects a PDF from the helper may never contain.
-pub const FORBIDDEN_NAMES: [&[u8]; 16] = [
+pub const FORBIDDEN_NAMES: [&[u8]; 31] = [
     b"JavaScript",
     b"JS",
     b"OpenAction",
@@ -66,7 +85,25 @@ pub const FORBIDDEN_NAMES: [&[u8]; 16] = [
     b"XFA",
     b"RichMedia",
     b"Encrypt",
+    b"Annots",
+    b"EF",
+    b"FileAttachment",
+    b"Filespec",
+    b"FS",
+    b"Thread",
+    b"Rendition",
+    b"Movie",
+    b"Sound",
+    b"Screen",
+    b"3D",
+    b"3DD",
+    b"OnInstantiate",
+    b"URL",
+    b"XRefStm",
 ];
+
+/// Dictionary keys a PDF from the helper may never use (`/A`: an action).
+pub const FORBIDDEN_KEYS: [&[u8]; 1] = [b"A"];
 
 /// The most bytes one stream may inflate to.
 pub const MAX_INFLATED_STREAM: usize = 64 << 20;
@@ -90,19 +127,24 @@ pub enum PdfRefusal {
     /// by `endstream`.
     StreamLength,
     /// A stream filter other than none, `FlateDecode` or an image's
-    /// `DCTDecode`.
+    /// `DCTDecode`, or `/DecodeParms` or an external-file key.
     UnsupportedFilter,
     /// A `FlateDecode` stream did not inflate.
     Inflate,
     /// A stream inflated past [`MAX_INFLATED_STREAM`] or the file past
     /// [`MAX_INFLATED_TOTAL`].
     InflateLimit,
-    /// A name on [`FORBIDDEN_NAMES`].
+    /// A name on [`FORBIDDEN_NAMES`] or a key on [`FORBIDDEN_KEYS`].
     ForbiddenName,
-    /// An object stream or a cross-reference stream.
+    /// An object stream or a cross-reference stream (by shape or type).
     CompressedObjects,
     /// An inline image in a content stream.
     InlineImage,
+    /// The cross-reference table, trailer or `startxref` is missing, not
+    /// alone, or does not match the objects the check saw: an entry that
+    /// does not point at a top-level `N G obj` header, a reference to an
+    /// object the table does not list, or a `/Prev` chain.
+    CrossReference,
 }
 
 fn is_ws(c: u8) -> bool {
@@ -143,12 +185,28 @@ enum Tok<'a> {
     Keyword(&'a [u8]),
 }
 
+/// Why a first-pass reference makes an object's stream binary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Role {
+    /// `/FontFile`, `/FontFile2`, `/FontFile3` or `/CIDSet`.
+    Font,
+    /// The second element of `[/ICCBased n 0 R]`.
+    Icc,
+    /// `/Metadata`.
+    Metadata,
+}
+
 struct Lexer<'a> {
     b: &'a [u8],
     pos: usize,
-    /// Objects a font descriptor names as its `/CIDSet` (a bitset) or
-    /// `/FontFile`, `/FontFile2`, `/FontFile3` (a font program).
-    binary_refs: BTreeSet<i64>,
+    /// Where the last token returned by `next` started.
+    tok_start: usize,
+    /// Objects whose streams may be binary, and why.
+    roles: BTreeMap<i64, Role>,
+    /// Two roles for one object.
+    role_conflict: bool,
+    /// Every object an indirect reference names.
+    refs: BTreeSet<i64>,
 }
 
 impl<'a> Lexer<'a> {
@@ -156,7 +214,10 @@ impl<'a> Lexer<'a> {
         Lexer {
             b,
             pos: 0,
-            binary_refs: BTreeSet::new(),
+            tok_start: 0,
+            roles: BTreeMap::new(),
+            role_conflict: false,
+            refs: BTreeSet::new(),
         }
     }
 
@@ -168,6 +229,12 @@ impl<'a> Lexer<'a> {
         let c = self.peek()?;
         self.pos += 1;
         Some(c)
+    }
+
+    fn role(&mut self, object: i64, role: Role) {
+        if *self.roles.entry(object).or_insert(role) != role {
+            self.role_conflict = true;
+        }
     }
 
     fn skip_space(&mut self) {
@@ -230,6 +297,7 @@ impl<'a> Lexer<'a> {
     /// every name anywhere in the file is checked.
     fn next(&mut self) -> Result<Option<Tok<'a>>, PdfRefusal> {
         self.skip_space();
+        self.tok_start = self.pos;
         let Some(c) = self.bump() else {
             return Ok(None);
         };
@@ -314,17 +382,26 @@ fn number(run: &[u8]) -> Option<Tok<'static>> {
     (dots == 1 && rest_digits && body.len() > 1).then_some(Tok::Real)
 }
 
-/// What a stream's dictionary says (only the keys the check needs).
+/// What a dictionary says (only the keys the check needs; most of them
+/// matter only when the dictionary is a stream's or the trailer).
 #[derive(Debug, Default)]
-struct StreamFacts {
+struct DictFacts {
     length: Option<i64>,
     length_indirect: bool,
     filters: Option<Vec<Vec<u8>>>,
     filter_unusual: bool,
     kind: Option<Vec<u8>>,
     subtype: Option<Vec<u8>>,
-    font_lengths: bool,
     icc_n: bool,
+    /// `/First`, `/W` or `/Index`: an object or cross-reference stream's
+    /// shape.
+    compressed_shape: bool,
+    /// `/DecodeParms`, `/DP`, `/F`, `/FFilter` or `/FDecodeParms`.
+    decode_parms: bool,
+    /// `/Prev` (in the trailer: an earlier cross-reference section).
+    prev: bool,
+    /// `/Root`'s object.
+    root: Option<i64>,
 }
 
 enum Val {
@@ -348,7 +425,10 @@ fn value_from<'a>(lx: &mut Lexer<'a>, t: Tok<'a>, depth: usize) -> Result<Val, P
             // `n g R` is an indirect reference.
             let at = lx.pos;
             match (lx.next()?, lx.next()?) {
-                (Some(Tok::Int(_)), Some(Tok::Keyword(b"R"))) => Val::Ref(i),
+                (Some(Tok::Int(_)), Some(Tok::Keyword(b"R"))) => {
+                    lx.refs.insert(i);
+                    Val::Ref(i)
+                }
                 _ => {
                     lx.pos = at;
                     Val::Int(i)
@@ -366,35 +446,47 @@ fn value_from<'a>(lx: &mut Lexer<'a>, t: Tok<'a>, depth: usize) -> Result<Val, P
     })
 }
 
-/// The rest of an array; returns the names among its elements.
+/// The rest of an array; returns the names among its elements, and
+/// records the profile of an `[/ICCBased n 0 R]` colour space.
 fn parse_array(lx: &mut Lexer<'_>, depth: usize) -> Result<Vec<Vec<u8>>, PdfRefusal> {
     if depth > MAX_DEPTH {
         return Err(PdfRefusal::Malformed);
     }
     let mut names = Vec::new();
+    let mut index = 0usize;
+    let mut icc = false;
     loop {
         let t = lx.next()?.ok_or(PdfRefusal::Malformed)?;
         if t == Tok::ArrClose {
             return Ok(names);
         }
-        if let Val::Name(n) = value_from(lx, t, depth)? {
-            names.push(n);
+        match value_from(lx, t, depth)? {
+            Val::Name(n) => {
+                icc = index == 0 && n.as_slice() == b"ICCBased";
+                names.push(n);
+            }
+            Val::Ref(n) if icc && index == 1 => lx.role(n, Role::Icc),
+            _ => {}
         }
+        index += 1;
     }
 }
 
-/// The rest of a dictionary, with the stream facts of its keys.
-fn parse_dict(lx: &mut Lexer<'_>, depth: usize) -> Result<StreamFacts, PdfRefusal> {
+/// The rest of a dictionary, with the facts of its keys.
+fn parse_dict(lx: &mut Lexer<'_>, depth: usize) -> Result<DictFacts, PdfRefusal> {
     if depth > MAX_DEPTH {
         return Err(PdfRefusal::Malformed);
     }
-    let mut f = StreamFacts::default();
+    let mut f = DictFacts::default();
     loop {
         let key = match lx.next()?.ok_or(PdfRefusal::Malformed)? {
             Tok::DictClose => return Ok(f),
             Tok::Name(k) => k.into_owned(),
             _ => return Err(PdfRefusal::Malformed),
         };
+        if FORBIDDEN_KEYS.contains(&key.as_slice()) {
+            return Err(PdfRefusal::ForbiddenName);
+        }
         let v = parse_value(lx, depth)?;
         match (key.as_slice(), v) {
             (b"Length", Val::Int(n)) => f.length = Some(n),
@@ -404,29 +496,44 @@ fn parse_dict(lx: &mut Lexer<'_>, depth: usize) -> Result<StreamFacts, PdfRefusa
             (b"Filter", _) => f.filter_unusual = true,
             (b"Type", Val::Name(n)) => f.kind = Some(n),
             (b"Subtype", Val::Name(n)) => f.subtype = Some(n),
-            (b"Length1" | b"Length2" | b"Length3", _) => f.font_lengths = true,
             (b"N", Val::Int(_) | Val::Ref(_)) => f.icc_n = true,
-            (b"CIDSet" | b"FontFile" | b"FontFile2" | b"FontFile3", Val::Ref(n)) => {
-                lx.binary_refs.insert(n);
+            (b"First" | b"W" | b"Index", _) => f.compressed_shape = true,
+            (b"DecodeParms" | b"DP" | b"F" | b"FFilter" | b"FDecodeParms", _) => {
+                f.decode_parms = true;
             }
+            (b"Prev", _) => f.prev = true,
+            (b"Root", Val::Ref(n)) => f.root = Some(n),
+            (b"CIDSet" | b"FontFile" | b"FontFile2" | b"FontFile3", Val::Ref(n)) => {
+                lx.role(n, Role::Font);
+            }
+            (b"Metadata", Val::Ref(n)) => lx.role(n, Role::Metadata),
             _ => {}
         }
     }
 }
 
-impl StreamFacts {
-    /// Streams whose bytes are binary data, not PDF syntax.
-    fn binary(&self) -> bool {
+impl DictFacts {
+    fn is_image(&self) -> bool {
+        self.kind.as_deref() == Some(b"XObject") && self.subtype.as_deref() == Some(b"Image")
+    }
+
+    /// Streams whose bytes are binary data krilla writes, not PDF syntax:
+    /// image XObjects, and the objects the first pass found referenced as
+    /// a font program, an ICC profile or the XMP packet, each only in the
+    /// shape krilla gives it.
+    fn binary(&self, role: Option<Role>) -> bool {
         let sub = self.subtype.as_deref();
         let kind = self.kind.as_deref();
-        sub == Some(b"Image")
-            || self.font_lengths
-            || matches!(
-                sub,
-                Some(b"Type1C" | b"CIDFontType0C" | b"OpenType" | b"XML")
-            )
-            || kind == Some(b"Metadata")
-            || (self.icc_n && kind.is_none() && sub.is_none())
+        self.is_image()
+            || match role {
+                Some(Role::Font) => {
+                    kind.is_none()
+                        && matches!(sub, None | Some(b"Type1C" | b"CIDFontType0C" | b"OpenType"))
+                }
+                Some(Role::Icc) => kind.is_none() && sub.is_none() && self.icc_n,
+                Some(Role::Metadata) => kind == Some(b"Metadata") && sub == Some(b"XML"),
+                None => false,
+            }
     }
 }
 
@@ -436,16 +543,14 @@ enum Filter {
     Dct,
 }
 
-fn filter(f: &StreamFacts) -> Result<Filter, PdfRefusal> {
-    if f.filter_unusual {
+fn filter(f: &DictFacts) -> Result<Filter, PdfRefusal> {
+    if f.filter_unusual || f.decode_parms {
         return Err(PdfRefusal::UnsupportedFilter);
     }
     match f.filters.as_deref() {
         None | Some([]) => Ok(Filter::None),
         Some([one]) if one.as_slice() == b"FlateDecode" => Ok(Filter::Flate),
-        Some([one]) if one.as_slice() == b"DCTDecode" && f.subtype.as_deref() == Some(b"Image") => {
-            Ok(Filter::Dct)
-        }
+        Some([one]) if one.as_slice() == b"DCTDecode" && f.is_image() => Ok(Filter::Dct),
         _ => Err(PdfRefusal::UnsupportedFilter),
     }
 }
@@ -464,15 +569,15 @@ fn scan_syntax(data: &[u8]) -> Result<(), PdfRefusal> {
     Ok(())
 }
 
-/// The stream whose `stream` keyword the lexer has just read.
+/// The stream whose `stream` keyword the lexer has just read. `role` is
+/// `None` in the first pass, which reads no stream's data.
 fn stream(
     lx: &mut Lexer<'_>,
-    f: &StreamFacts,
+    f: &DictFacts,
     budget: &mut usize,
-    binary_object: bool,
-    scan: bool,
+    role: Option<Option<Role>>,
 ) -> Result<(), PdfRefusal> {
-    if matches!(f.kind.as_deref(), Some(b"ObjStm" | b"XRef")) {
+    if f.compressed_shape || matches!(f.kind.as_deref(), Some(b"ObjStm" | b"XRef")) {
         return Err(PdfRefusal::CompressedObjects);
     }
     // `stream` is followed by CRLF or LF.
@@ -502,10 +607,10 @@ fn stream(
     }
     lx.pos += b"endstream".len();
     let filter = filter(f)?;
-    if !scan {
+    let Some(role) = role else {
         return Ok(());
-    }
-    let binary = f.binary() || binary_object;
+    };
+    let binary = f.binary(role);
     match filter {
         Filter::None => {
             if !binary {
@@ -548,48 +653,95 @@ pub fn check(bytes: &[u8]) -> Result<(), PdfRefusal> {
     {
         return Err(PdfRefusal::NoEof);
     }
-    // The first pass follows the syntax and collects the font
-    // descriptors' binary objects without reading any stream's data; the second checks every
-    // stream, treating those objects' streams as binary.
-    let binary = pass(bytes, None)?;
-    pass(bytes, Some(&binary)).map(|_| ())
+    // The first pass follows the syntax without reading any stream's
+    // data: it collects the objects, the binary streams' roles, every
+    // reference and the cross-reference structure, which is checked
+    // before the second pass inflates and tokenises the streams.
+    let seen = pass(bytes, None)?;
+    if seen.role_conflict {
+        return Err(PdfRefusal::Malformed);
+    }
+    cross_reference(bytes, &seen)?;
+    pass(bytes, Some(&seen.roles)).map(|_| ())
 }
 
-/// One pass over the file's objects; `known` is the first pass's binary
-/// objects (`None`: the first pass, which reads no stream's data).
-fn pass(bytes: &[u8], known: Option<&BTreeSet<i64>>) -> Result<BTreeSet<i64>, PdfRefusal> {
+/// What the first pass saw.
+#[derive(Default)]
+struct Seen {
+    roles: BTreeMap<i64, Role>,
+    role_conflict: bool,
+    refs: BTreeSet<i64>,
+    /// Top-level `N G obj` headers: offset → (number, generation).
+    headers: BTreeMap<usize, (i64, i64)>,
+    /// Offsets of top-level `xref` keywords.
+    xrefs: Vec<usize>,
+    trailers: Vec<DictFacts>,
+    startxrefs: Vec<i64>,
+}
+
+/// One pass over the file's objects; `known` is the first pass's roles
+/// (`None`: the first pass, which reads no stream's data).
+fn pass(bytes: &[u8], known: Option<&BTreeMap<i64, Role>>) -> Result<Seen, PdfRefusal> {
     let mut lx = Lexer::new(bytes);
+    let mut seen = Seen::default();
     let mut budget = MAX_INFLATED_TOTAL;
-    let mut last_dict: Option<StreamFacts> = None;
-    // The last two integers before an `obj` keyword: the object's number.
-    let mut ints: [Option<i64>; 2] = [None, None];
+    let mut last_dict: Option<DictFacts> = None;
+    // The last two integers (and where the first began): an object's
+    // number and generation before `obj`, or a reference before `R`.
+    let mut ints: [Option<(i64, usize)>; 2] = [None, None];
     let mut object: Option<i64> = None;
+    let mut want_trailer = false;
+    let mut want_startxref = false;
     while let Some(t) = lx.next()? {
+        let at = lx.tok_start;
+        if (want_trailer && t != Tok::DictOpen) || (want_startxref && !matches!(t, Tok::Int(_))) {
+            return Err(PdfRefusal::CrossReference);
+        }
         match t {
             Tok::DictOpen => {
-                last_dict = Some(parse_dict(&mut lx, 1)?);
+                let f = parse_dict(&mut lx, 1)?;
                 ints = [None, None];
+                if want_trailer {
+                    want_trailer = false;
+                    seen.trailers.push(f);
+                    last_dict = None;
+                } else {
+                    last_dict = Some(f);
+                }
                 continue;
             }
             Tok::Int(n) => {
-                ints = [ints[1], Some(n)];
-                last_dict = None;
-                continue;
+                if want_startxref {
+                    want_startxref = false;
+                    seen.startxrefs.push(n);
+                } else {
+                    ints = [ints[1], Some((n, at))];
+                    last_dict = None;
+                    continue;
+                }
             }
             Tok::Keyword(b"obj") => {
-                object = match ints {
-                    [Some(n), Some(_)] => Some(n),
+                let (n, start, g) = match ints {
+                    [Some((n, start)), Some((g, _))] => (n, start, g),
                     _ => return Err(PdfRefusal::Malformed),
                 };
+                seen.headers.insert(start, (n, g));
+                object = Some(n);
             }
+            Tok::Keyword(b"R") => match ints {
+                [Some((n, _)), Some(_)] => {
+                    lx.refs.insert(n);
+                }
+                _ => return Err(PdfRefusal::Malformed),
+            },
             Tok::Keyword(b"endobj") => object = None,
+            Tok::Keyword(b"xref") => seen.xrefs.push(at),
+            Tok::Keyword(b"trailer") => want_trailer = true,
+            Tok::Keyword(b"startxref") => want_startxref = true,
             Tok::Keyword(b"stream") => {
                 let f = last_dict.take().ok_or(PdfRefusal::StreamLength)?;
-                let binary_object = match (known, object) {
-                    (Some(k), Some(o)) => k.contains(&o),
-                    _ => false,
-                };
-                stream(&mut lx, &f, &mut budget, binary_object, known.is_some())?;
+                let role = known.map(|k| object.and_then(|o| k.get(&o).copied()));
+                stream(&mut lx, &f, &mut budget, role)?;
             }
             Tok::Keyword(b"endstream") => return Err(PdfRefusal::StreamLength),
             Tok::ArrOpen => {
@@ -601,7 +753,100 @@ fn pass(bytes: &[u8], known: Option<&BTreeSet<i64>>) -> Result<BTreeSet<i64>, Pd
         ints = [None, None];
         last_dict = None;
     }
-    Ok(lx.binary_refs)
+    if want_trailer || want_startxref {
+        return Err(PdfRefusal::CrossReference);
+    }
+    seen.roles = lx.roles;
+    seen.role_conflict = lx.role_conflict;
+    seen.refs = lx.refs;
+    Ok(seen)
+}
+
+/// An unsigned decimal run at `p`, and the position after it.
+fn digits(bytes: &[u8], p: usize, max: usize) -> Option<(u64, usize)> {
+    let run = bytes
+        .get(p..)?
+        .iter()
+        .take(max + 1)
+        .take_while(|c| c.is_ascii_digit())
+        .count();
+    if run == 0 || run > max {
+        return None;
+    }
+    let s = std::str::from_utf8(bytes.get(p..p + run)?).ok()?;
+    Some((s.parse().ok()?, p + run))
+}
+
+/// Step 6: one classic cross-reference table at `startxref`, one trailer
+/// without `/Prev`, every in-use entry at a top-level header of the same
+/// object, and every reference to an in-use object.
+fn cross_reference(bytes: &[u8], seen: &Seen) -> Result<(), PdfRefusal> {
+    let bad = PdfRefusal::CrossReference;
+    let ([xref], [trailer], [startxref]) = (
+        seen.xrefs.as_slice(),
+        seen.trailers.as_slice(),
+        seen.startxrefs.as_slice(),
+    ) else {
+        return Err(bad);
+    };
+    if usize::try_from(*startxref).ok() != Some(*xref) || trailer.prev {
+        return Err(bad);
+    }
+    let root = trailer.root.ok_or(bad)?;
+    let mut p = xref + b"xref".len();
+    let mut in_use = BTreeSet::new();
+    loop {
+        while bytes.get(p).copied().is_some_and(is_ws) {
+            p += 1;
+        }
+        if bytes.get(p..).is_some_and(|r| r.starts_with(b"trailer")) {
+            break;
+        }
+        // A subsection: `first count` on its own line.
+        let (first, q) = digits(bytes, p, 10).ok_or(bad)?;
+        if bytes.get(q) != Some(&b' ') {
+            return Err(bad);
+        }
+        let (count, mut q) = digits(bytes, q + 1, 10).ok_or(bad)?;
+        while bytes.get(q).is_some_and(|c| *c == b' ') {
+            q += 1;
+        }
+        match (bytes.get(q), bytes.get(q + 1)) {
+            (Some(b'\r'), Some(b'\n')) => q += 2,
+            (Some(b'\r' | b'\n'), _) => q += 1,
+            _ => return Err(bad),
+        }
+        p = q;
+        for i in 0..count {
+            // Exactly 20 bytes: `oooooooooo ggggg n` and a two-byte end.
+            let e = bytes.get(p..p + 20).ok_or(bad)?;
+            let (offset, _) = digits(e, 0, 10).filter(|(_, at)| *at == 10).ok_or(bad)?;
+            let (gen, _) = digits(e, 11, 5).filter(|(_, at)| *at == 16).ok_or(bad)?;
+            let ends = matches!(e.get(18..20), Some(b" \r" | b" \n" | b"\r\n"));
+            if e.get(10) != Some(&b' ') || e.get(16) != Some(&b' ') || !ends {
+                return Err(bad);
+            }
+            let number = first.checked_add(i).and_then(|n| i64::try_from(n).ok());
+            match e.get(17) {
+                Some(b'n') => {
+                    let number = number.ok_or(bad)?;
+                    let gen = i64::try_from(gen).map_err(|_| bad)?;
+                    let at = usize::try_from(offset).map_err(|_| bad)?;
+                    if seen.headers.get(&at) != Some(&(number, gen)) {
+                        return Err(bad);
+                    }
+                    in_use.insert(number);
+                }
+                Some(b'f') => {}
+                _ => return Err(bad),
+            }
+            p += 20;
+        }
+    }
+    if !in_use.contains(&root) || !seen.refs.is_subset(&in_use) {
+        return Err(bad);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

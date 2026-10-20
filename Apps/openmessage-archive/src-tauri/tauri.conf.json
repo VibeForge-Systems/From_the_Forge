@@ -63,7 +63,8 @@
     "license": "Apache-2.0",
     "licenseFile": "../LICENSE",
     "resources": {
-      "resources/fonts/*": "fonts/"
+      "resources/fonts/*": "fonts/",
+      "../NOTICE": "NOTICE"
     },
     "icon": [
       "icons/32x32.png",

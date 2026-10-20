@@ -31,7 +31,9 @@ import {
   COPY_CANCEL,
   COPY_DISCLOSURE,
   COPY_EARLIER_CONFIRM,
+  COPY_FACTS_READY,
   COPY_LEGEND,
+  COPY_RESULT_LEGEND,
   COPY_READING,
   COPY_RESULT,
   COPY_RISKY_PREFIX,
@@ -41,6 +43,7 @@ import {
   COPY_START,
   COPY_TITLE,
   COUNTING,
+  COUNTS_READY,
   CSV_DATA_TOOLS_WARNING,
   CSV_PROFILE_LABEL,
   DATE_ALL,
@@ -71,6 +74,7 @@ import {
   REPLACE_CONFIRMED,
   REPLACE_PROMPT_PREFIX,
   REPLACE_PROMPT_SUFFIX,
+  RESULT_LEGEND,
   REVEAL_NONE,
   REVIEW_AGAIN,
   SAVES_AS,
@@ -109,7 +113,11 @@ const nf = new Intl.NumberFormat();
 
 const f = computed(() => x.form);
 const ctx = computed(() => x.context);
-const legend = computed(() => (x.isCopy ? (COPY_LEGEND[x.step] ?? STEP_LEGEND[x.step]) : STEP_LEGEND[x.step]));
+const legend = computed(() => {
+  // The result's legend says how the job ended, not only that it did.
+  if (x.step === 'result' && x.result) return (x.jobCopy ? COPY_RESULT_LEGEND : RESULT_LEGEND)[x.result.kind];
+  return x.isCopy ? (COPY_LEGEND[x.step] ?? STEP_LEGEND[x.step]) : STEP_LEGEND[x.step];
+});
 const dialogTitle = computed(() => (x.isCopy ? COPY_TITLE : DIALOG_TITLE));
 
 const attachmentsModel = computed<AttachmentModeInput>({
@@ -154,6 +162,10 @@ const countStatus = computed(() => {
   if (x.isCopy && (c.kind === 'counting' || c.kind === 'idle')) return COPY_READING;
   if (c.kind === 'counting') return c.rows > 0 ? `${COUNTING} (${nf.format(c.rows)} rows so far)` : COUNTING;
   if (c.kind === 'zone') return PREPARING_ZONE;
+  // Said once the counts arrive, so the consent-critical lines are
+  // announced, not met in silence (review fix).
+  if (c.kind === 'ready') return COUNTS_READY;
+  if (c.kind === 'copyReady') return COPY_FACTS_READY;
   return '';
 });
 
@@ -214,6 +226,31 @@ watch(
     if (open) void focusStep();
   },
 );
+
+// The counting block (and the Cancel button that had focus) goes away
+// when the count ends: focus moves to the Review step's first control
+// rather than falling to <body> (review fix).
+watch(
+  () => x.count.kind,
+  (kind) => {
+    if (x.open && x.step === 'review' && kind !== 'counting' && kind !== 'zone' && kind !== 'idle') void focusStep();
+  },
+);
+
+/** "Keep exporting": the question goes away with its focused button. */
+function keepExporting(): void {
+  x.askCancel = false;
+  void focusStep();
+}
+
+/** "Replace": its buttons give way to a sentence; focus goes to Start. */
+async function confirmReplace(): Promise<void> {
+  x.replaceConfirmed = true;
+  await nextTick();
+  const start = body.value?.querySelector<HTMLButtonElement>('#export-start');
+  if (start && !start.disabled) start.focus({ preventScroll: true });
+  else void focusStep();
+}
 </script>
 
 <template>
@@ -223,7 +260,7 @@ watch(
         <p class="mb-2">{{ ASK_CANCEL }}</p>
         <div class="d-flex flex-wrap gap-2">
           <button type="button" class="btn btn-sm btn-danger" @click="x.cancelExport()">{{ CANCEL_EXPORT }}</button>
-          <button type="button" class="btn btn-sm btn-outline-secondary" @click="x.askCancel = false">
+          <button type="button" class="btn btn-sm btn-outline-secondary" @click="keepExporting()">
             {{ KEEP_EXPORTING }}
           </button>
           <button type="button" class="btn btn-sm btn-outline-secondary" @click="x.continueInBackground()">
@@ -590,6 +627,7 @@ watch(
           <button type="button" class="btn btn-sm btn-outline-secondary" @click="x.reviewAgain()">{{ REVIEW_AGAIN }}</button>
         </div>
         <template v-else-if="x.copyFacts">
+          <p v-if="x.notice" class="alert alert-info py-2" role="status">{{ x.notice }}</p>
           <p class="mb-2">{{ copySizeLine(x.copyFacts.fileBytes) }}</p>
           <p class="alert alert-secondary small mb-2">{{ COPY_DISCLOSURE }}</p>
           <div v-if="x.copyFacts.earlierContent" class="form-check mb-2">
@@ -695,8 +733,15 @@ watch(
           </p>
           <p v-if="x.replaceConfirmed" class="mb-0">{{ REPLACE_CONFIRMED }}</p>
           <div v-else class="d-flex gap-2">
-            <button type="button" class="btn btn-sm btn-danger" @click="x.replaceConfirmed = true">{{ REPLACE }}</button>
-            <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="x.choosing" @click="x.chooseDestination()">
+            <button type="button" class="btn btn-sm btn-danger" :disabled="x.starting" @click="confirmReplace()">
+              {{ REPLACE }}
+            </button>
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-secondary"
+              :disabled="x.choosing || x.starting"
+              @click="x.chooseDestination()"
+            >
               {{ CHOOSE_ANOTHER }}
             </button>
           </div>
@@ -730,12 +775,12 @@ watch(
             v-else-if="!x.destination.targetExists"
             type="button"
             class="btn btn-outline-secondary"
-            :disabled="x.choosing"
+            :disabled="x.choosing || x.starting"
             @click="x.chooseDestination()"
           >
             {{ x.destination.packaging === 'singleFile' ? CHOOSE_ANOTHER : CHOOSE_ANOTHER_FOLDER }}
           </button>
-          <button type="button" class="btn btn-primary" :disabled="!x.canStart" @click="x.start()">
+          <button id="export-start" type="button" class="btn btn-primary" :disabled="!x.canStart" @click="x.start()">
             {{ x.isCopy ? COPY_START : START }}
           </button>
         </div>
@@ -782,9 +827,11 @@ watch(
             </ul>
           </template>
           <template v-else-if="x.result.kind === 'failed'">
-            <p class="alert alert-danger mb-2">{{ x.result.error.message }} {{ failedNote(x.result.stagingRemoved) }}</p>
+            <p class="alert alert-danger mb-2">
+              {{ x.result.error.message }} {{ failedNote(x.result.stagingRemoved, x.jobCopy) }}
+            </p>
           </template>
-          <p v-else class="mb-2">{{ cancelledSentence(x.result.stagingRemoved) }}</p>
+          <p v-else class="mb-2">{{ cancelledSentence(x.result.stagingRemoved, x.jobCopy) }}</p>
         </div>
         <div class="d-flex flex-wrap gap-2">
           <button v-if="x.result.kind === 'finished'" type="button" class="btn btn-outline-secondary" @click="x.showInFolder()">
@@ -804,8 +851,19 @@ watch(
     </div>
     <template #footer>
       <template v-if="x.step === 'what' || x.step === 'format' || x.step === 'options' || x.step === 'review' || x.step === 'destination'">
-        <button v-if="canBack" type="button" class="btn btn-outline-secondary me-auto" @click="back()">{{ BACK }}</button>
-        <button type="button" class="btn btn-outline-secondary" @click="x.close()">{{ CLOSE }}</button>
+        <button
+          v-if="canBack"
+          type="button"
+          class="btn btn-outline-secondary me-auto"
+          :disabled="x.starting"
+          @click="back()"
+        >
+          {{ BACK }}
+        </button>
+        <!-- Through requestClose, so a starting or running job asks first. -->
+        <button type="button" class="btn btn-outline-secondary" :disabled="x.starting" @click="x.requestClose()">
+          {{ CLOSE }}
+        </button>
         <button
           v-if="x.step === 'what' || x.step === 'format' || x.step === 'options'"
           type="button"

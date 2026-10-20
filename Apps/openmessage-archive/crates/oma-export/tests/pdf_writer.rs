@@ -403,12 +403,50 @@ fn a_bundle_is_one_volume_per_conversation_file_cut_by_the_estimate() {
         PdfWriter::new(Box::new(rec.clone()), None),
     )
     .expect("export");
-    let n = rec
-        .sent()
-        .iter()
-        .filter(|s| matches!(s, Sent::End(_)))
-        .count() as u64;
+    let whole = rec.sent();
+    let n = whole.iter().filter(|s| matches!(s, Sent::End(_))).count() as u64;
     assert_eq!(n, files_);
+    // Every item is sent exactly once across the cut volumes, in the same
+    // order as in the uncut export (review finding: nothing checked that a
+    // cut neither drops nor repeats the entry at its boundary).
+    let cut = item_numbers(&sent);
+    let uncut = item_numbers(&whole);
+    assert_eq!(cut.len() as u64, report.writers[0].items);
+    assert_eq!(cut, uncut);
+    let mut unique = cut.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), cut.len(), "an item was sent twice");
+}
+
+/// Each entry's item number piece (`item N`), with the conversation it is
+/// in, in the order sent.
+fn item_numbers(sent: &[Sent]) -> Vec<(String, String)> {
+    let mut conversation = String::new();
+    let mut out = Vec::new();
+    for s in sent {
+        match s {
+            Sent::Conversation(Block::Heading {
+                level: HeadingLevel::Conversation,
+                text,
+                ..
+            }) => {
+                let t = text.as_str();
+                conversation = t
+                    .strip_suffix(")")
+                    .and_then(|t| t.rsplit_once(" (part "))
+                    .map_or(t, |(c, _)| c)
+                    .to_owned();
+            }
+            Sent::Item(Block::Entry { head, .. }) => {
+                if let Some(n) = head.get(1).filter(|h| h.as_str().starts_with("item ")) {
+                    out.push((conversation.clone(), n.as_str().to_owned()));
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 #[test]
@@ -645,8 +683,8 @@ fn the_hostile_catalogue_is_drawn_without_clipping_a_megabyte_or_a_flood() {
 }
 
 /// Bundles for `scripts/oracles/pdf_oracle.py`: every catalogue entry
-/// exported to JSON + PDF (markers and previews on with copies, and
-/// names only with markers off), and the export catalogue's entries with
+/// exported to JSON + PDF (markers and previews on with copies, names
+/// only with markers off, and names only cut into 2-page volumes), and the export catalogue's entries with
 /// both reveals (the positive control), listed in `pdf-oracle.json`.
 #[test]
 #[ignore = "writes the PDF oracle's bundles: OMA_ORACLE_PDF_OUT=<empty dir>"]
@@ -676,11 +714,17 @@ fn write_oracle_pdf() {
             id,
         };
         let mut bundles = Vec::new();
-        let mut kinds = vec![("files", true, false), ("names", false, false)];
+        // `cut`: names only, with a 2-page volume limit, so the oracle
+        // sees volumes cut by the estimate (part 2 and later).
+        let mut kinds = vec![
+            ("files", true, false, false),
+            ("names", false, false, false),
+            ("cut", false, false, true),
+        ];
         if doc.export.is_some() {
-            kinds.push(("revealed", true, true));
+            kinds.push(("revealed", true, true, false));
         }
-        for (kind, markers, reveal) in kinds {
+        for (kind, markers, reveal, cut) in kinds {
             let dest = out.join(&doc.name).join(kind);
             std::fs::create_dir_all(&dest).expect("dest");
             let tweak = |o: &mut ExportOptions| {
@@ -698,6 +742,11 @@ fn write_oracle_pdf() {
             };
             let pdf: Box<dyn ExportWriter> = if markers {
                 Box::new(pdf_writer(Some(Box::new(FakeSource::default()))))
+            } else if cut {
+                Box::new(pdf_writer(None).with_limits(VolumeLimits {
+                    pages: 2,
+                    bytes: 40 << 20,
+                }))
             } else {
                 Box::new(pdf_writer(None))
             };

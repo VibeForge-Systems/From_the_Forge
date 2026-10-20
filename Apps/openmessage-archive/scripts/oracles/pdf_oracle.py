@@ -16,7 +16,7 @@ with poppler-utils installed):
 
 `pdf-oracle.json` lists, per entry, a `files` bundle (copies, previews and
 the hidden-character markers on), a `names` bundle (names only, markers
-off) and, for the export catalogue's entries, a `revealed` bundle (both
+off), a `cut` bundle (names only, cut into 2-page volumes) and, for the export catalogue's entries, a `revealed` bundle (both
 reveals: the positive control). Per bundle:
 
 - every `SHA256SUMS` line verifies;
@@ -27,13 +27,20 @@ reveals: the positive control). Per bundle:
   generic document title (D112: "Messages export — conversation N" or
   "... messages in no conversation", with ", part K" after the first
   volume), a structure tree with `/MarkInfo /Marked true` (tagged; no
-  PDF/UA claim), every font embedded, and no forbidden name (JavaScript,
-  actions, launch, URI, embedded files, forms, rich media) as a key or a
-  name value in any object;
+  PDF/UA claim), every font embedded, an outline entry per day under
+  the conversation's entry, and none of the active or external
+  constructs the spec (5.6) says are never present: this oracle's own
+  list, by category (actions of any kind, scripts, annotations, file
+  attachments and file specifications, forms, external links and
+  media, 3D, encryption), not a copy of the Rust check's list, as a key
+  or a name value in any object reachable from the trailer; and pypdf
+  finds no compressed object (object stream) and no `/Prev` or
+  `/XRefStm` in the trailer;
 - completeness and order: the text of a file's volumes (pdftotext, after
   removing white space and the bidi embedding marks pdftotext adds)
-  holds `item N` for every item of the JSON file that is not a folded
-  reaction row, in the JSON's order; for items whose recorded text is
+  holds `item N` exactly once for every item of the JSON file that is
+  not a folded reaction row, in the JSON's order (so a volume cut can
+  neither drop nor repeat an entry); for items whose recorded text is
   printable ASCII, that text too, in pdftotext and in pypdf's extraction;
 - masking: no sentinel of the entry's export.json is in any volume's text
   (both tools; U+FFFC, an attachment's place, is drawn as
@@ -44,7 +51,7 @@ reveals: the positive control). Per bundle:
   a bundle whose manifest counts previews has an image in its PDFs.
 
 Floors: 40 bundles, 300 items, 14 sentinels scanned for, 10 found
-revealed. Output is counts and check names only (never content). Run with
+revealed, 5 files cut into more than one volume. Output is counts and check names only (never content). Run with
 `python3 -I`; the standard library plus pypdf.
 """
 import argparse
@@ -65,14 +72,30 @@ FIXTURES = APP / "tests" / "fixtures"
 SENTINEL_KINDS = ("oneTimeCodes", "earlierText", "editText", "subjectHistory", "alternativeText",
                   "unsentAttachmentFiles")
 BIDI_EMBEDDING = {"\u202a", "\u202b", "\u202c"}
-FORBIDDEN = {"/JavaScript", "/JS", "/OpenAction", "/AA", "/Launch", "/URI", "/SubmitForm",
-             "/ImportData", "/GoToR", "/GoToE", "/EmbeddedFile", "/EmbeddedFiles", "/AcroForm",
-             "/XFA", "/RichMedia"}
+# Derived from spec 5.6 ("file attachments, actions and external links are
+# never present") and 5.7, by category, independently of the Rust check.
+NEVER_PRESENT = {
+    # Actions of any kind, and every place an action can be attached.
+    "actions": {"/A", "/AA", "/OpenAction", "/Next", "/S", "/Action"},
+    "scripts": {"/JavaScript", "/JS"},
+    "annotations": {"/Annots", "/Annot", "/Link", "/Popup", "/Widget"},
+    "attachments": {"/EmbeddedFile", "/EmbeddedFiles", "/EF", "/FS", "/Filespec",
+                    "/FileAttachment", "/RF", "/Collection"},
+    "forms": {"/AcroForm", "/XFA", "/SubmitForm", "/ImportData", "/ResetForm", "/Fields"},
+    "external": {"/URI", "/URL", "/Launch", "/GoToR", "/GoToE", "/Thread", "/Threads"},
+    "media": {"/RichMedia", "/Rendition", "/Movie", "/Sound", "/Screen", "/MediaClip"},
+    "3d": {"/3D", "/3DD", "/OnInstantiate"},
+    "encryption": {"/Encrypt"},
+}
+# `/S` and `/Next` also name a structure element's type and an outline
+# item's sibling; they count only inside a dictionary that is an action.
+ACTION_ONLY = {"/S", "/Next"}
 TITLE = "Messages export \u2014 "
 MIN_BUNDLES = 40
 MIN_ITEMS = 300
 MIN_SENTINELS = 14
 MIN_REVEALED = 10
+MIN_CUT = 5
 
 
 class Failures:
@@ -133,7 +156,8 @@ def embedded(reader):
 
 
 def names_in(obj, seen, out):
-    """Every name used as a key or a value in `obj`, following references."""
+    """Every name used as a key or a value in `obj`, following references
+    (`/S` and `/Next` only in a dictionary typed as an action)."""
     if isinstance(obj, IndirectObject):
         key = (obj.idnum, obj.generation)
         if key in seen:
@@ -141,8 +165,10 @@ def names_in(obj, seen, out):
         seen.add(key)
         obj = obj.get_object()
     if isinstance(obj, DictionaryObject):
+        action = obj.get("/Type") == "/Action"
         for k, v in obj.items():
-            out.add(str(k))
+            if str(k) not in ACTION_ONLY or action:
+                out.add(str(k))
             names_in(v, seen, out)
     elif isinstance(obj, ArrayObject):
         for v in obj:
@@ -219,6 +245,8 @@ def check_bundle(name, b, export, fails, counts):
                 want += f", part {part}"
             fails.check(title == want, f"{what}: {stem}-{part} document title")
             fails.check(bool(reader.outline), f"{what}: {stem}-{part} outline")
+            fails.check(any(isinstance(o, list) and o for o in reader.outline),
+                        f"{what}: {stem}-{part} outline entries per day")
             root = reader.trailer["/Root"].get_object()
             fails.check("/StructTreeRoot" in root, f"{what}: {stem}-{part} structure tree")
             mark = root.get("/MarkInfo")
@@ -228,7 +256,11 @@ def check_bundle(name, b, export, fails, counts):
             fails.check(ok and fonts > 0, f"{what}: {stem}-{part} fonts embedded")
             found = set()
             names_in(reader.trailer, set(), found)
-            fails.check(not (found & FORBIDDEN), f"{what}: {stem}-{part} forbidden names")
+            for category, banned in NEVER_PRESENT.items():
+                fails.check(not (found & banned), f"{what}: {stem}-{part} {category} present")
+            fails.check(not reader.xref_objStm, f"{what}: {stem}-{part} object streams")
+            fails.check("/Prev" not in reader.trailer and "/XRefStm" not in reader.trailer,
+                        f"{what}: {stem}-{part} one cross-reference section")
             images += images_in(reader)
             texts.append(normalise(pdftotext(path)))
             pyp.append(normalise("".join(p.extract_text() for p in reader.pages)))
@@ -237,11 +269,17 @@ def check_bundle(name, b, export, fails, counts):
         all_text.extend([text, pytext])
         items = [x for x in jsonl(bundle / "json" / f"{stem}.jsonl")
                  if x["type"] == "item" and x["context"]["foldedInto"] is None]
+        if len(vols) > 1:
+            counts["cut"] += 1
         at = 0
         for x in items:
-            m = re.compile(rf"item{x['n']}(?![0-9])").search(text, at)
+            # An item's own header piece; "Reply to item N" and the like
+            # refer to it and are not counted.
+            pattern = re.compile(rf"(?<!to)item{x['n']}(?![0-9])")
+            m = pattern.search(text, at)
             if fails.check(m is not None, f"{what}: {stem} item {x['n']} in order"):
                 at = m.end()
+            fails.check(len(pattern.findall(text)) == 1, f"{what}: {stem} item {x['n']} once")
             body = plain_ascii(x)
             if body is not None:
                 nb = normalise(body)
@@ -287,7 +325,7 @@ def main():
     fails = Failures()
     fails.check(listing["format"] == "oma-oracle-pdf", "pdf-oracle.json format")
     counts = {"volumes": 0, "items": 0, "texts": 0, "images": 0, "masked": set(),
-              "revealed": set()}
+              "revealed": set(), "cut": 0}
     bundles = 0
     for e in listing["exports"]:
         export = load(FIXTURES / e["catalogue"] / e["export"]) if e["export"] else None
@@ -304,9 +342,11 @@ def main():
     fails.check(len(counts["revealed"]) >= MIN_REVEALED,
                 f"sentinels found with both reveals: {len(counts['revealed'])}")
     fails.check(counts["images"] >= 1, "previews exercised")
+    fails.check(counts["cut"] >= MIN_CUT, f"files cut into volumes: {counts['cut']}")
     print(f"{bundles} bundles, {counts['volumes']} volumes, {counts['items']} items "
           f"({counts['texts']} texts compared), {counts['images']} images, "
-          f"{len(counts['masked'])} sentinels scanned for, {len(counts['revealed'])} found revealed; "
+          f"{len(counts['masked'])} sentinels scanned for, {len(counts['revealed'])} found revealed, "
+          f"{counts['cut']} files cut; "
           f"{fails.checks} checks, {len(fails.items)} failed")
     for f in fails.items[:50]:
         print(f"FAIL {f}")
