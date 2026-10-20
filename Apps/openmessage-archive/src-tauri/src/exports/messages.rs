@@ -3,7 +3,7 @@
 //! name, a zone, an id, a count or content (I6).
 
 use oma_archive::ArchiveError;
-use oma_export::ExportError;
+use oma_export::{ExportError, LimitKind};
 
 use crate::error::{ErrorCode, IpcError};
 use crate::viewer::messages::{self as vm, NotFound};
@@ -114,7 +114,11 @@ pub fn to_ipc(e: &ExportError) -> IpcError {
         ExportError::DestinationChanged => {
             IpcError::new(C::ExportDestinationRefused, DESTINATION_CHANGED)
         }
-        ExportError::HelperOutputRejected => IpcError::new(C::ExportHelperFailed, HELPER_FAILED),
+        ExportError::HelperOutputRejected
+        | ExportError::HelperFailed(_)
+        | ExportError::Limit(LimitKind::FrameTooLarge) => {
+            IpcError::new(C::ExportHelperFailed, HELPER_FAILED)
+        }
         ExportError::Cancelled => IpcError::internal("cancel reported as an error"),
         ExportError::Limit(_) => IpcError::internal("export invariant"),
         // `ExportError` is non-exhaustive.

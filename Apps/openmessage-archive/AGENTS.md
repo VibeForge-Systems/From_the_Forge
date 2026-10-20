@@ -59,7 +59,10 @@ engine; no export UI yet) is built** on `feat/oma-m6-export-engine`
 the TXT, CSV, JSON and HTML writers, the shell's export job, its five
 IPC commands and the export's decode-helper pool. It has run only in a
 Linux container (not on CI, not on Windows). No export can be made from
-the UI until PR B (PDF, XLSX, the Export dialog, slices 6i–6l). The owner
+the UI until PR B (PDF, the Export dialog, slices 6i–6l). PR B's slice
+6i (the export-render helper, without a real backend) is built on
+`feat/oma-m6-export-ui`; **XLSX is deferred** to a follow-up slice after
+2026-10-31 (its writer crate is not yet 14 days old) and stays refused. The owner
 answered M6's Q1–Q4 on 2026-10-19 (Q5 is a lean awaiting confirmation;
 `docs/architecture.md`, "Milestone 6 decisions").
 
@@ -769,6 +772,27 @@ Never hand-edit generated files.
   `src-tauri/tests/log_hygiene.rs` runs every in-process format into a
   folder named by a sentinel; a new export log line or format goes
   through it.
+- **The export-render helper (M6 slice 6i, `oma-export`'s `helper/`,
+  `check/`, `render/`; the shell's `exports/render_helper.rs`).** PDF
+  (and later XLSX) runs only in this binary started with
+  `--oma-export-helper` (`main` dispatches before Tauri, as for the
+  decode helper). Only the shell enables `oma-export`'s `render`
+  feature, and only `render_helper.rs` names `oma_export::render`
+  (`tests/source_rules.rs`); never run a backend in-process. Frames are
+  `helper/frame.rs` only, at most 16 MiB in both directions, the length
+  checked before allocating. `RenderSession` reads replies on its own
+  thread (never read stdout from the caller), and its supervisor kills
+  on the cancel token, a 120 s stalled write and 120 s after
+  `EndVolume`; an export registers `session.kill_handle()` with
+  `render_helper::register_kill` so `Jobs::cancel` kills the helper
+  itself (`Jobs::on_cancel`; hooks run outside the table lock). Output
+  is returned only after `check::check_output` passed (PDF: forbidden
+  names anywhere a name object can be, streams bounded and inflated with
+  `miniz_oxide`; XLSX: always refused until its package check exists);
+  a new output kind needs its check first. The stub backend
+  (`render/stub.rs`) is debug-only and writes counts, never record
+  bytes; add a fault there and a case to `src-tauri/tests/export_helper.rs`
+  together. Helper stderr is counted, never read into a log.
 - **`oma-export` in one place (M6 PR A).** One record model and ledger;
   masking happens in `oma-archive` before any writer sees text; paths
   only from `naming.rs`; on Linux every write relative to the staging

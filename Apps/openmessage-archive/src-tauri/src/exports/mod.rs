@@ -24,6 +24,11 @@
 //!   `start_export` must echo the latest one ([`ExportHost::take_for_start`]).
 //! - **Previews** ([`previews`], slice 6h2): the job's own decode-helper
 //!   pool behind `oma_export`'s preview feed.
+//! - **The export-render helper** ([`render_helper`], slice 6i): the
+//!   `--oma-export-helper` entry, how the app launches it, and its kill
+//!   on the job's cancel path. No format uses it yet: PDF (slice 6j) is
+//!   its first backend, and PDF and XLSX stay refused at the draft with
+//!   `exportUnavailable` until then.
 //! - **Logs** carry kinds, buckets and outcomes only (I6): never a path, a
 //!   name, an id, a zone, a query, an exact count or content.
 
@@ -32,6 +37,7 @@ pub mod dto;
 pub mod input;
 pub mod messages;
 pub mod previews;
+pub mod render_helper;
 #[cfg(test)]
 mod tests;
 pub mod worker;

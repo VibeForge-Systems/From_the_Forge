@@ -75,8 +75,20 @@
 //!   decode-helper renditions, and the checks every rendition passes
 //!   before it is embedded as `data:` or written as a larger preview.
 //!
-//! XLSX and PDF follow in 6i and 6j. Nothing here logs; errors carry kinds
-//! only (I6).
+//! Slice 6i, the export-render helper (spec §5.7, D133):
+//!
+//! - [`helper`]: the frames (bounded at 16 MiB, checked before
+//!   allocating) and the main process's [`helper::RenderSession`] (a
+//!   reader thread, a supervisor that kills on cancel, stalls and the
+//!   120 s reply timeout, and the output check before any byte is
+//!   returned);
+//! - [`check`]: the main process's checks on helper output (PDF);
+//! - `render` (feature `render`, enabled only by the shell): the helper's
+//!   own `serve` loop and, in debug builds, its test backend.
+//!
+//! PDF (slice 6j) is the helper's first real backend; XLSX is deferred
+//! (its writer crate is not yet old enough to pin) and stays refused.
+//! Nothing here logs; errors carry kinds only (I6).
 #![cfg_attr(
     not(test),
     deny(
@@ -88,9 +100,11 @@
 )]
 
 pub mod attach;
+pub mod check;
 pub mod codes;
 pub mod error;
 pub mod fault;
+pub mod helper;
 pub mod hidden;
 pub mod ids;
 pub mod jsonfmt;
@@ -102,6 +116,8 @@ pub mod pipeline;
 pub mod plan;
 pub mod preview;
 pub mod record;
+#[cfg(feature = "render")]
+pub mod render;
 pub mod stage;
 pub mod time;
 mod unicode_tables;
@@ -109,7 +125,9 @@ pub mod words;
 pub mod writer;
 
 pub use codes::{Code, ExportCode, Registry, REGISTRIES, UNRECOGNISED_TOKEN};
-pub use error::{DateRangeRefusal, ExportError, LimitKind, PlanRefusal, ZoneTableRefusal};
+pub use error::{
+    DateRangeRefusal, ExportError, HelperFailure, LimitKind, PlanRefusal, ZoneTableRefusal,
+};
 pub use ids::{IdentifierMode, Ordinal, Ordinals};
 pub use manifest::{write_provenance, ManifestBody, ManifestCounts, ManifestInput};
 pub use map::{

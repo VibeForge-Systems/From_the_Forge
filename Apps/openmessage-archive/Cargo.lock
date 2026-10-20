@@ -2670,6 +2670,7 @@ dependencies = [
  "csv",
  "dunce",
  "getrandom 0.3.4",
+ "miniz_oxide 0.8.9",
  "oma-archive",
  "oma-backup",
  "oma-export",

@@ -79,6 +79,13 @@ getrandom = "=0.3.4"
 # permissive too (docs/dependencies.md).
 csv = "=1.4.0"
 
+# Milestone 6 slice 6i: the main process's check on PDF output from the
+# export-render helper inflates every FlateDecode stream
+# (crates/oma-export/src/check/pdf.rs, spec §5.7). Already locked through
+# png (image, Tauri); MIT OR Zlib OR Apache-2.0. `with-alloc` (the
+# `decompress_to_vec_zlib_with_limit` API) only: no `std`, no `simd`.
+miniz_oxide = { version = "=0.8.9", default-features = false, features = ["with-alloc"] }
+
 oma-fs = { path = "crates/oma-fs" }
 oma-backup = { path = "crates/oma-backup" }
 oma-messages = { path = "crates/oma-messages" }

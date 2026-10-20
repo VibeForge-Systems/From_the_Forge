@@ -929,6 +929,27 @@ dialog:
   error stream is read and thrown away; only its length is logged, as a
   size bucket.
 
+### The export-render helper (slice 6i)
+
+Tested on Linux only (`src-tauri/tests/export_helper.rs`); no export
+uses it yet, because PDF (slice 6j) is its first format and XLSX is
+deferred:
+
+- **PDF pages will be laid out in a separate process**, the app's own
+  binary started for that purpose, one per export. It is given the
+  export's records (already masked, with export-local numbers instead of
+  archive ids by default) and checked image previews through a pipe,
+  never a path, a file name, the archive's id or the destination. It
+  writes nothing to disk; its output comes back through the pipe and is
+  checked by the app before any byte of it is written into the export.
+  It is not a sandbox: it runs as the same user.
+- **Cancelling kills it at once**, and so does a helper that crashes,
+  stops answering for two minutes, or sends anything malformed; the
+  unfinished export is then removed as for any other failure.
+- **Its error output is never kept**: only its length is counted, and a
+  crash inside it prints a location in the source, never the text it was
+  working on.
+
 ## Device identifiers (M2)
 
 The app never stores or keeps these fields from a backup: `Unique

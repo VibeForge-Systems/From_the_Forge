@@ -591,6 +591,27 @@ cargo test -p oma-export --test html -- --nocapture      # prints the RECORD lin
   also runs the held-handle publish test and prints `RECORD
   publish_with_open_handle`; it has not run yet.
 
+### The export-render helper (M6 slice 6i)
+
+```sh
+cargo test -p oma-export --lib -- helper:: render:: check::   # frames, the serve loop, resources, the stub's PDF
+cargo test -p oma-export --test pdf_check                     # the PDF output check: forbidden names, streams, inflate bounds
+cargo test -p openmessage-archive --test export_helper        # the real binary with --oma-export-helper and the stub's faults
+cargo test -p openmessage-archive --lib backups::             # the job table's cancel hooks
+```
+
+- `export_helper.rs` starts the debug binary Cargo built
+  (`CARGO_BIN_EXE_openmessage-archive`) with `--oma-export-helper` and
+  the test backend (`oma_export::render::stub`, debug builds only). Its
+  timeouts are shortened to 2 s through `SessionLimits`, so the whole
+  file runs in about 2 s here. The `/dev/full` case runs on Linux only.
+- No export format uses the helper yet, and no oracle checks its output:
+  the PDF oracles (pypdf, `pdftotext`) arrive with slice 6j.
+- Windows: the helper code was only compiled and linted for
+  `x86_64-pc-windows-msvc` through a scratch harness that includes
+  `helper/`, `check/` and `render/` by path; the process tests run on the
+  Windows CI job only.
+
 ### The bulk generator (M5)
 
 `crates/oma-archive/tests/common/bulk.rs` writes a schema-valid v1 archive

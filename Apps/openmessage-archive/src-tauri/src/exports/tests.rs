@@ -1581,6 +1581,20 @@ fn every_export_code_has_a_sentence() {
         (E::DestinationChanged, C::ExportDestinationRefused),
         (E::HelperOutputRejected, C::ExportHelperFailed),
         (
+            E::HelperFailed(oma_export::HelperFailure::Crashed),
+            C::ExportHelperFailed,
+        ),
+        (
+            E::HelperFailed(oma_export::HelperFailure::Refused(
+                oma_export::helper::HelperErrorCode::Unsupported,
+            )),
+            C::ExportHelperFailed,
+        ),
+        (
+            E::Limit(oma_export::LimitKind::FrameTooLarge),
+            C::ExportHelperFailed,
+        ),
+        (
             E::Archive(oma_archive::ArchiveError::AnchorNotFound),
             C::InvalidInput,
         ),

@@ -1450,6 +1450,24 @@ sentinel floors. The staging, naming and attachment modules compile
 clippy-clean for `x86_64-pc-windows-msvc` through the scratch harness;
 nothing ran on Windows.
 
+### Milestone 6 PR B, slice 6i: the export-render helper (Linux container only)
+
+Run on 2026-10-20 in one Linux container (Ubuntu 24.04.5 LTS, 4 CPUs,
+Rust 1.97.0), on the branch `feat/oma-m6-export-ui`, synthetic inputs
+only:
+
+| What | Result here |
+|---|---|
+| `cargo test --workspace` | 1,555 passed, 22 ignored, 0 failed; 6 min 55 s wall clock, compiling included |
+| `cargo test -p openmessage-archive --test export_helper` (the real binary with `--oma-export-helper`) | 14 passed, in about 2 s; repeated six times, 0 failed |
+| `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all`, `cargo deny check` | Pass |
+| Helper code for `x86_64-pc-windows-msvc` (scratch harness: `helper/`, `check/`, `render/` by path, debug and release) | `cargo clippy -- -D warnings` clean; compiled only, not run |
+
+**Not run, so UNVERIFIED:** anything on Windows (`CREATE_NO_WINDOW`,
+pipe and kill behaviour, the process tests); the helper with a real
+backend (none exists until slice 6j); any PDF opened in a viewer; XLSX
+(deferred). The oracles were not re-run: no writer's output changed.
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI

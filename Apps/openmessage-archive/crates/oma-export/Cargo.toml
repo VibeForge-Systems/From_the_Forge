@@ -16,6 +16,7 @@ publish = false
 csv.workspace = true # the CSV writer, through `Writer::from_writer` only (§5.2, D130)
 dunce.workspace = true # the destination is checked in its canonical form (§8.2, D143)
 getrandom.workspace = true # 128-bit export and staging ids (§7.1, §8.3)
+miniz_oxide.workspace = true # inflates PDF streams in the helper output check (§5.7)
 oma-archive.workspace = true
 oma-fs.workspace = true # sanitize_filename_max, create_new_private, placement (§6.2, §8)
 serde.workspace = true
@@ -32,9 +33,14 @@ rustix.workspace = true
 # Crash points (`fault::point`), compiled to nothing without the feature.
 # Only this crate's own tests enable it (the self dev-dependency below).
 fault-injection = []
+# The export-render helper's own side (`render::serve` and its backends;
+# spec §4.1, §5.7). Enabled only by the shell, whose `--oma-export-helper`
+# entry is the only caller (this crate's source rules check it; the
+# shell's `tests/export_helper.rs` drives it as a process).
+render = []
 
 [dev-dependencies]
-oma-export = { path = ".", features = ["fault-injection"] }
+oma-export = { path = ".", features = ["fault-injection", "render"] }
 # Tests only: the archive's bulk generator (`hooks::bulk_writer`) for the
 # ignored attachment throughput test (`tests/perf_attach.rs`).
 oma-archive = { workspace = true, features = ["fault-injection"] }

@@ -4291,6 +4291,138 @@ only in this Linux container (not on CI, not on Windows).
 - **Housekeeping.** The stray ts-rs `bindings/` folder is removed and
   ignored, and so is `.venv-oracles/`.
 
+### The export-render helper (M6 slice 6i)
+
+Slice 6i opens PR B with the process that PDF layout (slice 6j) and XLSX
+writing will run in (spec §5.7, D133). **No export uses it yet:** PDF
+and XLSX stay refused at the draft with `exportUnavailable`, and the
+helper has no backend that writes a real format. PDF is its first real
+backend (6j). **XLSX is deferred:** its writer crate, rust_xlsxwriter
+0.100.0, was published on 2026-10-17 and the project pins only releases
+at least 14 days old, so it cannot be added before 2026-10-31; 0.99.x is
+rejected (advisories). The XLSX writer is a follow-up slice after that
+date; until then a helper refuses the `Xlsx` backend and the main
+process refuses any XLSX output (`check::check_output` has no XLSX
+check, so it accepts none).
+
+- **The entry.** `main` runs `exports::render_helper::run_export_helper`
+  when the binary is started with exactly `--oma-export-helper`, before
+  Tauri, logging or settings, as it does for the decode helper. The
+  helper installs the payload-free panic hook (`panic_hook::hook`,
+  writing to stderr) and calls `oma_export::render::serve` on stdin and
+  stdout. `render` is behind `oma-export`'s `render` feature, which only
+  the shell enables; a source rule (`crates/oma-export/tests/source_rules.rs`)
+  checks that nothing in the crate outside `src/render/` and nothing in
+  the shell but `exports/render_helper.rs` names it. The helper is
+  started with `CREATE_NO_WINDOW` on Windows. **It is not an OS
+  sandbox:** it runs as the same user.
+- **Frames** (`oma_export::helper::frame`). `"OMXF" | kind | len u32 |
+  payload` in both directions, `len` at most 16 MiB and checked before
+  anything is allocated: an oversized header is
+  `Limit(FrameTooLarge)` on the host (the helper is killed) and exit
+  code 2 in the helper. Requests: `Begin` (protocol version, backend,
+  options), `Resource` (one piece of a resource: `slot | total | offset
+  | bytes`, contiguous, at most 16 slots and 64 MiB in all), then
+  `Conversation`, `Item` (records, already masked, as opaque bytes),
+  `Image` (`file_ordinal | rendition`, already checked), and
+  `EndVolume` or `End`. Replies: `Chunk`s (at most 1 MiB each) and one
+  `Done` (pages or rows, `.notdef` characters, wrapped tokens, limited
+  combining runs, total bytes), or one `Error` with a closed code
+  (`Unsupported`, `BadRequest`, `ResourceLimit`, `NoSpace`,
+  `OutputLimit`, `Internal`), after which the helper exits. No archive
+  id, name, path or destination crosses.
+- **The host** (`oma_export::helper::RenderSession`). It spawns the
+  helper and starts three threads: a **reader** that reads replies as
+  they arrive (so a helper that writes early cannot deadlock a worker
+  blocked on a full stdin pipe) and kills the helper itself on an
+  oversized frame, a wrong magic, a reply before `EndVolume`, or a
+  volume over 256 MiB; a **supervisor** that wakes every 10 ms and kills
+  the helper when the cancel token is set, when one write has been
+  blocked for 120 s, or when the output has not arrived within 120 s of
+  `EndVolume`; and a **stderr drain** that keeps only the byte count.
+  A kill closes the pipes, so a blocked call returns, and the session
+  says why: `Cancelled`, `HelperFailed(Spawn | Crashed | Timeout |
+  Protocol | OutputTooLarge | Refused(code))`, `Limit(FrameTooLarge)`,
+  or `NoSpace` for the helper's `Error(NoSpace)`. After a failure every
+  call repeats it. `end_volume` checks that the chunks add up to the
+  `Done` total and runs the output check of the session's kind
+  **before** it returns a byte; `end_volume_into` then writes the checked
+  bytes to a staged file (a full disk there is `NoSpace`). Dropping a
+  session kills and reaps its helper.
+- **Kill from the cancel path.** `Jobs` gains cancel hooks
+  (`Jobs::on_cancel`), run by `Jobs::cancel` and by the exit handler's
+  `cancel_all_and_wait` after the token is set, outside the table's
+  lock. `exports::render_helper::register_kill` puts a session's
+  `HelperKill` there, so a cancel kills the helper at once, even while
+  the worker is blocked writing to it; the supervisor's token poll is
+  the second path.
+- **The PDF check** (`oma_export::check::pdf`, C1.17). A `%PDF-x.y`
+  header and a final `%%EOF`; the whole file tokenised with literal and
+  hexadecimal strings and comments skipped; every name object decoded
+  (`#xx` escapes included) and refused if it is `/JavaScript`, `/JS`,
+  `/OpenAction`, `/AA`, `/Launch`, `/URI`, `/SubmitForm`, `/ImportData`,
+  `/GoToR`, `/GoToE`, `/EmbeddedFile`, `/EmbeddedFiles`, `/AcroForm`,
+  `/XFA`, `/RichMedia` or `/Encrypt`; every stream with a direct
+  `/Length` whose data is followed by `endstream`, filtered by nothing,
+  `FlateDecode` or (an image's) `DCTDecode` only; every Flate stream
+  inflated with `miniz_oxide` (the inflate implementation the spec left
+  open, already in the tree through `png`), at most 64 MiB per stream and
+  512 MiB per file; the inflated syntax of content streams, CMaps and
+  forms tokenised with the same name check, refusing inline images and
+  nested streams. Binary streams (images, font programs, ICC profiles,
+  XMP) are inflated but not tokenised, because a name-shaped byte run in
+  them is not a name object. Object streams and cross-reference streams
+  are refused, so every object is visible to the check.
+- **The test backend** (`oma_export::render::stub`, debug builds only;
+  release builds refuse it like any backend they lack). It writes a
+  minimal PDF of counts per volume (never a byte of a record) and plays
+  one fault per session: a crash, a hang, a panic, a stop in reading, an
+  oversized, early or garbage reply, a wrong `Done` total, `Error(NoSpace)`,
+  a planted `/OpenAction /JavaScript`, stderr noise, or padding to an
+  output of several chunks.
+
+**Deviations from the spec:** fonts are not sent in `Begin` but as
+`Resource` frames (one CJK font is close to the 16 MiB frame bound), in
+pieces; the helper also has `End` for an output after which it exits
+(PDF uses `EndVolume` per volume); `HelperOutputRejected` stays without
+a check kind (the kind is `check::check_output`'s result, used by the
+tests, and the user's sentence is the same); the supervisor also ends a
+write blocked for 120 s (the spec timed only the reply); `/Encrypt` is
+refused besides the spec's list; object and cross-reference streams are
+refused rather than parsed (whether krilla writes them is **UNVERIFIED**;
+if it does, 6j extends the check to tokenise their objects); a whole
+volume is held in the main process's memory (at most 256 MiB) so that it
+is checked before any byte is staged. Not built (XLSX): the temporary
+folder inside staging and the "dies with less than 1 MiB free" `NoSpace`
+classification; the XLSX package check.
+
+**Tests:** `crates/oma-export/src/helper/frame.rs` (frames round-trip in
+their own direction only; an oversized length is refused before the
+payload is read; closed, truncated and garbage pipes; payloads; `Debug`
+without content); `crates/oma-export/src/render/` (PDF and XLSX
+refused; `Begin` first; an oversized request ends the helper without an
+answer; resource pieces contiguous and bounded; the stub's PDF passes
+the check and the planted one does not); `crates/oma-export/tests/pdf_check.rs`
+(every forbidden name refused at the top level, nested, escaped, in an
+inflated content stream and in a form; the same text in strings,
+comments and binary streams accepted; header, end, stream length,
+filters, inflate errors and a 64 MiB inflate bound, object streams,
+inline images, nesting depth); `src-tauri/src/backups/mod.rs` (cancel
+hooks); `src-tauri/tests/export_helper.rs`, the real binary with
+`--oma-export-helper`: a round trip with a resource over one frame,
+records, an image and two volumes; an output of several chunks and one
+over the volume bound; PDF and XLSX refused; a crash and an exit without
+reply; a hang ended by the reply timeout; a blocked write ended by the
+stall timeout; a cancel ending a blocked worker within 2 s through the
+token and through `Jobs::cancel`'s hook; oversized, garbage, early and
+miscounted replies; a planted `/JavaScript` refused before any byte is
+returned; a full disk reported by the helper, met by an injected writer
+and by `/dev/full` (Linux); stderr counted; a panic whose payload never
+reaches stderr; an oversized request refused before it is sent, and by
+the helper itself. Everything ran only in a Linux container; the helper
+code was compiled clippy-clean for `x86_64-pc-windows-msvc` through a
+scratch harness, and nothing ran on Windows.
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`
@@ -4524,7 +4656,7 @@ marked PR B are decided but not built in PR A.
 | D147 | Consent and drift (slice 6b2; compared from slice 6h1) | Exact, cancellable counts; the archive generation in the draft, compared at start and again inside the job's snapshot; a recount under the lock before writing; reveal counts that never understate (folded reactions and, with history, edit text counted); each reveal confirmed against its own count, which must equal the draft's at start | Budgeted "at least" counts | "N messages" is never an understatement |
 | D127 | Destination (lean; slices 6h1, 6h2) | Rust-opened dialogs whose titles name sensitive options; the folder kept in the draft, never crossing IPC, behind an opaque destination token bound to the draft (the latest choice's token starts the export); names generated in Rust; the format's extension enforced; `.oma-export-*` names refused; refusals per I1 plus the archive folder; warnings to confirm, checked again at start; no remembered destination | A name or path from the webview | I4, I3; `settings.json` stays content-free |
 | D136 | Export DTOs (slice 6h1) | A new export walk disjoint from the others but for three shared types; `exportFinished` inside the archive guard's walk, counts only; warnings and providers as closed codes | Reuse the viewer walk | Walks stay disjoint and events small |
-| D131 | XLSX (lean; **PR B**, slice 6i) | rust_xlsxwriter in constant-memory mode in the export-render helper; `quotePrefix`; our own 32,767 UTF-16 limit with continuation rows; temp directory in staging | In-process | A panic on temp-file I/O cannot end the app; exact values |
+| D131 | XLSX (lean; **deferred** to a follow-up slice after 2026-10-31) | rust_xlsxwriter 0.100.0 in constant-memory mode in the export-render helper; `quotePrefix`; our own 32,767 UTF-16 limit with continuation rows; temp directory in staging. Slice 6i built the helper without it: 0.100.0 (published 2026-10-17) is not 14 days old until 2026-10-31, and 0.99.x is rejected (advisories), so XLSX stays refused | In-process | A panic on temp-file I/O cannot end the app; exact values |
 | D133 | Export-render helper (**owner-confirmed Q1, Q2**; **PR B**, slices 6i, 6j) | PDF layout and XLSX writing in `--oma-export-helper`; bounded frames; main-process output checks; PDF with krilla 0.8.2 + parley 0.12.0 (a per-crate BSD-2-Clause exception for `arrayref` only; `rust-version` 1.92); fonts: the base scripts, Noto Sans CJK and Noto Color Emoji, pinned by SHA-256 | In-process; our own PDF writer | Hostile text and full disks cannot end the app |
 | D139 | Job (slice 6h1) | `JobKind::Export` on the archive subject, holding the archive lock until its cleanup ends; its own reader, so damaged or migrating archives are refused; survives the viewer closing; `removingPartial` keeps the slot | A viewer-session task | One job model; excludes writers in every instance |
 

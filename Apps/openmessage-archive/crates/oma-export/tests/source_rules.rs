@@ -145,3 +145,35 @@ fn content_is_never_a_bare_string_in_a_record() {
         }
     }
 }
+
+/// The helper's own side (`render`, spec §4.1, §5.7) is reached only
+/// through the shell's `--oma-export-helper` entry: nothing else in this
+/// crate names it, and in the shell only `exports/render_helper.rs` does,
+/// so the main process never runs a backend in-process.
+#[test]
+fn render_is_reached_only_through_the_helper_entry() {
+    for (p, text) in sources() {
+        let in_render = p.components().any(|c| c.as_os_str() == "render");
+        if !in_render {
+            let c = code(&text);
+            assert!(!c.contains("render::"), "{}: render::", p.display());
+        }
+    }
+    let shell = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src-tauri/src");
+    let mut files = Vec::new();
+    collect(&shell, &mut files);
+    assert!(files.len() > 20, "the shell's sources");
+    let mut entry = 0;
+    for (p, text) in files {
+        let c = code(&text);
+        if c.contains("oma_export::render") {
+            assert!(
+                p.ends_with("render_helper.rs"),
+                "{}: names oma_export::render",
+                p.display()
+            );
+            entry += 1;
+        }
+    }
+    assert_eq!(entry, 1, "the entry calls oma_export::render::serve");
+}

@@ -188,7 +188,14 @@ pub struct ActiveJob {
     pub gate: Option<Arc<Gate>>,
     /// What the gate shows, while the import waits there.
     pub preflight: Option<ImportPreflightDto>,
+    /// Run by [`Jobs::cancel`] and [`Jobs::cancel_all_and_wait`] after the
+    /// token is set: the export kills its render helper here, so a cancel
+    /// never waits for the worker to reach a check (M6 spec §5.7).
+    pub cancel_hooks: Vec<CancelHook>,
 }
+
+/// Something a cancel does at once, besides setting the token.
+pub type CancelHook = Arc<dyn Fn() + Send + Sync>;
 
 /// What the last job for a backup left behind. In memory only.
 ///
@@ -289,6 +296,7 @@ impl Jobs {
                 phase: None,
                 gate: gate.clone(),
                 preflight: None,
+                cancel_hooks: Vec::new(),
             },
         );
         t.completions.insert(job_id.clone(), rx);
@@ -311,11 +319,11 @@ impl Jobs {
     /// Request cancellation. False when the job is unknown or already over.
     /// A job waiting at the gate wakes and declines.
     pub fn cancel(&self, job_id: &str) -> bool {
-        let gate = match self.lock() {
+        let (gate, hooks) = match self.lock() {
             Ok(t) => match t.active.get(job_id) {
                 Some(j) => {
                     j.cancel.cancel();
-                    j.gate.clone()
+                    (j.gate.clone(), j.cancel_hooks.clone())
                 }
                 None => return false,
             },
@@ -323,6 +331,30 @@ impl Jobs {
         };
         if let Some(g) = gate {
             g.wake();
+        }
+        // Outside the table's lock: a hook may block briefly (a kill).
+        for h in hooks {
+            h();
+        }
+        true
+    }
+
+    /// Run `hook` when `job_id` is cancelled (at once if it already is).
+    /// `false` when the job is not running. Hooks are dropped with the
+    /// job.
+    pub fn on_cancel(&self, job_id: &str, hook: CancelHook) -> bool {
+        let run_now = match self.lock() {
+            Ok(mut t) => match t.active.get_mut(job_id) {
+                Some(j) => {
+                    j.cancel_hooks.push(Arc::clone(&hook));
+                    j.cancel.is_cancelled()
+                }
+                None => return false,
+            },
+            Err(_) => return false,
+        };
+        if run_now {
+            hook();
         }
         true
     }
@@ -448,19 +480,29 @@ impl Jobs {
     /// total. A batch in flight finishes or rolls back. Workers are
     /// `std::thread`s, so this cannot deadlock an async runtime.
     pub fn cancel_all_and_wait(&self, budget: Duration) -> bool {
-        let (receivers, gates): (Vec<Receiver<()>>, Vec<Arc<Gate>>) = match self.lock() {
-            Ok(mut t) => {
-                let mut gates = Vec::new();
-                for j in t.active.values() {
-                    j.cancel.cancel();
-                    gates.extend(j.gate.clone());
+        let (receivers, gates, hooks): (Vec<Receiver<()>>, Vec<Arc<Gate>>, Vec<CancelHook>) =
+            match self.lock() {
+                Ok(mut t) => {
+                    let mut gates = Vec::new();
+                    let mut hooks = Vec::new();
+                    for j in t.active.values() {
+                        j.cancel.cancel();
+                        gates.extend(j.gate.clone());
+                        hooks.extend(j.cancel_hooks.iter().cloned());
+                    }
+                    (
+                        t.completions.drain().map(|(_, rx)| rx).collect(),
+                        gates,
+                        hooks,
+                    )
                 }
-                (t.completions.drain().map(|(_, rx)| rx).collect(), gates)
-            }
-            Err(_) => return false,
-        };
+                Err(_) => return false,
+            };
         for g in gates {
             g.wake();
+        }
+        for h in hooks {
+            h();
         }
         let deadline = Instant::now() + budget;
         let mut all = true;
@@ -602,6 +644,41 @@ mod tests {
         assert!(r.cancel.is_cancelled());
         jobs.finish(&r.job_id, LastOutcome::default());
         assert!(!jobs.cancel(&r.job_id));
+    }
+
+    /// The export's helper kill runs on the cancel path itself: once per
+    /// cancel, at once when registered after one, by the exit handler's
+    /// cancel-all too, and never for a job that is not running.
+    #[test]
+    fn cancel_hooks_run_on_cancel_and_cancel_all() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let jobs = Jobs::default();
+        let hits = Arc::new(AtomicU32::new(0));
+        let hook = || -> CancelHook {
+            let h = Arc::clone(&hits);
+            Arc::new(move || {
+                h.fetch_add(1, Ordering::SeqCst);
+            })
+        };
+        assert!(!jobs.on_cancel("job-99", hook()));
+        let r = jobs.reserve("b", JobKind::Validate).expect("reserve");
+        assert!(jobs.on_cancel(&r.job_id, hook()));
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+        assert!(jobs.cancel(&r.job_id));
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        // Registered after the cancel: runs at once.
+        assert!(jobs.on_cancel(&r.job_id, hook()));
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        jobs.finish(&r.job_id, LastOutcome::default());
+        assert!(!jobs.on_cancel(&r.job_id, hook()));
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+
+        let r = jobs.reserve("c", JobKind::Validate).expect("reserve");
+        assert!(jobs.on_cancel(&r.job_id, hook()));
+        let done = r.done;
+        drop(done);
+        assert!(jobs.cancel_all_and_wait(Duration::from_secs(1)));
+        assert_eq!(hits.load(Ordering::SeqCst), 3);
     }
 
     #[test]
