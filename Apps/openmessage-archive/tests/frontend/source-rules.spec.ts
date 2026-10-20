@@ -109,6 +109,15 @@ const ALLOWED_BINDINGS: Record<string, readonly string[]> = {
   'components/BackupStateBadge.vue': ['class="presentation.cls"'],
   'components/CreateArchiveDialog.vue': ['aria-invalid="!!(localError ?? archives.createError)"'],
   'components/EmptyState.vue': ['class="`bi-${icon}`"', "class=\"{ 'oma-empty-compact': compact }\""],
+  // Ids from closed format and warning codes, a boolean state (M6 slice 6k1).
+  'components/ExportDialog.vue': [
+    'aria-describedby="`export-format-${fmt}-note`"',
+    'aria-expanded="x.optionsOpen"',
+    'aria-invalid="dateInvalid"',
+    'id="`export-format-${fmt}-note`"',
+    'id="`export-format-${fmt}`"',
+    'id="`export-warning-${w}`"',
+  ],
   'components/ExtractionReport.vue': ['class="alertClass"', "class=\"{ 'ps-3': row.indent }\""],
   'components/ImportDialog.vue': [
     "class=\"includeRecentlyDeleted ? 'alert alert-warning' : 'text-body-secondary'\"",

@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import type { JobKind, JobPhase } from '@/types';
 import type { ProgressJob } from '@/types/progress';
 
-const props = defineProps<{ job: ProgressJob }>();
+const props = withDefaults(defineProps<{ job: ProgressJob; cancelLabel?: string }>(), { cancelLabel: 'Cancel' });
 const emit = defineEmits<{ cancel: [] }>();
 
 const nf = new Intl.NumberFormat();
@@ -147,7 +147,7 @@ const percent = computed(() => {
           :disabled="job.cancelling"
           @click="emit('cancel')"
         >
-          Cancel
+          {{ cancelLabel }}
         </button>
       </div>
       <div

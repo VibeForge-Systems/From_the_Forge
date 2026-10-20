@@ -50,6 +50,7 @@ import { computed, markRaw, nextTick, ref, shallowRef } from 'vue';
 import { IpcError, ipc } from '@/services/ipc';
 import { devNote } from '@/services/devlog';
 import { playGate } from '@/services/media';
+import { useExports } from './exports';
 import { VIEWER_ERROR_TEXT } from '@/services/viewerText';
 import type { LinkRun } from '@/services/copyText';
 import type {
@@ -1291,6 +1292,9 @@ export const useViewer = defineStore('viewer', () => {
    */
   function closeDialogs(): void {
     dialogEpoch += 1;
+    // The Export dialog too, with its draft (M6 §10); a running export
+    // continues.
+    useExports().closeForPrivacy();
     media.value = null;
     pendingPlay.value = null;
     dateJumpOpen.value = false;

@@ -84,7 +84,7 @@ flowchart LR
 | `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them. From M4: `copy_file_to` streams one listed file's plaintext into a caller's writer, hashing it, under `Limits::attachment_bytes` and per-file stamps | ✔ M2, M3, M4 (slice 4b) |
 | `crates/oma-messages` | Scans and probes the sms.db schema by capability, streams typed records (handles, chats, the joins, messages, attachments, Recently Deleted links) as `Col<T>` values, decodes `attributedBody` with a clean-room typedstream decoder, and produces the aggregate `ExtractionReport`. Persists nothing. From M4: stable `KnownColumn` codes, raw values of unreadable cells (`raw_issues`), `payload_data` on request, the raw association columns, key-only passes and the storage class of text cells | ✔ M3, M4 (slice 4c) |
 | `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep; slices 4e–4j the import; slice 4k the report-only verifier and `open_blob`. Used by the shell since slice 4l. From M5: the viewer reads (`view/`, `sortkey.rs`, phased budgets), search (`search/`) and media sniffing, checks and rendering (`media/`, `blobs::open_range`) | ✔ M4 (slices 4d–4k), M5 (slices 5a–5d) |
-| `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX. Tauri-free and SQLite-free: it reads only through `oma-archive`'s export APIs. Slice 6d ships the record core: the validated plan, the code registry, the column ledger, the canonical record and its mapping, export-local ordinals, the Rust word tables, time zones and local-day bounds, and the hidden-character markers. Slice 6e1 adds the files core: names, staging and publish, leftovers, the manifest and the writer trait. Slice 6e2 adds the attachment copy, the TXT writer and the pipeline (`pipeline::run`); 6f the JSON and CSV writers; 6g the HTML writer; 6h2 the preview feed between the pipeline and the decode-helper pool. Driven by the shell's export job (slice 6h1). PDF and XLSX are PR B: slice 6i adds the export-render helper and the output check, 6j1 the PDF layout (parley, krilla, behind the `render` feature) with the pinned fonts | ✔ M6 PR A (slices 6d–6h2); PR B: 6i, 6j1 built; no export writes PDF until 6j2; XLSX deferred; no Export dialog until 6k |
+| `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX. Tauri-free and SQLite-free: it reads only through `oma-archive`'s export APIs. Slice 6d ships the record core: the validated plan, the code registry, the column ledger, the canonical record and its mapping, export-local ordinals, the Rust word tables, time zones and local-day bounds, and the hidden-character markers. Slice 6e1 adds the files core: names, staging and publish, leftovers, the manifest and the writer trait. Slice 6e2 adds the attachment copy, the TXT writer and the pipeline (`pipeline::run`); 6f the JSON and CSV writers; 6g the HTML writer; 6h2 the preview feed between the pipeline and the decode-helper pool. Driven by the shell's export job (slice 6h1). PDF and XLSX are PR B: slice 6i adds the export-render helper and the output check, 6j1 the PDF layout (parley, krilla, behind the `render` feature) with the pinned fonts, 6j2 the PDF writer | ✔ M6 PR A (slices 6d–6h2); PR B: 6i, 6j1, 6j2 built; XLSX deferred; the Export dialog is built (6k1) but no control opens it until 6k2 |
 | `crates/oma-device` | Detects devices and creates backups behind a platform trait | planned, M7 |
 
 Each library crate can be built and tested without Tauri. The shell only
@@ -4709,6 +4709,127 @@ tagged figure, titles two volumes and refuses a figure without its
 image), `tests/log_hygiene.rs` (HTML + PDF through both real helpers),
 `tests/perf_smoke.rs` (the ignored 80,000-message PDF run), and
 `scripts/oracles/pdf_oracle.py` (below, and `docs/development.md`).
+
+### The Export dialog and its store (M6 slice 6k1)
+
+Slice 6k1 is the first half of the UI row (spec §10): the dialog, its
+store, its words and the zone table. **No control opens it yet**: the
+entry points (thread header, search panel, Archive page), the status chip,
+the Archive page's "Exporting" state and the roadmap's `exports` flip are
+slice 6k2, so the roadmap still shows exports as planned and nothing in
+the UI looks like it exports.
+
+- **`components/ExportDialog.vue`** is mounted once in
+  `ArchiveDialogs.vue`, through `ModalDialog` with the new `guardEscape`
+  prop: Escape reports `close` instead of closing, so a running export
+  asks first ("Cancel it?" with **Cancel export** / **Keep exporting**).
+  The steps are What, Formats, Options, Review, Where to save, Exporting
+  and the result; each is a `fieldset` with a `legend`, and focus moves to
+  the step's first enabled control.
+- **`stores/exports.ts`** owns the form, the draft, the counts, the zone
+  table, the destination, the job and the result, and **persists
+  nothing**. `openExport(context)` builds a fresh form on every open, so
+  both reveal opt-ins (owner Q4), "Keep original file extensions" (Q3b)
+  and the identifiers opt-in (Q5's lean) start off every time; the
+  viewer's `revealEarlierText` is never read. While an export runs,
+  opening the dialog shows its progress (one job at a time).
+- **Defaults.** Attachments follow Q3a through `defaultAttachments`, the
+  same rule as `oma_export::plan::default_attachments` (tested case by
+  case); the user's choice overrides it. Previews are on where they apply
+  (HTML, PDF), history and reactions on, hidden-character markers on,
+  seconds on, 24-hour, LF, the CSV "spreadsheet" profile, A4, and this
+  computer's zone (UTC when the engine names none Rust accepts). No format
+  is pre-selected.
+- **What Rust refuses is shown as such.** XLSX is a disabled checkbox with
+  its reason ("Not available in this version…"), and is never sent.
+  "Group and system events" is a checked, disabled box with the sentence
+  that leaving them out is not available yet; the request always sends
+  `events: true`. An option that does not apply to the chosen formats is
+  disabled and sent off (Rust refuses it on): previews without HTML or PDF,
+  larger previews without previews, kept extensions without copies,
+  identifiers without JSON or CSV; `csvProfile` and `pageSize` are sent
+  only with CSV and PDF.
+- **The draft and its counts.** Entering Review calls `preview_export`
+  and shows "Counting…" (with the rows so far) and **Cancel**, which
+  discards the draft and returns to Options. Channel events are matched to
+  the draft id; events that arrive before the call resolves wait for it.
+  Going back before Review, closing the dialog or a newer count discards
+  the draft (`discard_export_draft`); a late answer of a discarded count is
+  dropped. A `failed` count shows the sentence of its code from the
+  store's table (the channel carries the code only).
+- **The zone table (`services/zoneTable.ts`, D128, D145).** It samples the
+  zone's offset every 6 hours with `Intl.DateTimeFormat(…).formatToParts`
+  (the wall clock read as UTC, minus the instant), bisects every change to
+  the second, starts with the window's start, yields to the event loop
+  every 4,096 samples and stops after 10 s. It refuses (and the dialog
+  then offers **Use UTC instead**) on the time bound, more than 4,096
+  transitions, a name outside `^[A-Za-z0-9_+\-/]{1,64}$`, an offset beyond
+  ±18 h or a zone the engine does not know. The window Rust names is
+  extended by 2 days at its end, because Rust checks it again against
+  "now" a little later. A date range sends the table with a second
+  `preview_export` when the first answers `needsZoneTable`; every other
+  scope builds it after `ready` (from `zoneWindowUtcMs`) and sends it with
+  the first `choose_export_destination` only. A change undone within one
+  6-hour step is not seen; this is the spec's sampling rule, and a test
+  states it. Building the 1900–2028 window for America/New_York took
+  1.2 s in Node here (jsdom, not a webview).
+- **Review** shows the packaging, the counts and estimated size
+  (`reviewLines`), the search scope's kept and excluded matches
+  (`searchLines`: "N matches are left out because they matched only text
+  this export does not include"), the zone sentence with **Use UTC
+  instead**, the fixed plaintext disclosure every time, and the required
+  confirmations: one checkbox per reveal that is on, each with its own
+  exact count, and one for kept extensions. A reveal whose count is 0
+  needs no checkbox and sends 0. **Choose where to save…** is enabled only
+  when every confirmation is ticked.
+- **Where to save** shows the name Rust returns through `SafeText` in
+  `identifier` mode (`safeText.ts`'s `untrustedContent` computes its
+  badges), so a hidden or direction character in a typed name shows as a
+  token; no path ever reaches the webview. Each warning that needs a
+  confirmation is a checkbox (`fatVolume` is a note), the sync warning
+  names the provider from its closed code, the leftovers are an opt-in,
+  and an existing file needs **Replace** ("Replace '<name>'? This cannot
+  be undone.") or **Choose another name** before **Start export**.
+- **Start** sends exactly the counts the preview showed, the confirmed
+  warnings, `replace`, `keepRiskyExtension` and `removeLeftovers`.
+  `start_export` consumes the draft whatever it answers: a stale
+  confirmation or an expired draft counts again with a notice; any other
+  refusal leaves **Review again**.
+- **Progress** reuses `JobProgress` (its phase sentence is announced in
+  its `aria-live` region; the new `cancelLabel` prop says "Cancel
+  export"), with "Cancelling removes the unfinished export". The result
+  says what was exported (`resultSentence`, `resultNotes`: counts, codes
+  and a size bucket), with **Show in folder** and **Done**, and no "Open
+  file". A job that failed with `exportConfirmationStale` offers **Review
+  again**.
+- **The privacy screen** closes the dialog through
+  `useViewer().closeDialogs()`, which calls `closeForPrivacy`: the draft
+  is dropped (Rust's `hide_viewer` discards it too); a running export
+  continues, and its end is announced by a toast.
+
+Not built in 6k1: "Continue in background" and the navbar chip (6k2; until
+then a running export is closed only by the privacy screen, and reopening
+the dialog shows it), the entry points, the "Exporting" state, "Save a
+copy" of one attachment (refused by Rust with `exportUnavailable`), and a
+run of the dialog in a real window (jsdom only; WebKitGTK and WebView2
+support for `Intl.supportedValuesOf('timeZone')` is **UNVERIFIED**, and
+"Another zone" is disabled where it is missing).
+
+Tests: `tests/frontend/export-dialog.spec.ts` (26: the Q3a rule case by
+case, the fresh form, the date arithmetic, the words, the steps and focus,
+XLSX unavailable, the reset on every open, the request Rust validates,
+"Counting…" with Cancel, early events, both reveal confirmations with
+exact counts, kept extensions, the zone table sent once, "Use UTC
+instead", a date range's second preview, the excluded-hits sentence, the
+replace prompt and no path, a hidden character in the name, warnings and
+leftovers, the stale path at start and in the job, progress with Escape
+and cancel, the result, the privacy screen), `tests/frontend/zone-table.spec.ts`
+(14: 6-hour sampling, bisection to the second, several changes, the
+undone-change limit, the time bound, the transition limit, refusals,
+abort, yielding, ICU's Europe/Berlin 2024 and New York 1900–2028), and
+`tests/frontend/dst/zone-table.spec.ts` (in each of the four DST zones,
+the table for this computer's zone against `Date`'s offsets from 2005 to
+2027, including Apia's skipped day).
 
 ### Status and qualifiers (D43)
 

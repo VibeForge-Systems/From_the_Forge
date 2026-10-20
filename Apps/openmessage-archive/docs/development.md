@@ -703,6 +703,24 @@ cargo test -p oma-export --release --test perf_smoke -- --ignored --exact \
   abd531f (no export-render helper) measured 11.5 MB here, so the helper
   and the PDF backend add about 6.25 MB (`docs/architecture.md`).
 
+### The Export dialog and the zone table (M6 slice 6k1)
+
+```sh
+npx vitest run tests/frontend/export-dialog.spec.ts    # the dialog and its store (26 tests)
+npx vitest run tests/frontend/zone-table.spec.ts       # the zone table (14 tests)
+npx vitest run tests/frontend/dst/zone-table.spec.ts   # this computer's zone, once per DST project
+npm run typecheck                                      # the exhaustive word tables
+```
+
+- The tests fake `ipc` and drive the store through the dialog in jsdom;
+  `showModal` is stubbed as in `privacy.spec.ts`. No control opens the
+  dialog until slice 6k2, so it has not been seen in a real window.
+- `zone-table.spec.ts` uses the engine's ICU for Europe/Berlin (2024) and
+  America/New_York (1900–2028, about 1.2 s here, Node 22's ICU); every
+  other case uses an injected offset source. The DST project runs compare
+  the table for this computer's zone with `Date`'s offsets.
+- This slice changes no Rust code, so the Rust test time is unchanged.
+
 ### The bulk generator (M5)
 
 `crates/oma-archive/tests/common/bulk.rs` writes a schema-valid v1 archive

@@ -6,6 +6,8 @@
 // The classes mirror the Rust classifiers that set `ContentText.bidiControls`
 // and `ContentText.invisible` (§3.8), plus C0 and C1 controls.
 
+import type { ContentTextDto, UntrustedText } from '@/types';
+
 /** One run of a rendered value: text, or a visible token for one character. */
 export type SafeRun = { kind: 'text'; text: string } | { kind: 'token'; label: string };
 
@@ -93,4 +95,22 @@ export function visibleRuns(text: string, layout: 'identifier' | 'body'): SafeRu
 /** Whether the string holds anything `visibleRuns` would turn into a token. */
 export function hasHiddenCharacters(text: string): boolean {
   return visibleRuns(text, 'body').some((r) => r.kind === 'token');
+}
+
+/**
+ * A name Rust sent as bare `UntrustedText` (the export's `displayName`),
+ * with the facts `SafeText` shows its badges from, computed here with the
+ * same classifiers. Render it with `SafeText` in `identifier` mode.
+ */
+export function untrustedContent(text: UntrustedText): ContentTextDto {
+  const cps = Array.from(text, (c) => c.codePointAt(0) ?? 0);
+  return {
+    text,
+    lossy: false,
+    storedAsBlob: false,
+    truncated: false,
+    fullUtf16: text.length,
+    bidiControls: cps.some(isBidiControl),
+    invisible: cps.some(isInvisible),
+  };
 }

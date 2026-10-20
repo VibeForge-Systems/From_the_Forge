@@ -63,7 +63,9 @@ the UI until PR B (PDF, the Export dialog, slices 6i–6l). PR B's slice
 6i (the export-render helper), slice 6j1 (its PDF backend: parley
 layout and krilla output with the pinned Noto fonts) and slice 6j2 (the
 PDF writer: PDF is an export format, with volumes, previews and tagged
-structure) are built on `feat/oma-m6-export-ui`; **XLSX is deferred** to a follow-up slice after
+structure) are built on `feat/oma-m6-export-ui`, and so is slice 6k1 (the
+Export dialog, its store, its words and the zone table; no control opens
+it until slice 6k2's entry points); **XLSX is deferred** to a follow-up slice after
 2026-10-31 (its writer crate is not yet 14 days old) and stays refused. The owner
 answered M6's Q1–Q4 on 2026-10-19 (Q5 is a lean awaiting confirmation;
 `docs/architecture.md`, "Milestone 6 decisions").
@@ -838,6 +840,26 @@ Never hand-edit generated files.
   missing or altered font is `HelperFailure::Fonts`. A change to what a
   PDF draws runs `tests/pdf_writer.rs` and `scripts/oracles/pdf_oracle.py`
   (`write_oracle_pdf`); the tags are produced with no PDF/UA claim.
+- **The Export dialog (M6 slice 6k1, `components/ExportDialog.vue`,
+  `stores/exports.ts`, `services/exportText.ts`, `services/zoneTable.ts`).**
+  The store persists nothing and `openExport` builds a fresh form every
+  time: both reveals, kept extensions and identifiers start off on every
+  open; never read the viewer's `revealEarlierText` there. Attachment
+  defaults are `defaultAttachments` (Q3a), which must stay the same rule
+  as `oma_export::plan::default_attachments`. Send every option Rust
+  validates, and an option that does not apply as off (Rust refuses it
+  on); XLSX and "events off" are shown disabled with their reason, never
+  sent. A reveal is confirmed against the preview's own count and
+  `start_export` sends exactly that count. The zone table is built only
+  by `zoneTable.ts` (6-hour samples, bisected to the second, 10 s bound)
+  for the window Rust names plus its margin, and goes to Rust once: with
+  a date range's second preview, else with the first destination. The
+  destination's name renders only through `SafeText` (`untrustedContent`);
+  no path reaches the webview. Escape goes through `ModalDialog`'s
+  `guardEscape`, so a running export asks before cancelling, and
+  `useViewer().closeDialogs()` calls `closeForPrivacy`. Words live in
+  `exportText.ts`'s exhaustive tables; new dialog bindings go into the
+  source rule's allowlist.
 - **`oma-export` in one place (M6 PR A).** One record model and ledger;
   masking happens in `oma-archive` before any writer sees text; paths
   only from `naming.rs`; on Linux every write relative to the staging

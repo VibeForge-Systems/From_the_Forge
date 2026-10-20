@@ -1,10 +1,12 @@
 <script setup lang="ts">
 // The archive dialogs, mounted once in App.vue so they open from the
 // Archive page and the Backups page alike, and so the gate shows wherever
-// the user is while an import waits for an answer.
+// the user is while an import waits for an answer. The Export dialog (M6)
+// is mounted here too, so it opens from the viewer and the Archive page.
 import { computed } from 'vue';
 import BackupPasswordDialog from '@/components/BackupPasswordDialog.vue';
 import CreateArchiveDialog from '@/components/CreateArchiveDialog.vue';
+import ExportDialog from '@/components/ExportDialog.vue';
 import ImportDialog from '@/components/ImportDialog.vue';
 import ImportPreflightDialog from '@/components/ImportPreflightDialog.vue';
 import { useArchives } from '@/stores/archives';
@@ -39,4 +41,5 @@ function onPassword(password: string): void {
     @close="archives.closePrompt()"
   />
   <ImportPreflightDialog />
+  <ExportDialog />
 </template>

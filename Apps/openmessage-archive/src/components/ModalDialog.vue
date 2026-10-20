@@ -10,7 +10,10 @@ import { onMounted, ref, useId, watch } from 'vue';
 // a control that was disabled or removed when it was pressed leaves focus
 // on `<body>`, and a control inside another, now closed, dialog cannot be
 // focused.
-const props = defineProps<{ open: boolean; title: string; returnTo?: string | null }>();
+// `guardEscape`: Escape does not close the dialog by itself; it reports
+// `close`, and the parent decides (the Export dialog asks before
+// cancelling a running export).
+const props = defineProps<{ open: boolean; title: string; returnTo?: string | null; guardEscape?: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 
 const dialog = ref<HTMLDialogElement | null>(null);
@@ -66,6 +69,12 @@ function onNativeClose(): void {
   }
 }
 
+function onCancel(event: Event): void {
+  if (!props.guardEscape) return;
+  event.preventDefault();
+  emit('close');
+}
+
 function onBackdropClick(event: MouseEvent): void {
   if (event.target === dialog.value) emit('close');
 }
@@ -77,6 +86,7 @@ function onBackdropClick(event: MouseEvent): void {
     class="oma-dialog p-0"
     :aria-labelledby="titleId"
     @close="onNativeClose"
+    @cancel="onCancel"
     @click="onBackdropClick"
   >
     <div class="modal-content">

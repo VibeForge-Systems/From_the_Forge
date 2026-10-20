@@ -1516,6 +1516,26 @@ viewer or a screen reader, and so how the tagged structure reads (no
 PDF/UA claim); real archives and real photo previews (the scale run used
 a 48 KiB synthetic JPEG and a generated PNG); XLSX (deferred).
 
+### Milestone 6 PR B, slice 6k1: the Export dialog (Linux container, jsdom only)
+
+Run on 2026-10-20 in the same Linux container (Node 22.22.0, Vitest
+4.1.12, jsdom), on `feat/oma-m6-export-ui`, with a faked IPC layer:
+
+| What | Result here |
+|---|---|
+| `npm test` | 735 passed in 57 files (the four DST projects included), about 30 s wall clock |
+| `tests/frontend/export-dialog.spec.ts` | 26 passed: steps and focus, XLSX unavailable, the reset on every open, the Q3a defaults, the request Rust validates, "Counting…" with Cancel, both reveal confirmations with exact counts, the zone table sent once, "Use UTC instead", a date range's second preview, the excluded-hits sentence, warnings, leftovers and the replace prompt, no path held, the stale path, progress with Escape and cancel, the result, the privacy screen |
+| `tests/frontend/zone-table.spec.ts` and `tests/frontend/dst/zone-table.spec.ts` | 14 passed, and 2 in each of the four DST zones: the table agrees with ICU's Europe/Berlin 2024 changes and with `Date`'s offsets from 2005 to 2027, Apia's skipped day included |
+| `npm run typecheck`, `npm run licenses` | Pass |
+| `cargo test --workspace` (no Rust change in this slice) | 1,590 passed, 25 ignored, 0 failed |
+| `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all --check`, `cargo deny check` | Pass |
+
+**Not run, so UNVERIFIED:** the dialog in any real window (no control
+opens it until slice 6k2, so no smoke test or screenshot was taken);
+`Intl.supportedValuesOf('timeZone')` and `formatToParts` in WebKitGTK and
+WebView2; the native save dialog and folder picker; a screen reader
+reading the steps and the progress region; Windows.
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI
