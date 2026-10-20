@@ -19,7 +19,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   },
 }));
 import { ERROR_CODES, IpcError, ipc, toIpcError } from '@/services/ipc';
-import type { SafeId } from '@/types';
+import type { DestinationToken, DraftId, PreviewExportRequest, SafeId } from '@/types';
 
 const PASSWORD = 'synthetic-test-password-sentinel';
 
@@ -352,6 +352,94 @@ describe('viewer wrappers (M5)', () => {
       'messageNotFound',
       'anchorNotFound',
       'attachmentUnavailable',
+    ] as const) {
+      expect(ERROR_CODES).toContain(code);
+    }
+  });
+});
+
+describe('export wrappers (M6)', () => {
+  const SENTINEL = 'synthetic-export-ipc-sentinel';
+  beforeEach(() => {
+    fake.calls.length = 0;
+    fake.respond = () => Promise.resolve(null);
+  });
+
+  it('call the five commands with requests wrapped as specified, and never a path', async () => {
+    const draftId = '0123456789abcdef0123456789abcdef' as DraftId;
+    const request: PreviewExportRequest = {
+      scope: { kind: 'archive', archiveId: 'a1' },
+      formats: ['txt'],
+      options: {
+        attachments: 'none',
+        keepExtensions: false,
+        previews: false,
+        largerPreviews: false,
+        history: false,
+        reactions: true,
+        events: true,
+        revealOneTimeCodes: false,
+        revealEarlierContent: false,
+        hiddenCharacterMarkers: true,
+        seconds: true,
+        includeIdentifiers: false,
+        clock: 'h23',
+        lineEndings: 'lf',
+        zone: 'utc',
+      },
+    };
+    await ipc.previewExport(request, () => undefined);
+    await ipc.chooseExportDestination({ draftId });
+    const confirmations = {
+      warnings: [],
+      replace: false,
+      reveal: null,
+      keepRiskyExtension: false,
+      removeLeftovers: false,
+    };
+    const destinationToken = 'fedcba9876543210fedcba9876543210' as DestinationToken;
+    await ipc.startExport({ draftId, destinationToken, confirmations }, () => undefined);
+    await ipc.discardExportDraft(draftId);
+    await ipc.showExportInFolder('job-3');
+    expect(fake.calls.map(([c]) => c)).toEqual([
+      'preview_export',
+      'choose_export_destination',
+      'start_export',
+      'discard_export_draft',
+      'show_export_in_folder',
+    ]);
+    const args = fake.calls.map(([, a]) => a);
+    expect((args[0] as { request: unknown }).request).toEqual(request);
+    expect(args[1]).toEqual({ request: { draftId } });
+    expect(args[3]).toEqual({ request: { draftId } });
+    expect(args[4]).toEqual({ request: { jobId: 'job-3' } });
+    for (const [, args] of fake.calls) {
+      for (const s of strings(args)) expect(s).not.toMatch(/[\\/]/);
+    }
+  });
+
+  it('never copy a raw rejection, and keep the export codes', async () => {
+    fake.respond = () => Promise.reject(`invalid args \`request\`: "${SENTINEL}" is wrong`);
+    const err = (await ipc
+      .discardExportDraft(SENTINEL as DraftId)
+      .catch((e: unknown) => e)) as IpcError;
+    expect(err.code).toBe('internal');
+    expect(JSON.stringify(err)).not.toContain(SENTINEL);
+    fake.respond = () => Promise.reject({ code: 'exportUnavailable', message: 'Not in this version.' });
+    const unavailable = (await ipc
+      .chooseExportDestination({ draftId: '0'.repeat(32) as DraftId })
+      .catch((e: unknown) => e)) as IpcError;
+    expect(unavailable.code).toBe('exportUnavailable');
+    for (const code of [
+      'exportDestinationRefused',
+      'exportTargetExists',
+      'exportNameRefused',
+      'exportDraftExpired',
+      'exportConfirmationStale',
+      'exportZoneTableStale',
+      'exportWriteFailed',
+      'exportHelperFailed',
+      'exportUnavailable',
     ] as const) {
       expect(ERROR_CODES).toContain(code);
     }

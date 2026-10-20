@@ -18,6 +18,7 @@
 //! | `SQLITE_LIMIT_ATTACHED` 0 and the length limits | yes | yes |
 //! | op budget (progress handler) | yes | no |
 //! | viewer phases: op budget, cancel and deadline together (M5 §3.2) | yes | no |
+//! | export snapshot: one read transaction per job, cancel only (M6 §3.5) | yes | no |
 //! | `locking_mode` | NORMAL | NORMAL |
 //!
 //! No code outside this module may open, copy, hash or map the database or
@@ -79,6 +80,9 @@ struct Budget {
     /// Progress-handler ticks seen in the current viewer phase (for the
     /// `cancel_at_view_tick` test fault).
     phase_ticks: AtomicU64,
+    /// An export snapshot is open ([`ReadConn::exporting`]): its mode is
+    /// fixed, so every other mode refuses until it ends (M6 spec §3.2).
+    exporting: AtomicBool,
 }
 
 impl Budget {
@@ -238,10 +242,16 @@ pub(crate) struct Phase<'a> {
     budget: &'a Budget,
 }
 
-impl Phase<'_> {
+impl<'a> Phase<'a> {
     /// The connection (for statements prepared once per phase; map their
     /// errors with [`Phase::err`]).
     pub(crate) fn conn(&self) -> &Connection {
+        self.conn
+    }
+
+    /// The connection for the phase's whole lifetime: an export snapshot
+    /// keeps its prepared statements for as long as the snapshot lasts.
+    pub(crate) fn connection(&self) -> &'a Connection {
         self.conn
     }
 
@@ -365,6 +375,12 @@ pub(crate) fn create_database_file(dir: &ArchiveDir) -> Result<(), ArchiveError>
     Ok(())
 }
 
+/// Every mode but the export snapshot's refuses while one is open: a
+/// nested mode would toggle the shared [`Budget`] under a statement the
+/// snapshot is still stepping (M6 spec §3.1 item 6, §3.2).
+const NESTED_IN_EXPORT: ArchiveError =
+    ArchiveError::Internal("a read nested in an export snapshot");
+
 impl ReadConn {
     /// The ReadOnly profile. Never writes the database; SQLite may create
     /// the `-shm` (and an empty `-wal`) beside a WAL database it reads.
@@ -399,6 +415,9 @@ impl ReadConn {
         stage: Stage,
         f: impl FnOnce(&Connection) -> rusqlite::Result<T>,
     ) -> Result<T, ArchiveError> {
+        if self.budget.exporting.load(Ordering::Relaxed) {
+            return Err(NESTED_IN_EXPORT);
+        }
         let ops = crate::fault::read_op_budget(ops);
         let ticks = ops / u64::try_from(OPS_PER_TICK).unwrap_or(1000);
         self.budget.tripped.store(false, Ordering::Relaxed);
@@ -430,6 +449,9 @@ impl ReadConn {
         stage: Stage,
         f: impl FnOnce(&Connection) -> rusqlite::Result<T>,
     ) -> Result<T, ArchiveError> {
+        if self.budget.exporting.load(Ordering::Relaxed) {
+            return Err(NESTED_IN_EXPORT);
+        }
         if cancel.is_cancelled() {
             return Err(ArchiveError::Cancelled);
         }
@@ -476,6 +498,9 @@ impl ReadConn {
         deadline: Instant,
         f: impl FnOnce(&Phase<'_>) -> Result<T, ArchiveError>,
     ) -> Result<T, ArchiveError> {
+        if self.budget.exporting.load(Ordering::Relaxed) {
+            return Err(NESTED_IN_EXPORT);
+        }
         if cancel.is_some_and(oma_backup::CancelToken::is_cancelled) {
             return Err(ArchiveError::Cancelled);
         }
@@ -535,7 +560,8 @@ impl ReadConn {
     /// … COMMIT` read transaction, so the call sees one snapshot (M5 spec
     /// §3.4). No read transaction outlives a call, so an import's
     /// `wal_checkpoint(TRUNCATE)` is never held back for longer than one
-    /// call.
+    /// call. An export's call ([`ReadConn::exporting`]) lasts as long as
+    /// its job, which holds the archive's lock.
     pub(crate) fn snapshot<T>(
         &self,
         f: impl FnOnce() -> Result<T, ArchiveError>,
@@ -564,6 +590,94 @@ impl ReadConn {
             (Ok(_), Err(e)) => Err(map(&e)),
             (Err(e), _) => Err(e),
         }
+    }
+
+    /// Run `f`, a whole export job's reads, inside ONE `BEGIN DEFERRED …
+    /// COMMIT` read transaction in the cancellable mode (M6 spec §3.2,
+    /// §3.5): no op budget and no deadline, stopped only by `cancel`
+    /// (checked every [`OPS_PER_TICK`] VM operations, and between
+    /// statements by [`Phase::checkpoint`]). A stop gives `Cancelled`.
+    ///
+    /// The transaction ends when `f` returns, so "no read transaction
+    /// outlives a call" still holds: for an export, the call is the job,
+    /// which holds the archive's lock, so nothing writes the archive while
+    /// it runs and the only cost is holding back an import's
+    /// `wal_checkpoint(TRUNCATE)`. The mode is fixed for the whole
+    /// closure: `budgeted`, `cancellable`, `viewing` and a second
+    /// `exporting` refuse with `Internal` until it ends, so no nested call
+    /// can toggle the shared budget under a statement still stepping.
+    pub(crate) fn exporting<T, E: From<ArchiveError>>(
+        &self,
+        cancel: &oma_backup::CancelToken,
+        f: impl FnOnce(&Phase<'_>) -> Result<T, E>,
+    ) -> Result<T, E> {
+        let budget = &self.budget;
+        if budget.exporting.swap(true, Ordering::Relaxed) {
+            return Err(NESTED_IN_EXPORT.into());
+        }
+        let out = self.exporting_inner(cancel, f);
+        budget.exporting.store(false, Ordering::Relaxed);
+        out
+    }
+
+    fn exporting_inner<T, E: From<ArchiveError>>(
+        &self,
+        cancel: &oma_backup::CancelToken,
+        f: impl FnOnce(&Phase<'_>) -> Result<T, E>,
+    ) -> Result<T, E> {
+        if cancel.is_cancelled() {
+            return Err(ArchiveError::Cancelled.into());
+        }
+        let map = |e: &rusqlite::Error| {
+            if primary_code(e) == Some(SQLITE_INTERRUPT) {
+                ArchiveError::Cancelled
+            } else {
+                ArchiveError::sqlite(Stage::View, e)
+            }
+        };
+        let budget = &self.budget;
+        budget.tripped.store(false, Ordering::Relaxed);
+        budget.cancelled.store(false, Ordering::Relaxed);
+        budget.deadline_hit.store(false, Ordering::Relaxed);
+        budget.active.store(false, Ordering::Relaxed);
+        budget.deadline_on.store(false, Ordering::Relaxed);
+        if let Ok(mut slot) = budget.cancel.lock() {
+            *slot = Some(cancel.clone());
+        }
+        budget.cancellable.store(true, Ordering::Relaxed);
+        let began = self
+            .conn
+            .execute_batch("BEGIN DEFERRED")
+            .map_err(|e| map(&e));
+        let out = match began {
+            Ok(()) => {
+                let out = f(&Phase {
+                    conn: &self.conn,
+                    budget,
+                });
+                // The handler is off before the transaction ends, so a
+                // set token never interrupts the COMMIT or ROLLBACK.
+                budget.cancellable.store(false, Ordering::Relaxed);
+                let end = if out.is_ok() { "COMMIT" } else { "ROLLBACK" };
+                let ended = self.conn.execute_batch(end);
+                if ended.is_err() && !self.conn.is_autocommit() {
+                    // A transaction must never outlive the call.
+                    let _ = self.conn.execute_batch("ROLLBACK");
+                }
+                match (out, ended) {
+                    (Ok(v), Ok(())) => Ok(v),
+                    (Ok(_), Err(e)) => Err(map(&e).into()),
+                    (Err(e), _) => Err(e),
+                }
+            }
+            Err(e) => Err(e.into()),
+        };
+        budget.cancellable.store(false, Ordering::Relaxed);
+        if let Ok(mut slot) = budget.cancel.lock() {
+            *slot = None;
+        }
+        budget.cancelled.store(false, Ordering::Relaxed);
+        out
     }
 
     /// A handle that interrupts this connection's running statement from
@@ -1001,6 +1115,64 @@ mod tests {
             },
         );
         assert!(matches!(e, Err(ArchiveError::QueryTooBroad)), "{e:?}");
+    }
+
+    #[test]
+    fn an_export_snapshot_is_one_transaction_in_a_fixed_cancel_mode() {
+        let (_tmp, r) = reader();
+        let token = oma_backup::CancelToken::new();
+        // Inside: one transaction, no budget (LONG runs whole), and every
+        // other mode refuses.
+        let n = r
+            .exporting(&token, |p| -> Result<i64, ArchiveError> {
+                assert!(!p.conn().is_autocommit());
+                let n = p.sql(|c| c.query_row(LONG, [], |row| row.get::<_, i64>(0)))?;
+                for e in [
+                    r.budgeted(READ_OP_BUDGET, Stage::Read, |c| {
+                        c.query_row("SELECT 1", [], |row| row.get::<_, i64>(0))
+                    })
+                    .expect_err("budgeted"),
+                    r.cancellable(&token, Stage::Read, |c| {
+                        c.query_row("SELECT 1", [], |row| row.get::<_, i64>(0))
+                    })
+                    .expect_err("cancellable"),
+                    r.viewing(ViewBudget::List, None, soon(), |_| Ok(()))
+                        .expect_err("viewing"),
+                    r.exporting(&token, |_| Ok::<_, ArchiveError>(()))
+                        .expect_err("nested export"),
+                ] {
+                    assert!(matches!(e, ArchiveError::Internal(_)), "{e:?}");
+                }
+                Ok(n)
+            })
+            .expect("runs");
+        assert_eq!(n, 2_000_000);
+        assert!(r.conn.is_autocommit(), "the transaction ended");
+        // A cancel from another thread stops a statement inside it.
+        let later = token.clone();
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            later.cancel();
+        });
+        let e = r
+            .exporting(&token, |p| -> Result<i64, ArchiveError> {
+                p.sql(|c| c.query_row(ENDLESS, [], |row| row.get::<_, i64>(0)))
+            })
+            .expect_err("cancelled");
+        t.join().expect("join");
+        assert!(matches!(e, ArchiveError::Cancelled), "{e:?}");
+        assert!(r.conn.is_autocommit(), "rolled back");
+        // Already cancelled: nothing runs. Afterwards every mode works.
+        assert!(matches!(
+            r.exporting(&token, |_| Ok::<_, ArchiveError>(())),
+            Err(ArchiveError::Cancelled)
+        ));
+        let n: i64 = r
+            .budgeted(READ_OP_BUDGET, Stage::Read, |c| {
+                c.query_row("SELECT 7", [], |row| row.get(0))
+            })
+            .expect("budgeted");
+        assert_eq!(n, 7);
     }
 
     #[test]

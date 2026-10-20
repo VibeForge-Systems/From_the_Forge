@@ -1,0 +1,57 @@
+{
+ "corruptStoreFiles": [],
+ "fileCases": [],
+ "format": "oma-export-expectations",
+ "formatVersion": 1,
+ "formulaCases": [],
+ "hostile": [],
+ "membership": {
+  "chats": {
+   "guid:iMessage;-;synthetic-export-hist-1@example.invalid": {
+    "items": 5,
+    "messages": [
+     "guid:SYNTH-EXP-HIST-MSG-0001",
+     "guid:SYNTH-EXP-HIST-MSG-0002",
+     "guid:SYNTH-EXP-HIST-MSG-0003",
+     "guid:SYNTH-EXP-HIST-MSG-0004",
+     "guid:SYNTH-EXP-HIST-MSG-0005"
+    ]
+   }
+  },
+  "noConversation": []
+ },
+ "patches": [],
+ "sentinels": {
+  "alternativeText": [],
+  "earlierText": [
+   "SYNTH-EXP-EARLIER-BEFORE-UNSEND",
+   "SYNTH-EXP-EDIT-BEFORE-UNSEND-HIST",
+   "SYNTH-EXP-H1-PART-0 SYNTH-EXP-EARLIER-BEFORE-UNSEND SYNTH-EXP-H1-PART-2",
+   "SYNTH-EXP-H4-PART-0 SYNTH-EXP-H4-MIDDLE SYNTH-EXP-H4-PART-2",
+   "SYNTH-EXP-H5-PART-0 \ufffc SYNTH-EXP-H5-PART-2"
+  ],
+  "editText": [
+   "SYNTH-EXP-EDIT-BEFORE-UNSEND-HIST"
+  ],
+  "oneTimeCodes": [],
+  "subjectHistory": [
+   "SYNTH-EXP-SUBJECT-BEFORE-UNSEND"
+  ],
+  "unsentAttachmentFiles": [
+   "SYNTH-EXP-UNSENT-FILE-SENTINEL-HIST"
+  ]
+ },
+ "unsentAttachments": [
+  {
+   "attachment": "SYNTH-EXP-HIST-ATT-0001",
+   "sha256": "0161c760e38d8258d9c8a01259d7807a843a08db0df422122c2ab0b11b604720"
+  }
+ ],
+ "visible": [
+  "SYNTH-EXP-HIST-3 edited",
+  "SYNTH-EXP-HIST-NAME-1",
+  "SYNTH-EXP-HIST-NAME-2",
+  "SYNTH-EXP-SUBJECT-NEW-VISIBLE",
+  "SYNTH-EXP-SUBJECT-OLD-VISIBLE"
+ ]
+}

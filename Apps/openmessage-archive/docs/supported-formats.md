@@ -722,6 +722,29 @@ found (question 6). M3 records which optional columns are present and
 derives features from them, labelled "derived" and never mapped to an iOS
 version.
 
+## Export formats (M6)
+
+What the app **writes** (milestone 6, PR A: TXT, CSV, JSON and HTML; PDF
+and XLSX come in PR B). These are the external specifications the writers
+follow; no new fact about sms.db is added here. How each writer applies
+them is in `docs/architecture.md` (slices 6e2, 6f, 6g), and every rule
+below is tested on Linux with synthetic data and independent Python
+oracles (`scripts/oracles/`). Nothing was opened in Excel, LibreOffice or
+a browser.
+
+| Format | Specification | What the writer does |
+|---|---|---|
+| CSV | RFC 4180 (Common Format and MIME Type for CSV Files) | CRLF record ends; every field quoted, quotes doubled; one header row; UTF-8 (with a byte order mark in the spreadsheet profile only). Two profiles: "for spreadsheets" (the default) neutralises any cell a spreadsheet could read as a formula, following the OWASP "CSV Injection" guidance, by prefixing an apostrophe and listing the column in the row; "for data tools" writes values raw except the export's reserved marker character |
+| JSON | RFC 8259 (JSON); RFC 7493 (I-JSON) consulted, not claimed | UTF-8 without a byte order mark, LF. Raw integers that can exceed 2^53 − 1 are written as decimal strings, as I-JSON advises for numbers beyond IEEE 754 double precision. The output is **not** I-JSON: RFC 7493 §2.1 forbids noncharacters even escaped, and message text may hold them. U+2028, U+2029, U+0085, DEL and the other C1 controls are escaped as `\uXXXX` (JSON allows them raw; some readers end a line at them) |
+| JSON Lines | The JSON Lines convention (one JSON value per line, `\n` line ends, UTF-8) | The per-conversation files: a `header` line, then one `item` line per timeline item, each followed by its stored body versions as `version` lines when history is included |
+| JSON Schema | JSON Schema draft 2020-12 | `crates/oma-export/schema/` holds the export's open and strict schemas and the manifest's, each with a URN `$id`, never a URL; a JSON bundle carries copies of the open export schema and the manifest schema |
+| TXT | Our own line grammar (no external standard) | UTF-8 text with LF or CRLF; controls always written as codes, hidden characters as codes by default, so a message cannot fake an item or drive a terminal |
+| HTML | HTML Living Standard; Content Security Policy Level 3 (delivery through `<meta http-equiv>`, hash sources) | Static pages with no script: the CSP `default-src 'none'; img-src data:; style-src 'sha256-…'` as the first element after the charset; every value escaped into text nodes; images only as `data:` URIs of re-encoded previews. Whether each browser honours a `<meta>` CSP from a `file:` page is **UNVERIFIED** |
+
+Spreadsheet limits (Excel's 1,048,576 rows and 32,767 characters per
+cell) apply to XLSX in PR B; a CSV opened in a spreadsheet may exceed
+them, and what a spreadsheet then does is not tested here.
+
 ## Licensing constraints found
 
 | Project | License | Allowed use |

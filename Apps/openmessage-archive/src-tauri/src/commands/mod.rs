@@ -13,6 +13,7 @@
 pub mod archive_location;
 pub mod archives;
 pub mod backups;
+pub mod exports;
 pub mod jobs;
 pub mod settings;
 pub mod system;
@@ -24,6 +25,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use crate::archives::ArchiveEnv;
 use crate::backups::{BackupRegistry, Jobs};
 use crate::error::{IpcError, IpcResult};
+use crate::exports::ExportHost;
 use crate::settings::SettingsStore;
 use crate::viewer::ViewerHost;
 
@@ -42,6 +44,8 @@ pub struct AppState {
     pub archive_env: ArchiveEnv,
     /// The viewer session, if one is open (M5).
     pub viewer: Arc<ViewerHost>,
+    /// The export draft and finished exports' folders (M6).
+    pub exports: Arc<ExportHost>,
 }
 
 impl AppState {
@@ -53,7 +57,24 @@ impl AppState {
             jobs: Arc::new(Jobs::default()),
             archive_env: ArchiveEnv::default(),
             viewer: Arc::new(ViewerHost::default()),
+            exports: Arc::new(ExportHost::default()),
         }
+    }
+
+    /// `close_viewer`: close the session named by `viewer` and discard any
+    /// export draft (M6 §9.2: the privacy controls discard drafts and stop
+    /// their counts). Idle hide closes the viewer through this too.
+    pub fn close_viewer(&self, viewer: u32) -> IpcResult<()> {
+        self.exports.discard_any();
+        self.viewer.close(viewer)
+    }
+
+    /// `hide_viewer`: the privacy screen is up. Any export draft is
+    /// discarded first, whatever the session.
+    pub fn hide_viewer(&self, viewer: u32) -> IpcResult<()> {
+        self.exports.discard_any();
+        let s = self.viewer.get(viewer)?;
+        crate::viewer::hide(&s)
     }
 
     pub(crate) fn settings(&self) -> IpcResult<MutexGuard<'_, SettingsStore>> {

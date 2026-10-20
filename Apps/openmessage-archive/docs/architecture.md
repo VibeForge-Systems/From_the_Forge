@@ -59,7 +59,9 @@ flowchart LR
     Shell --> Backup["oma-backup ✔"]
     Shell --> Messages["oma-messages ✔"]
     Shell --> Archive["oma-archive ✔"]
-    Shell -.-> Export["oma-export (M6)"]
+    Shell --> Export["oma-export (M6 PR A: TXT, CSV, JSON, HTML)"]
+    Shell --> Decode["decode helper processes (M5; export pool M6)"]
+    Shell -.-> Render["export-render helper (M6 PR B: PDF, XLSX)"]
     Shell -.-> Device["oma-device (M7)"]
     Backup --> FS
     Messages --> Backup
@@ -67,7 +69,9 @@ flowchart LR
     Archive --> FS
     Archive --> Backup
     Export --> Archive
+    Decode --> Archive
   end
+  Export -- "staging, no-replace publish" --> OUT[("Export destination")]
   Backup -. read-only .-> SRC[("iPhone backup")]
   Archive --> LIB[("Archive library")]
 ```
@@ -75,12 +79,12 @@ flowchart LR
 | Unit | Responsibility | State |
 |---|---|---|
 | `src/` | Vue 3 UI: views, Pinia stores, the typed IPC client, the shortcut registry, and the capability roadmap | M1, M2 (Backups page), M3 (extraction report), M4 slice 4m (Archive page), M5 slices 5g–5j (the viewer) |
-| `src-tauri/` | Tauri shell. Holds IPC commands, application state, settings persistence, archive-location validation, the backup registry, job table and DTOs, (M3) the report mapping and the panic hook, (M4 slice 4l) the archive commands, the import gate and the import and verify jobs, and (M5 slices 5e, 5f) the viewer session and commands, the `oma-media` protocol handler, the decode helper host and the main window built in Rust. Contains no domain logic. | M1, M2, M3, M4 (slice 4l), M5 (slices 5e, 5f) |
+| `src-tauri/` | Tauri shell. Holds IPC commands, application state, settings persistence, archive-location validation, the backup registry, job table and DTOs, (M3) the report mapping and the panic hook, (M4 slice 4l) the archive commands, the import gate and the import and verify jobs, and (M5 slices 5e, 5f) the viewer session and commands, the `oma-media` protocol handler, the decode helper host and the main window built in Rust, and (M6 slices 6h1, 6h2) the export drafts, destination checks and tokens, the export job and its five commands, and the export's decode-helper pool. Contains no domain logic. | M1, M2, M3, M4 (slice 4l), M5 (slices 5e, 5f), M6 PR A (slices 6h1, 6h2) |
 | `crates/oma-fs` | Filesystem safety: filename sanitization, contained path resolution, and guards for backups, MobileSync, iMazing's default store and cloud sync. From M4: volume facts (`volume`: free space, network/virtualised/FAT detection), the Unix private-permission check (`perm::check_private`), and durable placement (`place`: `fsync_dir`, `create_dir_durable`, `place_noreplace`, `open_nofollow`). From slice 4d: `check_owned_unshared` (the library folder), `rename_dir_noreplace`, `create_new_private` and `total_space` | M1, M4 (slices 4a, 4d) |
 | `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them. From M4: `copy_file_to` streams one listed file's plaintext into a caller's writer, hashing it, under `Limits::attachment_bytes` and per-file stamps | ✔ M2, M3, M4 (slice 4b) |
 | `crates/oma-messages` | Scans and probes the sms.db schema by capability, streams typed records (handles, chats, the joins, messages, attachments, Recently Deleted links) as `Col<T>` values, decodes `attributedBody` with a clean-room typedstream decoder, and produces the aggregate `ExtractionReport`. Persists nothing. From M4: stable `KnownColumn` codes, raw values of unreadable cells (`raw_issues`), `payload_data` on request, the raw association columns, key-only passes and the storage class of text cells | ✔ M3, M4 (slice 4c) |
 | `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep; slices 4e–4j the import; slice 4k the report-only verifier and `open_blob`. Used by the shell since slice 4l. From M5: the viewer reads (`view/`, `sortkey.rs`, phased budgets), search (`search/`) and media sniffing, checks and rendering (`media/`, `blobs::open_range`) | ✔ M4 (slices 4d–4k), M5 (slices 5a–5d) |
-| `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX | planned, M6 |
+| `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX. Tauri-free and SQLite-free: it reads only through `oma-archive`'s export APIs. Slice 6d ships the record core: the validated plan, the code registry, the column ledger, the canonical record and its mapping, export-local ordinals, the Rust word tables, time zones and local-day bounds, and the hidden-character markers. Slice 6e1 adds the files core: names, staging and publish, leftovers, the manifest and the writer trait. Slice 6e2 adds the attachment copy, the TXT writer and the pipeline (`pipeline::run`); 6f the JSON and CSV writers; 6g the HTML writer; 6h2 the preview feed between the pipeline and the decode-helper pool. Driven by the shell's export job (slice 6h1). PDF and XLSX are PR B | ✔ M6 PR A (slices 6d–6h2); PDF and XLSX in PR B (6i, 6j); no Export dialog until 6k |
 | `crates/oma-device` | Detects devices and creates backups behind a platform trait | planned, M7 |
 
 Each library crate can be built and tested without Tauri. The shell only
@@ -2950,6 +2954,1343 @@ checklist. Nothing in the crate or the shell changed.
   QuickTime and WAV only, and the one file played through the scheme got
   one `206` response and then failed for lack of an audio device.
 
+### Exports (M6): what PR A builds
+
+M6's PR A is the export engine without a user interface (spec §18): the
+archive's export reads (slices 6a, 6b1, 6b2), the fixtures and the
+independent oracles (6c), the `oma-export` crate (6d–6g) and the shell's
+job and commands (6h1, 6h2). The sections below describe each slice; in
+short:
+
+- **One record model, one ledger.** `oma-export` maps every timeline
+  item to one canonical record (`record.rs`) from the uncapped assembly
+  layer, with tagged absence and unknown codes kept, and every v1 column
+  has a disposition in `ledger.rs` (D123, D142). Masking and withholding
+  happen in `oma-archive` before a record exists (D125).
+- **Writers** render records only: TXT, JSON (Lines and arrays, with
+  strict and open schemas), CSV (two profiles, default-deny
+  neutralisation) and HTML (a static, CSP-locked template). PDF and XLSX
+  run in the export-render helper in PR B (D131, D133).
+- **Staging and placement.** Everything is written inside the
+  destination: a `.oma-export-<hex>.partial` folder or `.partial-file`,
+  created relative to `O_DIRECTORY | O_NOFOLLOW` handles on Linux, held
+  by a locked marker until after the one no-replace publish rename; a
+  replace happens only for a regular file after the app's confirmation
+  (D126, D143, D144). Nothing is written to a system temporary folder.
+- **The job and its lock.** `JobKind::Export` reserves the archive's
+  subject and holds the archive lock file for the whole job, so imports
+  and verifies in any instance are refused; the job reads through its own
+  reader in one read transaction (`with_export_snapshot`), so `conn.rs`'s
+  rule that no read transaction outlives a call holds with the call being
+  the job (D124, D139).
+- **Helpers.** HTML previews come from the export's own pool of decode
+  helper processes (slice 6h2, D113's isolation); PDF layout and XLSX
+  writing will run in the export-render helper (PR B).
+- **M8 note.** Exports are plaintext outside the app's control; M8's
+  archive encryption will not cover them, and an encrypted export format
+  is an M8 candidate (spec §13).
+
+### Export caps and raw codes (M6 slice 6a)
+
+Slice 6a prepares the assembly layer for exports (M6 spec §3.1, §3.3,
+§3.9). Nothing an export writes exists yet, and the viewer is unchanged.
+
+- **Every cap is a `Caps` field.** The four caps that were hard-coded
+  (`IDENTIFIER_UTF16` for type, name, UTI, group title, address, account
+  and most history values; `BODY_PAGE_UTF16` for versions and decoded edit
+  text; `PREVIEW_UTF16` for the subject, its history and the Genmoji
+  description; `EMOJI_BYTES` for `assoc_emoji`) are now
+  `identifier_utf16`, `version_utf16`, `subject_utf16` and `emoji_bytes`,
+  threaded through `attachments()`, `event()`, `handle()`,
+  `emoji_content` and the details (`detail_row`, `versions`,
+  `edit_entries`, `history`, `attachment_facts`). `Caps::PAGE` keeps M5's
+  values. `Caps::EXPORT` sets every field to its type's maximum. The
+  conversation list's caps (chat names, previews) and the reply quote
+  (`QUOTE_UTF16`) are not part of the assembly an export uses and stay as
+  they were; the export's conversation reads are slice 6b's.
+- **`Caps::PAGE` is pinned.** `tests/export_caps.rs` dumps every viewer
+  read the caps reach (conversation rows, thread pages of both ranges,
+  reply threads, details and reaction histories, with no reveal and with
+  both) over every viewer catalogue entry and scenario, as `Debug` plus the
+  exposed texts, and compares each dump's SHA-256 with the digest the M5
+  code produced at `9883217` before this slice.
+- **A missed cap is never silent.** `AssembledMessage::cap_miss` returns
+  the first `truncated`, `capped` or `more` marker (body, segments, earlier
+  text, attachment values, "N more" attachments, event title, emoji,
+  reaction rows, chips, reply count), or `ExtrasNotLoaded`. It is ordinary
+  code, so it runs in release builds. The reply quote is not checked: it is
+  the viewer's excerpt, and an export references the originator instead.
+- **Raw codes and states** (`view/raw.rs`) are read from the same rows as
+  the view types and returned beside them as `RawCodes`: the item kind,
+  service, edit label and units as `Coded<T> = Result<T, i64>`; `_st`
+  states coded the same way; `is_from_me` as `RawDirection` (`FromMe`,
+  `Received`, `NotRecorded { state }`, `UnknownValue { raw }`);
+  `app_content` and `effect` as `StateBool` (an absent or unreadable
+  column is never `false`); `schedule_type`, `item_type`,
+  `group_action_type`, `total_bytes` and `is_sticker` as `RawInt`; the
+  date as `RawTime`; the association's and the current body's codes; the
+  stored size per attachment. `base()` is now a wrapper over `base_coded()`,
+  which returns them; the viewer drops them.
+- **`ExportItem`** (`view/uncapped.rs`) is one message under `Caps::EXPORT`
+  with its extras loaded and its `RawCodes`. Until slice 6b adds the export
+  snapshot, its only callers are the `fault-injection` hooks
+  (`export_item`, `export_detail`, `export_handle`, with `LowerCaps` to
+  lower a cap in a test). They run in one read transaction under
+  `ReadConn::cancellable` (no op budget), and `export_item` refuses a missed
+  cap with `Internal("value truncated under export caps")` or
+  `Internal("export extras not loaded")`.
+
+Not done in 6a: content `_st` codes this build does not know still read
+`Unreadable` inside `OptContent`, and `RawValue` in the details does the
+same. The detail lists keep their M5 limits (`DETAIL_VERSIONS`,
+`DETAIL_EDIT_ENTRIES`, `REACTION_HISTORY_LIMIT`); slice 6b streams them.
+
+### Export reads (M6 slice 6b1)
+
+Slice 6b1 adds `crates/oma-archive/src/export/`, the only way an export
+reads an archive (M6 spec §3.2, §3.4, §3.5, D124). `oma-export` (slice 6d
+on) never reaches SQLite.
+
+- **The lock.** `Library::hold_for_export(id)` runs `Library::open`'s
+  checks and takes the same `ArchiveLock::acquire`, and returns an
+  `ExportHold` that the job keeps. While it lives, `Library::open` (an
+  import or a verify, in this process or another instance) gets `Locked`,
+  a second hold gets `Locked`, and `Library::list` reports the archive as
+  in use. Viewer readers take no lock and keep reading. Tested on Linux
+  only (`tests/export_reads.rs`); the lock is the M4 one, which CI
+  exercises on Windows.
+- **One snapshot per job.** `ArchiveReader::with_export_snapshot(hold,
+  cancel, f)` refuses a hold of another archive, then runs `f` inside
+  **one** `BEGIN DEFERRED … COMMIT` read transaction in a new
+  `ReadConn::exporting` mode: no op budget and no deadline, stopped only
+  by the cancel token (in the progress handler every 1,000 VM operations,
+  and by `checkpoint()` between statements); a stop is `Cancelled`, never
+  `Damaged`. The transaction ends when `f` returns, so `conn.rs`'s "no read
+  transaction outlives a call" holds with the call being the job. The mode
+  is fixed for the whole closure: `budgeted`, `cancellable`, `viewing` and
+  a nested `exporting` on the same reader refuse with `Internal`, so no
+  nested call can toggle the shared `Budget` under a statement that is
+  still stepping (§3.1 item 6). A test deletes timeline rows and inserts a
+  session from a raw connection inside a snapshot and sees neither until
+  the snapshot ends.
+- **Cursors** (`export/cursor.rs`). `timeline(chat, range)` pages
+  `chat_message_timeline` by keyset over `(sort_key, message_id)`, first
+  the dated range (`sort_key < X'01'`, plus the half-open bounds of a
+  `TimeRange::Dated { from_ns, until_ns }`, the keyset starting at the
+  lower bound so the first batch seeks), then, for `TimeRange::All` only,
+  the undated range (`sort_key >= X'01'`). `unassigned(range)` does the same
+  over `message_sort` for messages with no `chat_message` row (probing
+  `chat_message_by_message`). `by_ids(ids)` walks a given list. Each
+  `next_batch()` reads its rows to the end and puts the statement back
+  (reset) before the fold checks and the pre-measure run, so no statement
+  steps while another runs on the connection (a `fault-injection` hook,
+  `statements_stepping`, checks `sqlite3_stmt_busy` after each call). In a
+  conversation, a reaction row that folds into a timeline item of the same
+  conversation (M5 §3.5 step 3) is returned in `folded` with its target,
+  never as an item. `rewind()` starts over within the same snapshot.
+- **Byte-sized batches** (`export/measure.rs`). Each candidate is measured
+  from stored lengths only (`octet_length` of the current body's
+  `display_text` and `attributed_raw`, plus every version's `display_text`
+  and `summary_raw` at `ExportDepth::WithHistory`). A batch takes at most
+  `BatchLimits::max_ids` (256) messages and at most `max_bytes` (32 MiB)
+  measured; a larger message is a batch of its own. The keyset moves only
+  past what the batch returned. One short statement per candidate, because
+  the archive has no id-list table without a temporary table.
+- **Assembly** (`ExportSnapshot::assemble(ids, reveal, depth)`) runs the
+  viewer's assembly layer under `Caps::EXPORT` outside any conversation
+  (the intrinsic part is the same in every conversation file), with the
+  raw codes, then slice 6a's check (a missed cap or missing extras is
+  refused as `Internal`, never exported). It adds, uncapped:
+  `DetailColumns` (raw `date_edited` and `date_retracted`, the account, the
+  subject, the Recently Deleted listings with raw `delete_*` and
+  `ck_sync_state`), every `ChatMembership` with its raw `join_date`, every
+  `ReactionRow` targeting the message (no `REACTION_HISTORY_LIMIT`), the
+  closed value-history set, `HistoryState` (version and phone-entry counts)
+  and `Derivation` (`derived_by`, the current body's `decoder_version`).
+  `attachment_facts`, `chat_columns` and `handle_columns` read the
+  attachment (`is_outgoing`, `transfer_state`, raw `created_*` and
+  `start_*`), conversation (name, identifier, raw service, flags, every
+  `chat_handle` participant, name history) and handle (address, raw
+  service, `country`) columns, uncapped. GUIDs, `uncanonicalized_id`,
+  `person_centric_id` and session-local rowids are not read (the D141
+  opt-in is slice 6d's); read, delivery and sent state never are (D94).
+- **History** streams one version at a time (`history(m, reveal)`, a
+  `HistoryCursor`): only the version list (ids and ranks) is held, each
+  version's row is read when asked for, every phone edit entry is read (no
+  `DETAIL_VERSIONS` or `DETAIL_EDIT_ENTRIES`), and "text unchanged"
+  compares SHA-256 digests, so one version's text is in memory at a time.
+  Masking is the details' (D115), shared through `detail::version_view`.
+- **Masking.** One-time codes and earlier text follow the export's
+  `Reveal` exactly as the viewer's details do. A subject history value of
+  a message with an unsent part is `ValueHistoryEntry::Withheld` unless
+  earlier content is revealed (§3.8); the other columns are not withheld.
+  The rest of the §3.8 widening (attachments of unsent parts, the
+  plain-column alternative text), the exact preview counts, the dated span,
+  `search_ids` with membership classification, the masking oracle and the
+  hostile-history RSS test are slice 6b2's (next section).
+- **The generation** (`archive_generation()`, `ExportSnapshot::generation`)
+  is the newest session (id, state, resume count), the newest completed
+  session and the highest row id of `message`, `message_body`,
+  `attachment` and `blob`: rows are never deleted (D57), so every import
+  insert moves one, and each is one primary-key seek. It is opaque:
+  compared only, and its `Debug` prints nothing.
+- **Statement reuse.** rusqlite's `prepare_cached` needs its `cache`
+  feature, which pulls in `hashlink`, a crate the workspace does not have;
+  PR A adds no dependency but `csv`. So `src/stmt.rs` is a small
+  statement cache (`StmtCache`, 64 idle statements, the longest idle
+  finalized first): a statement is taken out while used, so a nested use
+  of the same SQL prepares a second one, and put back when its guard
+  drops, after rusqlite has reset it. The assembly layer and the details
+  now take a `&StmtCache` (which derefs to the connection; its own
+  `prepare(&'static str)` shadows `Connection::prepare`). An export
+  snapshot keeps one cache for the whole job; the viewer passes a new one
+  per call site, so it reuses a statement only within that one call, and
+  its results are unchanged (`Caps::PAGE` stays byte-identical,
+  `tests/export_caps.rs`). Measured in the container
+  (debug test build, SQLite at `opt-level = 3`), assembling every timeline
+  item of a 20,000-message bulk archive through a snapshot took 358 µs per
+  message without the cache and 141 µs with it.
+- **Plans.** Every new statement is in `export::plan_statements` and
+  pinned in `tests/query_plans.rs`; `export_statements_stay_on_their_indexes`
+  checks that the timeline batches stay on `chat_message_timeline`, the
+  unassigned batches walk `message_sort` and probe
+  `chat_message_by_message`, nothing sorts in a temporary B-tree, and only
+  the chat id list (`SCAN chat`) and the newest session scan.
+
+### Export previews, search scopes and masking (M6 slice 6b2)
+
+Slice 6b2 completes the export reads in `crates/oma-archive/src/export/`
+(M6 spec §3.6, §3.7, §3.8; D125, D137, D147). Nothing outside
+`oma-archive` changed, so no IPC type changed; the shell's export job is
+slice 6h.
+
+- **Scopes as ids** (`export/scope.rs`). `ExportScopeIds` is
+  `Conversation { chat, range }`, `Archive { range }` (every conversation
+  in id order, then the messages in no conversation) or `Messages(groups)`
+  (a search scope: each `ScopeGroup` names the conversation its messages
+  are written under, `None` for no conversation). One walk visits every
+  timeline row of a scope (each conversation's rows in range, items and
+  folded reactions, and each message in no conversation) through the
+  cursors' unmeasured row batches (4,096 rows, read and reset before the
+  caller sees them). The preview, the job's pre-count and the scope index
+  all use it, so their numbers agree by construction. `Debug` of a scope
+  prints its kind and sizes only.
+- **Exact previews** (`export/preview.rs`). `ArchiveReader::export_preview
+  (scope, opts, cancel, progress)` runs that walk in one read transaction
+  in the export mode (no op budget, no deadline, `Cancelled` on the
+  token), needs no hold, and posts `PreviewProgress { rows }` every 1,024
+  rows and at the end. `ExportSnapshot::precount` runs the same code in
+  the job's snapshot. `ExportPreview` holds counts and sizes only:
+  conversations with a row, timeline rows, distinct messages (items and
+  folded reactions alike, since the pipeline writes a folded row whole; a
+  message in two exported conversations once), folded rows, messages in no
+  conversation, undated rows a dated range leaves out, attachment records
+  (one per message link), the records whose file would be copied and those
+  withheld as attachments of unsent parts, distinct blobs with their total
+  and largest size, the two reveal counts, `text_bytes` after masking (an
+  estimate's input: shown current text, revealed earlier text, and with
+  history every version that would be written; decoded edit text and the
+  alternative text are not counted), `image_previews` (declared image
+  types with a file, for the estimate only), the dated span and the
+  generation. Per distinct message the walk runs a few primary-key
+  statements, never the assembly.
+- **The reveal counts are never understated** (D147). A message counts for
+  one-time codes when **any** of its body versions has a flagged part, and
+  for earlier content when its current body lists an unsent part, or when
+  its current body has no text and another version holds text or a phone
+  edit entry holds edit text (D115's other withheld cases). With history,
+  a message with a phone edit entry holding edit text also counts for
+  one-time codes (its decoded text can carry a code, or be masked whole
+  when its runs are incomplete; counted without decoding). A folded
+  reaction counts like an item (its flags, attachments and files). The
+  job's pre-count recomputes both under the lock and compares each with
+  its own confirmed count (slice 6h1, review fixes).
+- **The dated span** is four index seeks (first and last `sort_key <
+  X'01'` in range, on `chat_message_timeline` for a conversation and on
+  `message_sort` for the archive), or the walk's own minimum and maximum
+  for given messages; reported in Unix milliseconds, the first rounded
+  down and the last up.
+- **The scope index** (`ExportSnapshot::scope_index`) is every message id
+  that is a timeline row of the scope, sorted and distinct;
+  `ScopeIndex::ordinal(id)` is its rank from 1 (§4.9), so ordinals have no
+  gaps. Its `Debug` prints the length only.
+- **Search scopes** (`export/search.rs`). `ExportSnapshot::search_ids(req,
+  cap, progress)` runs a request again inside the snapshot with a cap of
+  up to `EXPORT_SEARCH_CAP` (1,000,000): the viewer's words plans and
+  exact-text scan, refactored so that their work runs in a phase the
+  caller sets up (`words::collect_in`, `scan::run_in`); the viewer still
+  wraps them in its budgeted phases, unchanged. The exact scan keeps its
+  2,000,000-messages-examined bound; a set still over the cap says
+  `capped`. `search_scope(req, set, opts)` classifies the live set or the
+  re-run's set:
+  - a hit is kept only when the request matches text the export writes
+    for it under the export's own reveal and depth (the current body's
+    shown segments, revealed earlier text, and with history every shown
+    version), each shown run checked on its own so a phrase never matches
+    across a withheld range;
+  - exact text matches with `str::contains`; words match term by term
+    (`query::term_expressions`, whose `AND` is the request's expression)
+    against a private in-memory FTS5 table with the archive's tokenizer
+    (`unicode61 remove_diacritics 2`, compared with `v1.sql` by a unit
+    test), one row per shown run;
+  - a hit on its current body with no flagged code is kept after one
+    primary-key probe (nothing in it is masked);
+  - `ExcludedHits` counts the others by the reveal that would include them
+    (codes, earlier content, both, or nothing written, such as an earlier
+    version when history is off); the counts are for Review and the result
+    step, never an output;
+  - kept hits are grouped by the lowest conversation id (M5's `hit.chat`),
+    conversations in id order and "no conversation" last, each group in
+    timeline order. `SearchScope` carries `capped`, `newest_kept` and
+    `coverage_complete` (`true` for words; for exact text, whether the scan
+    examined every message in range).
+
+  **Matching covers code text** (the spec's open question): the
+  full-text index and the exact scan both read the whole displayed text,
+  codes included, and `tests/export_scope.rs` finds a message by the text
+  of its flagged code in both modes. That is why the classification
+  exists. The grouping of 1,000,000 hits holds each hit's sort key in
+  memory (no temporary table); its peak was not measured at that size
+  (the perf baseline below has far fewer hits).
+- **Masking extensions** (`export/mask.rs`, owner Q4, D125), applied in
+  `ExportSnapshot::assemble` before anything leaves the crate and released
+  only by the export's `Reveal` (`earlier_text`, `one_time_code`); the
+  viewer's `revealEarlierText` setting never reaches these reads:
+  - **Attachments of unsent parts.** For a message whose current body
+    lists an unsent part, an attachment keeps its file only when a part of
+    the current body that is not listed as unsent names it (`attachment_guid`
+    equals the attachment's GUID and `part_index` is recorded; the GUID
+    equality is UNVERIFIED, as in M5, so the rule errs towards withholding).
+    `ExportMessage::attachment_access` is `Included`, `Withheld(Unsent)` or
+    `Revealed(Unsent)` per attachment; a withheld one loses `blob` and
+    `stored_bytes` in the item and its raw codes, and
+    `ExportSnapshot::attachment_facts(&ExportMessage)` (which replaces the
+    6b1 id-list form) returns it with `facts.blob = None` and its access,
+    so nothing that follows the record can open, preview or save the
+    file. The declared facts (name, type, sizes) stay, as the viewer shows
+    them. **Settled:** the archive keeps these links across imports, because
+    links are a union and a link once observed is never removed
+    (`import/links.rs`; `tests/links.rs`, `links_follow_rank_in_both_orders`:
+    a link of an older backup stays when a newer one lacks it). No new
+    fixture was needed for that; the export catalogue (slice 6c) adds an
+    import-built case.
+  - **The alternative text** (`ExportMessage::alternative_text`): with
+    `sources_differ = 1`, the plain `text` column when the shown text is the
+    decoded `attributedBody` (uncapped, decoded lossily and marked when it
+    is not UTF-8), or the empty decoded `attributedBody` when the shown text
+    came from the column (D58). Withheld whole, without being read, while
+    the message's earlier text is withheld (an unsent part, or no current
+    text) unless earlier content is revealed, and, separately, when the
+    current body has any flagged code unless codes are revealed.
+  - The subject history of a message with an unsent part (slice 6b1) and
+    D115's own masking are unchanged.
+- **The masking oracle, archive side** (`tests/export_scope.rs`,
+  `no_masked_text_reaches_any_export_read_unless_revealed`) collects every
+  text an export reads (items, revealed earlier text, events, emoji,
+  attachment and conversation values, the alternative text, detail
+  columns, value history, reaction rows, every history version and decoded
+  edit text, attachment facts) and every blob id it can reach. Over the
+  viewer catalogue's `view-main-plain` and `lineages`, no masked sentinel
+  appears without a reveal, the codes stay hidden with only earlier content
+  revealed and the earlier text with only codes revealed, and each appears
+  with both; on a built case it does the same for the alternative text,
+  the subject history and the file of an unsent part. Disabling the
+  attachment withholding, the alternative-text withholding and the
+  membership check together, by hand for this slice, made four of the
+  file's seven tests fail, the oracle among them; there is no permanent
+  mutation build on this side. The export side's permanent
+  `cfg(test_masking_off)` mutation build (§14.1, D146) is **assigned to
+  slice 6j** (PR B, after the last writer, so it covers every format);
+  until then the Python oracles' sentinel floors and positive controls
+  (review fixes, below) keep their masking scans from passing empty.
+- **Memory of a hostile history** (`tests/export_memory.rs`, Linux only).
+  The parent builds one message whose current body and earlier versions
+  hold 16 MiB of text each; a child process (this test binary again)
+  measures it, takes it in a batch of its own and walks its history, and
+  reports `VmHWM`. On every push, 21 versions (336 MiB of text): the child
+  peaked at 72.5 MiB here. The spec's 200 versions (3.2 GiB) are an
+  `#[ignore]` test; its run is recorded in `docs/development.md`.
+- **Plans.** The 16 new statements are pinned in `tests/query_plans.rs`;
+  each is a primary-key or index seek and none sorts in a temporary
+  B-tree.
+
+### Export fixtures and the oracle scaffold (M6 slice 6c)
+
+Slice 6c adds test inputs and independent checks; no shipped code changes.
+
+- **The export catalogue** (`tests/fixtures/export/`, spec §15), written
+  only by `scripts/fixtures/make_synthetic_exports.py`: six plain backups
+  and one two-backup scenario (`history`), with the viewer catalogue's
+  `content.json` (the M4 import model and the M5 viewer model) and the
+  generator's own `export.json`. Two pins, as for the viewer catalogue:
+  the inputs (backups and `hidden-vectors.json`) are frozen; the
+  expectations may be regenerated when a slice settles a rule. The cases
+  are those §15 lists, except that volume is generated at test time and the
+  1 MiB body stays in the viewer catalogue. Codes an import cannot write
+  (an unknown `_st`, unit or item kind) are `patches` applied by tests to
+  a copy of the imported archive; the corrupted store file is likewise
+  made by the test.
+- **The archive-side masking oracle** now also covers this catalogue, by
+  sentinel kind: one-time codes, earlier text, decoded edit text beside an
+  unsent part, the subject history of an unsent message, the alternative
+  text (with a code, with an unsent part) and the file of an unsent part,
+  in a single import and across two imports. The strings `export.json`
+  marks `visible` must be read with no reveal.
+- **The hidden-character vectors** (`hidden-vectors.json`, spec §4.7):
+  strings split into classed pieces (`keep`, `bidi`, `invisible`,
+  `joiner`, `tag`, `vsRun`, `control`, `cr`). "Copy text without invisible
+  characters" keeps exactly the `keep` and `cr` pieces of all 31 vectors
+  (`tests/frontend/hidden-vectors.spec.ts`); the export's classifier
+  (`hidden.rs`, slice 6d) is checked against the same file
+  (`crates/oma-export/tests/hidden_vectors.rs`). `cr` is the one class the
+  two treat differently: the copy keeps a carriage return as layout, the
+  export's text formats mark it as a control.
+- **The independent projection** (`scripts/oracles/project_archive.py`,
+  spec §14.4) reads a read-only copy of an archive with the standard
+  library's `sqlite3`, written from `v1.sql` and the spec rather than from
+  the Rust export code, and `run_oracles.py` compares it with the
+  generators' models for every archive of both catalogues, and with
+  `golden-v1`'s logical snapshot. CI's Linux `checks` job runs it in a
+  virtual environment with hashes enforced. Agreement with the models
+  shows that the import and the models agree as seen through an
+  independent reader; it is not a check of any export format yet.
+- **The bulk generator's blob option** (`BulkSpec::blobs`): each attachment
+  gets its own store file, placed by the test-only
+  `BulkWriter::put_blob` through the import's own partial-and-placer path,
+  so the attachment copy and its performance can be tested at scale (slice
+  6e).
+
+### The export record core (M6 slice 6d)
+
+Slice 6d adds the new crate `crates/oma-export` (spec §4.1–§4.10). It
+writes no file yet: it turns the archive's export reads into records, and
+holds the rules every writer will share. It reads the archive only through
+`oma-archive`'s public export APIs and never names `rusqlite` or Tauri
+(`tests/source_rules.rs`).
+
+- **The plan** (`plan.rs`): formats, options, the two reveal opt-ins with
+  the count each was confirmed against, and the packaging (D126: a single
+  file for one conversation in one format other than CSV without copied
+  files, a bundle otherwise). Combinations that do not apply are refused,
+  never ignored. Owner Q3a's default (`default_attachments`): bundles with
+  HTML or JSON, and whole-archive exports, copy original files; a single
+  file carries names only; CSV, XLSX and TXT bundles copy only when
+  ticked. `check_confirmation` is the D147 comparison of the job's
+  pre-count with the confirmed counts (one per reveal, review fixes).
+  "Save a copy" of one attachment is not a plan; PR A refuses the
+  `attachment` scope with `exportUnavailable`, and it is **assigned to
+  slice 6k** (PR B, with the dialog), a recorded deviation.
+- **The code registry** (`codes.rs`, spec §5.1): every enum a record
+  carries travels as `{token, code}`. Archive codes keep the stored
+  numbers; export codes (sender reasons, chip states, cards, segment
+  kinds, styles, attachment outcomes, exclusion reasons, …) have explicit
+  numbers written beside each variant. A number this build does not know
+  is kept with the token `unrecognisedCode`. `tests/codes.pin` pins all 39
+  tables (270 entries); a renumbered or removed code fails.
+- **The column ledger** (`ledger.rs`, D142): every `ArchiveColumn` of v1
+  has exactly one disposition (exported raw, exported derived with its
+  rule, or excluded for `d94`, `d115Raw`, `rawSourceBytes`,
+  `sourceIdentifierOptIn`, `sessionLocalRowid` or `storageInternal`), and
+  each exported one names its path in the record. A test fails on a gap,
+  another checks that every exported path really appears in the records
+  of both catalogues and that the opt-in identifiers appear only under
+  the opt-in. The manifest's `exclusions` come from `ledger::exclusions`.
+  To give every column a disposition, `oma-archive` now also reads the
+  message columns no viewer read carried (`ExportMessage::raw_columns`:
+  the raw `service`, `is_audio_message`, `cache_has_attachments`, the
+  share, association-range, part-count, schedule-state, filter and
+  downgrade columns, and `thread_originator_part`) and the chat flags
+  `is_blackholed`, `is_pending_review`, `is_recovered` and
+  `properties_bytes`.
+- **The record** (`record.rs`, spec §4.2): dedicated structs (never
+  serde-derived archive types) whose camelCase serde form is the JSON
+  format: `ItemRecord` with its per-file `ItemContext`, `AttachmentRecord`,
+  `ConversationRecord`, `HandleRecord` and `VersionRecord`. Absence is
+  tagged (`Included`: `notIncluded` by an option with counts;
+  `Determinable`: `notDeterminable` with a reason; a text's `missing`
+  state; the attachment outcome `notRequested`), never `null`. Raw
+  integers and archive ids are decimal strings (`Decimal`), content is
+  `Content`; both print only a length under `Debug`. References outside
+  the scope carry no id.
+- **The mapping** (`map.rs`): `Mapper::item` builds a record from an
+  `ExportMessage`, with release-mode checks: a cap marker is
+  `Limit(TruncatedUnderExport)`, missing extras `Limit(ExtrasNotLoaded)`,
+  and an `oma-archive` variant without an export code
+  `Limit(UnmappedVariant)` (those enums are `#[non_exhaustive]`, so a new
+  variant can never be written as something else). The reply count is
+  split into replies in the export and elsewhere through the new
+  `ExportSnapshot::reply_ids`; `inConversation` facts use the new
+  `ExportSnapshot::chats_of`. Whether a file is copied is the caller's
+  (`AttachmentFiles`, slice 6e2's `attach.rs`); the mapper alone decides `notRequested`,
+  `withheldUnsent` and `noStoredFile`.
+- **Identifiers** (`ids.rs`, D141, owner Q5 **lean, awaiting
+  confirmation**): every id is an export-local ordinal by default
+  (messages by rank in the scope index, conversations by rank among the
+  exported ones, handles, attachment records, files, sessions and lineages
+  at first reference). Archive ids (decimal strings) and source
+  identifiers (message, chat and attachment GUIDs and the GUIDs a message
+  references, an attachment's `original_guid`, a chat's `room_name` and
+  `group_id`, a handle's `uncanonicalized_id` and `person_centric_id`)
+  are read only under the opt-in, through the new
+  `ExportSnapshot::source_identifiers`.
+- **Words** (`words.rs`, D129): an exhaustive `match` per table, worded
+  for a third-party reader (no "You": "Sent from the backed-up phone's
+  account"). `tests/words.rs` writes `src/types/generated/export-words.json`
+  (kept committed by the generated-files drift check) and the Vitest
+  `export-words.spec.ts` compares every entry that names a viewer key with
+  `viewerText.ts`.
+- **Time** (`time.rs`, D128, D145): the webview's zone table is validated
+  (name, 1–4,096 strictly increasing transitions, offsets within ±18 h,
+  a window that covers the export's span clamped to 1900-01-01 … now +
+  366 days). Instants outside the clamped window are written in UTC and
+  counted; one inside it that the table does not cover stops the export
+  (`ZoneTableStale`). Local-day bounds follow DST gaps (the day starts
+  where the gap ends) and repeats (the first midnight). The civil
+  arithmetic counts days over 400-year eras and is tested against fixed
+  vectors from year 1 to 9999. No time-zone crate is linked.
+- **Hidden characters** (`hidden.rs`, D121, D138): the classifier is
+  "Copy text without invisible characters" inverted and passes all 31
+  shared vectors; the `⟨…⟩` marker form, the escape of a literal U+27E8,
+  header fields that never break a line, and combining runs cut after 16
+  marks with `⟨+N combining marks⟩`. The joiner and mark properties come
+  from `src/unicode_tables.rs`, generated by
+  `scripts/make-export-unicode-tables.mjs` from Node's own regular
+  expression properties (Unicode 16.0 here), the same engine the copy
+  runs on.
+
+**Tests** (`crates/oma-export/tests/record_catalogue.rs`): every entry
+and scenario of the viewer and export catalogues is imported and mapped
+whole, history included. Ordinals are dense and one message has one
+intrinsic record in every conversation file; no D94 key exists and tagged
+absence is never `null`; the patched unknown item kind, `is_from_me`
+state and time unit keep their numbers; no masked or withheld sentinel
+reaches a record without a reveal and each appears with it; segment
+offsets are taken after masking; and every text the viewer's details show
+for a message is in its record, except the subject history §3.8 withholds.
+
+### Export staging, naming and the manifest (M6 slice 6e1)
+
+Slice 6e1 adds the files core of `oma-export` (spec §4.3, §6.2, §7,
+§8.3–§8.6). No writer exists yet; the core is driven by test writers.
+
+- **Names** (`naming.rs`, I2): the only module that builds a path inside
+  or beside a bundle (`tests/source_rules.rs` bans `.join(` elsewhere).
+  Fixed names (`README.txt`, `manifest.json`, `SHA256SUMS`, the marker
+  `.oma-export-partial`); a closed grammar for format files
+  (`txt/c0001.txt`, `json/no-conversation.jsonl`, `csv/messages.csv`);
+  attachment names `attachments/<shard>/<6-digit ordinal>-<name>` with
+  1,000 files per shard, where `<name>` is the `transfer_name` without
+  hidden characters, through the new `oma_fs::sanitize_filename_max`
+  within a length budget (the canonical parent, the longer of the bundle
+  name with ` (99)` and the staging name, the shard, the prefix,
+  `.blocked` and `:Zone.Identifier`, all within 259 bytes, and at most 120
+  bytes), and the ordinal alone (`000045.heic`) below 16 bytes; a nameless
+  attachment is `attachment.<ext>` from the **sniffed** kind. The passive
+  allowlist of owner Q3b (`naming::PASSIVE`, pinned by a test) keeps an
+  extension only when it is listed for the sniffed kind; everything else,
+  a missing extension included, gets `.blocked` (unless the confirmed
+  "Keep original file extensions" is on). `aac` and `amr` are on the
+  spec's list but `sniff.rs` names no such kind, so they are always
+  blocked. Staging entries are `.oma-export-<32 hex>.partial`,
+  `.partial-file` or `.probe`. An export's own name (`TargetName`) is
+  refused, never changed, when `sanitize_filename` would change it or it
+  starts with `.oma-export-`; a single file's name gains the format's
+  extension unless it already ends in it (`notes.html` → `notes.html.txt`).
+- **Staging** (`stage.rs`, D126, D140, D143, D144): the destination must
+  be canonical (`dunce`) and a real directory. **On Linux** the parent is
+  opened `O_DIRECTORY | O_NOFOLLOW` and its `(dev, ino)` recorded; the
+  staging folder is made with `mkdirat` (0700) and opened the same way;
+  every later file (`openat` with `O_CREAT | O_EXCL | O_NOFOLLOW`, 0600),
+  subfolder, rename and removal is relative to those handles. Before the
+  publish rename the parent must still canonicalise to the same path and
+  `(dev, ino)`, and the staging name must still be that folder; otherwise
+  `DestinationChanged`. **Elsewhere** (Windows) staging works on paths
+  below the canonical parent with `create_new` everywhere and the same
+  checks by name and type: a junction swapped in between a check and a
+  create is the disclosed residual (spec §11.1), and re-checks cannot use
+  a file id without `unsafe`. Every file is hashed (SHA-256) and counted
+  as it is written, never read back; `sync_all` runs once per batch.
+- **The marker** is created right after the staging folder, held with
+  `File::try_lock` for the whole job, and removed only **after** the
+  publish rename and the parent's flush, so a crash before the rename
+  always leaves a marked folder. On a file system without locks the job
+  continues and the sweep's age rule is the only protection; every
+  `sync_batch` sets the marker's modification time to now, so a running
+  export never looks older than one batch (review fixes; a single batch
+  over 5 minutes is the residual). A cleanup that cannot remove one of
+  the export's own files keeps the marker (unlocked), so the folder stays
+  a marked leftover the sweep offers again.
+- **Publish**: a bundle is renamed with `renameat2(RENAME_NOREPLACE)`
+  (a checked rename where the file system lacks the flag), trying the
+  name, then ` (2)` to ` (99)`, then `TargetExists`. A single file
+  (`.partial-file`, locked while open) is placed without replacing
+  anything, or, with the app's confirmation, over a **regular file**
+  only (never a folder or a link). Renames and removals retry on Windows'
+  access-denied and sharing-violation errors with 100 ms doubling to 2 s,
+  9.1 s in all; if the publish rename still fails with the marker held,
+  the marker's handle is closed and the rename tried once more.
+- **Cancel or failure** (`Staging::remove`, also run on drop) removes
+  only what the export created: its files and subfolders through the
+  handles, the marker, then the staging folder by name only if it is
+  still the export's own. Anything else keeps the folder, and the result
+  is `stagingRemoved: false`.
+- **Leftovers** (`find_leftovers`, `remove_leftovers`): entries matching
+  the pattern exactly, real folders with the marker (or empty ones: a
+  crash between `mkdirat` and the marker) and regular files, at least 5
+  minutes old and not locked. Removal takes the list pinned at choose
+  time, re-checks each by name, type, marker, lock and (Linux)
+  `(dev, ino)`, and on Linux empties a folder through handles that never
+  follow a link. `probe_writable` creates and removes a `.probe`.
+- **Provenance** (`manifest.rs`, D135): `README.txt` (fixed paragraphs
+  from `words::readme`), then `manifest.json` (its `files` lists every
+  file so far but itself and the sums), then `SHA256SUMS` (coreutils
+  format, every file, `manifest.json` included), then the folders are
+  flushed. The counts must satisfy the four identities of §7.1, or nothing
+  is written. `ManifestBody` has no field that can hold a query, a
+  device fact, an archive id or label, a GUID or a path; `exclusions`
+  are the ledger's plus two export-level notes. `jsonfmt.rs` escapes
+  U+2028, U+2029, DEL and C1 controls in the JSON text.
+- **The writer trait and fan-out** (`writer/mod.rs`, spec §4.3): every
+  format is an `ExportWriter` (`begin`, `begin_conversation`, `item`,
+  `end_conversation`, `finish`); `FanOut` hands every call to every
+  writer of the plan, enforces that order (`Limit(RowOrder)`), checks the
+  cancel token before each item, and refuses a report that disagrees with
+  its own counts (`RowCountMismatch`) or a file left open
+  (`FileStillOpen`). `begin_conversation` takes a `ConversationFile`
+  (a record, or the "No conversation" file), not only a record.
+- **Crash points** (`fault.rs`, the non-default `fault-injection`
+  feature): staging created, first file staged, before `README.txt`,
+  after `SHA256SUMS`, after the publish rename before the parent's flush,
+  before the marker's removal, and a single file staged.
+
+**Tests** (`crates/oma-export/tests/{stage,crash,fanout}.rs`): a bundle
+publishes whole with provenance last, 0700/0600 modes and sums that verify
+in Rust; taken names give ` (n)` and never a replace; 99 taken names fail
+and leave nothing; a single file never replaces without confirmation and
+never a folder or a link; cancel and drop remove exactly what was created;
+**the swap tests** (Linux: the staging folder renamed and a link planted
+under its name mid-export, and the parent itself moved and replaced by a
+link) write nothing outside the staging folder and fail the publish; the
+sweep finds only dead leftovers, skips this process's live exports by
+their locks, removes exactly the pinned list, and skips an entry replaced
+after the scan; a kill at every crash point (a child process killed with
+`Child::kill`) leaves nothing under a final name before the publish,
+nothing outside the destination, and only leftovers the sweep removes,
+and a re-run publishes under ` (2)`; the fan-out drives two writers with
+the view catalogue's records and checks order, cancel and reports.
+Disabling the publish's destination check, the marker's lock or the
+sweep's `(dev, ino)` re-check by hand made four of these fail.
+Windows was not run: the Windows half of `stage.rs` was only compiled
+(and linted) for `x86_64-pc-windows-msvc` through a scratch harness that
+stubs the crate's other modules; the whole crate could not be compiled
+for that target here (the bundled SQLite needs MSVC).
+
+### Attachment copies, the TXT writer and the pipeline (M6 slice 6e2)
+
+Slice 6e2 adds the attachment copy (`attach.rs`, spec §6.1, §6.3, §6.4,
+owner Q3, D134), the TXT writer (`writer/txt.rs`, §5.4, D138) and the
+pipeline that drives an export from the pre-count to the publish
+(`pipeline.rs`, §4.3, the spec's `Exporter::run`).
+
+- **Copy with verification.** The bytes come only from
+  `ExportSnapshot::open_blob`'s `BlobReader` and go straight to the
+  file's final name inside staging (`Staging::create_verified`), in
+  1 MiB chunks with the cancel token checked per chunk. The first 4 KiB of
+  that stream are read first and sniffed (`oma_archive::media::sniff`),
+  because the name's extension rule needs the kind; the file is created
+  after that and the stream continues. **One hash:** the reader verifies
+  length and digest at its end, and the new
+  `BlobReader::verified_digest` hands the verified digest to
+  `Staging::close_verified`, which records it for `manifest.json` and
+  `SHA256SUMS` (a copy of another length is refused); the copy is never
+  hashed or read again. No `verify_blob` and second open.
+- **Exclusions.** A store file that is missing, unreadable, of another
+  length or digest is `checksumMismatch` (the partial copy is removed;
+  a copy that cannot be removed fails the export). On FAT12/16/32
+  (detected on Linux; `VolumeRule::for_kind`) a blob over 4 GiB − 1 is
+  `tooLargeForVolume` before any byte is read; exFAT is never limited; on
+  Windows a write refused at the boundary (`FileTooLarge`, error 87, or a
+  space error after 4 GiB − 1 bytes) is classified so instead. Any other
+  write error is `writeFailed` and the export carries on; a full volume
+  stops it (`NoSpace`). A blob whose copy failed fails the same way for
+  every record of it, without a second attempt.
+- **Deduplication.** One file per `BlobId` per export; later records
+  are `deduplicated`, point at the same file, and the file carries the
+  first record's name. The mapper checks that the file ordinal the copy
+  named the file with is the one it assigns (`RowCountMismatch`
+  otherwise).
+- **Defusing (owner Q3b).** `naming::attachment_name` with the sniffed
+  kind: `.blocked` unless the extension is on `naming::PASSIVE` for that
+  kind, or the confirmed "Keep original file extensions" is on. Text
+  files have no allowed extension (the spec's table has none), so
+  `notes.txt` is copied as `notes.txt.blocked`.
+- **Mark of the Web (owner Q3c).** After each copy closes, on Windows
+  only, `Staging::write_mark_of_the_web` creates `<file>:Zone.Identifier`
+  (`[ZoneTransfer]`, `ZoneId=3`; the stream name is built by
+  `naming::zone_identifier`, the one path with a `:`). A failure is
+  counted (`motwNotWritten`) and never fails the export; nothing is
+  written on Linux. Whether Windows honours the mark (SmartScreen, Office
+  Protected View) is **UNVERIFIED**, and the Windows code was only
+  compiled here, never run.
+- **The record** gains, per file, its bundle `path` (content, since its
+  name part comes from `transfer_name`) and its `sniffed` kind (a new
+  `sniffedKind` registry with the viewer's tokens and sentences;
+  `null` when the export did not read the file, as in names-only mode).
+  `TimeRecord` carries the instant for the human-readable writers
+  (`utc_ns`, not serialised).
+- **The TXT writer** writes one file per conversation file
+  (`txt/c0001.txt`, `txt/no-conversation.txt`) or the single file, UTF-8
+  without a BOM, LF or CRLF. The header block names the conversation (or
+  "No conversation"), its participant count, its other recorded names and
+  the zone. Each item line starts at column 0:
+  `[time] [item N] <sender address> [tag] …`, with `[Undated]` for an
+  item the archive sorts as undated (its `undated` label; the undated
+  section comes last) and `[No usable time]` for one sorted among the
+  dated items whose own time cannot be shown (an unknown unit). Labels are
+  indented by four spaces, recorded text by six, so no message line can
+  start an item. Header fields (the sender, the conversation name,
+  attachment names, every recorded value on a tag or label line) are
+  marked with `MarkPolicy::text_header`, and their `[` and `]` are
+  written `⟨U+005B⟩`/`⟨U+005D⟩`, so a recorded address cannot forge a tag.
+  Recorded text is split at CRLF, LF, CR, U+2028, U+2029 and U+0085 into
+  six-space lines, each marked with `MarkPolicy::text_body` (controls
+  always, hidden characters with the option, a literal `⟨` always,
+  combining runs over 16). Segment kinds stay visible: `⟨one-time code
+  hidden⟩`, `⟨Attachment N⟩` and the M5 placeholder sentences; a
+  transcription is written under "Transcription recorded on the phone".
+  Edits and unsends are tags (`[Edited: part 1]`, `[Unsent by the sender:
+  part 2 of 3]`); attachments list their outcome, path, sniffed kind and
+  declared type; chips say "derived"; stored versions (history on) follow
+  their item. Folded reaction rows are not items; each file's footer
+  counts its items and folded rows, then the legend
+  (`words::txt_legend`); a single file then carries "About this export",
+  the manifest's fields flattened to `key: value` lines (a list over 16
+  entries, such as the zone's transitions, by its length).
+- **The pipeline** (`pipeline::run`) runs inside the job's export
+  snapshot: the exact pre-count and `check_confirmation` (D147) before
+  anything is written; the scope index and the conversation files (those
+  with a timeline row in scope; one conversation is written even when
+  empty); staging; per file, byte-sized batches assembled under the
+  plan's reveal and depth, each message mapped with its attachments
+  copied, every record to every writer through `FanOut`, handles before
+  the first item that names them (a new `ExportWriter::handle`), stored
+  versions after their item (`ExportWriter::version`; once per message,
+  under its first file), copied files flushed once per batch; ties
+  computed across batch boundaries by holding each batch's last item for
+  the next; then the writers' `finish`, the counts checked against the
+  pre-count, the provenance, and the no-replace publish. Any error
+  removes the staging. `pipeline::scope_ids` turns the plan's scope into
+  ids (local dates through the zone table); a search scope's ids come
+  from the shell.
+- **A crash point** in the middle of an attachment copy (after its first
+  bytes) joins `FaultPoint::ALL`; its kill runs the whole pipeline on an
+  imported archive.
+
+**Deviations from the spec**, all recorded here:
+
+- The body is written whole, not per part: the record's segments carry
+  no part index, so "part 1: … part 2: ⟨unsent by the sender⟩" cannot be
+  rendered; the parts are named in the tags.
+- `[` and `]` in TXT header fields are escaped (an addition to §5.4).
+- The spec's `[Recently Deleted in the backup of <date>]` is written as
+  the viewer's sentence without the date: the record names the session by
+  ordinal only, and `importSessions` (the session facts) is not filled
+  yet.
+- The "events" option off is refused (`OptionDoesNotApply` in the
+  pipeline, `exportUnavailable` at the draft) until the scope index can
+  leave events out without a gap in the ordinals; PR A did not build
+  that, and it is **assigned to slice 6k** (PR B). The default is on.
+- Previews from the copy stream (§6.1) arrived with the preview pool
+  (6h2). "Save a copy" of one attachment (§6.6) was not built in PR A
+  (6h1 and 6h2 refuse it); it is **assigned to slice 6k** (PR B).
+- The goldens live in `tests/fixtures/export/expected/<entry>/` as
+  §14.3 says, but are written by `crates/oma-export/tests/golden_txt.rs`
+  (`OMA_REGEN_GOLDENS=1`) and pinned by `expected/SHA256SUMS`, whose hash
+  that test pins, not by the generator's `EXPECTED.SHA256SUMS`; files over
+  64 KiB (the hostile catalogue's 1 MiB body) are pinned by digest only.
+  They are names-only exports, so no copied file's budgeted name depends
+  on the destination's path.
+
+**Tests:** `crates/oma-export/tests/{txt,attach,golden_txt,crash}.rs`, a
+strict Rust parser of the TXT grammar (`tests/txtgrammar`), and the
+independent oracle `scripts/oracles/txt_grammar.py`. Every entry and
+scenario of both catalogues exports to TXT that follows the grammar, with
+footer counts equal to the parsed items and the manifest; header forgery
+through the conversation name and the sender (U+2028, U+0085, U+2029,
+U+202E, LF) stays on one line as markers; every hostile body unmarks back
+to its text; no masking sentinel appears in any byte unless revealed, and
+each appears with the reveal; the options change line ends, the clock and
+markers only; a single file carries its About; a dated range writes only
+its days; a cancel leaves nothing. The file cases: byte-identical copies
+whose manifest and `SHA256SUMS` digest is the stored one; the corrupted
+store file excluded with no file; the shared blob written once; every
+name case (case and NFC/NFD collisions, reserved names, over 255 bytes,
+trailing dots and spaces, invisible characters, the U+202E spoof,
+traversal, separators, unknown and mismatched types, empty and NULL
+names); the opt-out; the reveal copying the unsent part's file; a volume
+limit; a cancel mid-copy; and, on Linux, the staging folder swapped for a
+link mid-copy (the victim stays empty, the publish fails with
+`DestinationChanged`). The goldens compare 21 exports byte for byte. The
+oracle, run here on Linux (Python 3.13.16), checked 21 exports with 9,777
+checks (433 item texts compared with `display_text`), 0 failed; turning
+off the header escaping made it and four Rust tests fail. The attachment
+throughput test is ignored and was run once at a small size
+(`docs/development.md`). The Windows halves (`write_mark_of_the_web`,
+the Windows boundary classification) were compiled and linted for
+`x86_64-pc-windows-msvc` through the scratch harness only; the Mark of
+the Web test runs only on CI's Windows job.
+
+### The JSON and CSV writers (M6 slice 6f)
+
+Slice 6f adds the structured writers: JSON (`writer/json.rs`, spec §5.1)
+and CSV (`writer/csv.rs`, §5.2, D130), both in-process behind
+`ExportWriter`, with the JSON schemas, goldens, the independent data
+oracle and the perf smoke.
+
+- **JSON is the records' serde form.** Every line and array element goes
+  through the new `jsonfmt::to_line`: `serde_json`'s compact output with
+  U+2028, U+2029, U+0085, DEL and C1 written as `\uXXXX`, so no record
+  splits under Python's `str.splitlines()`. A bundle has
+  `json/conversations.json` and `json/handles.json` (`{"type", "format",
+  "schemaVersion", "<key>": [...]}`, one record per line, streamed: the
+  conversations as their files begin, the handles as the mapping first
+  references them), one JSON Lines file per conversation file (a
+  `header` line, then `item` lines, each followed by its stored body
+  versions as `version` lines when history is included), and copies of
+  the open and manifest schemas under `schema/`. A single file is
+  `{format, schemaVersion, conversation, items: [...], handles: [...],
+  about}`, streamed with `handles` and `about` last; `items` holds the
+  same `item` and `version` objects. An item's fields are in record order
+  with `context` last, so a message in two conversation files is byte for
+  byte the same up to `"context"`.
+- **One file outcome per shared message.** The mapper now keeps the file
+  outcome of each attachment of a message that is an item of more than
+  one exported conversation and repeats it at the later placements
+  (counted there as deduplicated, so the manifest's identities hold).
+  Before, the second placement said `deduplicated` where the first said
+  `copied`, and the intrinsic parts differed.
+- **The schemas** are JSON Schema 2020-12 with URN `$id`s, generated by
+  `scripts/make-export-schemas.py` from the record structs' shapes and the
+  code registry pin: the **strict** one (CI only) sets
+  `additionalProperties: false` on every object and restricts every code
+  field to its table's (token, code) pairs plus `unrecognisedCode` with an
+  unknown number; the **open** one (shipped) is its mechanical
+  derivation, with unknown keys allowed and codes open; the **manifest**
+  schema describes `manifest.json`. `tests/json.rs` pins the strict
+  schema's SHA-256 against `schemaVersion` ("1.1.0" since the review
+  fixes added a version's `displayNoneReason`), checks its code
+  tables against `REGISTRIES` and checks that the open schema is still the
+  strict one's derivation.
+- **CSV** writes the nine files of §5.2, every one always present with its
+  header row. `messages.csv` has the spec's columns in its order, then
+  v1 additions for facts the list has no column for (`direction_state`,
+  `unsent_whole`, the reply count's state, the reaction and history
+  states, the association's shape and emoji, the event's title, the
+  edited and retracted units, the context's `join_date` and
+  in-conversation booleans, the body facts' other codes, the remaining
+  `source_*` GUIDs). Segments, attachments, observations, raw reaction
+  rows, versions with their phone edit entries, and value history are
+  written once per message, at its first placement, keyed by `item`.
+  The whole column contract, with each column's grammar, is pinned in
+  `crates/oma-export/tests/csv_columns.pin` (only appends allowed; then
+  `tabularColumnsVersion`'s MINOR is bumped). The `csv` crate is used only
+  through `WriterBuilder::from_writer` over a `StagedFile` (`from_path` is
+  banned), with `Terminator::CRLF` and `QuoteStyle::Always`.
+- **Default-deny neutralisation (D130).** In the "for spreadsheets"
+  profile a cell is prefixed with `'` when its first character is TAB, CR
+  or LF, or when its first character after White_Space and
+  Default_Ignorable_Code_Point characters is `=`, `+`, `-`, `@`, `＝ ＋ －
+  ＠` or `﹢ ﹣ ﹦ ﹫`; only typed columns whose value matches their
+  grammar (`int`, `intList`, `real`, `iso`, `offset`, `token`) are exempt.
+  The test runs on the final cell text; the row's `neutralised_columns`
+  names every prefixed column and the manifest counts them
+  (`neutralisedCells`). The two property tables come from the same Node
+  generator as `hidden.rs`'s (`scripts/make-export-unicode-tables.mjs`).
+  Escapes are applied to recorded fragments only: U+27E8 in both
+  profiles, and in the spreadsheet profile C0 and C1 controls other than
+  TAB, CR and LF, and DEL, as `⟨U+XXXX⟩` (counted); the export's own
+  placeholders (`⟨one-time code hidden⟩`, `⟨Attachment N⟩`) are never
+  escaped. The spreadsheet profile writes a BOM; "for data tools" writes
+  none, neutralises nothing and leaves controls raw.
+- **The pipeline** adds the writers' `neutralisedCells` and
+  `continuationRows` to the manifest's counts. README's CSV and JSON
+  paragraphs now state the RFC 4180 extension, the profiles, the column
+  contract, string-typed large numbers, the separator escapes and that
+  JSON is RFC 8259, not I-JSON.
+
+**Deviations from the spec**, all recorded here:
+
+- Every CSV field is quoted (`QuoteStyle::Always`): `csv` sets one quoting
+  style per writer, so "necessary, plus content columns always" is met by
+  quoting all; it stays RFC 4180.
+- U+FE6B (﹫, small commercial at) is a trigger too: the export catalogue
+  plants it and default-deny errs towards the prefix.
+- `messages.csv` has v1 columns appended after the spec's list (above),
+  and every other file ends with `neutralised_columns`. The raw columns
+  no viewer shows (`record.raw`) are in JSON only.
+- JSON Lines files carry a third line type, `version`, after their item
+  (§5.1 names `header` and `item`): versions stream one by one, so an item
+  cannot hold them.
+- The JSON round trip is checked by comparing each written line, parsed,
+  with the serde value of the record the writer was handed (a recording
+  writer in `tests/json.rs`), not by deserialising into `ItemRecord`: the
+  records are `Serialize` only.
+- The data goldens live in `tests/fixtures/export/expected-data/` with
+  their own `SHA256SUMS` (pinned in `tests/golden_data.rs`), beside the
+  TXT goldens' `expected/`; the zone oracle's tables in
+  `tests/fixtures/export/zones/`. `oma-archive`'s fixture pin test leaves
+  both folders out of the generator's sums.
+
+**Tests:** `crates/oma-export/tests/{json,csv,golden_data,perf_smoke}.rs`,
+new unit tests in `jsonfmt.rs`, `writer/json.rs` and `writer/csv.rs`, and
+the oracle `scripts/oracles/data_oracle.py`. Every entry and scenario of
+both catalogues exports to JSON whose lines equal the records handed to
+the writer, with no raw separator, raw integers as strings (the
+nanosecond ones above 2^53), no D94 key, and the two shared messages
+byte-identical up to `context`; masked content stays out of JSON unless
+revealed; a single file streams `handles` and `about` last. Every entry
+exports to CSV that reads back with nine pinned headers, CRLF and every
+field quoted, the default-deny invariant on every cell (a `'` exactly
+where `neutralised_columns` says, no other cell triggering) and
+`neutralisedCells` equal to the prefixed cells; the 35 planted formula
+cases (31 in `export-text-plain`, four file names in
+`export-files-plain`) are neutralised for spreadsheets and not for data
+tools, except the one on a second line, which never is; quotes, CRLF, lone CR, NUL and ESC round-trip
+per profile; files left out by an option hold their header only; the
+`source_*` columns fill only under the opt-in. The goldens compare 21
+JSON + CSV bundles byte for byte. The perf smoke exports a 20,000-message
+bulk archive to TXT, CSV and JSON in a child process: here, 13,112 KiB
+peak RSS (bound 150 MiB) and 4.8 s in the debug test build (with
+`oma-export`, `csv` and `csv-core` at `opt-level = 3`), 102 MB written.
+The 500,000-message variant is ignored and was **not run**. The data
+oracle, run here (Python 3.13.16, stdlib `sqlite3` 3.45.1, `jsonschema`
+4.26.0): 21 entries, 126 bundles, 1,437 JSON lines against both schemas,
+697 items against the projection (448 display texts compared, 150
+copied files re-hashed), 1,398 CSV rows and 233,034 cells, 3,604 local
+times against `zoneinfo` in four zones; 317,916 checks, 0 failed. With
+the neutralisation turned off by hand, the oracle (119 failures) and two
+Rust tests failed; with the separator escapes off, the JSON round-trip
+test failed. Nothing was run on Windows; the new code has no
+platform-specific part.
+
+### The HTML writer (M6 slice 6g)
+
+Slice 6g adds the HTML writer (`writer/html.rs`, spec §5.5, D132), the
+`preview` module that hands it images, its goldens, a strict Rust reader
+of its grammar and the independent HTML oracle.
+
+- **Files.** A bundle gets `html/c0001.html` per conversation file
+  (`html/no-conversation.html` for the messages in none) and
+  `html/index.html`, which lists the files by ordinal with each name in
+  the body only. A page is split into `c0001-2.html`, `c0001-3.html` …
+  before an item that would take it past 5,000 items or 20 MiB, the
+  embedded `data:` bytes included (`PageLimits::SPEC`; 256 KiB is kept
+  for the navigation and footer). A single file is one page and is never
+  split. Titles are generic ("Messages export — conversation 1, part 2",
+  D112).
+- **One fixed template.** `<!doctype html>`, `<html lang="en">`, `<meta
+  charset>`, then the CSP meta first (`default-src 'none'; img-src data:;
+  style-src 'sha256-…'; base-uri 'none'; form-action 'none'`), the
+  referrer, viewport and colour-scheme metas, the title and the one
+  stylesheet (`STYLE`, hash pinned in `STYLE_SHA256` by a unit test).
+  The body is two skip links, a header (the plaintext notice, the one
+  `h1`, the address count, other recorded names, the zone), `main` with
+  one `section` and `h2` per day (then "Undated"), one `article` per item
+  labelled by its `h3` (sender, time with an HTML `datetime`, item
+  number), then `nav#days` **after** `main` (the page's days, the other
+  parts, `index.html`), then `footer#about` (counts, the legend, and in
+  a single file "About this export"; in a bundle a pointer to the
+  manifest, README and index, whose footer lists About).
+- **Escaping is the control.** All content goes through one function
+  (`H::content`): `& < > " '` become `&amp; &lt; &gt; &quot; &#x27;`,
+  each run sits in `<bdi dir="auto">` with `white-space: pre-wrap`, CR
+  and CRLF become LF, and controls, noncharacters and (in header fields
+  always, in recorded text when the option is on) hidden characters
+  become `<span class="mark">U+XXXX</span>` elements. Placeholders
+  (`<span class="ph">`) and labels are elements, so a literal `⟨` stays
+  literal (§4.7's table). Attribute values are only ours: ordinal ids,
+  dates, image sizes, `data:` URIs of checked renditions, class tokens
+  and links of the closed grammar. Styles are classes on the run's `bdi`
+  (M5's rule); URLs are text. Every `article` has `overflow: hidden;
+  contain: paint`, and combining marks are all kept.
+- **Images (D113).** The writer never decodes or reads a file. With
+  previews on it asks a `preview::PreviewSource` for each included
+  attachment's renditions (the decode-helper pool behind it is slice
+  6h's) and checks each one (`check_rendition`, §5.7: JPEG SOI/EOI and a
+  frame header before the scan, or the PNG signature, a valid first
+  `IHDR` and a final `IEND`; at most 640 px for a thumbnail and 2,048 px
+  for a display rendition; at most 16 MiB); a failed check fails the
+  export with the new `HelperOutputRejected` and the staging is removed.
+  A thumbnail is embedded as `data:` while the page's 16 MiB of base64
+  lasts, otherwise the card says "Preview not embedded (size limit)"; a
+  source's "unavailable" is a card too; both are counted in the
+  manifest's `previewsUnavailable`, embeddings in `previewsEmbedded`. With
+  "Larger previews" (bundles only) the display rendition is written once
+  per attachment record as `html/previews/p<n>.jpg|png` and linked. A
+  copied original is named by its path as text and never linked or
+  embedded. A plan with previews on and no source is refused
+  (`OptionDoesNotApply`).
+- **Backward links only.** A reply or a reaction links to `#m<n>` only
+  when that item is already on the same page; otherwise the text names
+  "item n, elsewhere in this conversation", "in another conversation of
+  this export" or "not in this export".
+- **Shared with TXT.** The tag, sender, time and About helpers moved from
+  `txt.rs` to `writer/shared.rs` unchanged (the TXT goldens did not
+  move). Both writers now skip the stored versions of a folded reaction
+  row (a chip, not an item): TXT used to write them under the item
+  before it. They stay in JSON. README gains an HTML paragraph.
+
+**Deviations from the spec**, all recorded here:
+
+- Bodies are rendered whole, with edits and unsends as tags, not per
+  part: the record's segments carry no part index (as in TXT).
+- Noncharacters are marked like controls: raw, they are HTML parse errors
+  (html5lib's strict mode refused two in the hostile catalogue).
+- A thumbnail over the page's budget is counted in
+  `previewsUnavailable` (the report keeps `previewsSizeLimited` apart);
+  the manifest has no field of its own for it.
+- Larger previews are named by the attachment record's ordinal
+  (`p<n>`), not the file ordinal: a names-only bundle has no file
+  ordinals.
+- The `datetime` attribute carries at most three fraction digits and is
+  left out for years HTML cannot write; the visible time is unchanged.
+- No `h2` outside the day sections: the navigation and the footer use
+  labelled paragraphs, so "one `h2` per day" holds exactly.
+
+**Tests:** `crates/oma-export/tests/{html,golden_html}.rs` with the strict
+reader `tests/htmlgrammar/`, unit tests in `writer/html.rs`, `preview.rs`
+and `naming.rs`, and the oracle `scripts/oracles/html_oracle.py`. Every
+entry and scenario of both catalogues exports to pages the reader accepts
+(the template's head order with the CSP second, the style and its hash,
+only the template's elements and attributes, links of the grammar,
+backward-only item links, one `h1`, one `h2` per section, labelled
+articles, `nav` after `main`, no control, noncharacter or (markers on)
+hidden character in any text node); items per file and page equal the
+manifest; masked content stays out of every byte and every decoded text
+unless revealed; every hostile body of the export catalogue reads back
+exactly (CR as LF); names and senders keep their marks; with markers off
+only bodies keep hidden characters raw; previews from a test source are
+embedded within the budget and counted, larger previews written and
+linked, a bad rendition (an SVG, a JPEG without a frame, a 4,097 px PNG)
+fails the export and leaves nothing; pages split by items and by bytes
+and link their parts; a single file carries About. The goldens compare
+21 HTML bundles byte for byte (116 files; the two over 64 KiB, the hostile pages, by digest only).
+The HTML oracle, run here (Python 3.13.16, html5lib 1.1): 42 bundles
+(files copied with previews and markers on; names only with markers off),
+106 pages, 968 articles against the JSON items, 71 images; 115,719
+checks, 0 failed. With `<` left unescaped by hand, three Rust tests and
+the oracle failed; with hidden characters never marked, nine of the
+eleven `html.rs` tests and the golden test failed. Nothing was run on
+Windows, and no page was opened in a browser in this slice (the
+WebKitGTK observation in the spec is the research run's).
+
+### The export job and its commands (M6 slice 6h1)
+
+Slice 6h1 is the shell's first half of the export (spec §9.1–§9.5):
+`src-tauri/src/exports/` (Tauri-free) and `commands/exports.rs`.
+
+- **Five commands**, each through the five IPC steps and each parsing its
+  raw request in Rust: `preview_export` (a draft id at once, then
+  `progress`, `ready`, `needsZoneTable` or `failed` on its channel),
+  `choose_export_destination` (a native save dialog for one file, a
+  folder picker for a bundle; `null` when cancelled),
+  `start_export` (`JobStarted`, then job events), `discard_export_draft`
+  and `show_export_in_folder` (tauri-plugin-opener on the folder that
+  holds a finished export, remembered per job in memory until exit).
+  `cancel_job` is reused.
+- **Drafts.** One slot in `AppState.exports`; a new preview replaces it
+  and cancels the old count. A draft holds the parsed plan (the reveal's
+  confirmed count only arrives at start), the exact counts with the
+  archive generation, the zone, the destination and, for a search scope,
+  the live search request and set (an `Arc` of the viewer's). It expires
+  after 30 minutes (an injectable clock; tests move it) and
+  `start_export` consumes it. `AppState::close_viewer` and
+  `AppState::hide_viewer` (the privacy screen; idle hide closes the
+  viewer) discard it first, as does the exit handler.
+- **Zones.** UTC needs no table. A date range in any other zone needs its
+  table before counting: the preview answers `needsZoneTable` with the
+  window (the dates' UTC days widened by 18 hours and by now ± one day,
+  clamped to 1900 … now + 366 days), and the webview calls
+  `preview_export` again with the table. Every other scope is counted
+  first; its `ready` carries `zoneWindowUtcMs` (the span and now, clamped)
+  and the table arrives with `choose_export_destination`, validated there
+  (`ZoneTable::new`) before the default name is built from it.
+- **Search scopes.** The preview takes the viewer session's live set by
+  `{viewer, searchId}` (a superseded id is `searchSuperseded`); a new
+  `ArchiveReader::export_search_preview` re-runs it when "all matches" is
+  asked, keeps the hits the export may write (`search_scope`) and counts
+  them, in one read transaction (a test pins it to the job's own steps in
+  a snapshot). The job re-runs and re-checks in its snapshot, then drops
+  the request (the query) before writing.
+- **The destination** (`exports::destination`, §8.1, §8.2): the folder is
+  canonicalised and must be a UTF-8 directory; inside a backup,
+  `MobileSync/Backup`, `iMazing/Backups` or the archive folder is
+  refused; a `.probe` file must be creatable; the copied files' bytes
+  must fit (`insufficientSpace`). Warnings are closed codes (shared
+  folder on Linux, sync folder with a closed provider code, network or
+  virtual drive, FAT with a file of 4 GiB or more, "may not fit" below
+  the estimate × 1.2 + 64 MiB, an unreadable free space being "unknown").
+  A bundle is named `Messages export <date> <time>` in the export's zone
+  (the first free ` (n)` is shown; the publish itself moves on if it is
+  taken meanwhile); a single file keeps the typed name when it ends in
+  the format's extension and gets it appended otherwise; names
+  `sanitize_filename` would change and `.oma-export-*` names are refused
+  (`exportNameRefused`). An existing single file must be a regular file
+  and needs the app's "Replace" confirmation. Leftovers are listed by
+  `find_leftovers` and removed only on request, by the job, exactly as
+  listed. The file-system facts come through a `DestinationProbe`, so
+  tests use fakes.
+- **Start** (`worker::prepare`, `worker::recheck`): the draft must be
+  counted, zoned and placed; a reveal needs its confirmed count and a
+  count without a reveal is refused; "Keep original file extensions" must
+  be confirmed; every warning but FAT must be confirmed; then the
+  archive must open (damaged, older and newer archives keep their
+  codes), its generation must be the draft's (`exportConfirmationStale`),
+  and the folder's checks pass again from a fresh canonicalisation (a
+  moved folder is refused, a new unconfirmed warning is
+  `exportConfirmationStale`). Then the slot on the archive's subject
+  (`JobKind::Export`; `busy` against everything, D7/D73), the location
+  confirmation, and `Library::hold_for_export`.
+- **The job** (`worker::run_export`): its own reader; inside one export
+  snapshot the generation again, the scope (from the plan, or the search
+  re-run), the four writers PR A has (TXT, CSV, JSON, HTML), and
+  `pipeline::run_detailed`, whose pre-count refuses a reveal count above
+  the confirmed N before anything is written. Phases: `preparingExport`,
+  `writingMessages` (timeline rows, after every batch), `finishingExport`
+  and `removingPartial`; `renderingPreviews`, `writingSpreadsheet` and
+  `layingOutPdf` are declared for 6h2, 6i and 6j. The lock is dropped
+  after the cleanup and **before** the slot is freed; one terminal event
+  follows. `exportFinished` carries `ExportSummaryDto` (counts, the
+  attachment exclusions grouped into five codes, a size bucket, `bundle`,
+  the search hits left out) and is `completedWithExclusions` when an
+  attachment's file, undated messages of a range or search hits were
+  left out.
+- **Pipeline changes** (`oma-export`): `pipeline::run_detailed` reports an
+  `ExportStep` with the rows (after every batch, not only per file),
+  reports `RemovingPartial` before it removes the staging, and returns
+  `ExportFailure { error, staging_removed }`; `run` keeps its signature.
+  `ExportReport` gains the published files' count and bytes.
+- **DTOs and guards (D136).** Export types are in `exports/dto.rs`. The
+  export walk (`ts_guard::M6_EXPORT_TYPES`, 31 types) admits `string`
+  only for `ExportScopeInput.archiveId` and
+  `ShowExportInFolderRequest.jobId`, plus the brands `DraftId`
+  (`^[0-9a-f]{32}$`), `LocalDate`, `ZoneName` and the viewer's
+  `UntrustedText` for `ExportDestinationDto.displayName` alone; it bans
+  the viewer's keys plus `destination`, `fileName`, `query`, `filter`,
+  `provider`, `text` and `body`; it shares only `ErrorCode`, `SafeId` and
+  `UntrustedText` with other walks. `exportFinished`'s four types
+  (`M6_EVENT_TYPES`) are in the archive guard's walk, which now also
+  rejects any export type or brand in an archive field. The archive list
+  shows `exporting` for an archive this app exports from.
+- **Errors (§9.5):** `exportDestinationRefused`, `exportTargetExists`,
+  `exportNameRefused`, `exportDraftExpired`, `exportConfirmationStale`,
+  `exportZoneTableStale`, `exportWriteFailed`, `exportHelperFailed`
+  (from a rejected helper rendition) and `exportUnavailable`, each with
+  fixed sentences in `exports::messages`.
+
+**Deviations from the spec**, all recorded here:
+
+- `exportUnavailable` is a tenth code (not in §9.5): PDF and XLSX (6i,
+  6j), image previews (until slice 6h2 built the decode-helper pool), the
+  `attachment` scope (save a copy) and `events: false` are refused with
+  it when the draft is made, never faked. The last two were not built in
+  PR A and are assigned to slice 6k (PR B), with the dialog.
+- `preview_export` takes an optional `zone`, for a date range only
+  (its local days need the table before anything can be counted); the
+  spec's flow sends the table only with the destination.
+- `PreviewEvent::failed` carries the code only (as the spec says), so a
+  failed count's sentence comes from the UI's table (6k).
+- The preview does not send the archive generation: it is opaque and
+  stays in the draft.
+- `ExportSummaryDto` groups the attachment exclusions into five counts
+  (withheld unsent, no stored file for every card state, checksum
+  mismatch, too large for the volume, write failed) to stay under the
+  event's 1 KiB; it has no "undrawable characters" count until PDF exists.
+- `start_export` consumes the draft before its checks, so any refusal
+  means reviewing the export again.
+
+**Not in this slice (6h2):** the decode-helper pool and `RenditionPair`
+behind HTML previews; `log_hygiene.rs`'s `exercise_export` with captured
+stderr; the cancel-latency tests; the Windows sharing-violation tests of
+the publish and removals through the job; the test-time record. No
+native dialog was opened (headless), and nothing ran on Windows.
+
+**Tests:** `src-tauri/src/exports/tests.rs` (18 tests): input validation
+that echoes nothing; the refusals of what is not built; drafts that count
+exactly, replace and expire; the three privacy controls discarding drafts
+and stopping their counts; zones before and after counting; the dialog
+title; the destination checks against fake probes (refusals, warnings,
+names, leftovers, a new warning and a moved folder at start); every
+confirmation; a changed archive refused at start; a whole export holding
+the lock (`busy` both ways, `Library::open` and a second hold refused,
+the list showing `exporting`, surviving `close_viewer`) and publishing a
+four-format bundle with the code masked; a recount over the confirmed N
+leaving nothing, and the right N writing the code; a cancel removing the
+unfinished export; a search scope exported after the viewer closed, with
+no query in the manifest; `exportFinished` under 1 KiB; the guards and
+the wiring. `oma-archive`'s `export_scope.rs` checks the search preview
+against the snapshot's steps.
+
+### Destinations, the preview pool and log hygiene (M6 slice 6h2)
+
+Slice 6h2 finishes the shell of PR A (spec §6.5, §8.1, §8.2, §8.6, §9.6).
+
+- **The destination token** (§8.1, D127). `choose_export_destination`
+  returns, with the checked destination, a `destinationToken`: 128
+  random bits as 32 hex digits (`dto::DestinationToken`, a branded string
+  in the export walk), kept in the draft with the canonical folder.
+  `start_export` takes `{ draftId, destinationToken, confirmations }`;
+  `ExportHost::take_for_start` consumes the draft and refuses
+  (`exportConfirmationStale`) a token that is not the latest choice's, so
+  warnings confirmed for one folder can never start an export into
+  another. The dialog titles, the canonical checks (`dunce`; refusals per
+  I1 plus the archive folder; `.oma-export-*` names; warnings to confirm,
+  re-run at start) are slice 6h1's and unchanged.
+- **`RenditionPair`** (§6.5). `oma_archive::media::render::render_pair`
+  decodes once and makes the display rendition (2048 px) from the
+  decoded image and the thumbnail (640 px) from the display rendition,
+  each oriented and encoded as `render` does, under the same limits. The
+  decode helper protocol gains rendition code 3, answered with two reply
+  frames (or one refusal frame); `HelperHost::request_pair` reads them
+  under the same 20 s watchdog. `RenderBackend::render_pair` defaults to
+  two `render` calls for fakes.
+- **The pool** (`src-tauri/src/exports/previews.rs`). An export with
+  previews starts `min(2, available_parallelism − 1)` workers (at least
+  one), each owning a `HelperHost` (this binary with
+  `--oma-decode-helper`, `CREATE_NO_WINDOW` on Windows), separate from
+  any viewer session's. It implements `oma_export::preview::RenditionPool`.
+  At the end the job shuts it down: after a publish it joins the workers;
+  on cancel or failure it stops them and kills every running helper
+  through a `KillSwitch` (the child handle the host registers), without
+  waiting, so a hung helper never delays the terminal event.
+- **The feed** (`oma_export::preview::PreviewFeed`). While an item is
+  mapped, the mapper lists its `included` attachments with a stored file
+  (`Mapper::collect_preview_wants`); the pipeline offers each to the feed
+  before the item reaches the writers: the copy stream's verified bytes
+  when the file was copied (`Attacher::keep_preview_bytes`, images of at
+  most 64 MiB, kept only after the reader verified the whole file), else
+  one verified read through `ExportSnapshot::open_blob`
+  (`attach::read_preview_input`: sniff the first 4 KiB, refuse over
+  64 MiB, read to the end). Bytes go to the pool at once; the HTML
+  writer's `PreviewSource` (`PreviewFeed::source`) waits for each answer,
+  checking the cancel token every 50 ms, and checks every rendition
+  before use (slice 6g). A refusal is "Preview unavailable"; after three
+  helper crashes in a row the feed is off, later images are cards, and
+  `previewsSkippedAfterHelperFailures` counts them (they are within
+  `previewsUnavailable` too). What the writer did not ask for is dropped
+  after each item.
+- **Helper stderr** (§9.6). `HelperHost` now pipes each helper's stderr
+  into a thread that keeps only the byte count; the pool sums it and the
+  job logs it at `debug` as a bucket (`stderr_size`). The text is never
+  read into a log or an event.
+- **Windows sharing violations** (§8.6). The retries themselves are
+  slice 6e1's (`stage::retry_with`: 100 ms doubling to 2 s, 9.1 s in all,
+  on raw OS errors 5 and 32). This slice adds
+  `a_publish_with_a_handle_held_open_retries_then_succeeds` to
+  `crates/oma-export/tests/stage.rs`, Windows only: a handle held on a
+  staged file for 700 ms while the bundle is published. It has **not run
+  yet** (it needs `windows-2022` CI); whether an open handle blocks the
+  directory rename at all stays **UNVERIFIED** until it does.
+
+**Deviations:** previews come from the copy stream only for files the
+export copies; otherwise the file is read once more through the
+verifying reader (spec §6.1 allows it for names-only exports). The pool
+is fed per item, so parallelism is across an item's images (an item
+rarely has more than one); a deeper prefetch was not built. Skipped
+previews are not yet stated in a single file's "About this export"
+(that section is written before the writers finish); the bundle's
+manifest records them. Previews apply to HTML only until PDF exists.
+
+**Tests:** `crates/oma-archive/src/media/render.rs`
+(`a_pair_is_both_renditions_from_one_decode`); `src-tauri/tests/decode_helper.rs`
+(the pair through the real helper; stderr counted, never kept);
+`crates/oma-export/tests/html.rs` (the feed sends the same verified
+image bytes with and without copies; three crashes turn previews off and
+are counted in the manifest; a cancel stops a wait for a rendition within
+a second and leaves nothing); `src-tauri/src/exports/tests.rs` (only the
+latest destination token starts an export; pool sizes; the pool answers
+every submission; a killing shutdown ends a hung helper at once; an HTML
+export through the job embeds the pool's renditions; a cancel during a
+hung preview ends the job, staging removed, within a second);
+`src-tauri/tests/log_hygiene.rs` (`exercise_export`: the export commands'
+work and every in-process format, HTML with previews from the real
+decode helper, over the hostile and media archives into a folder named
+by a sentinel: no sentinel, destination component, bundle name or exact
+output size in a log line, event or error message).
+
+### Review fixes (M6 PR A)
+
+The review of PR A found the defects below; each was fixed in one commit,
+with a regression test where one could be written. Everything here ran
+only in this Linux container (not on CI, not on Windows).
+
+- **Search facts give nothing away** (§3.6, D137). A capped set holds
+  exactly its published cap, so `capped` beside `matchesWritten` gave
+  the excluded count. `manifest.search` (and so the single-file About)
+  now has `mayBeIncomplete` (capped, a bounded exact scan, or any hit
+  left out) instead of `capped`, `newestKept` and `coverageComplete`;
+  `SearchFacts::may_be_incomplete` is the rule, and a unit test checks
+  that a capped set with exclusions and an uncapped one write the same
+  facts. Review still shows all of them. **Deviation:** the spec's
+  manifest recorded the three booleans.
+- **Each reveal has its own confirmed count** (Q4, D147).
+  `RevealConfirmationInput` is `{ oneTimeCodes?, earlierContent? }`;
+  `worker::prepare` requires each exactly when its reveal is on and
+  refuses (`exportConfirmationStale`) any value but the draft's own count,
+  so a webview cannot confirm `u64::MAX` or a stale number.
+  `RevealPlan` carries `codes_confirmed_up_to` and
+  `earlier_confirmed_up_to`, `check_confirmation` compares each recount
+  with its own N, and the manifest records
+  `options.reveal.oneTimeCodesConfirmedUpTo` and
+  `earlierContentConfirmedUpTo`. **Deviation:** the spec had one
+  `confirmedUpTo`.
+- **The pre-count counts what the job writes.** A folded reaction is
+  written whole, so it is now a distinct message with its flags,
+  attachments and files (the FAT and space checks see a sticker's file;
+  `crossConversationRows` no longer counts folded rows: the `view-main`
+  golden went from 70 distinct / 215 cross to 284 / 1). With history, a
+  message with a phone edit entry holding edit text counts for the codes'
+  N. Tests: `export_scope.rs`
+  (`folded_reactions_and_edit_text_are_counted_like_what_the_job_writes`).
+- **Previews.** Folded rows offer nothing to the helpers (the HTML
+  writer shows no image for them, and the bytes stayed queued);
+  attachments revealed by the earlier-content opt-in get previews like
+  included ones. A pool whose worker threads all failed to spawn closes
+  its queue, so every request is an immediate crash and the feed turns
+  previews off after three, instead of an export that waits forever.
+- **Staging** (`stage.rs`). A failed cleanup keeps the marker (see
+  above); `sync_batch` refreshes the marker's time; at most
+  `MAX_UNSYNCED` (64) closed files wait for their `sync_all` and, on
+  Linux, at most `MAX_OPEN_SUBDIRS` (32) subfolder handles stay open
+  (older ones are flushed, closed and reopened through the staging handle
+  when needed), so a photo-heavy batch stays far below 1,024 descriptors;
+  a subfolder whose open fails right after `mkdirat` is removed again;
+  `write_mark_of_the_web` checks the file closed last instead of scanning
+  every file.
+- **Names.** From the 1,000,000th copy the shard has four digits; the
+  name budget now subtracts the shard's extra digits like the prefix's.
+- **Faithfulness.** The ledger gives `message_body.text_raw` (501) the
+  disposition `derived` at `item.alternativeText.text` (it was listed as
+  never exported); a body version without text keeps its stored
+  `display_none_reason` (`text.displayNoneReason`, an unknown number
+  included) in JSON and in a new last column of `edit_versions.csv`.
+  `schemaVersion` and `tabularColumnsVersion` are 1.1.0 (MINOR: a field
+  and a column added); `manifestVersion` stays 1.0.0, changed in place,
+  because no export format has been released yet.
+- **Shell.** `ExportHost::take` checks and takes the draft under one
+  guard; a draft that leaves the slot any other way than a successful
+  start has its count stopped (stale token, refused `prepare`, expiry);
+  a count whose draft is gone without being stopped answers `failed`
+  with `exportDraftExpired`. The pipeline sends only new handles (no
+  copy of the whole list per item).
+- **Oracles.** `data_oracle.py` parses CSV with NUL swapped for a
+  private-use stand-in, so CPython 3.10's `csv` reader (which refuses
+  NUL) and 3.11+ agree; the three writer oracles count the sentinels they
+  scan for against a floor and check a bundle exported with both reveals
+  as a positive control (`docs/development.md`).
+- **Housekeeping.** The stray ts-rs `bindings/` folder is removed and
+  ignored, and so is `.venv-oracles/`.
+
 ### Status and qualifiers (D43)
 
 The report's status is `Readable { qualifiers }`, `Damaged`, `Unsupported`
@@ -3149,6 +4490,43 @@ D104, D107–D109, D112's UI side) are implemented in PR B.
 | D121 | Copy without invisible characters (slice 5j) | Bidi controls, invisible and control characters are dropped, but a zero-width joiner or non-joiner stays between two non-ASCII letters, marks or emoji, and tag characters stay inside a flag's tag sequence | Drop every character `SafeText` shows as a code | Emoji sequences, subdivision flags and joining scripts (Persian, Indic) keep their shape, while a joiner hidden between ASCII letters is still removed |
 | D122 | The right panel when another conversation opens (slice 5k) | Details and the reply thread close; search stays open | Keep the details open | They describe a message of the conversation that was open and resolve its addresses from that conversation's window; kept open, they showed "Sender" instead of the address (seen in the smoke test) |
 | D118 | Play order (slice 5h3) | Rust's structural check and full hash run on the first Play, **before** the confirmation, so the confirmation's "It has checked the file's structure" is true and a refused file never asks | The spec's §2 order: confirm, then check | A full hash of a file the user may then cancel; no attachment byte reaches the engine before the confirmation either way |
+
+### Milestone 6 decisions
+
+D123–D147 are the M6 spec's (§19). **The owner answered the spec's
+questions on 2026-10-19:** Q1 to Q4 confirm the leans (Q1 and Q2, the PDF
+engine and fonts, apply to PR B: D133; Q3 is D134; Q4 is D125). Q5
+(identifiers, D141) was not put to the owner: its lean is applied and
+awaits confirmation. Every other row is the spec's engineering lean,
+applied as the decision; the owner may still override any of them. Rows
+marked PR B are decided but not built in PR A.
+
+| # | Topic | Choice | Main alternative | Trade-off |
+|---|---|---|---|---|
+| D123 | Export architecture (lean; slices 6d–6g) | A Tauri-free `oma-export` with one canonical record (dedicated structs) and one streaming writer per format behind `ExportWriter`; reads only through `oma-archive`'s export APIs | Writers reading the archive themselves | One place for fidelity and masking; no `rusqlite` outside `oma-archive` |
+| D124 | Reads, snapshot and lock (slices 6a, 6b1) | `Caps::EXPORT` with a check that runs in release builds; byte-sized batches; one closure-scoped read transaction per job; the archive lock held for the job; cursors materialised before nested calls | Per-batch transactions; trusting the job slot | A consistent snapshot that is a checked fact across instances; `conn.rs`'s contracts kept |
+| D125 | Masking in exports (**owner-confirmed, Q4**; slices 6b1, 6b2) | D115 applied in `oma-archive` before records exist, widened to the attachments of unsent parts, the subject history and the alternative text of such messages; two per-export opt-ins (codes, earlier content), off, reset on every open, never remembered, each confirmed against its own exact count; the viewer's `revealEarlierText` is not inherited | Inherit the viewer setting | An export is bulk and outlives the app's control |
+| D137 | Search scope (slice 6b2) | The live set by default; "all matches" re-runs in the job with a cap of 1,000,000; the Review and result steps show `capped`, coverage and the excluded count, while outputs carry only `mayBeIncomplete` (capped, a bounded scan, or any hit left out), so no output gives the excluded count with a public cap (review fixes; residual: a `true` with few matches suggests something was left out); hits matched only in hidden content are excluded unless revealed, re-checked against the masked text the export writes; a multi-conversation hit is written under its lowest conversation | Always the shown 10,000; exporting membership as is | Faithful to what the user saw, with no disclosure through membership |
+| D128, D145 | Time zones and the window (slice 6d) | The webview's offset table, validated in Rust; a window clamped to 1900 … now + 366 days; outliers written in UTC and counted; a stale table refused; local-day bounds and formatting in Rust's own civil arithmetic | jiff with a bundled tzdb | One zone source (D104); nothing approximated |
+| D129 | Words (slice 6d) | Exhaustive Rust tables; `export-words.json` generated and checked against `viewerText.ts`; third-party wording | Codes only | Readable outputs without drift |
+| D138 | Readability safety, the classifier and markers (slice 6d; the TXT writer applies it from 6e2, with `[` and `]` also escaped in its header fields; HTML from 6g, as elements) | D121's rule inverted, checked against the shared vectors; the reserved `⟨` marker form; header fields always marked; combining runs limited in TXT and PDF | Raw everywhere | Prevents marker forgery, header forgery and bidi spoofing |
+| D141 | Identifiers (**owner Q5: lean applied, awaiting confirmation**; slice 6d) | Export-local ordinals by default; archive ids as decimal strings and source identifiers only under an opt-in for JSON, CSV and XLSX, off | Archive ids by default | No archive-size disclosure by default; joining exports is possible on request |
+| D142 | Record fidelity and the ledger (slice 6d) | Dedicated record structs; segments kept; unknown codes and states kept; tagged absence; every v1 column given a disposition, exported columns checked at their paths; `exclusions` generated; never less than the viewer, with the documented exceptions; `extras == false` refused | Flattened bodies; hand-picked fields | Rule 3 holds by construction, and drift fails a test |
+| D126 | Packaging and placement (slices 6d, 6e1) | A bundle for multi-file, CSV, attachments or multi-conversation exports, a single file otherwise; staging inside the destination; a no-replace rename publishes (` (2)` … ` (99)`); a single file replaces only a regular file, only after the app's confirmation | Always a folder; trusting native overwrite prompts | Atomic per output, never a silent overwrite, nothing outside the destination |
+| D134 | Attachments (**owner-confirmed, Q3a–Q3c**; slice 6e1 names, 6e2 the copy) | Ordinal-prefixed, budgeted, sharded names; the passive allowlist with sniff agreement, else `.blocked`; the confirmed opt-out; copies through `BlobReader` to final names inside staging with one hash (the reader's verified digest); dedupe per blob; Mark of the Web (`ZoneId=3`) on Windows, its effect **UNVERIFIED**; exclusions counted; the 4 GiB rule for FAT12/16/32 only; Q3a's defaults in `plan::default_attachments` | An extension blocklist; `verify_blob` then copy | Safe names by construction; no check-then-use gap; no completeness claimed, so Mark of the Web follows |
+| D135 | Provenance (slice 6e1) | README, then manifest, then `SHA256SUMS`; counts with the four identities; never the query, the excluded-hit count, device facts, the archive id or label, or paths | An opt-in for the query | Never reveal more than the export contains |
+| D140 | Permissions (slice 6e1) | 0700 folders and 0600 files on Linux (`mkdirat`, `openat` modes); the destination's ACL on Windows | umask | Private by default |
+| D143 | Destination integrity (slice 6e1) | Canonical destination; on Linux every write relative to `O_DIRECTORY\|O_NOFOLLOW` handles and a `(dev, ino)` check before publish; the Windows residual disclosed | String paths | Closes the staging-swap path into a backup (I1) |
+| D144 | Leftovers (slice 6e1) | The marker kept until after publish and held with `try_lock`, kept on disk when a cleanup leaves any of the export's own files, its time refreshed every batch; fixed, content-free names; probes swept; locked and recent entries skipped; removal of the pinned list only; bounded retries on Windows | Removing the marker before the rename; a fresh glob | Every crash leftover is findable, and a live export is never deleted while its lock is seen or its batches stay under 5 minutes (one batch over 5 minutes on a folder whose locks another machine cannot see is the disclosed residual) |
+| D130 | CSV (slice 6f) | RFC 4180 with CRLF and every field quoted; default-deny OWASP neutralisation (White_Space and default-ignorables skipped, full-width and small forms, after escaping), listed per row and counted; "for data tools" raw except U+27E8; every file always present; the column contract pinned and only appended; always a bundle | Never neutralise; a leading-character blocklist | Spreadsheet safety by default, raw values on request, and a reversible prefix |
+| D132 | HTML (lean; slices 6g, 6h2) | A static template; escaping into text nodes; markers as elements; CSP meta first; one hashed style; inline thumbnails as `data:` from checked renditions of the export's own decode-helper pool (`RenditionPair`, at most two helpers, off after three crashes in a row) through a `PreviewSource`; display previews opt-in; originals never linked; no media elements; nav after main; backward-only links | Linking originals; `img-src 'self'` | D113's isolation; independence from browsers' `file:` origin rules; streamable |
+| D146 | Independent oracles (slices 6c, 6e2, 6f, 6g) | A projection from the archive with stdlib `sqlite3`; JSON against the projection and both schemas; CSV against JSON under `T`; local times against `zoneinfo`; TXT through its own grammar parser; HTML through `html.parser` and strict html5lib against JSON under `T`; masking scanned in every byte | Oracles against our own records | A mapping bug cannot pass every test |
+| D147 | Consent and drift (slice 6b2; compared from slice 6h1) | Exact, cancellable counts; the archive generation in the draft, compared at start and again inside the job's snapshot; a recount under the lock before writing; reveal counts that never understate (folded reactions and, with history, edit text counted); each reveal confirmed against its own count, which must equal the draft's at start | Budgeted "at least" counts | "N messages" is never an understatement |
+| D127 | Destination (lean; slices 6h1, 6h2) | Rust-opened dialogs whose titles name sensitive options; the folder kept in the draft, never crossing IPC, behind an opaque destination token bound to the draft (the latest choice's token starts the export); names generated in Rust; the format's extension enforced; `.oma-export-*` names refused; refusals per I1 plus the archive folder; warnings to confirm, checked again at start; no remembered destination | A name or path from the webview | I4, I3; `settings.json` stays content-free |
+| D136 | Export DTOs (slice 6h1) | A new export walk disjoint from the others but for three shared types; `exportFinished` inside the archive guard's walk, counts only; warnings and providers as closed codes | Reuse the viewer walk | Walks stay disjoint and events small |
+| D131 | XLSX (lean; **PR B**, slice 6i) | rust_xlsxwriter in constant-memory mode in the export-render helper; `quotePrefix`; our own 32,767 UTF-16 limit with continuation rows; temp directory in staging | In-process | A panic on temp-file I/O cannot end the app; exact values |
+| D133 | Export-render helper (**owner-confirmed Q1, Q2**; **PR B**, slices 6i, 6j) | PDF layout and XLSX writing in `--oma-export-helper`; bounded frames; main-process output checks; PDF with krilla 0.8.2 + parley 0.12.0 (a per-crate BSD-2-Clause exception for `arrayref` only; `rust-version` 1.92); fonts: the base scripts, Noto Sans CJK and Noto Color Emoji, pinned by SHA-256 | In-process; our own PDF writer | Hostile text and full disks cannot end the app |
+| D139 | Job (slice 6h1) | `JobKind::Export` on the archive subject, holding the archive lock until its cleanup ends; its own reader, so damaged or migrating archives are refused; survives the viewer closing; `removingPartial` keeps the slot | A viewer-session task | One job model; excludes writers in every instance |
 
 ## Logging
 

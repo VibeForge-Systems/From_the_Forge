@@ -1,0 +1,180 @@
+OpenMessage Archive export — plaintext copy. See the end of this file for details.
+Conversation 1: No name recorded
+Addresses recorded in this conversation (includes people who left): 1
+Times: UTC (offsets shown on every line)
+
+==== 2004-03-03 ====
+[2004-03-03 09:46:40 +00:00] [item 43] synthetic-viewer-1@example.invalid [iMessage] [Before 2007, outside the range this app expects; it may not be a real date]
+    Text:
+      SYNTH-VIEW-BODY-43
+
+==== 2026-01-13 ====
+[2026-01-13 12:27:40 +00:00] [item 1] synthetic-viewer-1@example.invalid [iMessage]
+    Text:
+      SYNTH-VIEW-BODY-1
+    Replies: 1 in this export, 0 not in this export
+    Reaction (derived): Loved by synthetic-viewer-1@example.invalid, recorded (derived)
+    Reaction (derived): Liked by the backed-up phone's account, removed later (derived)
+    Reaction (derived): Questioned by the backed-up phone's account, recorded (derived)
+    Reaction (derived): Emoji reaction 🔥 by synthetic-viewer-1@example.invalid, removed later (derived)
+    Reaction (derived): Sticker reaction by synthetic-viewer-1@example.invalid, recorded (derived)
+    Reaction (derived): Emphasised by sender not recorded, recorded add
+[2026-01-13 12:28:40 +00:00] [item 2] [Sent from the backed-up phone's account] [iMessage]
+    Text:
+      SYNTH-VIEW-BODY-2
+    Reaction (derived): Disliked by synthetic-viewer-1@example.invalid, cannot be determined
+    Reaction (derived): Laughed by synthetic-viewer-1@example.invalid, cannot be determined
+    Reaction (derived): Emoji reaction 👍 by the backed-up phone's account, recorded (derived)
+[2026-01-13 12:42:40 +00:00] [item 16] synthetic-viewer-1@example.invalid [iMessage]
+    No text is recorded for this message
+    Reaction: Sticker placed on a message (Not a reaction)
+    Attachment 1: SYNTH-VIEW-STICKER-16.png
+      File not included: this export carries names only
+      Declared type: image/png
+[2026-01-13 12:43:40 +00:00] [item 17] synthetic-viewer-1@example.invalid [iMessage]
+    No text is recorded for this message
+    Reaction: Poll vote (poll contents not decoded) (Not a reaction)
+[2026-01-13 12:44:40 +00:00] [item 18] synthetic-viewer-1@example.invalid [iMessage]
+    No text is recorded for this message
+    Reaction: Unrecognised association (Not a reaction)
+[2026-01-13 12:45:40 +00:00] [item 19] synthetic-viewer-1@example.invalid [iMessage]
+    No text is recorded for this message
+    Reaction (Whether this folds into its target could not be determined)
+[2026-01-13 12:46:40 +00:00] [item 20] synthetic-viewer-1@example.invalid [iMessage]
+    No text is recorded for this message
+    Reaction (Reaction kind not recorded)
+[2026-01-13 12:47:40 +00:00] [item 21] synthetic-viewer-1@example.invalid [iMessage]
+    No text is recorded for this message
+    Reaction: Loved, on item 40 (Reaction to a message in another conversation)
+[2026-01-13 12:48:40 +00:00] [item 22] synthetic-viewer-1@example.invalid [iMessage]
+    No text is recorded for this message
+    Reaction: Loved (Reaction target is not uniquely identified)
+[2026-01-13 12:49:40 +00:00] [item 23] synthetic-viewer-1@example.invalid [iMessage]
+    No text is recorded for this message
+    Reaction: Loved (Reaction target could not be read)
+[2026-01-13 12:50:40 +00:00] [item 24] synthetic-viewer-1@example.invalid [iMessage]
+    Text:
+      SYNTH-VIEW-BODY-24
+    Reply to item 1
+[2026-01-13 12:51:40 +00:00] [item 25] [Sent from the backed-up phone's account] [iMessage]
+    Text:
+      SYNTH-VIEW-BODY-25
+    No uniquely identified message with this identifier is in the archive
+[2026-01-13 12:52:40 +00:00] [item 26] synthetic-viewer-1@example.invalid [iMessage]
+    Text:
+      SYNTH-VIEW-BODY-26
+    Reply to item 41, in another conversation of this export
+[2026-01-13 12:53:40 +00:00] [item 27] synthetic-viewer-1@example.invalid [iMessage]
+    Text:
+      SYNTH-VIEW-BODY-27
+    No uniquely identified message with this identifier is in the archive
+[2026-01-13 12:54:40 +00:00] [item 28] synthetic-viewer-1@example.invalid [iMessage] [No unique identifier in its source; it may appear more than once]
+    Text:
+      SYNTH-VIEW-BODY-28 (unkeyed)
+[2026-01-13 12:55:40 +00:00] [item 29] synthetic-viewer-1@example.invalid [iMessage] [No unique identifier in its source; it may appear more than once]
+    Text:
+      SYNTH-VIEW-BODY-29 (unkeyed)
+[2026-01-13 12:56:40 +00:00] [item 30] [Sent from the backed-up phone's account] [iMessage] [Edited: part 0]
+    Text:
+      SYNTH-VIEW-BODY-30 edited
+    Stored versions not included in this export: 1 captured, 1 phone edit entries
+[2026-01-13 12:57:40 +00:00] [item 31] [Sent from the backed-up phone's account] [iMessage] [Unsent by the sender: part 1 of 3]
+    Text:
+      SYNTH-VIEW-PART-0 SYNTH-VIEW-PART-2
+[2026-01-13 12:58:40 +00:00] [item 32] [Sent from the backed-up phone's account] [iMessage] [Unsent by the sender]
+    No text is recorded for this message
+[2026-01-13 12:59:40 +00:00] [item 33] synthetic-viewer-1@example.invalid [iMessage] [An edit date is recorded; no edit history in this version]
+    Text:
+      SYNTH-VIEW-BODY-33
+[2026-01-13 13:00:40 +00:00] [item 34] synthetic-viewer-1@example.invalid [iMessage] [An edit date is recorded; no edit history in this version]
+    The message text is empty
+[2026-01-13 13:01:40 +00:00] [item 35] synthetic-viewer-1@example.invalid [iMessage] [Edit state could not be determined]
+    Text:
+      SYNTH-VIEW-BODY-35
+[2026-01-13 13:02:40 +00:00] [item 36] synthetic-viewer-1@example.invalid [iMessage] [Edit state could not be determined]
+    Text:
+      SYNTH-VIEW-BODY-36
+[2026-01-13 13:03:40 +00:00] [item 37] synthetic-viewer-1@example.invalid [iMessage]
+    Text:
+      ⟨one-time code hidden⟩
+[2026-01-13 13:04:40 +00:00] [item 38] synthetic-viewer-1@example.invalid [iMessage]
+    Text:
+      SYNTH-VIEW-BODY-38
+[2026-01-13 13:05:40 +00:00] [item 39] synthetic-viewer-1@example.invalid [iMessage]
+    Text:
+      SYNTH-VIEW-INLINE ⟨Inline emoji image (not shown)⟩ and ⟨Attachment placeholder not matched to a file⟩
+[2026-01-13 13:08:40 +00:00] [item 42] [Sent from the backed-up phone's account] [planned send time] [iMessage] [schedule_type 2 recorded. For scheduled messages, the time shown is the planned send time]
+    Text:
+      SYNTH-VIEW-BODY-42
+[2026-01-13 13:12:40 +00:00] [item 46] synthetic-viewer-1@example.invalid [iMessage] [Also in conversation 2]
+    Text:
+      SYNTH-VIEW-BODY-46 in two chats
+[2026-01-13 13:13:40 +00:00] [item 47] [Sent from the backed-up phone's account] [SMS]
+    Text:
+      SYNTH-VIEW-BODY-47
+[2026-01-13 13:14:40 +00:00] [item 48] [Direction not recorded] [iMessage]
+    Text:
+      SYNTH-VIEW-BODY-48
+[2026-01-13 13:15:40 +00:00] [item 49] [Received] [No sender recorded] [iMessage]
+    Text:
+      SYNTH-VIEW-BODY-49
+[2026-01-13 13:16:40 +00:00] [item 50] [Received] [Sender recorded but not found in this archive] [iMessage]
+    Text:
+      SYNTH-VIEW-BODY-50
+[2026-01-13 13:17:40 +00:00] [item 51] [Received] [Sender could not be read] [iMessage]
+    Text:
+      SYNTH-VIEW-BODY-51
+[2026-01-13 13:18:40 +00:00] [item 52] synthetic-viewer-1@example.invalid [iMessage] [App or link content (not decoded)]
+    Text:
+      SYNTH-VIEW-BODY-52
+[2026-01-13 13:19:40 +00:00] [item 53] [Sent from the backed-up phone's account] [iMessage] [Sent with an effect]
+    Text:
+      SYNTH-VIEW-BODY-53
+[2026-01-13 13:20:40 +00:00] [item 54] synthetic-viewer-1@example.invalid [iMessage]
+    Transcription recorded on the phone:
+      SYNTH-VIEW-BODY-54
+[2026-01-13 13:21:40 +00:00] [item 55] synthetic-viewer-1@example.invalid [iMessage]
+    Text:
+      SYNTH-VIEW-BODY-55 formatted column
+    The two stored text fields differ; which one the phone showed is not known
+    The plain-text column holds different text:
+      SYNTH-VIEW-BODY-55 plain column
+[2026-01-13 13:22:40 +00:00] [item 56] synthetic-viewer-1@example.invalid [iMessage]
+    No text is recorded for this message
+[2026-01-13 13:23:40 +00:00] [item 57] synthetic-viewer-1@example.invalid [iMessage]
+    The message text is empty
+[2026-01-13 13:24:40 +00:00] [item 58] synthetic-viewer-1@example.invalid [iMessage]
+    The formatted text could not be used
+[2026-01-13 13:25:40 +00:00] [item 59] synthetic-viewer-1@example.invalid [iMessage]
+    Text:
+      SYNTH-VIEW-BODY-59 �( lossy
+    Some bytes of this text were not valid text and show as U+FFFD
+[2026-01-13 13:26:40 +00:00] [item 60] synthetic-viewer-1@example.invalid [iMessage]
+    Text:
+      see https://example.invalid/SYNTH-PATH?q=1 ok
+[2026-01-13 13:27:40 +00:00] [item 61] synthetic-viewer-1@example.invalid [iMessage]
+    Text:
+      SYNTH-VIEW-URL https://example.invalid/⟨U+202E⟩SYNTH-gpj.exe
+[2026-01-13 13:28:40 +00:00] [item 62] synthetic-viewer-1@example.invalid [iMessage]
+    Text:
+      Hi
+
+==== Undated ====
+[Undated] [item 44] synthetic-viewer-1@example.invalid [Date recorded as 0] [iMessage]
+    Text:
+      SYNTH-VIEW-BODY-44
+[Undated] [item 45] synthetic-viewer-1@example.invalid [Negative date (raw -60)] [iMessage]
+    Text:
+      SYNTH-VIEW-BODY-45
+
+==== End of conversation file ====
+Items: 47
+Reactions shown on the messages they react to: 13
+
+Legend:
+Each item starts at the beginning of a line with its recorded time in brackets and its number in this export, [item N], then the sender's address when one is recorded, then tags in brackets. Everything that belongs to an item is indented: labels by four spaces, recorded text by six. A line of message text can therefore never start a new item.
+Times are shown in the zone named at the top, with the offset in force on every line. [Undated] marks an item the archive sorts as undated; undated items come last and follow the order of the earliest import that recorded them, which is not a recorded fact. [No usable time] marks an item sorted among the dated ones whose own recorded time cannot be shown; a tag says why.
+[same recorded time; order not known]: the item has the same recorded time as its neighbour, so their order is the order the archive imported them in.
+Values and tags marked 'derived' were worked out by the archive from what the phone recorded, not recorded by the phone itself.
+Text in angle brackets ⟨…⟩ is written by the export, never by a message: ⟨U+200B⟩ stands for a character that does not show when printed or that controls the terminal or the text direction, ⟨U+005B⟩ and ⟨U+005D⟩ for square brackets in an address or a name, ⟨+N combining marks⟩ for marks left out of a very long run of accents, and ⟨one-time code hidden⟩ or ⟨Attachment N⟩ for what stood at that place in the text. A literal ⟨ in a message is itself written as ⟨U+27E8⟩.
+Line breaks inside a message become new indented lines. In addresses, names and other fields on a tag line, every line break and control is written as a code instead.

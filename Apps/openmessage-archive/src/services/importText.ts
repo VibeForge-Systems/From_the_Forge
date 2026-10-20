@@ -93,6 +93,7 @@ export const STATUS_LABEL: Record<ArchiveStatusDto, { text: string; cls: string 
   ready: { text: 'Ready', cls: 'text-bg-success' },
   importing: { text: 'Importing', cls: 'text-bg-primary' },
   verifying: { text: 'Verifying', cls: 'text-bg-primary' },
+  exporting: { text: 'Exporting', cls: 'text-bg-primary' },
   inUse: { text: 'In use', cls: 'text-bg-warning' },
   needsUpgrade: { text: 'Needs upgrade', cls: 'text-bg-warning' },
   newerVersion: { text: 'Newer version', cls: 'text-bg-secondary' },
@@ -129,6 +130,8 @@ export function statusSentence(e: ArchiveEntryDto): string {
       return 'OpenMessage Archive is importing into this archive.';
     case 'verifying':
       return 'OpenMessage Archive is verifying this archive.';
+    case 'exporting':
+      return 'OpenMessage Archive is exporting from this archive.';
     case 'inUse':
       return 'This archive is in use by another program, or by another copy of OpenMessage Archive.';
     case 'needsUpgrade':

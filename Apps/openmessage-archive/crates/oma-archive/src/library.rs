@@ -17,6 +17,7 @@ use rusqlite::TransactionBehavior;
 use crate::archive::Archive;
 use crate::conn::{create_database_file, WriteConn};
 use crate::error::{ArchiveError, DamageKind, IoOp, LocationRefusal, RefusalKind, Stage};
+use crate::export::ExportHold;
 use crate::id::{ArchiveId, Label};
 use crate::layout::{
     ArchiveDir, ATTACHMENTS_DIR, IMPORTS_DIR, INCOMING_DIR, LOCK_FILE, NEW_PREFIX, TOP_LEVEL_NAMES,
@@ -264,6 +265,28 @@ impl Library {
             Arc::clone(&self.clock),
             Arc::clone(&self.store),
         ))
+    }
+
+    /// Take archive `id`'s lock file for an export job's lifetime (M6 spec
+    /// §3.5, D124): the same checks and the same `ArchiveLock::acquire` as
+    /// [`Library::open`], so an import or a verify, in this process or in
+    /// another instance, gets `Locked` while the hold lives, and
+    /// [`Library::list`] reports the archive as in use. Readers stay
+    /// lock-free. `Locked` when the lock is already held. Like `open`, a
+    /// missing lock file is recreated.
+    ///
+    /// [`ArchiveReader::with_export_snapshot`] requires the hold of the
+    /// archive it reads.
+    pub fn hold_for_export(&self, id: &ArchiveId) -> Result<ExportHold, ArchiveError> {
+        let dir = ArchiveDir::of(&self.root, id);
+        let lock_present = self.precheck(&dir)?;
+        let lock = if lock_present {
+            ArchiveLock::acquire(&dir.lock())?
+        } else {
+            tracing::info!("archive lock file missing; recreated");
+            ArchiveLock::create(&dir.lock())?
+        };
+        Ok(ExportHold::new(lock, dir))
     }
 
     /// A lock-free, query-only reader (D84). Refuses an older schema with

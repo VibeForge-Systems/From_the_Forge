@@ -1,0 +1,315 @@
+OpenMessage Archive export — plaintext copy. See the end of this file for details.
+Conversation 1: No name recorded
+Addresses recorded in this conversation (includes people who left): 1
+Times: UTC (offsets shown on every line)
+
+==== 2026-01-13 ====
+[2026-01-13 12:27:40 +00:00] [item 1] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-1
+    Attachment 1: png-rgb-6x4.png
+      No file is stored for this attachment
+      Declared type: image/png
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:28:40 +00:00] [item 2] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-2
+    Attachment 2: png-alpha-4x4.png
+      No file is stored for this attachment
+      Declared type: image/png
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:29:40 +00:00] [item 3] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-3
+    Attachment 3: jpeg-exif6-gps-8x6.jpg
+      No file is stored for this attachment
+      Declared type: image/jpeg
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:30:40 +00:00] [item 4] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-4
+    Attachment 4: jpeg-truncated.jpg
+      No file is stored for this attachment
+      Declared type: image/jpeg
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:31:40 +00:00] [item 5] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-5
+    Attachment 5: gif-2frames-4x4.gif
+      No file is stored for this attachment
+      Declared type: image/gif
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:32:40 +00:00] [item 6] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-6
+    Attachment 6: webp-lossless-4x4.webp
+      No file is stored for this attachment
+      Declared type: image/webp
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:33:40 +00:00] [item 7] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-7
+    Attachment 7: png-bomb-12000.png
+      No file is stored for this attachment
+      Declared type: image/png
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:34:40 +00:00] [item 8] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-8
+    Attachment 8: png-rgba16-4097.png
+      No file is stored for this attachment
+      Declared type: image/png
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:35:40 +00:00] [item 9] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-9
+    Attachment 9: png-ihdr-60000.png
+      No file is stored for this attachment
+      Declared type: image/png
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:36:40 +00:00] [item 10] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-10
+    Attachment 10: mp4-minimal.mp4
+      No file is stored for this attachment
+      Declared type: video/mp4
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:37:40 +00:00] [item 11] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-11
+    Attachment 11: mov-minimal.mov
+      No file is stored for this attachment
+      Declared type: video/quicktime
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:38:40 +00:00] [item 12] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-12
+    Attachment 12: m4a-minimal.m4a
+      No file is stored for this attachment
+      Declared type: audio/x-m4a
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:39:40 +00:00] [item 13] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-13
+    Attachment 13: wav-minimal.wav
+      No file is stored for this attachment
+      Declared type: audio/wav
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:40:40 +00:00] [item 14] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-14
+    Attachment 14: caf-header.caf
+      No file is stored for this attachment
+      Declared type: audio/x-caf
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:41:40 +00:00] [item 15] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-15
+    Attachment 15: heic-header.heic
+      No file is stored for this attachment
+      Declared type: image/heic
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:42:40 +00:00] [item 16] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-16
+    Attachment 16: mov-refmovie-rmra.mov
+      No file is stored for this attachment
+      Declared type: video/quicktime
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:43:40 +00:00] [item 17] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-17
+    Attachment 17: mov-dref-external.mov
+      No file is stored for this attachment
+      Declared type: video/quicktime
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:44:40 +00:00] [item 18] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-18
+    Attachment 18: mp4-box-past-eof.mp4
+      No file is stored for this attachment
+      Declared type: video/mp4
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:45:40 +00:00] [item 19] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-19
+    Attachment 19: mp4-box-64bit-overflow.mp4
+      No file is stored for this attachment
+      Declared type: video/mp4
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:46:40 +00:00] [item 20] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-20
+    Attachment 20: wav-chunk-past-eof.wav
+      No file is stored for this attachment
+      Declared type: audio/wav
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:47:40 +00:00] [item 21] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-21
+    Attachment 21: svg-script.svg
+      No file is stored for this attachment
+      Declared type: image/svg+xml
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:48:40 +00:00] [item 22] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-22
+    Attachment 22: html-named-jpg.jpg
+      No file is stored for this attachment
+      Declared type: image/jpeg
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:49:40 +00:00] [item 23] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-23
+    Attachment 23: gif-html-polyglot.gif
+      No file is stored for this attachment
+      Declared type: image/gif
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:50:40 +00:00] [item 24] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-24
+    Attachment 24: pdf-minimal.pdf
+      No file is stored for this attachment
+      Declared type: application/pdf
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:51:40 +00:00] [item 25] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-25
+    Attachment 25: vcard-synthetic.vcf
+      No file is stored for this attachment
+      Declared type: text/vcard
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:52:40 +00:00] [item 26] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-26
+    Attachment 26: text-plain.txt
+      No file is stored for this attachment
+      Declared type: text/plain
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:53:40 +00:00] [item 27] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-27
+    Attachment 27: unknown-bytes.bin
+      No file is stored for this attachment
+      Declared type: application/octet-stream
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:54:40 +00:00] [item 28] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-28
+    Attachment 28: one-byte.bin
+      No file is stored for this attachment
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:55:40 +00:00] [item 29] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-29
+    Attachment 29: empty.bin
+      No file is stored for this attachment
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:56:40 +00:00] [item 30] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-30
+    Attachment 30: SYNTH-MEDIA-blob-missing.png
+      No file is stored for this attachment
+      Declared type: image/png
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:57:40 +00:00] [item 31] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-31
+    Attachment 31: SYNTH-MEDIA-not-in-backup.png
+      No file is stored for this attachment
+      Declared type: image/png
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:58:40 +00:00] [item 32] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-32
+    Attachment 32: SYNTH-MEDIA-sticker-present.png
+      No file is stored for this attachment
+      Declared type: image/png
+      Not copied: attachment copy was off for that import
+[2026-01-13 12:59:40 +00:00] [item 33] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-33
+    Attachment 33: SYNTH-MEDIA-sticker-not-found.png
+      No file is stored for this attachment
+      Declared type: image/png
+      Not copied: attachment copy was off for that import
+[2026-01-13 13:00:40 +00:00] [item 34] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-34
+    Attachment 34: SYNTH-MEDIA-null-filename.png
+      No file is stored for this attachment
+      Declared type: image/png
+      Not copied: attachment copy was off for that import
+[2026-01-13 13:01:40 +00:00] [item 35] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-35
+    Attachment 35: SYNTH-MEDIA-class-not-looked-up.png
+      No file is stored for this attachment
+      Declared type: image/png
+      Not copied: attachment copy was off for that import
+[2026-01-13 13:02:40 +00:00] [item 36] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-36
+    Attachment 36: SYNTH-MEDIA-size-mismatch.png
+      No file is stored for this attachment
+      Declared type: image/png
+      Not copied: attachment copy was off for that import
+[2026-01-13 13:03:40 +00:00] [item 37] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-37
+    Attachment 37: SYNTH-MEDIA-hidden.png
+      No file is stored for this attachment
+      Declared type: image/png
+      Not copied: attachment copy was off for that import
+[2026-01-13 13:04:40 +00:00] [item 38] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-38
+    Attachment 38: SYNTH-MEDIA-genmoji.png
+      No file is stored for this attachment
+      Declared type: image/png
+      Not copied: attachment copy was off for that import
+      Description recorded with it: SYNTH-GENMOJI-PROMPT-MEDIA
+[2026-01-13 13:05:40 +00:00] [item 39] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-39
+    Attachment 39: SYNTH-MEDIA-same-bytes.png
+      No file is stored for this attachment
+      Declared type: image/png
+      Not copied: attachment copy was off for that import
+[2026-01-13 13:06:40 +00:00] [item 40] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-INLINE ⟨Attachment 40⟩ then ⟨Attachment 41⟩ emoji ⟨Inline emoji image (not shown)⟩
+    Attachment 41: SYNTH-MEDIA-inline-a.png
+      No file is stored for this attachment
+      Declared type: image/png
+      Not copied: attachment copy was off for that import
+    Attachment 40: SYNTH-MEDIA-inline-b.png
+      No file is stored for this attachment
+      Declared type: image/png
+      Not copied: attachment copy was off for that import
+[2026-01-13 13:07:40 +00:00] [item 41] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-UNMATCHED ⟨Attachment placeholder not matched to a file⟩
+    Attachment 42: SYNTH-MEDIA-unmatched.png
+      No file is stored for this attachment
+      Declared type: image/png
+      Not copied: attachment copy was off for that import
+[2026-01-13 13:08:40 +00:00] [item 42] synthetic-media-1@example.invalid [iMessage]
+    Text:
+      SYNTH-MEDIA-BODY-42
+    Attachment 43: SYNTH-MEDIA-declared-differs.png
+      No file is stored for this attachment
+      Declared type: image/png
+      Not copied: attachment copy was off for that import
+
+==== End of conversation file ====
+Items: 42
+Reactions shown on the messages they react to: 0
+
+Legend:
+Each item starts at the beginning of a line with its recorded time in brackets and its number in this export, [item N], then the sender's address when one is recorded, then tags in brackets. Everything that belongs to an item is indented: labels by four spaces, recorded text by six. A line of message text can therefore never start a new item.
+Times are shown in the zone named at the top, with the offset in force on every line. [Undated] marks an item the archive sorts as undated; undated items come last and follow the order of the earliest import that recorded them, which is not a recorded fact. [No usable time] marks an item sorted among the dated ones whose own recorded time cannot be shown; a tag says why.
+[same recorded time; order not known]: the item has the same recorded time as its neighbour, so their order is the order the archive imported them in.
+Values and tags marked 'derived' were worked out by the archive from what the phone recorded, not recorded by the phone itself.
+Text in angle brackets ⟨…⟩ is written by the export, never by a message: ⟨U+200B⟩ stands for a character that does not show when printed or that controls the terminal or the text direction, ⟨U+005B⟩ and ⟨U+005D⟩ for square brackets in an address or a name, ⟨+N combining marks⟩ for marks left out of a very long run of accents, and ⟨one-time code hidden⟩ or ⟨Attachment N⟩ for what stood at that place in the text. A literal ⟨ in a message is itself written as ⟨U+27E8⟩.
+Line breaks inside a message become new indented lines. In addresses, names and other fields on a tag line, every line break and control is written as a code instead.

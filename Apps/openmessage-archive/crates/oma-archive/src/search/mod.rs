@@ -156,7 +156,7 @@ impl SearchRequest {
         Ok(self.parse()?.ran())
     }
 
-    fn parse(&self) -> Result<Parsed, ArchiveError> {
+    pub(crate) fn parse(&self) -> Result<Parsed, ArchiveError> {
         let raw = self.query.expose().as_str();
         let exact = self.mode == SearchMode::Exact || raw.chars().any(query::needs_exact);
         if exact {
@@ -164,19 +164,28 @@ impl SearchRequest {
         } else {
             let terms = query::terms(raw)?;
             let (expr, prefix) = query::fts_expression(&terms);
-            Ok(Parsed::Words { expr, prefix })
+            Ok(Parsed::Words {
+                expr,
+                prefix,
+                terms: query::term_expressions(&terms),
+            })
         }
     }
 }
 
 /// A parsed query: the FTS5 expression, or the exact-text needle.
 pub(crate) enum Parsed {
-    Words { expr: String, prefix: bool },
+    Words {
+        expr: String,
+        prefix: bool,
+        /// Each term's own expression (`expr` is these joined by ` AND `).
+        terms: Vec<String>,
+    },
     Exact(String),
 }
 
 impl Parsed {
-    fn ran(&self) -> SearchRan {
+    pub(crate) fn ran(&self) -> SearchRan {
         match self {
             Parsed::Words { .. } => SearchRan::Words,
             Parsed::Exact(_) => SearchRan::Exact,
@@ -455,7 +464,7 @@ pub(crate) struct Match {
 /// Matches as a result set: one entry per message (its current body when
 /// that matched, else the highest body id), dated newest first, then
 /// undated.
-fn order(mut matches: Vec<Match>) -> (Vec<SetEntry>, usize) {
+pub(crate) fn order(mut matches: Vec<Match>) -> (Vec<SetEntry>, usize) {
     matches.sort_by(|a, b| {
         (a.message, !a.current, std::cmp::Reverse(a.body)).cmp(&(
             b.message,
@@ -685,7 +694,7 @@ impl ArchiveReader {
         }
         let conn = self.conn();
         conn.snapshot(|| match &parsed {
-            Parsed::Words { expr, prefix } => {
+            Parsed::Words { expr, prefix, .. } => {
                 let (plan, matches, capped) =
                     words::collect(conn, q, expr, *prefix, &ranges, cancel)?;
                 let (entries, dated) = order(matches);

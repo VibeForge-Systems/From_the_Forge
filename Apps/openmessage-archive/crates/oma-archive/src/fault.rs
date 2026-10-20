@@ -300,7 +300,91 @@ pub mod hooks {
         v
     }
 
+    /// The export reads' statements, by name, exactly as the code
+    /// prepares them (for `tests/query_plans.rs`, M6 spec §3.4).
+    pub fn export_statements() -> Vec<(&'static str, String)> {
+        crate::export::plan_statements()
+    }
+
+    /// Whether any statement on the snapshot's connection has stepped
+    /// and not been reset (`sqlite3_stmt_busy` over every statement): the
+    /// cursors materialise and reset before they return (M6 spec §3.2).
+    /// Test-only.
+    pub fn statements_stepping(snapshot: &crate::ExportSnapshot<'_>) -> bool {
+        snapshot.statements_stepping()
+    }
+
     pub use crate::bulk::{sort_key, BulkFinalize, BulkWriter};
+
+    /// Caps to lower below [`Caps::EXPORT`](crate::view::assemble::Caps)
+    /// in a test, so a missed cap can be shown to be reported (M6 spec
+    /// §14.1). `None` keeps the export's "no cap".
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct LowerCaps {
+        pub body_utf16: Option<u32>,
+        pub identifier_utf16: Option<u32>,
+        pub version_utf16: Option<u32>,
+        pub subject_utf16: Option<u32>,
+        pub emoji_bytes: Option<usize>,
+        pub attachments: Option<usize>,
+        pub reactions: Option<u64>,
+    }
+
+    fn export_caps(lower: LowerCaps) -> crate::view::assemble::Caps {
+        let e = crate::view::assemble::Caps::EXPORT;
+        crate::view::assemble::Caps {
+            body_utf16: lower.body_utf16.unwrap_or(e.body_utf16),
+            identifier_utf16: lower.identifier_utf16.unwrap_or(e.identifier_utf16),
+            version_utf16: lower.version_utf16.unwrap_or(e.version_utf16),
+            subject_utf16: lower.subject_utf16.unwrap_or(e.subject_utf16),
+            emoji_bytes: lower.emoji_bytes.unwrap_or(e.emoji_bytes),
+            attachments: lower.attachments.unwrap_or(e.attachments),
+            reactions: lower.reactions.unwrap_or(e.reactions),
+            ..e
+        }
+    }
+
+    /// One message assembled as an export will assemble it (M6 slice 6a):
+    /// `Caps::EXPORT` lowered by `lower`, base and extras, the raw codes,
+    /// in one read transaction with no op budget, then the cap check that
+    /// runs in every build. Test-only: exports read through
+    /// `ArchiveReader::with_export_snapshot`.
+    pub fn export_item(
+        reader: &crate::ArchiveReader,
+        chat: Option<crate::ChatId>,
+        id: crate::MessageId,
+        reveal: crate::Reveal,
+        lower: LowerCaps,
+    ) -> Result<crate::ExportItem, crate::ArchiveError> {
+        reader.export_item(
+            chat,
+            id,
+            reveal,
+            export_caps(lower),
+            &crate::CancelToken::new(),
+        )
+    }
+
+    /// One handle's address under `Caps::EXPORT` lowered by `lower` (M6
+    /// slice 6a). Test-only.
+    pub fn export_handle(
+        reader: &crate::ArchiveReader,
+        id: crate::HandleId,
+        lower: LowerCaps,
+    ) -> Result<crate::Participant, crate::ArchiveError> {
+        reader.export_handle(id, export_caps(lower), &crate::CancelToken::new())
+    }
+
+    /// `message_detail` under `Caps::EXPORT` lowered by `lower`: the
+    /// details' caps threaded through (M6 slice 6a). Test-only.
+    pub fn export_detail(
+        reader: &crate::ArchiveReader,
+        id: crate::MessageId,
+        reveal: crate::Reveal,
+        lower: LowerCaps,
+    ) -> Result<crate::MessageDetail, crate::ArchiveError> {
+        reader.detail_with(id, reveal, export_caps(lower))
+    }
 
     /// A write handle on `archive` for generating schema-valid v1 rows
     /// directly (M5 spec §14.2): the archive's own ReadWrite connection,

@@ -47,6 +47,13 @@ import type {
   TextChunkDto,
   ThreadPageDto,
   ViewerSessionDto,
+  ChooseExportDestinationRequest,
+  DraftId,
+  ExportDestinationDto,
+  ExportDraftDto,
+  PreviewEvent,
+  PreviewExportRequest,
+  StartExportRequest,
 } from '@/types';
 
 /**
@@ -94,6 +101,16 @@ export const ERROR_CODES = [
   'messageNotFound',
   'anchorNotFound',
   'attachmentUnavailable',
+  // Milestone 6: exports.
+  'exportDestinationRefused',
+  'exportTargetExists',
+  'exportNameRefused',
+  'exportDraftExpired',
+  'exportConfirmationStale',
+  'exportZoneTableStale',
+  'exportWriteFailed',
+  'exportHelperFailed',
+  'exportUnavailable',
 ] as const satisfies readonly ErrorCode[];
 
 export class IpcError extends Error {
@@ -163,6 +180,7 @@ async function callRedacted<T>(
 }
 
 const VIEWER_FALLBACK = 'The viewer request could not be completed.';
+const EXPORT_FALLBACK = 'The export request could not be completed.';
 
 export const ipc = {
   getSettings: () => call<SettingsSnapshot>('get_settings'),
@@ -294,6 +312,44 @@ export const ipc = {
   /** Only for attachments a page or detail of this session showed. */
   inspectAttachment: (request: InspectAttachmentRequest) =>
     call<AttachmentInspectionDto>('inspect_attachment', { request }),
+
+  // Milestone 6: exports. The webview never names a path: the destination
+  // comes from a native dialog Rust opens, and only its display name (an
+  // `UntrustedText`, rendered by interpolation) comes back. Rust parses
+  // every request itself, so a rejection never echoes it.
+  /**
+   * Prepare an export. Resolves with the draft at once; its exact counts
+   * arrive on `onEvent` (`progress`, then `ready`, `needsZoneTable` or
+   * `failed`).
+   */
+  previewExport: (request: PreviewExportRequest, onEvent: (e: PreviewEvent) => void) => {
+    const channel = new Channel<PreviewEvent>();
+    channel.onmessage = onEvent;
+    return callRedacted<ExportDraftDto>(
+      'preview_export',
+      { request, onEvent: channel },
+      EXPORT_FALLBACK,
+    );
+  },
+  /** Opens a native save dialog or folder picker; `null` when cancelled. */
+  chooseExportDestination: (request: ChooseExportDestinationRequest) =>
+    callRedacted<ExportDestinationDto | null>(
+      'choose_export_destination',
+      { request },
+      EXPORT_FALLBACK,
+    ),
+  /** Consumes the draft. Progress and the end arrive on `onEvent`. */
+  startExport: (request: StartExportRequest, onEvent: (e: JobEvent) => void) => {
+    const channel = new Channel<JobEvent>();
+    channel.onmessage = onEvent;
+    return callRedacted<JobStarted>('start_export', { request, onEvent: channel }, EXPORT_FALLBACK);
+  },
+  /** Drop a draft and stop its count. */
+  discardExportDraft: (draftId: DraftId) =>
+    callRedacted<null>('discard_export_draft', { request: { draftId } }, EXPORT_FALLBACK),
+  /** Opens the folder holding a finished export (never the export itself). */
+  showExportInFolder: (jobId: string) =>
+    callRedacted<null>('show_export_in_folder', { request: { jobId } }, EXPORT_FALLBACK),
 };
 
 export type Ipc = typeof ipc;

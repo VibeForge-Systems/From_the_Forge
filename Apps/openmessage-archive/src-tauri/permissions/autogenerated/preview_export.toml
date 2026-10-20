@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-preview-export"
+description = "Enables the preview_export command without any pre-configured scope."
+commands.allow = ["preview_export"]
+
+[[permission]]
+identifier = "deny-preview-export"
+description = "Denies the preview_export command without any pre-configured scope."
+commands.deny = ["preview_export"]

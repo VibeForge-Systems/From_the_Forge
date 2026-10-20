@@ -1160,7 +1160,9 @@ mod tests {
         for (ty, decl) in &decls {
             assert!(!decl.contains("bigint"), "{decl}");
             // The archive event types have their own guard (archives::dto).
-            if ts_guard::M4_EVENT_TYPES.contains(&ty.as_str()) {
+            if ts_guard::M4_EVENT_TYPES.contains(&ty.as_str())
+                || ts_guard::M6_EVENT_TYPES.contains(&ty.as_str())
+            {
                 continue;
             }
             for (key, field_ty) in fields(decl) {
@@ -1198,6 +1200,7 @@ mod tests {
         let expected: BTreeSet<String> = ts_guard::M2_M3_TYPES
             .iter()
             .chain(ts_guard::M4_EVENT_TYPES)
+            .chain(ts_guard::M6_EVENT_TYPES)
             .map(|s| (*s).to_owned())
             .collect();
         assert_eq!(reached, expected);

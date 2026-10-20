@@ -24,6 +24,7 @@ const RESUME_LABEL: Record<JobKind, string> = {
   extractionCheck: 'Unlock and run extraction check',
   import: 'Unlock and prepare import',
   verify: 'Unlock',
+  export: 'Unlock',
 };
 const buttonLabel = computed(() => props.submitLabel ?? RESUME_LABEL[props.resume]);
 const emit = defineEmits<{ submit: [password: string]; close: [] }>();

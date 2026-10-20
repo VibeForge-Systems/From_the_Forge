@@ -181,9 +181,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 3 Extraction check | Locate sms.db, probe the schema, and check that messages, chats, handles and attachment references can be read (counts only) | Implemented; sign-off pending (Windows CI, the clean-room review of the typedstream decoder and the fixture generators, the manual tests) |
 | 4 Archive database | Extract messages and copy attachments into the archive; versioned SQLite schema, transactional and resumable imports, FTS5, integrity verification | Implemented; sign-off pending (CI of slices 4g–4n, two §18.8 Windows tests that are not written yet (a held partial file, a killed lock holder; see `docs/compatibility.md`), the manual tests, the owner's answers on D69, D70, D71, D79 and D82) |
 | 5 Rich viewer | Conversation list, threads, inline media, search, date navigation | Implemented; sign-off pending (CI of PR B, the manual checklist in `docs/compatibility.md`: nothing of the viewer has been used on a desktop or on Windows; only a headless smoke test in a Linux container ran it in a real window). PR A (viewer reads, search, media checks, the viewer commands, the `oma-media` protocol, the image decode helper and the window built in Rust) passed CI on `ubuntu-22.04` and `windows-2022` ([run 39205163013](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39205163013)); PR B (the screens and the documents) is in review |
-| 6 Exports | TXT, CSV, JSON, HTML, PDF, XLSX, and attachments | Planned |
+| 6 Exports | TXT, CSV, JSON, HTML, PDF, XLSX, and attachments | In progress: **PR A of M6 (the engine; no export UI yet)** is built: the archive's export reads, `oma-export` with TXT, CSV, JSON and HTML (previews from the decode helpers), attachment copies, staging and the manifest, and the export job and its IPC commands. It has run only in a Linux container, not on CI or Windows. PR B (PDF, XLSX, the Export dialog, the manual checklist) is next. No export can be made from the app yet |
 | 7 Direct device backup | USB device detection and local backup creation | Planned |
-| 8 Hardening and release | Archive repair, recovery tests, diagnostic log, accessibility, signed packages | Planned |
+| 8 Hardening and release | Archive repair, recovery tests, diagnostic log, accessibility, archive encryption at rest, signed packages | Planned |
 
 ## Known limitations
 
@@ -445,18 +445,32 @@ against attachment rows, date-unit histograms, tapback-history counts, and
 the extraction report's sections for services, reactions, replies, edits
 and message bodies.
 
-### Next: milestone 6 (exports)
+### Milestone 6 (exports): where it stands
 
-Milestone 6 builds on the viewer's reading layer:
+**PR A of M6, the engine, is built, with no export UI yet.** What it has
+(tested on Linux with synthetic data; `docs/architecture.md`, "Exports
+(M6)", and `docs/privacy.md`, "Exports (M6)"):
 
-- TXT, CSV, JSON, HTML, PDF and XLSX exports, plus attachments, streamed
-  from the same assembly of messages the viewer uses (uncapped), with the
-  same sentences for derived states. Each export will ask how to treat
-  one-time codes and withheld earlier text.
-- HTML exports escape their output with the viewer's rendering rules.
-- "Save a copy" of an attachment, through Rust (never a web download),
-  with a sanitised file name. It will be the first plaintext the app writes
-  outside the archive on request, so it gets its own privacy entry.
+- the archive's export reads: one read transaction under the archive's
+  lock, exact counts, masking before anything leaves the archive code;
+- `crates/oma-export`: one record model and column ledger, and the TXT,
+  CSV (two profiles, formula neutralisation), JSON (with schemas) and
+  HTML (static, CSP-locked, previews re-encoded by the decode helpers)
+  writers; attachment copies with one hash, the passive extension
+  allowlist and Mark of the Web; staging inside the destination and a
+  no-replace publish; `README.txt`, `manifest.json` and `SHA256SUMS`;
+- the shell: drafts with exact counts, Rust-opened destination dialogs
+  with checks on the canonical folder, the export job holding the
+  archive's lock, and five IPC commands.
+
+Known limitations of PR A: **no export can be made from the app** (the
+dialog is PR B); PDF, XLSX, "Save a copy" of one attachment and leaving
+events out are refused (the last two are assigned to slice 6k, with the
+dialog); nothing has run on CI, on Windows, in a browser
+or in a spreadsheet program. PR B adds the export-render helper (XLSX,
+then PDF with krilla and the Noto fonts, owner-confirmed), the Export
+dialog, and the M6 manual checklist. The milestone after M6 is milestone
+7 (direct device backup).
 
 ## Contributing
 

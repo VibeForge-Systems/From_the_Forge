@@ -53,13 +53,21 @@ release binary on WebKitGTK 2.52.6 in a Linux container
 manual checklist there (no desktop, audio, screen-reader or WebView2 run
 yet, so no engine floor is established).
 The owner answered the M5 questions (`docs/architecture.md`, "Milestone 5
-decisions").
+decisions"). **Milestone 6 (exports) is in progress: PR A of M6 (the
+engine; no export UI yet) is built** on `feat/oma-m6-export-engine`
+(slices 6a–6h2): the archive's export reads, `crates/oma-export` with
+the TXT, CSV, JSON and HTML writers, the shell's export job, its five
+IPC commands and the export's decode-helper pool. It has run only in a
+Linux container (not on CI, not on Windows). No export can be made from
+the UI until PR B (PDF, XLSX, the Export dialog, slices 6i–6l). The owner
+answered M6's Q1–Q4 on 2026-10-19 (Q5 is a lean awaiting confirmation;
+`docs/architecture.md`, "Milestone 6 decisions").
 
 Read these before designing anything:
 
 | Doc | Read it for |
 |---|---|
-| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, the archive (layout, threat model, import data flow, one section per M4 and M5 slice), the viewer, and the decision records (D1–D122; D43 is how "do not fabricate" is read for the check) |
+| [`docs/architecture.md`](docs/architecture.md) | The five invariants, the crates, the IPC boundary, the extraction check, the archive (layout, threat model, import data flow, one section per M4 and M5 slice), the viewer, the exports (M6), and the decision records (D1–D147; D43 is how "do not fabricate" is read for the check) |
 | [`docs/supported-formats.md`](docs/supported-formats.md) | Sourced research on the backup format, encryption, the sms.db schema (columns with sources, timestamps, codes, typedstream) and device tooling. Items marked **UNVERIFIED** are hypotheses, not facts. |
 | [`docs/privacy.md`](docs/privacy.md) | What is copied, where and for how long, including the plaintext copies of sms.db, and what an archive holds (plaintext at rest) |
 | [`docs/compatibility.md`](docs/compatibility.md) | What has actually been tested |
@@ -100,6 +108,11 @@ them first:
 6. `cargo test --workspace`
 7. Confirm `src/types/generated/` has no uncommitted changes.
 8. `cargo deny check`
+9. The independent oracles (Linux, in the oracle virtual environment):
+   the "Independent oracles (Python)" step's commands, listed in
+   `docs/development.md` ("Synthetic export fixtures and the independent
+   oracles", then the TXT, data and HTML oracle commands of slices 6e2,
+   6f and 6g).
 
 Then run the root gate. Note that the root gate does **not** build this app.
 
@@ -152,12 +165,19 @@ Each one is enforced in code. Keep it that way.
   estimate and guards, the gate, finalize and the provenance files,
   `Archive::import`; and the report-only verifier `Archive::verify` with
   `open_blob`), driven by the shell's six archive commands and its
-  import and verify jobs (slice 4l), and the Archive page (slice 4m); the planned
-  crates are `oma-export` (M6) and `oma-device` (M7). Each must build and test without
+  import and verify jobs (slice 4l), and the Archive page (slice 4m).
+  `oma-export` (M6) has its record core from slice 6d, its files core
+  (names, staging, the manifest, the writer trait) from 6e1, and the
+  attachment copy, the TXT writer and the pipeline from 6e2, the JSON
+  and CSV writers from 6f, the HTML writer from 6g and the preview feed
+  from 6h2; `oma-device` (M7) is planned. Each must build and test without
   Tauri. The shell's `src-tauri/src/backups/` (registry, job table, worker,
-  DTOs, messages) and `src-tauri/src/archives/` (listing, details, the
-  gate, the import and verify workers, DTOs, sentences) have no Tauri
-  types either, so they are tested without a window.
+  DTOs, messages), `src-tauri/src/archives/` (listing, details, the
+  gate, the import and verify workers, DTOs, sentences) and
+  `src-tauri/src/exports/` (drafts, destination checks and tokens, the
+  export job, the decode-helper pool, DTOs, sentences; slices 6h1, 6h2)
+  have no Tauri types either, so they are
+  tested without a window.
 - **Frontend:**
   - Views live in `src/views/`, components in `src/components/`, and Pinia
     stores in `src/stores/`.
@@ -532,6 +552,232 @@ Never hand-edit generated files.
   what was copied. `services/guards.ts` stops print, save, reload, the
   engine's context menu and drag-out while the viewer is mounted; keep
   media and bubbles `draggable="false"`.
+- **Every cap is a `Caps` field (M6 slice 6a).** The assembly layer and
+  the details take their caps from `view::assemble::Caps`; never add a
+  hard-coded cap there. `Caps::PAGE` is pinned byte for byte by the digests
+  in `crates/oma-archive/tests/export_caps.rs` (re-pin only for a
+  deliberate viewer change), and `Caps::EXPORT` lifts every cap.
+  `AssembledMessage::cap_miss` must run in release builds (never a
+  `debug_assert`). Raw codes and states for exports come from
+  `base_coded()` as `RawCodes` (`view/raw.rs`); the view types keep
+  collapsing them for the viewer.
+- **Export reads (M6 slice 6b1).** An export reads only through
+  `crates/oma-archive/src/export/`: `Library::hold_for_export` (the
+  archive lock for the job) and `ArchiveReader::with_export_snapshot` (one
+  read transaction in `ReadConn::exporting`, cancel only). Inside it every
+  other mode of that reader refuses with `Internal`; never add a
+  `budgeted`, `viewing` or `cancellable` call to code an export snapshot
+  runs (`open_blob` there reads the row through the snapshot). Cursors
+  read a batch to the end and return their statement before anything else
+  runs (`hooks::statements_stepping` checks it), keep sort keys inside, and
+  bound dated reads with `sort_key < X'01'`. The assembly layer and the
+  details take a `&StmtCache` (`src/stmt.rs`): its `prepare` takes only a
+  `&'static str` and shadows `Connection::prepare`, so a constant
+  statement is reused; prepare dynamic SQL on the connection. A new export
+  statement goes into `export::plan_statements` and `tests/query_plans.rs`.
+- **Export previews, search scopes and masking (M6 slice 6b2).** The
+  preview, the job's pre-count and the scope index share one walk
+  (`export/scope.rs`), so their numbers agree by construction; count a new
+  scope fact there, never in a second loop. The two reveal counts may
+  overstate, never understate (D147). An export's search re-run uses the
+  viewer's search work through `words::collect_in` and `scan::run_in` in
+  the snapshot's phase (never a `viewing` phase), and `search_scope` keeps
+  a hit only when the request matches the **masked** text the export
+  writes (matching does cover code text). Masking for exports
+  (`export/mask.rs`, owner Q4) is applied in `ExportSnapshot::assemble`
+  and released only by the export's own `Reveal`: never read the viewer's
+  `revealEarlierText` for an export. A withheld attachment loses its
+  `blob` in the item and in `attachment_facts`, which takes the
+  `ExportMessage`; do not add a path that hands a writer a blob id
+  without its access. `tests/export_memory.rs` measures the child's
+  `VmHWM` (Linux only); keep its versions above the bound's size.
+- **Export fixtures and oracles (M6 slice 6c).** `tests/fixtures/export/`
+  is written only by `scripts/fixtures/make_synthetic_exports.py` (SQLite
+  3.45.1 only), except `expected/`, `expected-data/` and `expected-html/`
+  (the writers' goldens, slices 6e2, 6f and 6g) and `zones/` (the zone
+  oracle's tables), and
+  has two pins in `tests/export_fixtures.rs`: the inputs
+  (backups and `hidden-vectors.json`) are frozen; `*.expected/` and
+  `scenarios/` (`content.json`, `export.json`) may be re-pinned when a
+  slice settles a rule. A new export case goes into the generator with an
+  `export.json` statement of where it was planted, never into a hand-built
+  archive alone; codes an import cannot write are `patches`. The Python
+  oracles (`scripts/oracles/`) use the standard library plus the
+  hash-pinned `requirements.txt`, always in a virtual environment and with
+  `python3 -I`; `project_archive.py` must stay independent of the Rust
+  export code (written from `v1.sql` and the spec). Each writer's oracle
+  (`txt_grammar.py`, `data_oracle.py`, `html_oracle.py`, later XLSX and
+  PDF) is its own command in the workflow's "Independent oracles
+  (Python)" step, which runs on Linux only, after `run_oracles.py`; a new
+  one is added there and in `docs/development.md`, never only to
+  `run_oracles.py`. Each scans its bundles for the masking sentinels, has
+  a floor on how many it scanned for, and a positive control (a bundle
+  exported with both reveals must hold every sentinel). The bulk
+  generator's `BulkSpec::blobs` gives attachments real store files.
+- **The export record core (M6 slice 6d, `crates/oma-export`).** The crate
+  never names `rusqlite` or Tauri and never logs (`tests/source_rules.rs`);
+  a read it needs is a new public `ExportSnapshot` method in
+  `oma-archive`, pinned in `tests/query_plans.rs`. Records are dedicated
+  structs in `record.rs` (camelCase serde = the JSON format): content is a
+  `Content`, raw numbers and ids a `Decimal` (never a bare `String`), and
+  absence is tagged (`Included`, `Determinable`), never `null`. Every enum
+  a record carries is a `Code` from `codes.rs`; a new code is added with a
+  new number and `OMA_REPIN_CODES=1 cargo test -p oma-export --test codes`
+  (lines may only be added to `tests/codes.pin`), and with its words in
+  `words.rs` (`export-words.json` is regenerated by `cargo test`; an entry
+  that equals a viewer string names its `viewerText.ts` key). Match an
+  `oma-archive` `#[non_exhaustive]` enum with a `_ => Limit(UnmappedVariant)`
+  arm, never a fallback value. A new v1 column needs a `ledger.rs` entry
+  whose path the catalogue test finds. Ids are export-local ordinals unless
+  the plan opts in (owner Q5's lean, awaiting confirmation): never write an
+  archive id or a GUID outside `IdentifierMode::ArchiveAndSource`. Times
+  are placed only through `time.rs` (`ZoneTable`, `format_iso`,
+  `format_human`); hidden characters are classified only by `hidden.rs`,
+  whose tables `scripts/make-export-unicode-tables.mjs` regenerates.
+- **Export files (M6 slice 6e1, `oma-export`).** Only `naming.rs` builds
+  a path inside or beside a bundle (`.join(` nowhere else) and only
+  `stage.rs` creates, renames or removes files (`clippy.toml` and
+  `tests/source_rules.rs` ban `OpenOptions`, `File::create`, `fs::write`,
+  `fs::copy` and temporary directories). On Linux every staged write is
+  relative to the `O_DIRECTORY | O_NOFOLLOW` handles; keep it so, and
+  keep the `(dev, ino)` and canonical-parent check before the publish
+  rename. The marker stays locked until **after** the publish rename;
+  never remove it earlier. Names are refused, never changed
+  (`TargetName`); an attachment's name keeps its extension only through
+  `naming::PASSIVE` (test-pinned). Provenance is written only by
+  `manifest::write_provenance` (README, manifest, sums), and
+  `ManifestBody` must never gain a field for a query, a device fact, an
+  archive id or label, a GUID or a path. A new crash point goes into
+  `FaultPoint::ALL` and `tests/crash.rs` together.
+- **Attachments, TXT and the pipeline (M6 slice 6e2, `oma-export`).**
+  Attachment bytes come only from `ExportSnapshot::open_blob`
+  (`attach.rs`): the first 4 KiB of that stream are sniffed, then the file
+  is created under its final name with `Staging::create_verified` and
+  closed with `close_verified` and the reader's `verified_digest`; never
+  hash a copy again, never `verify_blob` then open, never add another
+  reader of store files. A failed copy is `discard`ed (an undeletable one
+  fails the export). Mark of the Web is `Staging::write_mark_of_the_web`
+  (Windows only; a failure is counted, never fatal; its effect is
+  **UNVERIFIED**). TXT (`writer/txt.rs`): item lines at column 0, labels
+  at four spaces, recorded text at six, split at every line break; header
+  fields through `TxtWriter::header` (marks, and escapes `[` `]`);
+  sentences only from `words.rs`; no `.join(` (the source rule), use the
+  `Comma` helper. A grammar change goes into `tests/txtgrammar` and
+  `scripts/oracles/txt_grammar.py` together, and regenerates the goldens
+  (`OMA_REGEN_GOLDENS=1 cargo test -p oma-export --test golden_txt`, then
+  re-pin `GOLDEN_SUMS_SHA256`; files over 64 KiB are pinned by digest
+  only). `pipeline::run` is the one driver: pre-count and consent first,
+  handles before the item that names them, versions after their item,
+  ties across batch boundaries, the counts checked against the pre-count
+  before provenance; any error removes the staging. The record's file
+  `path` is content.
+- **JSON and CSV (M6 slice 6f, `oma-export`).** JSON lines and array
+  elements go only through `jsonfmt::to_line` (separators, DEL and C1
+  escaped); an item's `context` stays its last field, so a shared
+  message's intrinsic part is byte-identical across files. The schemas in
+  `crates/oma-export/schema/` are generated by
+  `scripts/make-export-schemas.py` from the record shapes and
+  `tests/codes.pin`; never edit them by hand, and a change needs a
+  `schemaVersion` bump and a new `STRICT_SCHEMA_SHA256` in
+  `tests/json.rs`. CSV uses `csv` only through
+  `WriterBuilder::from_writer` over a `StagedFile` (`from_path` is
+  banned). Every value goes through `Row::set` (escaped); a text holding
+  our placeholders is built with `Row::esc` on its recorded fragments and
+  set with `Row::set_rendered`, so placeholders are never escaped and a
+  recorded `⟨` always is. Neutralisation is default-deny over the final
+  cell (`csv::triggers`); only a column whose `Kind` grammar the value
+  matches is exempt. Columns are only appended: re-pin
+  `tests/csv_columns.pin` (`OMA_REPIN_CSV_COLUMNS=1`) and bump
+  `TABULAR_COLUMNS_VERSION`'s MINOR. A JSON or CSV rule change
+  regenerates `tests/fixtures/export/expected-data/`
+  (`OMA_REGEN_GOLDENS=1 … --test golden_data`, then re-pin) and goes into
+  `scripts/oracles/data_oracle.py` too. The zone oracle's tables
+  (`tests/fixtures/export/zones/`) come only from
+  `scripts/make-export-zone-tables.mjs`. The mapper repeats a shared
+  message's attachment outcome at its later placements; keep it so.
+- **HTML (M6 slice 6g, `oma-export`, `writer/html.rs`).** One fixed
+  template: `<meta charset>`, then the CSP meta (`default-src 'none';
+  img-src data:; style-src 'sha256-…'`), and the one stylesheet `STYLE`,
+  whose hash `STYLE_SHA256` a unit test pins (change the style, then
+  re-pin it; the contrast test reads its colour properties). Content goes
+  **only** into text nodes through `H::content` (escapes `& < > " '`,
+  wraps each run in `<bdi dir="auto">`, CR/CRLF as LF) and marks hidden
+  characters, controls and noncharacters as `<span class="mark">U+XXXX
+  </span>` elements; placeholders and labels are elements too, so a
+  literal `⟨` stays literal. Never put content in an attribute, never add
+  `<script>`, `style=`, events, forms, frames, `<link>`, `<audio>` or
+  `<video>`, and never link or embed an original file; URLs stay text.
+  Item links (`#m<n>`) point **backward** on the same page only. Pages
+  split at `PageLimits::SPEC` (5,000 items or 20 MiB with `data:` bytes;
+  16 MiB of base64 per page); tests lower the limits with
+  `HtmlWriter::with_limits`. Images come only from a `preview::PreviewSource`
+  (the decode-helper pool in 6h) and pass `preview::check_rendition`
+  before they are embedded or written as `html/previews/p<n>.*`; a
+  failed check fails the export (`HelperOutputRejected`), and previews
+  without a source are refused. Words come from `words::html_text`. A
+  grammar change goes into `tests/htmlgrammar`, `scripts/oracles/html_oracle.py`
+  and the goldens together (`OMA_REGEN_GOLDENS=1 cargo test -p oma-export
+  --test golden_html`, then re-pin `GOLDEN_SUMS_SHA256`). The tag and
+  time helpers shared with TXT are in `writer/shared.rs`; a change there
+  must leave the TXT goldens unchanged unless a TXT rule changes too.
+- **The export job and commands (M6 slice 6h1, `src-tauri/src/exports/`,
+  `commands/exports.rs`).** Five commands, each through the five steps
+  (`exports::tests` checks the wiring) and each parsing its raw request
+  with `parse_raw` (a rejection never echoes input; `ipc.ts` wrappers use
+  `callRedacted`). `preview_export` makes the one draft (a new one
+  replaces it and cancels its count) and counts on the blocking pool;
+  `choose_export_destination` opens the native dialog in Rust, whose title
+  names every sensitive option, and checks the folder in its canonical
+  form (`exports::destination`; tests use a fake `DestinationProbe`);
+  `start_export` consumes the draft, checks the confirmations
+  (`worker::prepare`), the generation and the folder again
+  (`worker::recheck`), reserves `JobKind::Export` on the archive's
+  subject, takes `Library::hold_for_export` and runs
+  `worker::run_export`, which re-checks the generation inside the
+  snapshot, drops the search query after the re-run, calls
+  `pipeline::run_detailed`, releases the lock **before** freeing the slot
+  and sends one terminal event (`exportFinished` with counts only,
+  `cancelled` or `failed`, each with `stagingRemoved`). `close_viewer` and
+  `hide_viewer` go through `AppState::{close_viewer, hide_viewer}`, which
+  discard the draft first; keep it so. What PR A does not build (PDF,
+  XLSX, the attachment scope, events off) is refused at the
+  draft with `exportUnavailable`, never faked. Export DTOs live in
+  `exports/dto.rs`: a new one goes into `ts_guard::M6_EXPORT_TYPES` (or
+  `M6_EVENT_TYPES` if `JobEvent` reaches it, which the archive guard then
+  reviews); the walks stay disjoint but for `M6_SHARED_TYPES`, and the
+  only `string`s are `archiveId`, `jobId` and the brands (`DraftId`,
+  `LocalDate`, `ZoneName`, `UntrustedText` for `displayName` only). The
+  path never crosses IPC and is never logged.
+- **Destinations, the preview pool and log hygiene (M6 slice 6h2).**
+  `start_export` takes `{ draftId, destinationToken, confirmations }`:
+  `ExportHost::take_for_start` consumes the draft and refuses a token
+  that is not the latest `choose_export_destination`'s
+  (`exportConfirmationStale`); keep the token a brand in the export walk
+  and never derive anything from it. Previews come only from the
+  export's own `exports::previews::HelperPool` (never a viewer
+  session's helpers) through `oma_export::preview::PreviewFeed`: the
+  pipeline offers each mapped item's included attachments (copy-stream
+  bytes, else `attach::read_preview_input`), the HTML writer waits on the
+  feed with the cancel token, and the pool is shut down by the job
+  (killing helpers on cancel or failure, never joining them then). A
+  decode request that needs both renditions is one `RenditionPair`
+  (helper code 3, two reply frames); add a new request kind to
+  `helper.rs`'s parser, the host and `decode_helper.rs` together. Helper
+  stderr is piped into a counting thread only; log its size as a bucket,
+  never its text, and keep log field names free of `bytes=`
+  (`log_hygiene.rs` treats it as a range). `exercise_export` in
+  `src-tauri/tests/log_hygiene.rs` runs every in-process format into a
+  folder named by a sentinel; a new export log line or format goes
+  through it.
+- **`oma-export` in one place (M6 PR A).** One record model and ledger;
+  masking happens in `oma-archive` before any writer sees text; paths
+  only from `naming.rs`; on Linux every write relative to the staging
+  directory handles; no temporary file outside staging (and no
+  `std::env::temp_dir`); the reserved `⟨` marker; a no-replace publish
+  with the marker locked until after it; previews only from checked
+  decode-helper renditions; PDF and XLSX only in the export-render
+  helper (PR B; XLSX rows ascending); logs carry kinds, buckets and
+  outcomes only. The per-slice entries above say how each is enforced.
 - **P6 copies files in four phases** (`import/attachments.rs`, `blobs.rs`;
   spec §9.1): the copy into `.incoming/<n>.partial` while the pass reads,
   then the `blob_intent` commit, the no-replace placement and one flush

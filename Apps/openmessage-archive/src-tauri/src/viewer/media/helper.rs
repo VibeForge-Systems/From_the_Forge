@@ -9,7 +9,10 @@
 //! sandbox:** it runs as the same user.
 //!
 //! **The protocol** is length-prefixed frames on stdin and stdout. No
-//! path, id or name crosses; stderr is discarded.
+//! path, id or name crosses. stderr is captured and drained by a thread
+//! that keeps only its byte count ([`HelperHost::stderr_counter`], logged as
+//! a bucket by the export's pool, M6 spec §9.6); its text is never
+//! forwarded or logged.
 //!
 //! ```text
 //! request:  "OMAD" | version 1 | rendition | max_input u64 | max_decoded u64
@@ -20,6 +23,12 @@
 //!
 //! All integers are little-endian. `status` is 0 or a
 //! [`RenderError::code`]; `flags` bit 0 is "has alpha", bit 1 "animated".
+//!
+//! **`RenditionPair`** (rendition code 3, M6 spec §6.5): the export's
+//! previews ask for both renditions of one decode
+//! (`media::render::render_pair`). A successful pair is answered with two
+//! reply frames, the thumbnail then the display rendition; a refusal with
+//! one reply frame carrying the status.
 //! The helper exits on any malformed frame, and the host treats any
 //! malformed reply, a closed pipe or a reply later than
 //! [`DECODE_TIMEOUT`] as a crash: it kills the helper and starts a new one
@@ -29,7 +38,7 @@ use std::ffi::OsString;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -55,6 +64,8 @@ pub const REPLY_HEADER: usize = 4 + 1 + 1 + 1 + 4 * 4 + 8;
 
 const RENDITION_THUMB: u8 = 1;
 const RENDITION_DISPLAY: u8 = 2;
+/// Both renditions from one decode (the export's previews).
+pub const RENDITION_PAIR: u8 = 3;
 /// Debug builds only: the helper exits without replying, as a crash would
 /// (the restart and crash-cap tests).
 #[cfg(debug_assertions)]
@@ -91,6 +102,17 @@ pub enum RenderOutcome {
     Crashed,
 }
 
+/// What one `RenditionPair` request ended in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PairOutcome {
+    /// The thumbnail and the display rendition.
+    Images(HelperImage, HelperImage),
+    /// The helper refused the bytes (a closed code; not a crash).
+    Refused(RenderError),
+    /// The helper died, hung, or answered garbage.
+    Crashed,
+}
+
 /// Something that turns verified bytes into a rendition: the helper
 /// process in the app, a fake in tests.
 pub trait RenderBackend: Send {
@@ -100,6 +122,61 @@ pub trait RenderBackend: Send {
         rendition: Rendition,
         limits: &RenderLimits,
     ) -> RenderOutcome;
+
+    /// Bytes this backend's helpers wrote to stderr (counted, never kept;
+    /// 0 for a backend without a process).
+    fn stderr_bytes(&self) -> u64 {
+        0
+    }
+
+    /// A handle that kills the helper running now from another thread
+    /// (the export's cancel path); `None` for a backend without a process.
+    fn kill_switch(&self) -> Option<KillSwitch> {
+        None
+    }
+
+    /// Both renditions of `bytes`. The default asks twice; the helper
+    /// process answers both from one decode.
+    fn render_pair(&mut self, bytes: &[u8], limits: &RenderLimits) -> PairOutcome {
+        let thumb = self.render(bytes, Rendition::Thumb, limits);
+        match thumb {
+            RenderOutcome::Image(t) => match self.render(bytes, Rendition::Display, limits) {
+                RenderOutcome::Image(d) => PairOutcome::Images(t, d),
+                RenderOutcome::Refused(e) => PairOutcome::Refused(e),
+                RenderOutcome::Crashed => PairOutcome::Crashed,
+            },
+            RenderOutcome::Refused(e) => PairOutcome::Refused(e),
+            RenderOutcome::Crashed => PairOutcome::Crashed,
+        }
+    }
+}
+
+/// Kills whichever helper its host is running (none: nothing to do). The
+/// host's blocked read then sees EOF, and the request is a crash.
+#[derive(Clone, Default)]
+pub struct KillSwitch(Arc<Mutex<Option<Arc<Mutex<Child>>>>>);
+
+impl std::fmt::Debug for KillSwitch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("KillSwitch")
+    }
+}
+
+impl KillSwitch {
+    pub fn kill(&self) {
+        let child = self.0.lock().ok().and_then(|c| c.clone());
+        if let Some(c) = child {
+            if let Ok(mut c) = c.lock() {
+                let _ = c.kill();
+            }
+        }
+    }
+
+    fn set(&self, child: Option<Arc<Mutex<Child>>>) {
+        if let Ok(mut c) = self.0.lock() {
+            *c = child;
+        }
+    }
 }
 
 /// Makes one backend per decode worker.
@@ -233,41 +310,50 @@ pub fn run_helper() -> i32 {
             return 2;
         }
         let rendition = match req.code {
-            RENDITION_THUMB => Rendition::Thumb,
-            RENDITION_DISPLAY => Rendition::Display,
+            RENDITION_THUMB => Some(Rendition::Thumb),
+            RENDITION_DISPLAY => Some(Rendition::Display),
+            RENDITION_PAIR => None,
             #[cfg(debug_assertions)]
             RENDITION_CRASH_FOR_TEST => return 101,
             _ => return 2,
         };
-        let (status, img) = match oma_archive::media::render::render(&bytes, rendition, &req.limits)
-        {
-            Ok(r) => (
-                0,
-                Some(HelperImage {
-                    format: r.format,
-                    width: r.width,
-                    height: r.height,
-                    source_width: r.source_width,
-                    source_height: r.source_height,
-                    has_alpha: r.has_alpha,
-                    animated: r.animated,
-                    bytes: r.bytes.expose().clone(),
-                }),
-            ),
-            Err(e) => (e.code(), None),
+        let replies: Vec<(u8, Option<HelperImage>)> = match rendition {
+            Some(r) => match oma_archive::media::render::render(&bytes, r, &req.limits) {
+                Ok(r) => vec![(0, Some(helper_image(&r)))],
+                Err(e) => vec![(e.code(), None)],
+            },
+            None => match oma_archive::media::render::render_pair(&bytes, &req.limits) {
+                Ok((t, d)) => vec![(0, Some(helper_image(&t))), (0, Some(helper_image(&d)))],
+                Err(e) => vec![(e.code(), None)],
+            },
         };
         drop(bytes);
-        let head = reply_header(status, img.as_ref());
-        let sent = output
-            .write_all(&head)
-            .and_then(|()| match &img {
-                Some(i) => output.write_all(&i.bytes),
-                None => Ok(()),
-            })
-            .and_then(|()| output.flush());
-        if sent.is_err() {
-            return 2;
+        for (status, img) in &replies {
+            let head = reply_header(*status, img.as_ref());
+            let sent = output
+                .write_all(&head)
+                .and_then(|()| match img {
+                    Some(i) => output.write_all(&i.bytes),
+                    None => Ok(()),
+                })
+                .and_then(|()| output.flush());
+            if sent.is_err() {
+                return 2;
+            }
         }
+    }
+}
+
+fn helper_image(r: &oma_archive::Rendered) -> HelperImage {
+    HelperImage {
+        format: r.format,
+        width: r.width,
+        height: r.height,
+        source_width: r.source_width,
+        source_height: r.source_height,
+        has_alpha: r.has_alpha,
+        animated: r.animated,
+        bytes: r.bytes.expose().clone(),
     }
 }
 
@@ -314,7 +400,7 @@ impl HelperCommand {
         c.args(&self.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::piped());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -349,6 +435,9 @@ pub struct HelperHost {
     timeout: Duration,
     /// Helpers started so far (for tests).
     spawned: u32,
+    /// Bytes the helpers wrote to stderr (counted, never kept).
+    stderr: Arc<AtomicU64>,
+    switch: KillSwitch,
 }
 
 impl HelperHost {
@@ -358,7 +447,15 @@ impl HelperHost {
             running: None,
             timeout: DECODE_TIMEOUT,
             spawned: 0,
+            stderr: Arc::new(AtomicU64::new(0)),
+            switch: KillSwitch::default(),
         }
+    }
+
+    /// The bytes every helper of this host wrote to stderr so far. The
+    /// text itself is read and dropped (§9.6).
+    pub fn stderr_counter(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.stderr)
     }
 
     #[must_use]
@@ -390,6 +487,7 @@ impl HelperHost {
     }
 
     fn drop_running(&mut self) {
+        self.switch.set(None);
         if let Some(r) = self.running.take() {
             r.kill();
         }
@@ -404,8 +502,30 @@ impl HelperHost {
                 let _ = child.wait();
                 return None;
             };
+            if let Some(mut err) = child.stderr.take() {
+                let count = Arc::clone(&self.stderr);
+                // Drained so a chatty helper never blocks on a full pipe;
+                // only the length is kept. Ends at the helper's exit.
+                let _ = std::thread::Builder::new()
+                    .name("oma-helper-stderr".to_owned())
+                    .spawn(move || {
+                        let mut buf = [0u8; 4096];
+                        loop {
+                            match err.read(&mut buf) {
+                                Ok(0) => break,
+                                Ok(n) => {
+                                    count.fetch_add(n as u64, Ordering::Relaxed);
+                                }
+                                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                                Err(_) => break,
+                            }
+                        }
+                    });
+            }
+            let child = Arc::new(Mutex::new(child));
+            self.switch.set(Some(Arc::clone(&child)));
             self.running = Some(Running {
-                child: Arc::new(Mutex::new(child)),
+                child,
                 stdin,
                 stdout,
             });
@@ -420,13 +540,46 @@ impl HelperHost {
     /// be written (it read nothing of this image), it is replaced and the
     /// request is sent once more, without blaming the image.
     pub fn request(&mut self, bytes: &[u8], code: u8, limits: &RenderLimits) -> RenderOutcome {
+        match self.request_frames(bytes, code, limits, 1) {
+            Replies::Images(mut v) => match v.pop() {
+                Some(i) if v.is_empty() => RenderOutcome::Image(i),
+                _ => RenderOutcome::Crashed,
+            },
+            Replies::Refused(e) => RenderOutcome::Refused(e),
+            Replies::Crashed => RenderOutcome::Crashed,
+        }
+    }
+
+    /// One `RenditionPair` request: two images from one decode.
+    pub fn request_pair(&mut self, bytes: &[u8], limits: &RenderLimits) -> PairOutcome {
+        match self.request_frames(bytes, RENDITION_PAIR, limits, 2) {
+            Replies::Images(v) => {
+                let mut it = v.into_iter();
+                match (it.next(), it.next(), it.next()) {
+                    (Some(t), Some(d), None) => PairOutcome::Images(t, d),
+                    _ => PairOutcome::Crashed,
+                }
+            }
+            Replies::Refused(e) => PairOutcome::Refused(e),
+            Replies::Crashed => PairOutcome::Crashed,
+        }
+    }
+
+    /// Send one request and read `images` reply frames (or one refusal).
+    fn request_frames(
+        &mut self,
+        bytes: &[u8],
+        code: u8,
+        limits: &RenderLimits,
+        images: usize,
+    ) -> Replies {
         for attempt in 0..2 {
             if self.running_exited() {
                 self.drop_running();
             }
             let timeout = self.timeout;
             let Some(run) = self.ensure() else {
-                return RenderOutcome::Crashed;
+                return Replies::Crashed;
             };
             // A watchdog kills a helper that does not answer in time; the
             // blocked read then sees EOF. It says so first, so a helper it
@@ -445,7 +598,7 @@ impl HelperHost {
                         }
                     }
                 });
-            let outcome = exchange(run, bytes, code, limits);
+            let outcome = exchange(run, bytes, code, limits, images);
             drop(done);
             if let Ok(h) = dog {
                 let _ = h.join();
@@ -461,18 +614,25 @@ impl HelperHost {
                 Exchange::Stale if attempt == 0 && !fired => self.drop_running(),
                 _ => {
                     self.drop_running();
-                    return RenderOutcome::Crashed;
+                    return Replies::Crashed;
                 }
             }
         }
-        RenderOutcome::Crashed
+        Replies::Crashed
     }
+}
+
+/// The replies to one request.
+enum Replies {
+    Images(Vec<HelperImage>),
+    Refused(RenderError),
+    Crashed,
 }
 
 /// How one exchange with the helper ended.
 enum Exchange {
-    /// A well-formed reply.
-    Done(RenderOutcome),
+    /// Well-formed replies.
+    Done(Replies),
     /// The request header could not be written: the helper was already
     /// gone and read nothing of this image.
     Stale,
@@ -481,7 +641,13 @@ enum Exchange {
 }
 
 /// One request and its reply.
-fn exchange(run: &mut Running, bytes: &[u8], code: u8, limits: &RenderLimits) -> Exchange {
+fn exchange(
+    run: &mut Running,
+    bytes: &[u8],
+    code: u8,
+    limits: &RenderLimits,
+    images: usize,
+) -> Exchange {
     let Ok(len) = u64::try_from(bytes.len()) else {
         return Exchange::Failed;
     };
@@ -492,17 +658,31 @@ fn exchange(run: &mut Running, bytes: &[u8], code: u8, limits: &RenderLimits) ->
     {
         return Exchange::Stale;
     }
-    match reply(run, bytes) {
-        Some(o) => Exchange::Done(o),
-        None => Exchange::Failed,
+    if run.stdin.write_all(bytes).is_err() || run.stdin.flush().is_err() {
+        return Exchange::Failed;
     }
+    let mut got = Vec::with_capacity(images);
+    while got.len() < images {
+        match reply(run) {
+            Some(Frame::Image(i)) => got.push(i),
+            // A refusal is the only frame of its request.
+            Some(Frame::Refused(e)) if got.is_empty() => {
+                return Exchange::Done(Replies::Refused(e))
+            }
+            _ => return Exchange::Failed,
+        }
+    }
+    Exchange::Done(Replies::Images(got))
 }
 
-/// The rest of one request (its payload) and the reply; `None` for
-/// anything that is not a well-formed reply.
-fn reply(run: &mut Running, bytes: &[u8]) -> Option<RenderOutcome> {
-    run.stdin.write_all(bytes).ok()?;
-    run.stdin.flush().ok()?;
+/// One reply frame.
+enum Frame {
+    Image(HelperImage),
+    Refused(RenderError),
+}
+
+/// One reply frame; `None` for anything that is not a well-formed reply.
+fn reply(run: &mut Running) -> Option<Frame> {
     let mut head = [0u8; REPLY_HEADER];
     if !read_full(&mut run.stdout, &mut head).ok()? {
         return None;
@@ -516,7 +696,7 @@ fn reply(run: &mut Running, bytes: &[u8]) -> Option<RenderOutcome> {
         if len != 0 {
             return None;
         }
-        return RenderError::from_code(status).map(RenderOutcome::Refused);
+        return RenderError::from_code(status).map(Frame::Refused);
     }
     if len == 0 || len > MAX_REPLY_BYTES {
         return None;
@@ -530,7 +710,7 @@ fn reply(run: &mut Running, bytes: &[u8]) -> Option<RenderOutcome> {
     if !read_full(&mut run.stdout, &mut out).ok()? {
         return None;
     }
-    Some(RenderOutcome::Image(HelperImage {
+    Some(Frame::Image(HelperImage {
         format,
         width: u32_at(&head, 7),
         height: u32_at(&head, 11),
@@ -550,6 +730,18 @@ impl RenderBackend for HelperHost {
         limits: &RenderLimits,
     ) -> RenderOutcome {
         self.request(bytes, rendition_code(rendition), limits)
+    }
+
+    fn render_pair(&mut self, bytes: &[u8], limits: &RenderLimits) -> PairOutcome {
+        self.request_pair(bytes, limits)
+    }
+
+    fn stderr_bytes(&self) -> u64 {
+        self.stderr.load(Ordering::Relaxed)
+    }
+
+    fn kill_switch(&self) -> Option<KillSwitch> {
+        Some(self.switch.clone())
     }
 }
 

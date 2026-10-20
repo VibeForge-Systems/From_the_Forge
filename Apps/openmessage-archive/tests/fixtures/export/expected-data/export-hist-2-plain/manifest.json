@@ -1,0 +1,193 @@
+{
+  "format": "openmessage-archive-export-manifest",
+  "manifestVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
+  "tabularColumnsVersion": "1.1.0",
+  "appVersion": "0.0.0-test",
+  "archiveSchemaVersion": 1,
+  "exportId": "09090909090909090909090909090909",
+  "createdUtc": "2027-01-01T00:00:00Z",
+  "snapshot": {
+    "kind": "singleReadTransaction",
+    "archiveLockHeld": true
+  },
+  "scope": {
+    "kind": "archive",
+    "conversations": 1
+  },
+  "formats": [
+    "csv",
+    "json"
+  ],
+  "options": {
+    "attachments": "namesOnly",
+    "keepExtensions": false,
+    "previews": false,
+    "largerPreviews": false,
+    "history": true,
+    "reactions": true,
+    "events": true,
+    "reveal": {
+      "oneTimeCodes": false,
+      "earlierContent": false,
+      "oneTimeCodesConfirmedUpTo": null,
+      "earlierContentConfirmedUpTo": null
+    },
+    "clock": "h23",
+    "seconds": true,
+    "lineEndings": "lf",
+    "hiddenCharacterMarkers": true,
+    "csvProfile": "spreadsheet",
+    "identifiers": "ordinals",
+    "pageSize": null
+  },
+  "zone": {
+    "name": "UTC",
+    "source": "utc",
+    "windowUtc": null,
+    "transitions": []
+  },
+  "derivation": {
+    "derivedBy": {
+      "1": 5
+    },
+    "decoderVersion": {
+      "1": 5
+    }
+  },
+  "counts": {
+    "conversations": 1,
+    "timelineRows": 5,
+    "distinctMessages": 5,
+    "crossConversationRows": 0,
+    "foldedReactionRows": 0,
+    "items": 5,
+    "undatedExcluded": 0,
+    "before2007": 0,
+    "noText": 0,
+    "lossy": 0,
+    "orderTies": 0,
+    "eventsNotIncluded": 0,
+    "oneTimeCodesMasked": 0,
+    "bodiesWithheldWhole": 0,
+    "earlierTextWithheld": 0,
+    "editTextWithheld": 1,
+    "alternativeTextWithheld": 0,
+    "hiddenCharactersMarked": 0,
+    "controlsEscaped": 0,
+    "combiningRunsLimited": 0,
+    "neutralisedCells": 0,
+    "continuationRows": 0,
+    "pdfUndrawableCharacters": 0,
+    "pdfForcedWraps": 0,
+    "timesOutsideZoneWindow": 0,
+    "attachments": {
+      "records": 0,
+      "withFile": 0,
+      "notRequested": 0,
+      "excluded": {
+        "checksumMismatch": 0,
+        "tooLargeForVolume": 0,
+        "withheldUnsent": 0,
+        "writeFailed": 0
+      },
+      "filesWritten": 0,
+      "deduplicated": 0,
+      "blocked": 0,
+      "namesShortened": 0,
+      "previewsEmbedded": 0,
+      "previewsUnavailable": 0,
+      "previewsSkippedAfterHelperFailures": 0,
+      "motwNotWritten": 0
+    }
+  },
+  "search": null,
+  "importSessions": [],
+  "exclusions": [
+    "d94",
+    "d115Raw",
+    "rawSourceBytes",
+    "sourceIdentifierOptIn",
+    "sessionLocalRowid",
+    "storageInternal",
+    "recentlyDeletedOnlyNeverImported",
+    "attachmentsNotConverted"
+  ],
+  "files": [
+    {
+      "path": "README.txt",
+      "bytes": 3977,
+      "sha256": "f6a907c05efa0e6c87eedea055a0b09fe1062060f0535dbba5e62789c9f4702f"
+    },
+    {
+      "path": "csv/attachment_observations.csv",
+      "bytes": 169,
+      "sha256": "0c032d050b896e6f41c295c6d5c19a5ba9618c7c2e48f5be87a60937d4cd0e6a"
+    },
+    {
+      "path": "csv/attachments.csv",
+      "bytes": 780,
+      "sha256": "277da7787b7f334639267c8e577dff3b6d2f1130b2d9df5a0f056acb9153086b"
+    },
+    {
+      "path": "csv/conversations.csv",
+      "bytes": 682,
+      "sha256": "bf22c6b3c450f56b8a0e316f0c45bbcd5858b26212586274e228013bace1b083"
+    },
+    {
+      "path": "csv/edit_versions.csv",
+      "bytes": 1092,
+      "sha256": "dff9efe03344d8de56b8ae5953e13e7c334a92a8f4cb0e913c6a5d63deece6be"
+    },
+    {
+      "path": "csv/handles.csv",
+      "bytes": 324,
+      "sha256": "424f13c5fa6c26ddd3887e88fbe6bd80634aa1a26557cffd457e88c98bd56d91"
+    },
+    {
+      "path": "csv/messages.csv",
+      "bytes": 5689,
+      "sha256": "6bde4af77573204a2e0c6f306df01772ca8f917c0a149f79396df055a55f60c1"
+    },
+    {
+      "path": "csv/reactions.csv",
+      "bytes": 234,
+      "sha256": "c82d7d79fbfa485802659ecc1f737a830c1c9bb5b328e7bc1d339680577beb50"
+    },
+    {
+      "path": "csv/segments.csv",
+      "bytes": 1028,
+      "sha256": "8c1745249df005bc4ad3ba1d9069b562fb81a2310bf9de2cd356392767897823"
+    },
+    {
+      "path": "csv/value_history.csv",
+      "bytes": 157,
+      "sha256": "a1409f9b2a0bc4f513930b7454c1b274bb5bbd3159caa6562efa3aebd63205ac"
+    },
+    {
+      "path": "json/c0001.jsonl",
+      "bytes": 21422,
+      "sha256": "2d2550a605803717416c85f0ba14e661cbcf12336608c42c237fc1e81f3f1dfd"
+    },
+    {
+      "path": "json/conversations.json",
+      "bytes": 965,
+      "sha256": "d54c66aeb155cb763fa3e33bc1d9c74f759d145ba3ba963aeee734f61a26385d"
+    },
+    {
+      "path": "json/handles.json",
+      "bytes": 598,
+      "sha256": "1f7221783163e524cab93393852a8c20c55f47a52621fc9a56e4b7cdeb50e95b"
+    },
+    {
+      "path": "schema/export-v1.schema.json",
+      "bytes": 66733,
+      "sha256": "df1c662dceb5ba8256186dad08fe61b1f7ac07489a6030c6fc3387374fc8cde7"
+    },
+    {
+      "path": "schema/manifest-v1.schema.json",
+      "bytes": 14965,
+      "sha256": "dfd1c763069314d1e3cb8f6862d1a525026be1cfe24faf20b9772345c5f5626d"
+    }
+  ]
+}

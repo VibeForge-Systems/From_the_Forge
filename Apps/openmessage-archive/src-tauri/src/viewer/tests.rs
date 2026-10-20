@@ -62,7 +62,7 @@ fn model(entry: &str) -> Value {
 }
 
 /// Import one catalogue backup into archive `id` of `library`.
-fn import_entry(
+pub(crate) fn import_entry(
     library: &Path,
     id: &ArchiveId,
     entry: &str,
@@ -107,7 +107,7 @@ fn import_entry(
 
 /// Import the first order of `entry`'s model into a new archive of
 /// `library`.
-fn import_order(library: &Path, entry: &str) -> ArchiveId {
+pub(crate) fn import_order(library: &Path, entry: &str) -> ArchiveId {
     let m = model(entry);
     let lib = env().library(library).expect("library");
     let id = lib.create(None).expect("create");

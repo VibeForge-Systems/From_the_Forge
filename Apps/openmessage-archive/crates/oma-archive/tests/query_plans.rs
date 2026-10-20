@@ -28,6 +28,15 @@
 //! per-body probe and `highlight()` with `rowid=`); the exact-text scan
 //! and the scoped plan walk `message_sort` and `chat_message_timeline` by
 //! keyset; only the once-per-session unsearchable count scans `message`.
+//!
+//! The export reads (M6 slices 6b1, 6b2 and 6d, `hooks::export_statements`)
+//! are pinned too: the timeline batches stay on `chat_message_timeline`
+//! with the dated bound where they mean "dated", the unassigned batches
+//! walk `message_sort` and probe `chat_message_by_message`, the generation
+//! reads highest ids only, the dated span is four index seeks, the
+//! pre-count and the masking reads are primary-key or index seeks per
+//! message, the reply ids of a message walk `message_reply` (already in
+//! id order), and none sorts in a temporary B-tree.
 #![allow(clippy::disallowed_methods)]
 
 mod common;
@@ -630,6 +639,222 @@ const PINNED: &[(&str, &[&str])] = &[
         "search attachment exists",
         &["SEARCH message_attachment USING PRIMARY KEY (message_id=?)"],
     ),
+    (
+        "export chat ids",
+        &["SCAN chat"],
+    ),
+    (
+        "export blob row",
+        &["SEARCH blob USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export timeline dated",
+        &["SEARCH chat_message USING COVERING INDEX chat_message_timeline (chat_id=? AND (sort_key,message_id)>(?,?) AND sort_key<?)"],
+    ),
+    (
+        "export timeline undated",
+        &["SEARCH chat_message USING COVERING INDEX chat_message_timeline (chat_id=? AND (sort_key,message_id)>(?,?))"],
+    ),
+    (
+        "export unassigned dated",
+        &[
+            "SEARCH m USING COVERING INDEX message_sort (sort_key>? AND sort_key<?)",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SEARCH chat_message USING COVERING INDEX chat_message_by_message (message_id=?)",
+        ],
+    ),
+    (
+        "export unassigned undated",
+        &[
+            "SEARCH m USING COVERING INDEX message_sort (sort_key>?)",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SEARCH chat_message USING COVERING INDEX chat_message_by_message (message_id=?)",
+        ],
+    ),
+    (
+        "export version list",
+        &["SEARCH message_body USING INDEX sqlite_autoindex_message_body_1 (message_id=?)"],
+    ),
+    (
+        "export version row",
+        &["SEARCH message_body USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export measure current body",
+        &[
+            "SEARCH m USING INTEGER PRIMARY KEY (rowid=?)",
+            "SEARCH b USING INTEGER PRIMARY KEY (rowid=?)",
+        ],
+    ),
+    (
+        "export measure versions",
+        &["SEARCH message_body USING INDEX sqlite_autoindex_message_body_1 (message_id=?)"],
+    ),
+    (
+        "export generation",
+        &[
+            "SCAN CONSTANT ROW",
+            "SCALAR SUBQUERY 1",
+            "SEARCH import_session USING COVERING INDEX import_session_state (state=?)",
+            "SCALAR SUBQUERY 2",
+            "SEARCH message",
+            "SCALAR SUBQUERY 3",
+            "SEARCH message_body",
+            "SCALAR SUBQUERY 4",
+            "SEARCH attachment",
+            "SCALAR SUBQUERY 5",
+            "SEARCH blob",
+        ],
+    ),
+    (
+        "export newest session",
+        &["SCAN import_session"],
+    ),
+    (
+        "export detail columns",
+        &[
+            "SEARCH m USING INTEGER PRIMARY KEY (rowid=?)",
+            "SEARCH b USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN",
+        ],
+    ),
+    (
+        "export recently deleted rows",
+        &["SEARCH message_recently_deleted USING INDEX message_recently_deleted_by_message (message_id=?)"],
+    ),
+    (
+        "export chats of a message",
+        &["SEARCH chat_message USING INDEX chat_message_by_message (message_id=?)"],
+    ),
+    (
+        "export version count",
+        &["SEARCH message_body USING COVERING INDEX sqlite_autoindex_message_body_1 (message_id=?)"],
+    ),
+    (
+        "export phone entry count",
+        &[
+            "SEARCH b USING COVERING INDEX sqlite_autoindex_message_body_1 (message_id=?)",
+            "SEARCH e USING PRIMARY KEY (body_id=?)",
+        ],
+    ),
+    (
+        "export attachment columns",
+        &["SEARCH attachment USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export chat columns",
+        &["SEARCH chat USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export chat participants",
+        &["SEARCH chat_handle USING PRIMARY KEY (chat_id=?)"],
+    ),
+    (
+        "export handle columns",
+        &["SEARCH handle USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export attachment kept by a part",
+        &[
+            "SEARCH a USING INTEGER PRIMARY KEY (rowid=?)",
+            "SEARCH p USING PRIMARY KEY (body_id=?)",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SEARCH u USING PRIMARY KEY (body_id=?)",
+        ],
+    ),
+    (
+        "export alternative text facts",
+        &["SEARCH message_body USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export alternative text",
+        &["SEARCH message_body USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export any flagged code",
+        &["SEARCH message_body_part USING PRIMARY KEY (body_id=?)"],
+    ),
+    (
+        "export precount message",
+        &["SEARCH message USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export precount bodies",
+        &["SEARCH message_body USING INDEX sqlite_autoindex_message_body_1 (message_id=?)"],
+    ),
+    (
+        "export precount code ranges",
+        &["SEARCH message_body_part USING PRIMARY KEY (body_id=?)"],
+    ),
+    (
+        "export precount edit text",
+        &[
+            "SEARCH b USING COVERING INDEX sqlite_autoindex_message_body_1 (message_id=?)",
+            "SEARCH e USING PRIMARY KEY (body_id=?)",
+        ],
+    ),
+    (
+        "export precount attachments",
+        &[
+            "SEARCH ma USING PRIMARY KEY (message_id=?)",
+            "SEARCH a USING INTEGER PRIMARY KEY (rowid=?)",
+            "SEARCH bl USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN",
+        ],
+    ),
+    (
+        "export span chat first",
+        &["SEARCH chat_message USING COVERING INDEX chat_message_timeline (chat_id=? AND sort_key>? AND sort_key<?)"],
+    ),
+    (
+        "export span chat last",
+        &["SEARCH chat_message USING COVERING INDEX chat_message_timeline (chat_id=? AND sort_key>? AND sort_key<?)"],
+    ),
+    (
+        "export span all first",
+        &["SEARCH message USING COVERING INDEX message_sort (sort_key>? AND sort_key<?)"],
+    ),
+    (
+        "export span all last",
+        &["SEARCH message USING COVERING INDEX message_sort (sort_key>? AND sort_key<?)"],
+    ),
+    (
+        "export undated in chat",
+        &["SEARCH chat_message USING COVERING INDEX chat_message_timeline (chat_id=? AND sort_key>?)"],
+    ),
+    (
+        "export undated messages",
+        &["SEARCH message USING COVERING INDEX message_sort (sort_key>?)"],
+    ),
+    (
+        "export hit conversation",
+        &["SEARCH chat_message USING COVERING INDEX chat_message_by_message (message_id=?)"],
+    ),
+    (
+        "export reply ids",
+        &[
+            "SEARCH m USING INTEGER PRIMARY KEY (rowid=?)",
+            "SEARCH r USING INDEX message_reply (thread_originator_guid=?)",
+        ],
+    ),
+    (
+        "export message raw columns",
+        &["SEARCH message USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export message source ids",
+        &["SEARCH message USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export chat source ids",
+        &["SEARCH chat USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export attachment source ids",
+        &["SEARCH attachment USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
+    (
+        "export handle source ids",
+        &["SEARCH handle USING INTEGER PRIMARY KEY (rowid=?)"],
+    ),
 ];
 
 fn plan(c: &rusqlite::Connection, sql: &str) -> Vec<String> {
@@ -652,6 +877,7 @@ fn every_index_dependent_statement_has_its_pinned_plan() {
         .into_iter()
         .chain(CONTRACT.iter().map(|(n, s)| (*n, (*s).to_owned())))
         .chain(oma_archive::hooks::viewer_statements())
+        .chain(oma_archive::hooks::export_statements())
         .collect();
     let mut mismatches = Vec::new();
     for (name, sql) in &statements {
@@ -722,6 +948,50 @@ fn viewer_statements_stay_on_their_indexes() {
         if sql.contains("chat_message") && sql.contains("X'01'") {
             assert!(
                 lines.iter().any(|l| l.contains("chat_message_timeline")),
+                "{name}: {lines:?}"
+            );
+        }
+    }
+}
+
+/// The export reads (M6 spec §3.4): the timeline batches stay on
+/// `chat_message_timeline` (the dated one with its `X'01'` bound), the
+/// unassigned batches walk `message_sort` and probe
+/// `chat_message_by_message`, every per-message read is a primary-key or
+/// index seek, the generation reads the highest ids only, and nothing
+/// sorts in a temporary B-tree. Only the chat id list scans `chat` (once
+/// per job), and the newest session is the last row of `import_session`.
+#[test]
+fn export_statements_stay_on_their_indexes() {
+    let (tmp, lib) = library();
+    let id = lib.create(None).expect("create");
+    let c = raw(&db_path(&tmp, &id));
+    for (name, sql) in oma_archive::hooks::export_statements() {
+        let lines = plan(&c, &sql);
+        for line in &lines {
+            assert!(!line.contains("TEMP B-TREE"), "{name}: {line}");
+            if line.starts_with("SCAN") {
+                assert!(
+                    matches!(
+                        (name, line.as_str()),
+                        ("export chat ids", "SCAN chat")
+                            | ("export newest session", "SCAN import_session")
+                            | ("export generation", "SCAN CONSTANT ROW")
+                    ),
+                    "{name}: {line}"
+                );
+            }
+        }
+        if sql.contains("chat_message") && sql.contains("X'01'") && name.contains("timeline") {
+            assert!(
+                lines.iter().any(|l| l.contains("chat_message_timeline")),
+                "{name}: {lines:?}"
+            );
+        }
+        if name.contains("unassigned") {
+            assert!(
+                lines[0].contains("message_sort")
+                    && lines.iter().any(|l| l.contains("chat_message_by_message")),
                 "{name}: {lines:?}"
             );
         }

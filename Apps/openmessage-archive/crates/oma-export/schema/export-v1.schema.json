@@ -1,0 +1,3054 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openmessage-archive:export:1",
+  "title": "OpenMessage Archive export records",
+  "description": "Every JSON document of an export: a JSON Lines line (header, item or version), json/conversations.json, json/handles.json, or a single-file export. Open: consumers must accept unknown keys and unknown code tokens (every token travels with its numeric code).",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/header"
+    },
+    {
+      "$ref": "#/$defs/item"
+    },
+    {
+      "$ref": "#/$defs/version"
+    },
+    {
+      "$ref": "#/$defs/conversationsFile"
+    },
+    {
+      "$ref": "#/$defs/handlesFile"
+    },
+    {
+      "$ref": "#/$defs/singleFile"
+    }
+  ],
+  "$defs": {
+    "ordinal": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "An export-local ordinal (spec 4.9)."
+    },
+    "decimal": {
+      "type": "string",
+      "pattern": "^-?[0-9]+$",
+      "description": "A raw integer or an archive id as a decimal string (RFC 7493 2.2)."
+    },
+    "realDecimal": {
+      "type": "string",
+      "pattern": "^(-?[0-9]+(\\.[0-9]+)?(e-?[0-9]+)?|-?inf|NaN)$",
+      "description": "A real number as stored, in its shortest round-trip form."
+    },
+    "content": {
+      "type": "string",
+      "description": "Content text, as recorded (never normalised)."
+    },
+    "code": {
+      "type": "object",
+      "required": [
+        "token",
+        "code"
+      ],
+      "properties": {
+        "token": {
+          "type": "string"
+        },
+        "code": {
+          "type": "integer"
+        }
+      }
+    },
+    "code-altTextSource": {
+      "$ref": "#/$defs/code",
+      "description": "A `altTextSource` code."
+    },
+    "code-altTextWithheld": {
+      "$ref": "#/$defs/code",
+      "description": "A `altTextWithheld` code."
+    },
+    "code-assocKind": {
+      "$ref": "#/$defs/code",
+      "description": "A `assocKind` code."
+    },
+    "code-assocTargetShape": {
+      "$ref": "#/$defs/code",
+      "description": "A `assocTargetShape` code."
+    },
+    "code-assocVisibility": {
+      "$ref": "#/$defs/code",
+      "description": "A `assocVisibility` code."
+    },
+    "code-attachmentAccess": {
+      "$ref": "#/$defs/code",
+      "description": "A `attachmentAccess` code."
+    },
+    "code-attachmentOutcome": {
+      "$ref": "#/$defs/code",
+      "description": "A `attachmentOutcome` code."
+    },
+    "code-attributedOutcome": {
+      "$ref": "#/$defs/code",
+      "description": "A `attributedOutcome` code."
+    },
+    "code-blobVerifyState": {
+      "$ref": "#/$defs/code",
+      "description": "A `blobVerifyState` code."
+    },
+    "code-cardState": {
+      "$ref": "#/$defs/code",
+      "description": "A `cardState` code."
+    },
+    "code-chipSender": {
+      "$ref": "#/$defs/code",
+      "description": "A `chipSender` code."
+    },
+    "code-chipState": {
+      "$ref": "#/$defs/code",
+      "description": "A `chipState` code."
+    },
+    "code-copy": {
+      "$ref": "#/$defs/code",
+      "description": "A `copy` code."
+    },
+    "code-direction": {
+      "$ref": "#/$defs/code",
+      "description": "A `direction` code."
+    },
+    "code-displayNoneReason": {
+      "$ref": "#/$defs/code",
+      "description": "A `displayNoneReason` code."
+    },
+    "code-displaySource": {
+      "$ref": "#/$defs/code",
+      "description": "A `displaySource` code."
+    },
+    "code-editEntryText": {
+      "$ref": "#/$defs/code",
+      "description": "A `editEntryText` code."
+    },
+    "code-editLabel": {
+      "$ref": "#/$defs/code",
+      "description": "A `editLabel` code."
+    },
+    "code-editTextsOutcome": {
+      "$ref": "#/$defs/code",
+      "description": "A `editTextsOutcome` code."
+    },
+    "code-exclusionReason": {
+      "$ref": "#/$defs/code",
+      "description": "A `exclusionReason` code."
+    },
+    "code-formatting": {
+      "$ref": "#/$defs/code",
+      "description": "A `formatting` code."
+    },
+    "code-historyColumn": {
+      "$ref": "#/$defs/code",
+      "description": "A `historyColumn` code."
+    },
+    "code-itemKind": {
+      "$ref": "#/$defs/code",
+      "description": "A `itemKind` code."
+    },
+    "code-lookup": {
+      "$ref": "#/$defs/code",
+      "description": "A `lookup` code."
+    },
+    "code-maskKind": {
+      "$ref": "#/$defs/code",
+      "description": "A `maskKind` code."
+    },
+    "code-messageLabel": {
+      "$ref": "#/$defs/code",
+      "description": "A `messageLabel` code."
+    },
+    "code-noTextReason": {
+      "$ref": "#/$defs/code",
+      "description": "A `noTextReason` code."
+    },
+    "code-pathClass": {
+      "$ref": "#/$defs/code",
+      "description": "A `pathClass` code."
+    },
+    "code-reactionKind": {
+      "$ref": "#/$defs/code",
+      "description": "A `reactionKind` code."
+    },
+    "code-replyResolution": {
+      "$ref": "#/$defs/code",
+      "description": "A `replyResolution` code."
+    },
+    "code-segmentKind": {
+      "$ref": "#/$defs/code",
+      "description": "A `segmentKind` code."
+    },
+    "code-senderReason": {
+      "$ref": "#/$defs/code",
+      "description": "A `senderReason` code."
+    },
+    "code-serviceClass": {
+      "$ref": "#/$defs/code",
+      "description": "A `serviceClass` code."
+    },
+    "code-sniffedKind": {
+      "$ref": "#/$defs/code",
+      "description": "A `sniffedKind` code."
+    },
+    "code-style": {
+      "$ref": "#/$defs/code",
+      "description": "A `style` code."
+    },
+    "code-summaryTimeKind": {
+      "$ref": "#/$defs/code",
+      "description": "A `summaryTimeKind` code."
+    },
+    "code-timeUnit": {
+      "$ref": "#/$defs/code",
+      "description": "A `timeUnit` code."
+    },
+    "code-tsError": {
+      "$ref": "#/$defs/code",
+      "description": "A `tsError` code."
+    },
+    "code-valueState": {
+      "$ref": "#/$defs/code",
+      "description": "A `valueState` code."
+    },
+    "code-withheldReason": {
+      "$ref": "#/$defs/code",
+      "description": "A `withheldReason` code."
+    },
+    "textValue": {
+      "type": "object",
+      "required": [
+        "text",
+        "missing",
+        "lossy",
+        "storedAsBlob",
+        "bidiControls",
+        "invisible"
+      ],
+      "properties": {
+        "text": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/content"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "missing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-valueState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lossy": {
+          "type": "boolean"
+        },
+        "storedAsBlob": {
+          "type": "boolean"
+        },
+        "bidiControls": {
+          "type": "boolean"
+        },
+        "invisible": {
+          "type": "boolean"
+        }
+      }
+    },
+    "rawInt": {
+      "type": "object",
+      "required": [
+        "raw",
+        "state"
+      ],
+      "properties": {
+        "raw": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-valueState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "stateBool": {
+      "type": "object",
+      "required": [
+        "value",
+        "state",
+        "derived"
+      ],
+      "properties": {
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-valueState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "derived": {
+          "const": true
+        }
+      }
+    },
+    "rawTime": {
+      "type": "object",
+      "required": [
+        "raw",
+        "state",
+        "unit",
+        "unitRule"
+      ],
+      "properties": {
+        "raw": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-valueState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-timeUnit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unitRule": {
+          "const": "magnitudeWindows"
+        }
+      }
+    },
+    "time": {
+      "type": "object",
+      "required": [
+        "raw",
+        "state",
+        "unit",
+        "unitRule",
+        "utc",
+        "local",
+        "offsetSeconds",
+        "outsideZoneWindow",
+        "before2007",
+        "planned"
+      ],
+      "properties": {
+        "raw": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-valueState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-timeUnit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unitRule": {
+          "const": "magnitudeWindows"
+        },
+        "utc": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "local": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "offsetSeconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outsideZoneWindow": {
+          "type": "boolean"
+        },
+        "before2007": {
+          "type": "boolean"
+        },
+        "planned": {
+          "type": "boolean"
+        }
+      }
+    },
+    "messageRef": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "scope",
+            "n"
+          ],
+          "properties": {
+            "scope": {
+              "const": "inExport"
+            },
+            "n": {
+              "$ref": "#/$defs/ordinal"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "scope"
+          ],
+          "properties": {
+            "scope": {
+              "const": "notInExport"
+            }
+          }
+        }
+      ]
+    },
+    "conversationRef": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "scope",
+            "n"
+          ],
+          "properties": {
+            "scope": {
+              "const": "inExport"
+            },
+            "n": {
+              "$ref": "#/$defs/ordinal"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "scope"
+          ],
+          "properties": {
+            "scope": {
+              "const": "notInExport"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "scope"
+          ],
+          "properties": {
+            "scope": {
+              "const": "notRecorded"
+            }
+          }
+        }
+      ]
+    },
+    "recordedBy": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "singleLineage"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "lineage",
+            "session"
+          ],
+          "properties": {
+            "kind": {
+              "const": "lineage"
+            },
+            "lineage": {
+              "$ref": "#/$defs/ordinal"
+            },
+            "session": {
+              "$ref": "#/$defs/ordinal"
+            }
+          }
+        }
+      ]
+    },
+    "direction": {
+      "type": "object",
+      "required": [
+        "token",
+        "state",
+        "raw",
+        "recordedBy"
+      ],
+      "properties": {
+        "token": {
+          "$ref": "#/$defs/code-direction"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-valueState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "raw": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recordedBy": {
+          "$ref": "#/$defs/recordedBy"
+        }
+      }
+    },
+    "rawDirection": {
+      "type": "object",
+      "required": [
+        "token",
+        "state",
+        "raw"
+      ],
+      "properties": {
+        "token": {
+          "$ref": "#/$defs/code-direction"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-valueState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "raw": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "sender": {
+      "type": "object",
+      "required": [
+        "reason",
+        "handle"
+      ],
+      "properties": {
+        "reason": {
+          "$ref": "#/$defs/code-senderReason"
+        },
+        "handle": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ordinal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "segment": {
+      "type": "object",
+      "required": [
+        "kind",
+        "text",
+        "withheld",
+        "attachment",
+        "transcription",
+        "mention",
+        "url",
+        "urlHidden",
+        "oneTimeCode",
+        "styles",
+        "utf16Start",
+        "utf16Len"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/code-segmentKind"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/content"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "withheld": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-maskKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attachment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ordinal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "transcription": {
+          "type": "boolean"
+        },
+        "mention": {
+          "type": "boolean"
+        },
+        "url": {
+          "type": "boolean"
+        },
+        "urlHidden": {
+          "type": "boolean"
+        },
+        "oneTimeCode": {
+          "type": "boolean"
+        },
+        "styles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/code-style"
+          }
+        },
+        "utf16Start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "utf16Len": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "body": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "segments",
+            "formatting",
+            "utf16Len",
+            "bidiControls",
+            "invisible",
+            "lossy",
+            "storedAsBlob"
+          ],
+          "properties": {
+            "kind": {
+              "const": "text"
+            },
+            "segments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/segment"
+              }
+            },
+            "formatting": {
+              "$ref": "#/$defs/code-formatting"
+            },
+            "utf16Len": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "bidiControls": {
+              "type": "boolean"
+            },
+            "invisible": {
+              "type": "boolean"
+            },
+            "lossy": {
+              "type": "boolean"
+            },
+            "storedAsBlob": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "reason"
+          ],
+          "properties": {
+            "kind": {
+              "const": "noText"
+            },
+            "reason": {
+              "$ref": "#/$defs/code-noTextReason"
+            }
+          }
+        }
+      ]
+    },
+    "bodyFacts": {
+      "type": "object",
+      "required": [
+        "bodyRow",
+        "displaySource",
+        "displayNoneReason",
+        "attributedOutcome",
+        "attributedError",
+        "runIssue",
+        "textRawState",
+        "sourcesDiffer"
+      ],
+      "properties": {
+        "bodyRow": {
+          "type": "boolean"
+        },
+        "displaySource": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-displaySource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "displayNoneReason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-displayNoneReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attributedOutcome": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-attributedOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attributedError": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-tsError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runIssue": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-tsError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "textRawState": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-valueState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourcesDiffer": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "piece": {
+      "type": "object",
+      "required": [
+        "kind",
+        "text",
+        "withheld"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/code-segmentKind"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/content"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "withheld": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-maskKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "alternativeText": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "const": "none"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "state",
+            "source",
+            "text"
+          ],
+          "properties": {
+            "state": {
+              "const": "text"
+            },
+            "source": {
+              "$ref": "#/$defs/code-altTextSource"
+            },
+            "text": {
+              "$ref": "#/$defs/textValue"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "state",
+            "why",
+            "reason"
+          ],
+          "properties": {
+            "state": {
+              "const": "withheld"
+            },
+            "why": {
+              "$ref": "#/$defs/code-altTextWithheld"
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/code-withheldReason"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "edit": {
+      "type": "object",
+      "required": [
+        "label",
+        "editedParts",
+        "unsentParts",
+        "unsentWhole",
+        "partCount",
+        "storedVersions"
+      ],
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-editLabel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "editedParts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/decimal"
+          }
+        },
+        "unsentParts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/decimal"
+          }
+        },
+        "unsentWhole": {
+          "type": "boolean"
+        },
+        "partCount": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "storedVersions": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "earlierText": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "const": "none"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "const": "available"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "state",
+            "reason"
+          ],
+          "properties": {
+            "state": {
+              "const": "withheld"
+            },
+            "reason": {
+              "$ref": "#/$defs/code-withheldReason"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "state",
+            "reason",
+            "pieces",
+            "session"
+          ],
+          "properties": {
+            "state": {
+              "const": "revealed"
+            },
+            "reason": {
+              "$ref": "#/$defs/code-withheldReason"
+            },
+            "pieces": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/piece"
+              }
+            },
+            "session": {
+              "$ref": "#/$defs/ordinal"
+            }
+          }
+        }
+      ]
+    },
+    "historyCounts": {
+      "type": "object",
+      "required": [
+        "capturedVersions",
+        "phoneEntries"
+      ],
+      "properties": {
+        "capturedVersions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "phoneEntries": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "label": {
+      "type": "object",
+      "required": [
+        "kind",
+        "value",
+        "lineage",
+        "derived"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/code-messageLabel"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lineage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ordinal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "derived": {
+          "type": "boolean"
+        }
+      }
+    },
+    "recentlyDeleted": {
+      "type": "object",
+      "required": [
+        "session",
+        "conversation",
+        "notListedLater",
+        "deleted",
+        "ckSyncState"
+      ],
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/ordinal"
+        },
+        "conversation": {
+          "$ref": "#/$defs/conversationRef"
+        },
+        "notListedLater": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ordinal"
+          }
+        },
+        "deleted": {
+          "$ref": "#/$defs/rawTime"
+        },
+        "ckSyncState": {
+          "$ref": "#/$defs/rawInt"
+        }
+      }
+    },
+    "association": {
+      "type": "object",
+      "required": [
+        "determinable",
+        "kind",
+        "shape",
+        "visibility",
+        "target",
+        "targetPart",
+        "emoji"
+      ],
+      "properties": {
+        "determinable": {
+          "type": "boolean"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-assocKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "shape": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-assocTargetShape"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "visibility": {
+          "$ref": "#/$defs/code-assocVisibility"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/messageRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "targetPart": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "emoji": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/textValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "reactionRow": {
+      "type": "object",
+      "required": [
+        "n",
+        "kind",
+        "adds",
+        "emoji",
+        "direction",
+        "handle",
+        "date",
+        "targetPart"
+      ],
+      "properties": {
+        "n": {
+          "$ref": "#/$defs/ordinal"
+        },
+        "kind": {
+          "$ref": "#/$defs/code-assocKind"
+        },
+        "adds": {
+          "type": "boolean"
+        },
+        "emoji": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/textValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "direction": {
+          "$ref": "#/$defs/rawDirection"
+        },
+        "handle": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ordinal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "date": {
+          "$ref": "#/$defs/time"
+        },
+        "targetPart": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "chip": {
+      "type": "object",
+      "required": [
+        "kind",
+        "emoji",
+        "sender",
+        "state",
+        "rows",
+        "includesRowsOutsideScope",
+        "derived"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/code-reactionKind"
+        },
+        "emoji": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/textValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sender": {
+          "type": "object",
+          "required": [
+            "kind",
+            "handle"
+          ],
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/code-chipSender"
+            },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ordinal"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "state": {
+          "$ref": "#/$defs/code-chipState"
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ordinal"
+          }
+        },
+        "includesRowsOutsideScope": {
+          "type": "boolean"
+        },
+        "derived": {
+          "type": "boolean"
+        }
+      }
+    },
+    "reactions": {
+      "type": "object",
+      "required": [
+        "rows",
+        "chips",
+        "rule",
+        "unpaired"
+      ],
+      "properties": {
+        "rows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reactionRow"
+          }
+        },
+        "chips": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/chip"
+          }
+        },
+        "rule": {
+          "const": "d93LatestDatedRow"
+        },
+        "unpaired": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/messageRef"
+          }
+        }
+      }
+    },
+    "reply": {
+      "type": "object",
+      "required": [
+        "resolution",
+        "originator"
+      ],
+      "properties": {
+        "resolution": {
+          "$ref": "#/$defs/code-replyResolution"
+        },
+        "originator": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/messageRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "replyCount": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "state",
+            "reason"
+          ],
+          "properties": {
+            "state": {
+              "const": "notDeterminable"
+            },
+            "reason": {
+              "enum": [
+                "unkeyed"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "state",
+            "value"
+          ],
+          "properties": {
+            "state": {
+              "const": "determined"
+            },
+            "value": {
+              "type": "object",
+              "required": [
+                "inExport",
+                "elsewhere"
+              ],
+              "properties": {
+                "inExport": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "elsewhere": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "event": {
+      "type": "object",
+      "required": [
+        "kind",
+        "handles",
+        "title"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/code-itemKind"
+        },
+        "handles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ordinal"
+          }
+        },
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/textValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "valueHistory": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "state",
+            "column",
+            "value",
+            "firstSession"
+          ],
+          "properties": {
+            "state": {
+              "const": "value"
+            },
+            "column": {
+              "$ref": "#/$defs/code-historyColumn"
+            },
+            "value": {
+              "$ref": "#/$defs/textValue"
+            },
+            "firstSession": {
+              "$ref": "#/$defs/ordinal"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "state",
+            "column",
+            "reason"
+          ],
+          "properties": {
+            "state": {
+              "const": "withheld"
+            },
+            "column": {
+              "$ref": "#/$defs/code-historyColumn"
+            },
+            "reason": {
+              "$ref": "#/$defs/code-withheldReason"
+            }
+          }
+        }
+      ]
+    },
+    "derivation": {
+      "type": "object",
+      "required": [
+        "derivedBy",
+        "decoderVersion"
+      ],
+      "properties": {
+        "derivedBy": {
+          "type": "integer"
+        },
+        "decoderVersion": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "rawColumns": {
+      "type": "object",
+      "required": [
+        "service",
+        "itemType",
+        "groupActionType",
+        "isAudioMessage",
+        "cacheHasAttachments",
+        "shareStatus",
+        "shareDirection",
+        "assocType",
+        "assocRangeLocation",
+        "assocRangeLength",
+        "threadOriginatorPart",
+        "partCount",
+        "scheduleState",
+        "filterAction",
+        "filterSubAction",
+        "wasDowngraded"
+      ],
+      "properties": {
+        "service": {
+          "$ref": "#/$defs/textValue"
+        },
+        "itemType": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "groupActionType": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "isAudioMessage": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "cacheHasAttachments": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "shareStatus": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "shareDirection": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "assocType": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "assocRangeLocation": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "assocRangeLength": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "threadOriginatorPart": {
+          "$ref": "#/$defs/textValue"
+        },
+        "partCount": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "scheduleState": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "filterAction": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "filterSubAction": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "wasDowngraded": {
+          "$ref": "#/$defs/rawInt"
+        }
+      }
+    },
+    "context": {
+      "type": "object",
+      "required": [
+        "conversation",
+        "alsoIn",
+        "foldedInto",
+        "replyInConversation",
+        "targetInConversation",
+        "joinDate",
+        "orderTie"
+      ],
+      "properties": {
+        "conversation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ordinal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "alsoIn": {
+          "type": "object",
+          "required": [
+            "inExport",
+            "elsewhere"
+          ],
+          "properties": {
+            "inExport": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ordinal"
+              }
+            },
+            "elsewhere": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "foldedInto": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ordinal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "replyInConversation": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "targetInConversation": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "joinDate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/rawTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "orderTie": {
+          "type": "boolean"
+        }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "required": [
+        "session",
+        "lookup",
+        "copy",
+        "pathClass",
+        "sizeMatchedManifest",
+        "holdsStoredFile"
+      ],
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/ordinal"
+        },
+        "lookup": {
+          "$ref": "#/$defs/code-lookup"
+        },
+        "copy": {
+          "$ref": "#/$defs/code-copy"
+        },
+        "pathClass": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-pathClass"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sizeMatchedManifest": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "holdsStoredFile": {
+          "type": "boolean"
+        }
+      }
+    },
+    "card": {
+      "type": "object",
+      "required": [
+        "state",
+        "olderBackupHeldBy",
+        "olderBackupNewest",
+        "locationLookup",
+        "unavailableLookup",
+        "unavailableCopy"
+      ],
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/code-cardState"
+        },
+        "olderBackupHeldBy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ordinal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "olderBackupNewest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ordinal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "locationLookup": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-lookup"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unavailableLookup": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unavailableCopy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "attachment": {
+      "type": "object",
+      "required": [
+        "n",
+        "source",
+        "file",
+        "access",
+        "accessReason",
+        "name",
+        "mimeType",
+        "uti",
+        "totalBytes",
+        "storedBytes",
+        "isSticker",
+        "hideAttachment",
+        "isOutgoing",
+        "transferState",
+        "emojiDescription",
+        "created",
+        "start",
+        "placedInline",
+        "card",
+        "heldBy",
+        "observations",
+        "verify",
+        "history"
+      ],
+      "properties": {
+        "n": {
+          "$ref": "#/$defs/ordinal"
+        },
+        "source": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "option",
+                "counts"
+              ],
+              "properties": {
+                "state": {
+                  "const": "notIncluded"
+                },
+                "option": {
+                  "enum": [
+                    "identifiers"
+                  ]
+                },
+                "counts": {
+                  "type": "object",
+                  "required": [],
+                  "properties": {}
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "value"
+              ],
+              "properties": {
+                "state": {
+                  "const": "included"
+                },
+                "value": {
+                  "type": "object",
+                  "required": [
+                    "archiveId",
+                    "guid",
+                    "originalGuid"
+                  ],
+                  "properties": {
+                    "archiveId": {
+                      "$ref": "#/$defs/decimal"
+                    },
+                    "guid": {
+                      "$ref": "#/$defs/textValue"
+                    },
+                    "originalGuid": {
+                      "$ref": "#/$defs/textValue"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "file": {
+          "type": "object",
+          "required": [
+            "outcome",
+            "file",
+            "path",
+            "sniffed"
+          ],
+          "properties": {
+            "outcome": {
+              "$ref": "#/$defs/code-attachmentOutcome"
+            },
+            "file": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ordinal"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "path": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/content"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sniffed": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/code-sniffedKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "access": {
+          "$ref": "#/$defs/code-attachmentAccess"
+        },
+        "accessReason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-withheldReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "$ref": "#/$defs/textValue"
+        },
+        "mimeType": {
+          "$ref": "#/$defs/textValue"
+        },
+        "uti": {
+          "$ref": "#/$defs/textValue"
+        },
+        "totalBytes": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "storedBytes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "isSticker": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "hideAttachment": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "isOutgoing": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "transferState": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "emojiDescription": {
+          "$ref": "#/$defs/textValue"
+        },
+        "created": {
+          "$ref": "#/$defs/rawTime"
+        },
+        "start": {
+          "$ref": "#/$defs/rawTime"
+        },
+        "placedInline": {
+          "type": "boolean"
+        },
+        "card": {
+          "$ref": "#/$defs/card"
+        },
+        "heldBy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ordinal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/observation"
+          }
+        },
+        "verify": {
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "mayBeStale"
+              ],
+              "properties": {
+                "state": {
+                  "$ref": "#/$defs/code-blobVerifyState"
+                },
+                "mayBeStale": {
+                  "type": "boolean"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "history": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/valueHistory"
+          }
+        }
+      }
+    },
+    "item": {
+      "type": "object",
+      "required": [
+        "type",
+        "n",
+        "source",
+        "item",
+        "direction",
+        "sender",
+        "service",
+        "date",
+        "dateEdited",
+        "dateRetracted",
+        "subject",
+        "account",
+        "body",
+        "alternativeText",
+        "bodyFacts",
+        "edit",
+        "earlierText",
+        "history",
+        "labels",
+        "recentlyDeleted",
+        "association",
+        "reactions",
+        "reply",
+        "replyCount",
+        "event",
+        "attachments",
+        "scheduleType",
+        "appContent",
+        "effect",
+        "valueHistory",
+        "raw",
+        "derivation",
+        "context"
+      ],
+      "properties": {
+        "type": {
+          "const": "item"
+        },
+        "n": {
+          "$ref": "#/$defs/ordinal"
+        },
+        "source": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "option",
+                "counts"
+              ],
+              "properties": {
+                "state": {
+                  "const": "notIncluded"
+                },
+                "option": {
+                  "enum": [
+                    "identifiers"
+                  ]
+                },
+                "counts": {
+                  "type": "object",
+                  "required": [],
+                  "properties": {}
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "value"
+              ],
+              "properties": {
+                "state": {
+                  "const": "included"
+                },
+                "value": {
+                  "type": "object",
+                  "required": [
+                    "archiveId",
+                    "guid",
+                    "assocGuid",
+                    "threadOriginatorGuid",
+                    "replyToGuid"
+                  ],
+                  "properties": {
+                    "archiveId": {
+                      "$ref": "#/$defs/decimal"
+                    },
+                    "guid": {
+                      "$ref": "#/$defs/textValue"
+                    },
+                    "assocGuid": {
+                      "$ref": "#/$defs/textValue"
+                    },
+                    "threadOriginatorGuid": {
+                      "$ref": "#/$defs/textValue"
+                    },
+                    "replyToGuid": {
+                      "$ref": "#/$defs/textValue"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "item": {
+          "$ref": "#/$defs/code-itemKind"
+        },
+        "direction": {
+          "$ref": "#/$defs/direction"
+        },
+        "sender": {
+          "$ref": "#/$defs/sender"
+        },
+        "service": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-serviceClass"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "date": {
+          "$ref": "#/$defs/time"
+        },
+        "dateEdited": {
+          "$ref": "#/$defs/rawTime"
+        },
+        "dateRetracted": {
+          "$ref": "#/$defs/rawTime"
+        },
+        "subject": {
+          "$ref": "#/$defs/textValue"
+        },
+        "account": {
+          "$ref": "#/$defs/textValue"
+        },
+        "body": {
+          "$ref": "#/$defs/body"
+        },
+        "alternativeText": {
+          "$ref": "#/$defs/alternativeText"
+        },
+        "bodyFacts": {
+          "$ref": "#/$defs/bodyFacts"
+        },
+        "edit": {
+          "$ref": "#/$defs/edit"
+        },
+        "earlierText": {
+          "$ref": "#/$defs/earlierText"
+        },
+        "history": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "option",
+                "counts"
+              ],
+              "properties": {
+                "state": {
+                  "const": "notIncluded"
+                },
+                "option": {
+                  "enum": [
+                    "history"
+                  ]
+                },
+                "counts": {
+                  "$ref": "#/$defs/historyCounts"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "value"
+              ],
+              "properties": {
+                "state": {
+                  "const": "included"
+                },
+                "value": {
+                  "$ref": "#/$defs/historyCounts"
+                }
+              }
+            }
+          ]
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/label"
+          }
+        },
+        "recentlyDeleted": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/recentlyDeleted"
+          }
+        },
+        "association": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/association"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reactions": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "option",
+                "counts"
+              ],
+              "properties": {
+                "state": {
+                  "const": "notIncluded"
+                },
+                "option": {
+                  "enum": [
+                    "reactions"
+                  ]
+                },
+                "counts": {
+                  "type": "object",
+                  "required": [
+                    "rows"
+                  ],
+                  "properties": {
+                    "rows": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "value"
+              ],
+              "properties": {
+                "state": {
+                  "const": "included"
+                },
+                "value": {
+                  "$ref": "#/$defs/reactions"
+                }
+              }
+            }
+          ]
+        },
+        "reply": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/reply"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "replyCount": {
+          "$ref": "#/$defs/replyCount"
+        },
+        "event": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/event"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/attachment"
+          }
+        },
+        "scheduleType": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "appContent": {
+          "$ref": "#/$defs/stateBool"
+        },
+        "effect": {
+          "$ref": "#/$defs/stateBool"
+        },
+        "valueHistory": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/valueHistory"
+          }
+        },
+        "raw": {
+          "$ref": "#/$defs/rawColumns"
+        },
+        "derivation": {
+          "$ref": "#/$defs/derivation"
+        },
+        "context": {
+          "$ref": "#/$defs/context"
+        }
+      }
+    },
+    "editEntry": {
+      "type": "object",
+      "required": [
+        "part",
+        "ordinal",
+        "at",
+        "text"
+      ],
+      "properties": {
+        "part": {
+          "$ref": "#/$defs/decimal"
+        },
+        "ordinal": {
+          "$ref": "#/$defs/decimal"
+        },
+        "at": {
+          "type": "object",
+          "required": [
+            "kind",
+            "rawType",
+            "raw"
+          ],
+          "properties": {
+            "kind": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/code-summaryTimeKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "rawType": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "integer",
+                    "real"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "raw": {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/decimal"
+                    },
+                    {
+                      "$ref": "#/$defs/realDecimal"
+                    }
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "text": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "pieces"
+              ],
+              "properties": {
+                "state": {
+                  "const": "text"
+                },
+                "pieces": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/piece"
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "reason"
+              ],
+              "properties": {
+                "state": {
+                  "const": "withheld"
+                },
+                "reason": {
+                  "$ref": "#/$defs/code-withheldReason"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "state"
+              ],
+              "properties": {
+                "state": {
+                  "const": "noBody"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "decodeError"
+              ],
+              "properties": {
+                "state": {
+                  "const": "failed"
+                },
+                "decodeError": {
+                  "$ref": "#/$defs/code-tsError"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "state"
+              ],
+              "properties": {
+                "state": {
+                  "const": "notMatched"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "version": {
+      "type": "object",
+      "required": [
+        "type",
+        "message",
+        "current",
+        "firstSession",
+        "lastSession",
+        "text",
+        "textUnchanged",
+        "editLabel",
+        "edits",
+        "editTexts"
+      ],
+      "properties": {
+        "type": {
+          "const": "version"
+        },
+        "message": {
+          "$ref": "#/$defs/ordinal"
+        },
+        "current": {
+          "type": "boolean"
+        },
+        "firstSession": {
+          "$ref": "#/$defs/ordinal"
+        },
+        "lastSession": {
+          "$ref": "#/$defs/ordinal"
+        },
+        "text": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "pieces"
+              ],
+              "properties": {
+                "state": {
+                  "const": "text"
+                },
+                "pieces": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/piece"
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "reason"
+              ],
+              "properties": {
+                "state": {
+                  "const": "withheld"
+                },
+                "reason": {
+                  "$ref": "#/$defs/code-withheldReason"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "reason",
+                "displayNoneReason"
+              ],
+              "properties": {
+                "state": {
+                  "const": "noText"
+                },
+                "reason": {
+                  "$ref": "#/$defs/code-noTextReason"
+                },
+                "displayNoneReason": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/code-displayNoneReason"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "textUnchanged": {
+          "type": "boolean"
+        },
+        "editLabel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-editLabel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "edits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/editEntry"
+          }
+        },
+        "editTexts": {
+          "$ref": "#/$defs/code-editTextsOutcome"
+        }
+      }
+    },
+    "conversation": {
+      "type": "object",
+      "required": [
+        "n",
+        "source",
+        "name",
+        "chatIdentifier",
+        "serviceName",
+        "service",
+        "style",
+        "isFiltered",
+        "isArchived",
+        "isBlackholed",
+        "isPendingReview",
+        "isRecovered",
+        "propertiesBytes",
+        "participants",
+        "nameHistory"
+      ],
+      "properties": {
+        "n": {
+          "$ref": "#/$defs/ordinal"
+        },
+        "source": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "option",
+                "counts"
+              ],
+              "properties": {
+                "state": {
+                  "const": "notIncluded"
+                },
+                "option": {
+                  "enum": [
+                    "identifiers"
+                  ]
+                },
+                "counts": {
+                  "type": "object",
+                  "required": [],
+                  "properties": {}
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "value"
+              ],
+              "properties": {
+                "state": {
+                  "const": "included"
+                },
+                "value": {
+                  "type": "object",
+                  "required": [
+                    "archiveId",
+                    "guid",
+                    "roomName",
+                    "groupId"
+                  ],
+                  "properties": {
+                    "archiveId": {
+                      "$ref": "#/$defs/decimal"
+                    },
+                    "guid": {
+                      "$ref": "#/$defs/textValue"
+                    },
+                    "roomName": {
+                      "$ref": "#/$defs/textValue"
+                    },
+                    "groupId": {
+                      "$ref": "#/$defs/textValue"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "name": {
+          "$ref": "#/$defs/textValue"
+        },
+        "chatIdentifier": {
+          "$ref": "#/$defs/textValue"
+        },
+        "serviceName": {
+          "$ref": "#/$defs/textValue"
+        },
+        "service": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-serviceClass"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "style": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "isFiltered": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "isArchived": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "isBlackholed": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "isPendingReview": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "isRecovered": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "propertiesBytes": {
+          "$ref": "#/$defs/rawInt"
+        },
+        "participants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ordinal"
+          }
+        },
+        "nameHistory": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/valueHistory"
+          }
+        }
+      }
+    },
+    "handle": {
+      "type": "object",
+      "required": [
+        "n",
+        "source",
+        "address",
+        "service",
+        "serviceClass",
+        "country"
+      ],
+      "properties": {
+        "n": {
+          "$ref": "#/$defs/ordinal"
+        },
+        "source": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "option",
+                "counts"
+              ],
+              "properties": {
+                "state": {
+                  "const": "notIncluded"
+                },
+                "option": {
+                  "enum": [
+                    "identifiers"
+                  ]
+                },
+                "counts": {
+                  "type": "object",
+                  "required": [],
+                  "properties": {}
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "state",
+                "value"
+              ],
+              "properties": {
+                "state": {
+                  "const": "included"
+                },
+                "value": {
+                  "type": "object",
+                  "required": [
+                    "archiveId",
+                    "uncanonicalizedId",
+                    "personCentricId"
+                  ],
+                  "properties": {
+                    "archiveId": {
+                      "$ref": "#/$defs/decimal"
+                    },
+                    "uncanonicalizedId": {
+                      "$ref": "#/$defs/textValue"
+                    },
+                    "personCentricId": {
+                      "$ref": "#/$defs/textValue"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "address": {
+          "$ref": "#/$defs/textValue"
+        },
+        "service": {
+          "$ref": "#/$defs/textValue"
+        },
+        "serviceClass": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/code-serviceClass"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "country": {
+          "$ref": "#/$defs/textValue"
+        }
+      }
+    },
+    "header": {
+      "type": "object",
+      "required": [
+        "type",
+        "format",
+        "schemaVersion",
+        "conversation"
+      ],
+      "properties": {
+        "type": {
+          "const": "header"
+        },
+        "format": {
+          "const": "openmessage-archive-export"
+        },
+        "schemaVersion": {
+          "const": "1.1.0"
+        },
+        "conversation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ordinal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "conversationsFile": {
+      "type": "object",
+      "required": [
+        "type",
+        "format",
+        "schemaVersion",
+        "conversations"
+      ],
+      "properties": {
+        "type": {
+          "const": "conversations"
+        },
+        "format": {
+          "const": "openmessage-archive-export"
+        },
+        "schemaVersion": {
+          "const": "1.1.0"
+        },
+        "conversations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/conversation"
+          }
+        }
+      }
+    },
+    "handlesFile": {
+      "type": "object",
+      "required": [
+        "type",
+        "format",
+        "schemaVersion",
+        "handles"
+      ],
+      "properties": {
+        "type": {
+          "const": "handles"
+        },
+        "format": {
+          "const": "openmessage-archive-export"
+        },
+        "schemaVersion": {
+          "const": "1.1.0"
+        },
+        "handles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/handle"
+          }
+        }
+      }
+    },
+    "line": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/header"
+        },
+        {
+          "$ref": "#/$defs/item"
+        },
+        {
+          "$ref": "#/$defs/version"
+        }
+      ],
+      "description": "One line of a c<nnnn>.jsonl or no-conversation.jsonl file."
+    },
+    "singleFile": {
+      "type": "object",
+      "required": [
+        "format",
+        "schemaVersion",
+        "conversation",
+        "items",
+        "handles",
+        "about"
+      ],
+      "properties": {
+        "format": {
+          "const": "openmessage-archive-export"
+        },
+        "schemaVersion": {
+          "const": "1.1.0"
+        },
+        "conversation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/conversation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/item"
+              },
+              {
+                "$ref": "#/$defs/version"
+              }
+            ]
+          }
+        },
+        "handles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/handle"
+          }
+        },
+        "about": {
+          "type": "object",
+          "description": "The manifest's fields without `files` (urn:openmessage-archive:export-manifest:1)."
+        }
+      }
+    }
+  }
+}

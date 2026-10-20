@@ -19,7 +19,9 @@
 //!   call per body would repeat that work per message (measured in slice
 //!   5c; see `docs/architecture.md`).
 //! - Both run in one `ViewBudget::Search` phase with the cancel token and
-//!   a 5 s deadline. Any SQLite error but an interrupt is
+//!   a 5 s deadline ([`collect`]); an export's re-run runs the same work
+//!   in its snapshot's cancellable phase with its own cap ([`collect_in`],
+//!   M6 spec §3.6). Any SQLite error but an interrupt is
 //!   `SearchUnavailable`: the index cannot be read, browsing still works.
 
 use std::collections::HashMap;
@@ -104,15 +106,15 @@ pub(crate) fn chat_batch(
     rows.collect()
 }
 
-/// The global plan: the matches of at most [`SEARCH_MATCH_CAP`] distinct
+/// The global plan: the matches of at most `cap` distinct
 /// messages, and whether there were more.
 fn global(
     p: &Phase<'_>,
     q: &SearchRequest,
     expr: &str,
     range: (&[u8], &[u8]),
+    cap: usize,
 ) -> Result<(Vec<Match>, bool), ArchiveError> {
-    let cap = crate::fault::search_match_cap(SEARCH_MATCH_CAP);
     let who: Option<i64> = match q.filters.sender {
         super::SenderFilter::Anyone => None,
         super::SenderFilter::Me => Some(1),
@@ -204,7 +206,7 @@ fn global(
     Ok((out, capped))
 }
 
-/// The scoped plan: the matches of at most [`SEARCH_MATCH_CAP`] distinct
+/// The scoped plan: the matches of at most `cap` distinct
 /// messages (every matching body of each), and whether there were more.
 fn scoped(
     p: &Phase<'_>,
@@ -212,8 +214,8 @@ fn scoped(
     expr: &str,
     chat: i64,
     ranges: &[KeyRange],
+    cap: usize,
 ) -> Result<(Vec<Match>, bool), ArchiveError> {
-    let cap = crate::fault::search_match_cap(SEARCH_MATCH_CAP);
     let filter = RowFilter::of(q);
     let mut out: Vec<Match> = Vec::new();
     let mut messages = 0usize;
@@ -287,37 +289,52 @@ pub(crate) fn collect(
     cancel: &CancelToken,
 ) -> Result<(WordsPlan, Vec<Match>, bool), ArchiveError> {
     let deadline = Instant::now() + ViewBudget::Search.window();
+    let cap = crate::fault::search_match_cap(SEARCH_MATCH_CAP);
     conn.viewing(ViewBudget::Search, Some(cancel), deadline, |p| {
-        let threshold = crate::fault::scoped_search_rows(SCOPED_CHAT_ROWS);
-        let scoped_chat = match q.filters.chat {
-            Some(chat) if !prefix && threshold > 0 => {
-                let rows: i64 = p.sql(|c| {
-                    c.query_row(
-                        SQL_CHAT_ROWS,
-                        rusqlite::params![chat.get(), super::CappedCount::limit(threshold)],
-                        |r| r.get(0),
-                    )
-                })?;
-                (u64::try_from(rows).unwrap_or(u64::MAX) <= threshold).then_some(chat.get())
-            }
-            _ => None,
-        };
-        let (plan, (matches, capped)) = match scoped_chat {
-            Some(chat) => (
-                WordsPlan::Scoped,
-                scoped(p, q, expr, chat, ranges).map_err(fts_err)?,
-            ),
-            None => {
-                // One statement over the whole key range the ranges span:
-                // the global plan reads in rowid order anyway.
-                let lo = ranges.first().map(|r| r.0.as_slice()).unwrap_or(&[]);
-                let hi = ranges.last().map(|r| r.1.as_slice()).unwrap_or(&[]);
-                (
-                    WordsPlan::Global,
-                    global(p, q, expr, (lo, hi)).map_err(fts_err)?,
-                )
-            }
-        };
-        Ok((plan, matches, capped))
+        collect_in(p, q, expr, prefix, ranges, cap)
     })
+}
+
+/// [`collect`]'s work inside a phase the caller set up (a viewer phase,
+/// or an export snapshot's cancellable one, M6 spec §3.6), keeping the
+/// matches of at most `cap` messages.
+pub(crate) fn collect_in(
+    p: &Phase<'_>,
+    q: &SearchRequest,
+    expr: &str,
+    prefix: bool,
+    ranges: &[KeyRange],
+    cap: usize,
+) -> Result<(WordsPlan, Vec<Match>, bool), ArchiveError> {
+    let threshold = crate::fault::scoped_search_rows(SCOPED_CHAT_ROWS);
+    let scoped_chat = match q.filters.chat {
+        Some(chat) if !prefix && threshold > 0 => {
+            let rows: i64 = p.sql(|c| {
+                c.query_row(
+                    SQL_CHAT_ROWS,
+                    rusqlite::params![chat.get(), super::CappedCount::limit(threshold)],
+                    |r| r.get(0),
+                )
+            })?;
+            (u64::try_from(rows).unwrap_or(u64::MAX) <= threshold).then_some(chat.get())
+        }
+        _ => None,
+    };
+    let (plan, (matches, capped)) = match scoped_chat {
+        Some(chat) => (
+            WordsPlan::Scoped,
+            scoped(p, q, expr, chat, ranges, cap).map_err(fts_err)?,
+        ),
+        None => {
+            // One statement over the whole key range the ranges span:
+            // the global plan reads in rowid order anyway.
+            let lo = ranges.first().map(|r| r.0.as_slice()).unwrap_or(&[]);
+            let hi = ranges.last().map(|r| r.1.as_slice()).unwrap_or(&[]);
+            (
+                WordsPlan::Global,
+                global(p, q, expr, (lo, hi), cap).map_err(fts_err)?,
+            )
+        }
+    };
+    Ok((plan, matches, capped))
 }

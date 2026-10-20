@@ -42,6 +42,7 @@ use crate::conn::{Phase, ViewBudget};
 use crate::error::ArchiveError;
 use crate::reader::ArchiveReader;
 use crate::sortkey;
+use crate::stmt::StmtCache;
 
 /// The most visible items one page holds.
 pub const PAGE_ITEMS: u16 = 100;
@@ -371,7 +372,7 @@ fn scan(
         for (i, (id, key)) in got.into_iter().enumerate() {
             let folded = match p
                 .checkpoint()
-                .and_then(|()| p.sql(|c| folds_into(c, chat, id)))
+                .and_then(|()| p.sql(|c| folds_into(&StmtCache::new(c), chat, id)))
             {
                 Ok(f) => f,
                 Err(e) if too_broad(&e) => {
@@ -527,12 +528,12 @@ fn around(
         folded: None,
     };
     let mut reason = FocusReason::Anchor;
-    if let Some(target) = p.sql(|c| folds_into(c, chat, id))? {
+    if let Some(target) = p.sql(|c| folds_into(&StmtCache::new(c), chat, id))? {
         if let Some(tk) = p.sql(|c| key_of(c, chat, target))? {
             centre = Row {
                 id: target,
                 key: tk,
-                folded: p.sql(|c| folds_into(c, chat, target))?,
+                folded: p.sql(|c| folds_into(&StmtCache::new(c), chat, target))?,
             };
             reason = FocusReason::ReactionTarget;
         }
@@ -714,9 +715,9 @@ fn assemble_page(
     let mut kept = 0usize;
     for &i in &prio {
         let Some(row) = visible.get(i) else { continue };
-        let got = p
-            .checkpoint()
-            .and_then(|()| p.sql(|c| assemble::base(c, &ctx, chat, row.id, &caps, reveal)));
+        let got = p.checkpoint().and_then(|()| {
+            p.sql(|c| assemble::base(&StmtCache::new(c), &ctx, chat, row.id, &caps, reveal))
+        });
         match got {
             Ok(m) => {
                 if let Some(slot) = built.get_mut(i) {
@@ -742,7 +743,7 @@ fn assemble_page(
             };
             let got = p
                 .checkpoint()
-                .and_then(|()| p.sql(|c| assemble::extras(c, chat, m, x, &caps)));
+                .and_then(|()| p.sql(|c| assemble::extras(&StmtCache::new(c), chat, m, x, &caps)));
             match got {
                 Ok(()) => {}
                 Err(e) if too_broad(&e) => {
@@ -777,7 +778,7 @@ fn assemble_page(
             if incomplete {
                 continue;
             }
-            match p.sql(|c| assemble::handle(c, h.get())) {
+            match p.sql(|c| assemble::handle(&StmtCache::new(c), h.get(), &caps)) {
                 Ok(Some(ph)) => {
                     add += assemble::handle_bound(&ph);
                     fresh.push(ph);

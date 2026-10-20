@@ -1,0 +1,4 @@
+﻿"entity","conversation","item","attachment","column","column_code","state","value","value_state","first_session","withheld_reason","neutralised_columns"
+"conversation","1","","","chatDisplayName","4","value","SYNTH-LIN-NAME-1","","1","",""
+"conversation","1","","","chatDisplayName","4","value","SYNTH-LIN-NAME-B","","2","",""
+"message","","7","","subject","1","value","SYNTH-LIN-SUBJECT-1","","3","",""

@@ -145,3 +145,61 @@ fn a_hung_helper_is_killed_after_the_timeout() {
         RenderOutcome::Crashed
     );
 }
+
+/// `RenditionPair` (M6 spec §6.5): both renditions from one request and
+/// one decode, through the same long-lived helper; a refusal is one
+/// closed code, and the helper lives on.
+#[test]
+fn a_rendition_pair_answers_both_renditions_from_one_request() {
+    use openmessage_archive_lib::viewer::media::helper::PairOutcome;
+    let mut h = helper();
+    let limits = RenderLimits::default();
+    let exif = media("jpeg-exif6-gps-8x6.jpg");
+    let (t, d) = match h.request_pair(&exif, &limits) {
+        PairOutcome::Images(t, d) => (t, d),
+        other => panic!("expected a pair, got {other:?}"),
+    };
+    let single = image(h.render(&exif, Rendition::Thumb, &limits));
+    assert_eq!((t.width, t.height), (single.width, single.height));
+    assert_eq!((d.source_width, d.source_height), (6, 8));
+    for i in [&t, &d] {
+        assert!(i.bytes.starts_with(&[0xFF, 0xD8, 0xFF]));
+        assert!(!i.bytes.windows(4).any(|w| w == b"Exif"));
+    }
+    assert_eq!(
+        h.request_pair(&media("svg-script.svg"), &limits),
+        PairOutcome::Refused(RenderError::NotAnImage)
+    );
+    let alpha = h.render_pair(&media("png-alpha-4x4.png"), &limits);
+    assert!(
+        matches!(&alpha, PairOutcome::Images(t, d) if t.has_alpha && d.has_alpha),
+        "{alpha:?}"
+    );
+    assert_eq!(h.spawned(), 1, "one process served every request");
+}
+
+/// A helper's stderr is drained and only counted: its text never reaches
+/// the host (M6 spec §9.6).
+#[cfg(unix)]
+#[test]
+fn helper_stderr_is_counted_never_kept() {
+    let mut h = HelperHost::new(Some(HelperCommand::new(
+        PathBuf::from("/bin/sh"),
+        vec![
+            OsString::from("-c"),
+            OsString::from("printf 'synthetic-stderr-sentinel' >&2; cat >/dev/null"),
+        ],
+    )))
+    .with_timeout(std::time::Duration::from_millis(500));
+    let count = h.stderr_counter();
+    assert_eq!(
+        h.render(b"bytes", Rendition::Thumb, &RenderLimits::default()),
+        RenderOutcome::Crashed
+    );
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while count.load(std::sync::atomic::Ordering::Relaxed) < 25 {
+        assert!(std::time::Instant::now() < until, "stderr counted");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(count.load(std::sync::atomic::Ordering::Relaxed), 25);
+}

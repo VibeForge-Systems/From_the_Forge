@@ -132,6 +132,7 @@ pub fn entry_dto(e: &ArchiveEntry, jobs: &Jobs) -> Option<ArchiveEntryDto> {
             let status = match jobs.active_for_archive(id.as_str()) {
                 Some((job, _)) if job.kind == JobKind::Import => ArchiveStatusDto::Importing,
                 Some((job, _)) if job.kind == JobKind::Verify => ArchiveStatusDto::Verifying,
+                Some((job, _)) if job.kind == JobKind::Export => ArchiveStatusDto::Exporting,
                 _ => ArchiveStatusDto::InUse,
             };
             bare(id, status)

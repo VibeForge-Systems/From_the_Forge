@@ -1395,6 +1395,61 @@ ignored in `Checks (Linux)` and in `Build (Linux)`, 1,228 and 11 in
 `Build (Windows)` (the platforms differ in which platform-only tests they
 compile). PR B (slices 5g–5k) has not run on CI at the time of writing.
 
+### Milestone 6 PR A: the export engine (slices 6a–6h2; Linux container only)
+
+PR A (`feat/oma-m6-export-engine`: the export reads, `oma-export` with
+TXT, CSV, JSON and HTML, the export job and commands, the decode-helper
+pool) **has not run on CI** at the time of writing, so nothing below was
+run on `ubuntu-22.04` or `windows-2022`. Everything was run in one Linux
+container (Ubuntu 24.04.5 LTS, 4 CPUs, Rust 1.97.0, Python 3.13.16,
+SQLite 3.45.1 for the fixture generator), on synthetic data only, on
+2026-10-19:
+
+| What | Result here |
+|---|---|
+| `cargo test --workspace` (slice 6h2, after compiling) | 1,502 passed, 22 ignored, 0 failed; 3 min 7 s wall clock, 182.7 s summed (`development.md`, "Test time") |
+| `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all`, `cargo deny check` | Pass |
+| Projection oracle (`project_archive.py`, slice 6c) | 22 archives and `golden-v1`, 4,817 checks, 0 failed |
+| TXT grammar oracle (`txt_grammar.py`, slice 6e2) | 21 exports, 9,777 checks, 0 failed |
+| Data oracle (`data_oracle.py`: JSON, CSV, zones, masking, slice 6f) | 126 bundles, 317,916 checks, 0 failed |
+| HTML oracle (`html_oracle.py`, stdlib `html.parser` and html5lib 1.1 strict, slice 6g) | 42 bundles, 106 pages, 115,719 checks, 0 failed |
+| Perf smoke (`perf_smoke.rs`, slice 6f) | 20,000 messages to TXT, CSV and JSON in 4.8 s, child peak RSS 13.1 MiB (limit 150 MiB) |
+| HTML previews through the real decode helper (`log_hygiene.rs`, slice 6h2) | The media archive's HTML export embedded previews the helper made; no sentinel, destination component or exact output size logged |
+| Cancel latency (slice 6h2; spec §12: no new output within 1 s) | 53 ms from the cancel to the job's terminal event while a helper hung (`exports::tests`); the crate-level wait test also stayed under its 1 s assertion |
+
+The oracles were last run in the slice that added each; slice 6h2 did
+not change any writer's output for a run without previews (the TXT, data
+and HTML goldens are unchanged), so they were not re-run.
+
+**Not run, so UNVERIFIED:** anything on Windows (the Windows-only tests,
+among them Mark of the Web read-back and the held-handle publish of
+slice 6h2, have only been written; the Windows code was compiled for
+`x86_64-pc-windows-msvc` only through a scratch harness for the staging
+and attachment modules, not for the shell); CI's Python 3.10 oracle step;
+the native save and folder dialogs and their overwrite prompts; "Show in
+folder"; any exported page opened in a browser; any CSV opened in Excel
+or LibreOffice; the 500,000-message targets; preview throughput (§12's
+20 images per second per helper); FAT, exFAT, SMB and sync-client
+folders; real archives. The M6 manual checklist (spec §21) is added
+with PR B (slice 6l).
+
+**After the review fixes** (one further commit on the same branch, the
+same container, 2026-10-19; `architecture.md`, "Review fixes (M6 PR A)"):
+`cargo test --workspace` 1,514 passed, 22 ignored, 0 failed (273 s wall
+clock, compiling included); `cargo clippy --workspace --all-targets -- -D
+warnings`, `cargo fmt --all --check` and `cargo deny check` pass; `npm run
+typecheck` and `npm test` (51 files, 687 tests) pass. The oracles were
+re-run because the goldens and the manifest changed: projection 4,817
+checks; TXT 21 exports, 9,801 checks; data 133 bundles, 320,983 checks;
+HTML 42 bundles plus 7 revealed bundles, 116,113 checks; each 0 failed
+under Python 3.13.16, and the TXT, data and HTML oracles also 0 failed
+under a local CPython 3.10.20 virtual environment (not CI; the
+projection oracle was not re-run there). Setting every listing's
+`export` to `null` by hand made the three writer oracles fail on their
+sentinel floors. The staging, naming and attachment modules compile
+clippy-clean for `x86_64-pc-windows-msvc` through the scratch harness;
+nothing ran on Windows.
+
 ## iOS versions and backup types
 
 **No row below has been tested with a real device's backup.** "CI

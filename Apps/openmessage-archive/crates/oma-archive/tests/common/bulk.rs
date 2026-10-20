@@ -18,7 +18,10 @@
 //! - **Data**: seeded text in Latin words, CJK and emoji mixes; reactions
 //!   (to an earlier message of the same chat) and replies at fixed ratios;
 //!   undated rows; group chats; attachments without blobs (no store
-//!   files). One session, completed and a full observation.
+//!   files) by default, or, with [`BulkSpec::blobs`] (M6 slice 6c), each
+//!   with its own store file of [`BulkSpec::blob_len`] bytes, placed
+//!   through [`oma_archive::hooks::BulkWriter::put_blob`] and recorded as
+//!   copied. One session, completed and a full observation.
 //!
 //! Every value is synthetic. Every column a row leaves unset is recorded as
 //! "NULL in the source" (`_st = 1`), which every `CHECK` of v1 accepts.
@@ -64,6 +67,12 @@ pub struct BulkSpec {
     /// café`) instead of the mixed text, so the calibration compares like
     /// with like.
     pub sentinel_bodies: bool,
+    /// Give every attachment a store file (a `blob` row, the observation
+    /// `Present`/`Copied`), instead of none.
+    pub blobs: bool,
+    /// The size of each store file with [`BulkSpec::blobs`]: a JPEG start
+    /// and end around a sentinel and filler, so the sniffer reads JPEG.
+    pub blob_len: usize,
 }
 
 impl BulkSpec {
@@ -85,6 +94,8 @@ impl BulkSpec {
             group_every: 10,
             batch_rows: BatchBudget::ROWS_DEFAULT as usize,
             sentinel_bodies: false,
+            blobs: false,
+            blob_len: 1024,
         }
     }
 }
@@ -98,6 +109,9 @@ pub struct BulkReport {
     pub undated: u64,
     pub cjk: u64,
     pub attachments: u64,
+    /// Store files written ([`BulkSpec::blobs`]) and their bytes.
+    pub blobs: u64,
+    pub blob_bytes: u64,
     pub batches: u64,
     pub fts_merge_steps: u32,
     pub fts_merge_complete: bool,
@@ -240,7 +254,20 @@ struct Msg {
     text: String,
     reaction: Option<(i64, String)>, // (tapback offset 0..=5, target guid)
     reply_to: Option<String>,
-    attachment: bool,
+    /// The attachment's id, when the message has one.
+    attachment: Option<i64>,
+}
+
+/// The bytes of attachment `id`'s store file: a JPEG start of image, a
+/// sentinel, filler and an end of image, `len` bytes in all (at least the
+/// markers and the sentinel).
+pub fn blob_bytes(id: i64, len: usize) -> Vec<u8> {
+    let mut b = vec![0xff, 0xd8, 0xff, 0xe0];
+    b.extend_from_slice(format!("SYNTH-BULK-BLOB-{id}").as_bytes());
+    let fill = len.saturating_sub(b.len() + 2);
+    b.extend(std::iter::repeat_n(b'.', fill));
+    b.extend_from_slice(&[0xff, 0xd9]);
+    b
 }
 
 /// Write a bulk archive into `archive` (empty, freshly created) and run the
@@ -444,7 +471,11 @@ pub fn generate(archive: &mut Archive, spec: &BulkSpec) -> BulkReport {
                 None => body_text(&mut rng, i, kind),
             };
             report.cjk += u64::from(reaction.is_none() && kind == 1);
-            let attachment = reaction.is_none() && rng.below(1000) < spec.attachment_permille;
+            let attachment = (reaction.is_none() && rng.below(1000) < spec.attachment_permille)
+                .then(|| {
+                    att_id += 1;
+                    att_id
+                });
             if reaction.is_none() {
                 per_chat[usize::try_from(chat).expect("chat")].push((id, guid.clone()));
             }
@@ -461,7 +492,36 @@ pub fn generate(archive: &mut Archive, spec: &BulkSpec) -> BulkReport {
                 attachment,
             });
         }
+        // Store files first (the rows that name them follow in the batch).
+        let mut placed: Vec<(i64, [u8; 32], i64)> = Vec::new();
+        if spec.blobs {
+            for a in batch.iter().filter_map(|m| m.attachment) {
+                let bytes = blob_bytes(a, spec.blob_len);
+                let sha = w.put_blob(&bytes).expect("store file");
+                let len = i64::try_from(bytes.len()).expect("len");
+                report.blobs += 1;
+                report.blob_bytes += bytes.len() as u64;
+                placed.push((a, sha, len));
+            }
+        }
+        let placed_of: std::collections::BTreeMap<i64, ([u8; 32], i64)> =
+            placed.iter().map(|(a, s, l)| (*a, (*s, *l))).collect();
         w.batch(|c| {
+            let bsql_blob = "INSERT INTO blob (id, sha256, byte_len, storage_name, \
+                             first_session_id) VALUES (?1, ?2, ?3, ?4, ?5)";
+            let mut blob_st = c.prepare(bsql_blob)?;
+            for (a, sha, len) in &placed {
+                run(
+                    &mut blob_st,
+                    vec![
+                        int(*a),
+                        blob(sha),
+                        int(*len),
+                        text(super::hex(sha)),
+                        int(session),
+                    ],
+                )?;
+            }
             let msql = insert_sql(
                 c,
                 "message",
@@ -571,8 +631,11 @@ pub fn generate(archive: &mut Archive, spec: &BulkSpec) -> BulkReport {
                     "path_class",
                     "lookup",
                     "copy",
+                    "blob_id",
                 ],
             )?;
+            let mut cur_st =
+                c.prepare("UPDATE attachment SET current_blob_id = ?1 WHERE id = ?1")?;
             let mut m_st = c.prepare(&msql)?;
             let mut b_st = c.prepare(&bsql)?;
             let mut cm_st = c.prepare(&cmsql)?;
@@ -685,8 +748,8 @@ pub fn generate(archive: &mut Archive, spec: &BulkSpec) -> BulkReport {
                         blob(rk),
                     ],
                 )?;
-                if m.attachment {
-                    att_id += 1;
+                if let Some(att_id) = m.attachment {
+                    let stored = placed_of.get(&att_id);
                     let name = format!("SYNTH-BULK-FILE-{att_id}.jpeg");
                     run(
                         &mut a_st,
@@ -700,7 +763,7 @@ pub fn generate(archive: &mut Archive, spec: &BulkSpec) -> BulkReport {
                             blob(b"public.jpeg"),
                             blob(b"image/jpeg"),
                             blob(name.as_bytes()),
-                            int(1024 + att_id),
+                            int(stored.map_or(1024 + att_id, |s| s.1)),
                             int(session),
                             blob(rk),
                             int(session),
@@ -719,16 +782,28 @@ pub fn generate(archive: &mut Archive, spec: &BulkSpec) -> BulkReport {
                             blob(rk),
                         ],
                     )?;
+                    let (lookup, copy, blob_id) = match stored {
+                        Some(_) => (LookupCode::Present, CopyCode::Copied, int(att_id)),
+                        None => (
+                            LookupCode::NotListedAtSourcedKey,
+                            CopyCode::NotInBackup,
+                            Value::Null,
+                        ),
+                    };
                     run(
                         &mut o_st,
                         vec![
                             int(att_id),
                             int(session),
                             int(PathClassCode::SmsAttachments.code()),
-                            int(LookupCode::NotListedAtSourcedKey.code()),
-                            int(CopyCode::NotInBackup.code()),
+                            int(lookup.code()),
+                            int(copy.code()),
+                            blob_id,
                         ],
                     )?;
+                    if stored.is_some() {
+                        cur_st.execute([att_id])?;
+                    }
                 }
             }
             Ok(())
@@ -739,7 +814,7 @@ pub fn generate(archive: &mut Archive, spec: &BulkSpec) -> BulkReport {
             report.reactions += u64::from(m.reaction.is_some());
             report.replies += u64::from(m.reply_to.is_some());
             report.undated += u64::from(m.utc_ns.is_none());
-            report.attachments += u64::from(m.attachment);
+            report.attachments += u64::from(m.attachment.is_some());
         }
         done += n;
     }

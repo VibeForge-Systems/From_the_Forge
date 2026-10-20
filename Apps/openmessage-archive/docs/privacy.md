@@ -17,6 +17,7 @@ by milestone and are commitments the design is built around.
 | The last extraction report (counts and a date range) | **Memory only**, until the app closes. It is never written to disk and never logged. | M3 |
 | Temporary copy of the Messages database during an import (decrypted for an encrypted backup) | `<archive folder>/.oma-staging/`, from staging until after the import's last pass, including the confirmation step (up to two minutes) and the attachment copy; see "The archive (M4)" | M4 |
 | Archives: messages and their raw source bytes, addresses (handles), chat names, attachment metadata and files, the search index, import records and verify results | Only inside the archive library folder the user chooses, one `a<32 hex>/` folder per archive, **stored unencrypted** (see "The archive (M4)") | M4 |
+| Exports (M6): copies of messages, names, addresses and, if chosen, the original attachment files | Wherever you save them; **plaintext, decrypted, outside the app's control**; see "Exports (M6)". Nothing about an export is kept after the app closes. | M6 |
 | Backup passwords | **Never stored, anywhere.** A password is asked for on each check, used once, and zeroized in Rust; see "Backup passwords" below. No OS credential store is used. Storing passwords there was dropped from M2 and no milestone is planned for it. | M2 |
 
 There is no search history: the row that promised one stored inside the
@@ -450,8 +451,9 @@ its own code and the engine never receives attachment bytes.
 M5 never hands an attachment to another program and never saves one
 (owner-confirmed 2026-10-18, Q1a). The window refuses downloads, new
 windows and permission requests (camera, microphone, location and others)
-in Rust, and may only navigate within the app. Saving a copy of an
-attachment is M6.
+in Rust, and may only navigate within the app. Copying attachments into
+an export, and saving a copy of one attachment, are described in
+"Exports (M6)"; saving one attachment is not built yet.
 
 ### Memory, cache and the web profile
 
@@ -559,6 +561,374 @@ prevent them:
 - other programs running as you, which can read the archive and the
   screen.
 
+## Exports (M6)
+
+*Status: PR A of milestone 6, the export engine, is built: the archive's
+export reads, the `oma-export` crate (TXT, CSV, JSON and HTML), the
+export job, its five IPC commands and the decode-helper pool for HTML
+previews. **There is no Export dialog yet** (PR B, slice 6k), so no
+export can be made from the app's interface; PDF, XLSX, "Save a copy" of
+one attachment and leaving events out are refused, never faked ("Save a
+copy" and leaving events out are assigned to slice 6k). Every
+statement below was tested on Linux with synthetic data only; nothing
+was run on Windows, in a browser (pages were read back by parsers), or in
+a spreadsheet program. Owner decisions are those of 2026-10-19 (Q3, Q4);
+Q5 is a lean awaiting the owner.*
+
+**An export is a plaintext copy outside the app's control.**
+
+- It holds message text, addresses (your own account's where the phone
+  recorded it), conversation names and, if you chose, the original
+  attachment files.
+- **Everything in it is decrypted**, even when the backup was encrypted.
+- The app cannot encrypt, track or delete an export, and the archive
+  encryption planned for M8 will not cover exports.
+- Sync clients, backup tools and antivirus may copy or read it. The app
+  warns when the folder is a known sync client's folder or a network or
+  virtual drive; cancelling cannot recall files a sync client already
+  uploaded.
+
+**What it contains is what the dialog chose.**
+
+- One-time codes the phone marked are hidden, and content captured
+  before an unsend or edit is left out (text, and the files of
+  attachments of unsent parts), unless you chose to include them for
+  that export (owner-confirmed decision Q4). That choice is never
+  remembered, is confirmed against an exact count, and the viewer's
+  "show earlier text" setting does not carry over.
+- Codes in plain text that the phone did not mark are not detected.
+- Search results that matched only hidden content are left out unless
+  you include that content.
+- **Read, delivery and sent status is never exported.** Raw source data
+  (`attributedBody`, `message_summary_info`, `payload_data`) is not
+  exported. The stored plain `text` column is exported only as the
+  "alternative text", when it differs from the displayed text, and it is
+  withheld whole when the message has an unsent part or earlier text, or
+  a one-time code the phone marked (so it can still hold a code the phone
+  did not mark, like any plain text).
+- By default, numbers in the export are counters local to that export.
+  Archive identifiers, which reveal how many messages the archive holds
+  and roughly when they were imported, and the phone's GUIDs are
+  included only if you choose (question Q5: the lean is applied and
+  awaits the owner's confirmation).
+
+**Attachments are the original files, byte for byte** (owner-confirmed
+decision Q3).
+
+- They keep their metadata, which can include location.
+- They may be harmful when opened with other programs; the app never
+  opens them.
+- Files whose type the app cannot confirm as a plain image, audio, video
+  or PDF file get `.blocked` added, unless you chose "Keep original file
+  extensions" and confirmed it.
+- On Windows they are marked as coming from the internet
+  (`Zone.Identifier`, `ZoneId=3`) where the drive supports it. What
+  Windows does with the mark is **UNVERIFIED**.
+
+**HTML exports** contain re-encoded previews without metadata, made by
+the app's decode helper processes, never the original images, and no
+scripts. Their pages block network loads with a Content-Security-Policy
+(whether every browser honours it from a local file is **UNVERIFIED**).
+PDF exports are not built yet.
+
+**Where files are written.** Only inside the folder you chose.
+Unfinished work goes into a folder or file named `.oma-export-….partial`
+(or `.partial-file`) there, never into a temporary folder elsewhere.
+
+- On Linux, on drives with Unix permissions, the files are private to
+  your account (0600, folders 0700).
+- On FAT, exFAT, NTFS-3g, SMB and similar drives, permissions follow the
+  drive's mount options.
+- On Windows, the files inherit the folder's permissions, and the
+  `.oma-export-….partial` folder is a visible folder (a leading dot does
+  not hide it there).
+
+**Not prevented by the app:**
+
+- Windows Search and GNOME's search indexer index the Documents folder,
+  which is the default start folder of the export dialogs.
+- Thumbnailers (`~/.cache/thumbnails`, the Windows thumbnail cache) decode
+  exported original images and videos when the folder is viewed,
+  including through "Show in folder".
+- The system file dialogs keep lists of recently used folders (Windows
+  `OpenSavePidlMRU`, GTK `recently-used.xbel`; both **UNVERIFIED**).
+
+**After a crash,** an unfinished export may remain in that folder. The
+app offers to remove it the next time you export there, and keeps no
+list of past destinations.
+
+**The manifest** records the scope, options, counts, versions, the time
+zone with its offsets, and file checksums. The checksum of an attachment
+equals the archive's internal name for that file. The manifest never
+records the search query, device names, the archive's label or the
+folder path.
+
+**Logs** never record export content, names or paths (see "Logging").
+
+**Deletion is not erasure** applies to exports and their leftovers (see
+"Deleting data").
+
+### What each part decides (by slice)
+
+What is already decided and enforced in the archive's export reads
+(`crates/oma-archive/src/export/`, tested there):
+
+- **Masked and withheld by default (owner-confirmed 2026-10-19, Q4).**
+  One-time codes the phone marked, and content captured before an unsend
+  or an edit that the viewer also withholds (earlier text, decoded edit
+  text, the subject history of a message with an unsent part, the
+  plain-column alternative text of such a message, and the files of
+  attachments that belonged to unsent parts), are masked or withheld
+  before anything leaves the archive code. Two separate per-export
+  opt-ins release them: one for one-time codes, one for earlier content.
+  Both are off by default, reset each time the dialog opens, are never
+  remembered, and are each confirmed against its own exact count of
+  messages: the export starts only when each confirmed count equals the
+  count the preview made (a number from the app's window is never
+  trusted), and stops before writing anything if a recount under the
+  archive's lock is higher. A message counts as having a one-time code
+  when any stored version has a marked code, and, when history is
+  included, also when a phone edit entry holds edit text (its codes are
+  found only when it is decoded, so it is counted without decoding: the
+  count may be higher than the codes written, never lower). A reaction
+  folded into its target is written whole, so it is counted like any
+  other message.
+  The viewer's "Show earlier text by default" setting (`revealEarlierText`)
+  does **not** carry over into exports. The dialog and the confirmation
+  are not built yet.
+- **Only codes the phone marked are masked.** A code in plain text without
+  the phone's marking is not detected, in exports as in the viewer.
+- **Search results do not reveal hidden content through membership.** A
+  search hit whose match lies only in masked or withheld content is left
+  out of an export of search results unless the matching opt-in is on. How
+  many were left out is shown to the user and written to no output, and
+  no output carries anything that would give that number away: a capped
+  result set holds exactly its published cap (10,000, or 1,000,000 for
+  "all matches"), so the manifest does not say "capped". It carries one
+  `mayBeIncomplete` flag instead, true when the set was capped, when the
+  exact-text search stopped at its bound, or when any hit was left out.
+  **Accepted residual:** a `true` flag on an export with far fewer
+  matches than any cap suggests that some hit was left out, though never
+  how many.
+
+What the export's record core decides (`crates/oma-export`, slice 6d,
+tested there; no export file is written yet):
+
+- **No archive ids by default (owner question Q5: the lean is applied and
+  awaits the owner's confirmation).** Every id an export writes is an
+  export-local number: messages are numbered 1, 2, 3, … in the order of
+  their archive ids within the export, so the numbers have no gaps and say
+  nothing about the archive outside the export. Archive ids, the source
+  GUIDs (of messages, conversations and attachments, and those a message
+  refers to), a conversation's `room_name` and `group_id`, and a handle's
+  `uncanonicalized_id` and `person_centric_id` are written only under the
+  opt-in "Include archive and source identifiers" (JSON, CSV and XLSX;
+  off). **Archive ids reveal how many messages the archive holds and
+  roughly when they were imported**; GUIDs identify the messages and
+  conversations in the phone's own database. The opt-in and its Review
+  sentence are not built yet.
+- **Read, delivery and sent state is never exported** (D94): no record has
+  a field for it, and a test checks every record of the synthetic
+  catalogues for those keys.
+- **References outside the export carry no id.** A reply to, or a reaction
+  on, a message that is not in the export says "not in this export"
+  without naming it; the other conversations a message is in are counted,
+  not named, when they are not exported.
+
+What the export's files core decides (`crates/oma-export`, slice 6e1,
+tested on Linux with test writers; no export can be started from the app
+yet, and nothing here was run on Windows):
+
+- **Nothing is written outside the folder the export goes to.** A bundle
+  is written into a folder named `.oma-export-<32 hex digits>.partial`
+  inside the chosen folder, and a single file into a file named
+  `.oma-export-<32 hex digits>.partial-file` beside it. Those names carry
+  no content. No temporary folder of the system is used.
+- **Private by default on Linux:** the export's folders are created 0700
+  and its files 0600, readable only by the account that made them (on
+  file systems that keep Unix permissions). On Windows the files take the
+  chosen folder's permissions.
+- **An unfinished export is plaintext on disk.** Cancelling or a failure
+  removes what the export wrote; if that removal fails, the folder stays
+  under its `.oma-export-….partial` name. After a crash, the unfinished
+  folder or file stays where it was. The app finds it again only when the
+  next export goes to the same folder (it keeps no list of past
+  destinations); entries younger than five minutes, or held by a running
+  export, are never removed (a running export renews its marker's time
+  after every batch; on a network folder whose locks another computer
+  cannot see, a single batch that takes over five minutes is the
+  residual). If removing a cancelled export's own files fails, its marker
+  stays, so the folder is offered again by a later export to that folder. On Windows a name starting with a dot is not
+  hidden.
+- **A published export never replaces anything** without the app's own
+  confirmation, and then only a regular file of the same name; a bundle
+  takes the next free name (` (2)` … ` (99)`).
+- **`manifest.json`, `README.txt` and `SHA256SUMS` never contain** the
+  words of a search, the number of search hits left out, device facts,
+  the archive's name or id, or any path outside the export: the manifest's
+  structure has no place for them. The manifest does list the export's
+  own file paths, and an attachment's file name there is built from the
+  name the phone recorded (hidden characters removed, cut to fit).
+- **Attachment file names** keep their extension only when it is on a
+  short list of passive types and matches what the file's bytes are;
+  every other copied file gets `.blocked` appended (owner decision Q3b),
+  unless "Keep original file extensions" is chosen and confirmed.
+
+What the attachment copy and the TXT writer do (slice 6e2, tested on
+Linux through the export pipeline on the synthetic catalogues; no export
+can be started from the app yet; nothing was run on Windows):
+
+- **Which files are copied** (owner-confirmed decision Q3a): by default,
+  bundle exports with HTML or JSON, and whole-archive exports, copy the
+  original attachment files; a single file carries names only; CSV, XLSX
+  and TXT bundles copy files only when the box is ticked. A names-only
+  export reads no attachment file.
+- **A copy is the stored file, byte for byte, metadata included** (GPS
+  coordinates in a photo too): nothing is converted or stripped. Its
+  checksum in `manifest.json` and `SHA256SUMS` is the one the archive
+  stored, checked while the file was copied. A stored file that no longer
+  matches its checksum is not copied, and the record says so.
+- **Attachments of unsent parts are not copied** unless the export
+  includes content captured before an unsend (owner decision Q4, confirmed
+  against an exact count); a test checks that their bytes appear nowhere
+  in the export otherwise.
+- **Mark of the Web** (owner-confirmed decision Q3c): on Windows, each
+  copied file gets a `Zone.Identifier` stream marking it as from the
+  Internet (`ZoneId=3`), so Windows may warn before opening it. What
+  Windows actually does with the mark is **UNVERIFIED**, and the code has
+  not been run on Windows yet. Nothing is written on Linux, and a volume
+  without such streams (FAT, exFAT, some network shares) gets no mark
+  (counted in `manifest.json` as `motwNotWritten`).
+- **TXT files are plain text that a terminal or an editor shows as
+  written.** Control characters, and in names and addresses also line
+  breaks and square brackets, are written as codes such as `⟨U+001B⟩`;
+  characters that do not show when printed are written as codes too
+  unless the option is turned off (in names and addresses they always
+  are). This keeps a message from faking another item or a sender line,
+  but it is not a guarantee about every viewer.
+
+What the JSON and CSV writers do (slice 6f, tested on Linux through the
+export pipeline on the synthetic catalogues; no export can be started
+from the app yet; nothing was run on Windows, in Excel or in
+LibreOffice):
+
+- **JSON keeps every character of the recorded text** (escaped where JSON
+  needs it). Hidden characters are not marked; each text carries flags
+  saying it holds direction or invisible characters. A JSON export also
+  holds copies of its two schemas (no content).
+- **CSV "for spreadsheets" (the default)** starts a cell that a
+  spreadsheet could run as a formula (a leading `=`, `+`, `-`, `@`, their
+  full-width and small forms, also after spaces and invisible
+  characters, or a leading tab or line break) with an apostrophe, and
+  names the column in the row's `neutralised_columns`; every E.164
+  address starting with `+` is prefixed so. Control characters are
+  written as codes. This follows OWASP's "CSV Injection" advice; OWASP
+  also notes that a spreadsheet may turn the formula back on after the
+  file is saved and opened again, which is **not tested** here, nor is
+  how Excel or LibreOffice treat the invisible characters.
+- **CSV "for data tools"** writes values raw, controls included, except
+  the export's own marker character: opening those files in a
+  spreadsheet can run formulas hidden in messages, and printing them in
+  a terminal can run terminal escape codes. The dialog will say so
+  (slice 6k).
+- **With "Include archive and source identifiers" off** (the default),
+  the CSV's `source_*` columns are present and empty, and JSON's
+  `source` says the option left them out.
+
+What the HTML writer does (slice 6g, tested on Linux through the export
+pipeline on the synthetic catalogues and read back by two HTML parsers;
+no export can be started from the app yet; no page was opened in a
+browser in this slice, and nothing was run on Windows):
+
+- **Pages are static and hold no script.** Each page starts with a
+  Content-Security-Policy that forbids loading anything except the
+  images embedded in it, and every message, name and address is written
+  as escaped text. The policy is a second line of defence; whether any
+  browser (WebKitGTK, WebView2, Firefox, Chrome) honours it for a page
+  opened from a local file is **UNVERIFIED**; it is on the M6 manual
+  checklist added in PR B (slice 6l).
+- **Images in HTML are previews the app re-encoded, never the original
+  files**: thumbnails embedded in the page and, with "Larger previews",
+  larger copies beside it under `html/previews/`. They come only from
+  the decode helper's renditions and are checked before they are
+  written. Original files, when copied, are named by their path but not
+  linked, so opening a page never hands sender bytes to the browser's
+  image, audio or video decoders. Web addresses in messages are text,
+  not links. The renditions come from the export's own decode helpers
+  (slice 6h2, below).
+- **Hidden characters are shown as framed codes** (`U+202E`), always in
+  names, addresses and file names, and in message text unless the
+  markers option is off; control characters are always shown so.
+- **Titles are generic** ("Messages export — conversation 1"): a
+  conversation's name appears only in the page body, not in a browser's
+  tab, history or window title.
+
+### The export job and its commands (slice 6h1)
+
+What the shell does, tested on Linux without a window
+(`src-tauri/src/exports/`); nothing here has run on Windows or in a
+real window:
+
+- **The webview never names a path.** The destination comes from a
+  native save dialog or folder picker that Rust opens; Rust keeps the
+  folder in memory, bound to the export's draft, and the webview gets
+  only the name the export will have, closed warning codes and a free
+  space bucket. The dialog's title names every sensitive option of the
+  draft ("includes one-time codes", "includes text captured before an
+  unsend or edit", "keeps risky file extensions"). No destination is
+  remembered: `settings.json` gains nothing.
+- **The checks run on the folder's real path.** A folder inside an iPhone
+  backup, Apple's `MobileSync/Backup` or iMazing's `Backups`, or inside
+  the archive folder, is refused, as is one the export cannot write to.
+  A folder other accounts can change (Linux), a sync client's folder, a
+  network or virtual drive, and too little free space are warnings the
+  user must confirm; the checks run again when the export starts.
+- **A draft holds the request in memory only**, for at most 30 minutes:
+  the plan, the counts, the zone table, the destination, and for a
+  search scope the search request (with its query) and its result set.
+  The query is never sent back by the webview; the job drops it as soon
+  as the search has been re-run and re-checked. Closing the viewer, the
+  privacy screen and idle hide discard the draft and stop its count.
+- **Consent is checked twice.** Starting refuses when the archive changed
+  since the counts were taken, and the job counts again under the
+  archive's lock and stops before writing anything when more messages
+  would be revealed than the user confirmed.
+- **The job holds the archive's lock**, so no import or verify, in this
+  copy of the app or another, changes the archive while it is read; it
+  keeps running if the viewer closes.
+- **What the app keeps after an export:** the folder of each finished
+  export, in memory only, so "Show in folder" can open it; the app
+  forgets it when it closes. Unfinished exports are removed on cancel or
+  failure; one a crash leaves is offered for removal the next time the
+  same folder is chosen.
+- **Not available yet, and refused rather than faked:** PDF and XLSX,
+  saving one attachment, and leaving events out.
+
+### Destinations and previews (slice 6h2)
+
+Tested on Linux without a window (`src-tauri/src/exports/`,
+`src-tauri/tests/`); nothing here has run on Windows or with a native
+dialog:
+
+- **A chosen folder is a token, not a path.** Each choice returns a
+  random token bound to the draft; starting an export must carry the
+  token of the latest choice, so warnings confirmed for one folder can
+  never start an export into another. The path itself stays in Rust.
+- **Previews are made by the export's own decode helpers**, separate
+  from the viewer's: at most two helper processes (one on a two-core
+  machine), each the app's own binary started for that purpose, given
+  only the verified bytes of one image at a time, never a path or a
+  name. When the files are copied, the bytes come from the copy itself;
+  otherwise the file is read once, with its checksum checked. One decode
+  gives both the thumbnail and, with "Larger previews", the larger copy.
+  Images over 64 MiB, and any the helper refuses, become "Preview
+  unavailable" cards; after three helper crashes in a row, previews are
+  off for the rest of that export and the number skipped is recorded in
+  the manifest. Cancelling kills the helpers.
+- **Helper error output is never kept.** What a helper writes to its
+  error stream is read and thrown away; only its length is logged, as a
+  size bucket.
+
 ## Device identifiers (M2)
 
 The app never stores or keeps these fields from a backup: `Unique
@@ -660,7 +1030,15 @@ Backups and their contents are treated as hostile:
   before a path is built from them; store files and folders are never
   followed through links; and nothing is written until those checks pass.
 - **Attachments are never opened, executed or saved by M5** (owner-confirmed
-  2026-10-18, Q1a). Saving a copy of an attachment is M6.
+  2026-10-18, Q1a). Copies written into an export are described in
+  "Exports (M6)".
+- **File names written by an export** (M6) are never the untrusted name
+  alone: each starts with the file's own ordinal (`000045-`), has hidden
+  characters removed, is passed through the app's file-name sanitiser and
+  cut to a length budget computed from the destination path (to the
+  ordinal alone if the folder is very deep), and gets `.blocked` appended
+  unless its extension is on the passive allowlist and matches the
+  file's bytes.
 - **Previews and playback (owner-confirmed 2026-10-18, Q1b).** Images are
   decoded by memory-safe Rust decoders in a separate helper process and
   re-encoded before the window sees them. Audio and video are played by
@@ -696,7 +1074,8 @@ Backups and their contents are treated as hostile:
   self-builder's own legal risk**; the project gives no assurance about
   patents (see `dependencies.md`).
 - Message text is rendered as text, never as HTML. The UI does not use
-  `v-html` with untrusted content, and HTML exports will escape everything.
+  `v-html` with untrusted content, and HTML exports escape everything
+  (see "Exports (M6)" and "What the HTML writer does" above).
 
 ## Logging
 
@@ -714,7 +1093,14 @@ path (archive folder names included), display text, any value from the
 archive's issue or history tables, or SQLite error text (only the primary
 code). From M5 they also never record search or filter text, ids, media
 tokens, media URLs, byte ranges or exact file sizes (sizes are bucketed).
-The persistent diagnostic log file is deferred to M8 (D71, a lean
+From M6 the export job and commands log kinds, option flags, buckets,
+outcomes and elapsed time only: never a destination, an export's file or
+folder name, a zone name, a draft or destination token, a query, an
+exact count or size, or content; a decode helper's error output is
+counted, never logged. `src-tauri/tests/log_hygiene.rs` checks this over
+the export commands' work and the TXT, CSV, JSON and HTML formats (with
+previews from the real decode helper) on the synthetic hostile and media
+archives, exported into a folder whose name is a sentinel. The persistent diagnostic log file is deferred to M8 (D71, a lean
 awaiting the owner). Set `OMA_LOG=debug` for more detail. That
 setting changes how much is recorded, not which kinds of data.
 

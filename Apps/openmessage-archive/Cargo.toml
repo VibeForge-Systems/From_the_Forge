@@ -73,10 +73,17 @@ heic-rs = { version = "=0.1.4", default-features = false, features = ["std"] }
 # features only (no `wasm_js`, no custom backend).
 getrandom = "=0.3.4"
 
+# Milestone 6 slice 6f: the CSV writer (crates/oma-export/src/writer/csv.rs),
+# used only through `Writer::from_writer` over a staged file (spec §5.2,
+# D130). Unlicense OR MIT; its dependencies csv-core, itoa and ryu are
+# permissive too (docs/dependencies.md).
+csv = "=1.4.0"
+
 oma-fs = { path = "crates/oma-fs" }
 oma-backup = { path = "crates/oma-backup" }
 oma-messages = { path = "crates/oma-messages" }
 oma-archive = { path = "crates/oma-archive" }
+oma-export = { path = "crates/oma-export" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -112,4 +119,14 @@ opt-level = 3
 [profile.dev.package.oma-messages]
 opt-level = 3
 [profile.dev.package.oma-archive]
+opt-level = 3
+# Slice 6f: the export writers stream every record of a job through
+# serde_json (its generic serialisation is instantiated in oma-export) and
+# csv; the perf smoke test exports 20,000 messages on every push, so the
+# writer crates are optimized in tests too.
+[profile.dev.package.oma-export]
+opt-level = 3
+[profile.dev.package.csv]
+opt-level = 3
+[profile.dev.package.csv-core]
 opt-level = 3

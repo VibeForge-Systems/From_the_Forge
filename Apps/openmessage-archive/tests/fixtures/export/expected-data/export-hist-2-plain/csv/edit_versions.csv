@@ -1,0 +1,8 @@
+﻿"item","version","entry","current","first_session","last_session","text_state","text","text_unchanged","edit_label","edit_texts","part","entry_ordinal","at_kind","at_raw_type","at_raw","neutralised_columns","display_none_reason"
+"1","1","","true","1","1","text","SYNTH-EXP-H1-PART-0  SYNTH-EXP-H1-PART-2","false","unsentParts","notNeeded","","","","","","",""
+"2","1","","true","1","1","text","SYNTH-EXP-HIST-BODY-2","false","noEditRecorded","notNeeded","","","","","","",""
+"3","1","","true","1","1","text","SYNTH-EXP-HIST-3 edited","false","editHistory","decoded","","","","","","",""
+"3","1","1","true","1","1","text","SYNTH-EXP-HIST-3 original","","","","0","0","integer","integer","790000200","",""
+"4","1","","true","1","1","text","SYNTH-EXP-H4-PART-0  SYNTH-EXP-H4-PART-2","false","unsentPartsAndEditHistory","decoded","","","","","","",""
+"4","1","1","true","1","1","withheld:unsent","","","","","0","0","integer","integer","790000260","",""
+"5","1","","true","1","1","text","SYNTH-EXP-H5-PART-0  SYNTH-EXP-H5-PART-2","false","unsentParts","notNeeded","","","","","","",""

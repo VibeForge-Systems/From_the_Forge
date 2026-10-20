@@ -63,7 +63,7 @@ const ready = computed(() => entry.value?.status === 'ready' || (!entry.value &&
 /** The viewer reads while an import or a verify runs (M5 §2); Rust refuses the rest. */
 const canBrowse = computed(
   () =>
-    (!!entry.value && ['ready', 'importing', 'verifying'].includes(entry.value.status)) ||
+    (!!entry.value && ['ready', 'importing', 'verifying', 'exporting'].includes(entry.value.status)) ||
     (!entry.value && !!details.value),
 );
 const router = useRouter();

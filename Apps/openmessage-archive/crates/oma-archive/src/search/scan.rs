@@ -26,7 +26,7 @@ use super::{
     text_ref, Match, RowFacts, RowFilter, RowStmts, ScanCoverage, ScanProgress, ScanStop,
     SearchRequest, SEARCH_MATCH_CAP,
 };
-use crate::conn::{ReadConn, ViewBudget};
+use crate::conn::{Phase, ReadConn, ViewBudget};
 use crate::error::ArchiveError;
 use crate::progress::CancelToken;
 
@@ -121,6 +121,9 @@ struct State<'n> {
     matched: u64,
     stop: Option<ScanStop>,
     examined_limit: u64,
+    /// The most matches kept: [`SEARCH_MATCH_CAP`] for the viewer, the
+    /// export's cap for its re-run (M6 spec §3.6).
+    cap: u64,
 }
 
 /// What one visited row needs besides its id and key.
@@ -158,7 +161,7 @@ impl State<'_> {
             return Ok(true);
         }
         self.matched += 1;
-        if self.matched > u64::try_from(SEARCH_MATCH_CAP).unwrap_or(u64::MAX) {
+        if self.matched > self.cap {
             self.stop = Some(ScanStop::MatchCap);
             return Ok(false);
         }
@@ -175,7 +178,8 @@ impl State<'_> {
 }
 
 /// Run the scan: the matches (at most [`SEARCH_MATCH_CAP`]) and what it
-/// covered.
+/// covered. Each batch runs in its own `ViewBudget::ScanBatch` phase,
+/// within one 20 s deadline.
 pub(crate) fn run(
     conn: &ReadConn,
     q: &SearchRequest,
@@ -185,6 +189,40 @@ pub(crate) fn run(
     progress: &mut dyn FnMut(ScanProgress),
 ) -> Result<(Vec<Match>, ScanCoverage), ArchiveError> {
     let deadline = Instant::now() + ViewBudget::ScanBatch.window();
+    let cap = u64::try_from(SEARCH_MATCH_CAP).unwrap_or(u64::MAX);
+    walk(q, needle, ranges, cap, progress, |batch| {
+        conn.viewing(ViewBudget::ScanBatch, Some(cancel), deadline, batch)
+    })
+}
+
+/// The same scan inside a phase the caller set up (an export snapshot's
+/// cancellable phase, M6 spec §3.6): no op budget and no deadline, so it
+/// stops only at the examined bound, at `cap` matches, at the end of its
+/// range or on a cancel.
+pub(crate) fn run_in(
+    p: &Phase<'_>,
+    q: &SearchRequest,
+    needle: &str,
+    ranges: &[KeyRange],
+    cap: u64,
+    progress: &mut dyn FnMut(ScanProgress),
+) -> Result<(Vec<Match>, ScanCoverage), ArchiveError> {
+    walk(q, needle, ranges, cap, progress, |batch| batch(p))
+}
+
+/// One batch's work in the phase `in_phase` gives it.
+type Batch<'b> = &'b mut dyn FnMut(&Phase<'_>) -> Result<(), ArchiveError>;
+
+/// The scan over `ranges`, newest first, each batch run through
+/// `in_phase`.
+fn walk(
+    q: &SearchRequest,
+    needle: &str,
+    ranges: &[KeyRange],
+    cap: u64,
+    progress: &mut dyn FnMut(ScanProgress),
+    mut in_phase: impl FnMut(Batch<'_>) -> Result<(), ArchiveError>,
+) -> Result<(Vec<Match>, ScanCoverage), ArchiveError> {
     let chat = q.filters.chat.map(|c| c.get());
     let mut s = State {
         filter: RowFilter::of(q),
@@ -195,73 +233,14 @@ pub(crate) fn run(
         matched: 0,
         stop: None,
         examined_limit: crate::fault::scan_examined_limit(SCAN_EXAMINED_LIMIT),
+        cap,
     };
     'ranges: for (lo, hi) in ranges {
         let mut cursor: (Vec<u8>, i64) = (hi.clone(), i64::MIN);
         loop {
             let mut rows_read = 0usize;
-            let outcome = conn.viewing(ViewBudget::ScanBatch, Some(cancel), deadline, |p| {
-                let c = p.conn();
-                let mut st = RowStmts::new(c).map_err(|e| p.err(&e))?;
-                match chat {
-                    Some(chat) => {
-                        let rows =
-                            p.sql(|c| chat_batch(c, chat, (&cursor.0, cursor.1), lo, SCAN_BATCH))?;
-                        rows_read = rows.len();
-                        for (id, key) in rows {
-                            p.checkpoint()?;
-                            let v = Visit {
-                                facts: None,
-                                current: None,
-                            };
-                            let go = s.visit(&mut st, id, &key, v).map_err(|e| p.err(&e))?;
-                            if !go {
-                                return Ok(());
-                            }
-                            cursor = (key, id);
-                        }
-                    }
-                    None => {
-                        let mut batch = c.prepare(SQL_SCAN_BATCH).map_err(|e| p.err(&e))?;
-                        let limit = i64::try_from(SCAN_BATCH).unwrap_or(i64::MAX);
-                        let mut rows = batch
-                            .query(rusqlite::params![cursor.0, cursor.1, lo, limit])
-                            .map_err(|e| p.err(&e))?;
-                        while let Some(r) = rows.next().map_err(|e| p.err(&e))? {
-                            if rows_read.is_multiple_of(CHECK_EVERY) {
-                                p.checkpoint()?;
-                            }
-                            rows_read += 1;
-                            let row = (|| -> rusqlite::Result<_> {
-                                let id: i64 = r.get(0)?;
-                                let key: &[u8] = r.get_ref(1)?.as_blob()?;
-                                let facts = RowFacts {
-                                    current_body: r.get(2)?,
-                                    assoc_present: r.get(3)?,
-                                    item_kind: r.get(4)?,
-                                    is_from_me: r.get(5)?,
-                                };
-                                let text = text_ref(r.get_ref(6)?);
-                                let v = Visit {
-                                    facts: Some(facts),
-                                    current: Some(text.as_deref()),
-                                };
-                                let go = s.visit(&mut st, id, key, v)?;
-                                if go {
-                                    cursor.0.clear();
-                                    cursor.0.extend_from_slice(key);
-                                    cursor.1 = id;
-                                }
-                                Ok(go)
-                            })()
-                            .map_err(|e| p.err(&e))?;
-                            if !row {
-                                return Ok(());
-                            }
-                        }
-                    }
-                }
-                Ok(())
+            let outcome = in_phase(&mut |p: &Phase<'_>| {
+                batch(p, &mut s, chat, &mut cursor, lo, &mut rows_read)
             });
             match outcome {
                 Ok(()) => {}
@@ -272,9 +251,7 @@ pub(crate) fn run(
             }
             progress(ScanProgress {
                 examined: s.examined,
-                matched: s
-                    .matched
-                    .min(u64::try_from(SEARCH_MATCH_CAP).unwrap_or(u64::MAX)),
+                matched: s.matched.min(s.cap),
             });
             if s.stop.is_some() {
                 break 'ranges;
@@ -290,4 +267,77 @@ pub(crate) fn run(
         stop: s.stop,
     };
     Ok((s.matches, coverage))
+}
+
+/// One keyset batch of at most [`SCAN_BATCH`] keys below `cursor` and at
+/// or above `lo`, visited in phase `p`; `cursor` moves past every row
+/// examined.
+fn batch(
+    p: &Phase<'_>,
+    s: &mut State<'_>,
+    chat: Option<i64>,
+    cursor: &mut (Vec<u8>, i64),
+    lo: &[u8],
+    rows_read: &mut usize,
+) -> Result<(), ArchiveError> {
+    let c = p.conn();
+    let mut st = RowStmts::new(c).map_err(|e| p.err(&e))?;
+    match chat {
+        Some(chat) => {
+            let rows = p.sql(|c| chat_batch(c, chat, (&cursor.0, cursor.1), lo, SCAN_BATCH))?;
+            *rows_read = rows.len();
+            for (id, key) in rows {
+                p.checkpoint()?;
+                let v = Visit {
+                    facts: None,
+                    current: None,
+                };
+                let go = s.visit(&mut st, id, &key, v).map_err(|e| p.err(&e))?;
+                if !go {
+                    return Ok(());
+                }
+                *cursor = (key, id);
+            }
+        }
+        None => {
+            let mut batch = c.prepare(SQL_SCAN_BATCH).map_err(|e| p.err(&e))?;
+            let limit = i64::try_from(SCAN_BATCH).unwrap_or(i64::MAX);
+            let mut rows = batch
+                .query(rusqlite::params![cursor.0, cursor.1, lo, limit])
+                .map_err(|e| p.err(&e))?;
+            while let Some(r) = rows.next().map_err(|e| p.err(&e))? {
+                if rows_read.is_multiple_of(CHECK_EVERY) {
+                    p.checkpoint()?;
+                }
+                *rows_read += 1;
+                let row = (|| -> rusqlite::Result<_> {
+                    let id: i64 = r.get(0)?;
+                    let key: &[u8] = r.get_ref(1)?.as_blob()?;
+                    let facts = RowFacts {
+                        current_body: r.get(2)?,
+                        assoc_present: r.get(3)?,
+                        item_kind: r.get(4)?,
+                        is_from_me: r.get(5)?,
+                    };
+                    let text = text_ref(r.get_ref(6)?);
+                    let v = Visit {
+                        facts: Some(facts),
+                        current: Some(text.as_deref()),
+                    };
+                    let go = s.visit(&mut st, id, key, v)?;
+                    if go {
+                        cursor.0.clear();
+                        cursor.0.extend_from_slice(key);
+                        cursor.1 = id;
+                    }
+                    Ok(go)
+                })()
+                .map_err(|e| p.err(&e))?;
+                if !row {
+                    return Ok(());
+                }
+            }
+        }
+    }
+    Ok(())
 }

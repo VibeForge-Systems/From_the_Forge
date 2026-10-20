@@ -44,8 +44,8 @@ pub use container::{
     ContainerRefusal, ContainerVerdict, ReadAt, CONTAINER_BOXES, MAX_BOXES, MAX_DEPTH,
 };
 pub use render::{
-    render, RenderError, RenderLimits, Rendered, RenderedFormat, Rendition, DECODER_ALLOC,
-    JPEG_QUALITY, MAX_DECODED_BYTES, MAX_INPUT_BYTES, MAX_SIDE,
+    render, render_pair, RenderError, RenderLimits, Rendered, RenderedFormat, Rendition,
+    DECODER_ALLOC, JPEG_QUALITY, MAX_DECODED_BYTES, MAX_INPUT_BYTES, MAX_SIDE,
 };
 pub use sniff::{sniff, MediaClass, SniffedKind, SNIFF_WINDOW};
 

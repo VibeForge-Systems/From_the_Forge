@@ -47,12 +47,27 @@ describe('JobProgress for the archive jobs', () => {
     );
   });
 
+  it('labels the export phases, counting rows only while messages are written', () => {
+    const cases: [JobPhase, string][] = [
+      ['preparingExport', 'Counting what to export'],
+      ['finishingExport', 'Finishing the export'],
+      ['removingPartial', 'Removing the unfinished export'],
+    ];
+    for (const [phase, text] of cases) {
+      expect(label({ kind: 'export', phase, done: 0, total: null })).toBe(text);
+    }
+    expect(label({ kind: 'export', phase: 'writingMessages', done: 120, total: 4000 })).toBe(
+      'Writing messages (120 of 4,000)',
+    );
+  });
+
   it('names the job in the progress bar', () => {
     for (const [kind, aria] of [
       ['import', 'Import progress'],
       ['verify', 'Verification progress'],
       ['validate', 'Validation progress'],
       ['extractionCheck', 'Extraction check progress'],
+      ['export', 'Export progress'],
     ] as const) {
       const w = mount(JobProgress, { props: { job: { kind, phase: null, done: 0, total: null, cancelling: false } } });
       expect(w.find('.progress').attributes('aria-label')).toBe(aria);

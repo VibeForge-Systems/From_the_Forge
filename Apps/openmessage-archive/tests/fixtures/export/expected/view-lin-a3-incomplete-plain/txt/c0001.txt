@@ -1,0 +1,21 @@
+OpenMessage Archive export — plaintext copy. See the end of this file for details.
+Conversation 1: SYNTH-LIN-NAME-2
+Addresses recorded in this conversation (includes people who left): 1
+Times: UTC (offsets shown on every line)
+
+==== 2026-01-13 ====
+[2026-01-13 12:27:40 +00:00] [item 1] synthetic-lineage-1@example.invalid [iMessage]
+    Text:
+      SYNTH-LIN-BODY-1
+
+==== End of conversation file ====
+Items: 1
+Reactions shown on the messages they react to: 0
+
+Legend:
+Each item starts at the beginning of a line with its recorded time in brackets and its number in this export, [item N], then the sender's address when one is recorded, then tags in brackets. Everything that belongs to an item is indented: labels by four spaces, recorded text by six. A line of message text can therefore never start a new item.
+Times are shown in the zone named at the top, with the offset in force on every line. [Undated] marks an item the archive sorts as undated; undated items come last and follow the order of the earliest import that recorded them, which is not a recorded fact. [No usable time] marks an item sorted among the dated ones whose own recorded time cannot be shown; a tag says why.
+[same recorded time; order not known]: the item has the same recorded time as its neighbour, so their order is the order the archive imported them in.
+Values and tags marked 'derived' were worked out by the archive from what the phone recorded, not recorded by the phone itself.
+Text in angle brackets ⟨…⟩ is written by the export, never by a message: ⟨U+200B⟩ stands for a character that does not show when printed or that controls the terminal or the text direction, ⟨U+005B⟩ and ⟨U+005D⟩ for square brackets in an address or a name, ⟨+N combining marks⟩ for marks left out of a very long run of accents, and ⟨one-time code hidden⟩ or ⟨Attachment N⟩ for what stood at that place in the text. A literal ⟨ in a message is itself written as ⟨U+27E8⟩.
+Line breaks inside a message become new indented lines. In addresses, names and other fields on a tag line, every line break and control is written as a code instead.

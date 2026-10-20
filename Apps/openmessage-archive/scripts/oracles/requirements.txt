@@ -1,0 +1,35 @@
+# Python packages for the independent export oracles (M6 spec §14.4).
+#
+# Install only into a virtual environment, with hashes enforced and wheels
+# only (no build step runs):
+#
+#   python3 -m venv .venv-oracles
+#   .venv-oracles/bin/pip install --require-hashes --only-binary :all: --no-deps \
+#       -r scripts/oracles/requirements.txt
+#
+# CI (ubuntu-22.04) runs Python 3.10, so rpds-py is held at 0.30.0, the last
+# release with CPython 3.10 wheels. Its two hashes are the cp310 wheel (CI)
+# and the cp313 wheel (the reference fixture environment). Every other
+# package is a pure-Python wheel. PR A needs jsonschema (and its
+# dependencies) and html5lib (and its dependencies); openpyxl and pypdf
+# arrive with the XLSX and PDF slices. Every addition or upgrade is
+# recorded in docs/dependencies.md.
+attrs==26.1.0 \
+    --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
+html5lib==1.1 \
+    --hash=sha256:0d78f8fde1c230e99fe37986a60526d7049ed4bf8a9fadbad5f00e22e58e041d
+jsonschema==4.26.0 \
+    --hash=sha256:d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce
+jsonschema-specifications==2025.9.1 \
+    --hash=sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe
+referencing==0.37.0 \
+    --hash=sha256:381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231
+rpds-py==0.30.0 \
+    --hash=sha256:0c0e95f6819a19965ff420f65578bacb0b00f251fefe2c8b23347c37174271f3 \
+    --hash=sha256:9027da1ce107104c50c81383cae773ef5c24d296dd11c99e2629dbd7967a20c6
+six==1.17.0 \
+    --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274
+typing-extensions==4.16.0 \
+    --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
+webencodings==0.5.1 \
+    --hash=sha256:a0af1213f3c2226497a97e2b3aa01a7e4bee4f403f95be16fc9acd2947514a78

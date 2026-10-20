@@ -1,18 +1,22 @@
-//! The viewer catalogue, `tests/fixtures/viewer` (M5 spec §14.1): its
-//! entries and scenarios, and importing one order of steps into a fresh
-//! archive. The committed fixtures are never written: backups are opened
-//! in place with a temporary staging directory.
+//! The viewer catalogue, `tests/fixtures/viewer` (M5 spec §14.1), and the
+//! export catalogue, `tests/fixtures/export` (M6 spec §15), which shares
+//! its layout and document format: their entries and scenarios, importing
+//! one order of steps into a fresh archive, and comparing an archive with
+//! a model's `content` manifest. The committed fixtures are never written:
+//! backups are opened in place with a temporary staging directory.
 #![allow(dead_code, clippy::disallowed_methods, clippy::disallowed_types)]
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use oma_archive::{ArchiveId, Library, LineageChoice, LineageId};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use super::import::{
-    import, lineage_for, manifest_ref, open_dir, opts, read_only, LineageLabels, UDID,
+    assert_store_consistent, blob_list, import, lineage_for, manifest_expected, manifest_ref,
+    manifest_view, message_expected, message_view, open_dir, opts, read_only, LineageLabels, UDID,
 };
 use super::{db_path, hex, library};
 
@@ -38,6 +42,60 @@ pub fn viewer_root() -> PathBuf {
         env!("CARGO_MANIFEST_DIR"),
         "/../../tests/fixtures/viewer"
     ))
+}
+
+/// The export catalogue's entries (M6 spec §15).
+pub const EXPORT_ENTRIES: &[&str] = &[
+    "export-files-plain",
+    "export-hist-1-plain",
+    "export-hist-2-plain",
+    "export-oldcols-plain",
+    "export-records-plain",
+    "export-text-plain",
+];
+
+/// The export catalogue's scenarios.
+pub const EXPORT_SCENARIOS: &[&str] = &["history"];
+
+pub fn export_root() -> PathBuf {
+    PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/fixtures/export"
+    ))
+}
+
+/// A path below `root` from a `/`-separated relative name.
+pub fn under(root: &Path, rel: &str) -> PathBuf {
+    rel.split('/')
+        .fold(root.to_path_buf(), |p, part| p.join(part))
+}
+
+/// A JSON document below `root`.
+pub fn json_under(root: &Path, rel: &str) -> Value {
+    serde_json::from_slice(&fs::read(under(root, rel)).expect("json")).expect("parse")
+}
+
+/// The export catalogue's documents: for each entry and scenario, its name,
+/// its `content.json` and its `export.json`.
+pub fn export_docs() -> Vec<(String, Value, Value)> {
+    let root = export_root();
+    EXPORT_ENTRIES
+        .iter()
+        .map(|e| {
+            (
+                (*e).to_owned(),
+                json_under(&root, &format!("{e}.expected/content.json")),
+                json_under(&root, &format!("{e}.expected/export.json")),
+            )
+        })
+        .chain(EXPORT_SCENARIOS.iter().map(|s| {
+            (
+                (*s).to_owned(),
+                json_under(&root, &format!("scenarios/{s}.content.json")),
+                json_under(&root, &format!("scenarios/{s}.export.json")),
+            )
+        }))
+        .collect()
 }
 
 /// A path below the catalogue from a `/`-separated relative name.
@@ -85,8 +143,31 @@ impl Imported {
 /// Import the steps of `order` (a model's `orders[i]`) into a fresh
 /// archive, each with its options and lineage label.
 pub fn import_order(order: &Value, what: &str) -> Imported {
+    import_order_in(&viewer_root(), order, what)
+}
+
+/// [`import_order`] for the catalogue at `root`.
+pub fn import_order_in(root: &Path, order: &Value, what: &str) -> Imported {
     let (tmp, lib) = library();
     let id = lib.create(None).expect("create");
+    let labels = import_steps(root, &lib, &id, order, what);
+    Imported {
+        tmp,
+        lib,
+        id,
+        labels,
+    }
+}
+
+/// Import the steps of `order` into the archive `id` of `lib`, and return
+/// the lineage label of each lineage id.
+pub fn import_steps(
+    root: &Path,
+    lib: &Library,
+    id: &ArchiveId,
+    order: &Value,
+    what: &str,
+) -> LineageLabels {
     let mut lineages: BTreeMap<String, LineageId> = BTreeMap::new();
     for step in order.as_array().expect("steps") {
         let entry = step["entry"].as_str().expect("entry");
@@ -95,21 +176,15 @@ pub fn import_order(order: &Value, what: &str) -> Imported {
         o.include_recently_deleted = step["includeRecentlyDeleted"] == true;
         o.copy_attachments = step["copyAttachments"] != false;
         o.ios_version_untested = step["iosVersionUntested"] == true;
-        let mut a = lib.open(&id).expect("open");
-        let src = open_dir(&viewer_root().join(entry).join(UDID), None);
+        let mut a = lib.open(id).expect("open");
+        let src = open_dir(&root.join(entry).join(UDID), None);
         let choice: LineageChoice = lineage_for(&mut lineages, label);
         let s = import(&mut a, &src, &o, choice);
         lineages.insert(label.to_owned(), s.lineage);
         drop(a);
         assert!(src.ob.close().removed, "{what}: staging not removed");
     }
-    let labels: LineageLabels = lineages.iter().map(|(k, v)| (v.get(), k.clone())).collect();
-    Imported {
-        tmp,
-        lib,
-        id,
-        labels,
-    }
+    lineages.iter().map(|(k, v)| (v.get(), k.clone())).collect()
 }
 
 /// The model's name of every message: `guid:…` for keyed rows, and for
@@ -195,4 +270,81 @@ pub fn names(i: &Imported, order: &Value) -> Names {
             .map(|(s, st)| (s, st["entry"].as_str().expect("entry").to_owned()))
             .collect(),
     }
+}
+
+// ---------------------------------------------------------------------------
+// The import check against a model's content manifest
+// ---------------------------------------------------------------------------
+
+/// Text values over this many UTF-8 bytes are written as
+/// `sha256:<hex>:<bytes>` in the manifests (the generators' `LONG_TEXT`).
+pub const LONG_TEXT: usize = 4096;
+
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    hex(&Sha256::digest(bytes))
+}
+
+/// The generators' long-text rule, applied to what is read back.
+pub fn shorten(v: &mut Value) {
+    match v {
+        Value::Object(map) => {
+            for (k, x) in map.iter_mut() {
+                match x {
+                    Value::String(s) if k == "text" && s.len() > LONG_TEXT => {
+                        *x = Value::String(format!(
+                            "sha256:{}:{}",
+                            sha256_hex(s.as_bytes()),
+                            s.len()
+                        ));
+                    }
+                    _ => shorten(x),
+                }
+            }
+        }
+        Value::Array(a) => a.iter_mut().for_each(shorten),
+        _ => {}
+    }
+}
+
+fn sorted_strings(v: &[Value]) -> Vec<String> {
+    let mut s: Vec<String> = v.iter().map(Value::to_string).collect();
+    s.sort();
+    s
+}
+
+pub fn assert_same(got: &[Value], want: &[Value], what: &str) {
+    let (g, w) = (sorted_strings(got), sorted_strings(want));
+    if g != w {
+        let gs: BTreeSet<&String> = g.iter().collect();
+        let ws: BTreeSet<&String> = w.iter().collect();
+        panic!(
+            "{what}: differ\n  only in the archive: {:#?}\n  only in the model: {:#?}",
+            gs.difference(&ws).collect::<Vec<_>>(),
+            ws.difference(&gs).collect::<Vec<_>>()
+        );
+    }
+}
+
+/// The archive at `db` holds what the manifest `m` says: handles, chats,
+/// attachments, messages (with their order) and blobs, and its store is
+/// consistent.
+pub fn assert_content_matches(db: &Path, m: &Value, labels: &LineageLabels, what: &str) {
+    let mut view = manifest_view(db, labels);
+    for plural in ["handles", "chats", "attachments"] {
+        let got = view.get_mut(plural).expect("plural");
+        got.iter_mut().for_each(shorten);
+        assert_same(
+            got,
+            &manifest_expected(m, plural),
+            &format!("{what}: {plural}"),
+        );
+    }
+    let mut got = message_view(db, labels);
+    got.iter_mut().for_each(shorten);
+    let want = message_expected(m);
+    assert_same(&got, &want, &format!("{what}: messages"));
+    let sorts = |v: &[Value]| v.iter().map(|x| x["sort"].clone()).collect::<Vec<_>>();
+    assert_eq!(sorts(&got), sorts(&want), "{what}: message order");
+    assert_eq!(blob_list(db), m["content"]["blobs"], "{what}: blobs");
+    assert_store_consistent(db, true);
 }

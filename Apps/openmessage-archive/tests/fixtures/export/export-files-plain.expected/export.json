@@ -1,0 +1,703 @@
+{
+ "corruptStoreFiles": [
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0032",
+   "sha256": "8b94993a553296ba08a32f3fcd2690496a83b0a69bc62c3221498735f2324f20",
+   "why": "a store file whose bytes no longer hash to its name"
+  }
+ ],
+ "fileCases": [
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0001",
+   "bytes": 88,
+   "id": "allow-png",
+   "note": "allowlisted and agrees",
+   "sha256": "7060c5a407ed2bbcc2840e103dd6e7efb975ad4a876618e4f9edbaa6cb6b7791",
+   "transferName": {
+    "text": "SYNTH-EXP-picture.png",
+    "utf16Units": 21,
+    "utf8Bytes": 21
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0002",
+   "bytes": 22,
+   "id": "allow-txt",
+   "note": "allowlisted and agrees",
+   "sha256": "0ae4001ccd2d6bb425399765f8aa6f3f820d8d9069257c2275b8ddda61d9250e",
+   "transferName": {
+    "text": "SYNTH-EXP-notes.txt",
+    "utf16Units": 19,
+    "utf8Bytes": 19
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0003",
+   "bytes": 95,
+   "id": "case-upper",
+   "note": "differs only by case",
+   "sha256": "f24e9ef485394d99f56c14216aaa3c22a9a2dceece3feb9d0261c9a88db12378",
+   "transferName": {
+    "text": "SYNTH-EXP-Report.PDF",
+    "utf16Units": 20,
+    "utf8Bytes": 20
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0004",
+   "bytes": 101,
+   "id": "case-lower",
+   "note": "differs only by case",
+   "sha256": "48008d82392416546f4c7cd44820c17063bb515bc6597d31119534b1b1d92aaa",
+   "transferName": {
+    "text": "SYNTH-EXP-report.pdf",
+    "utf16Units": 20,
+    "utf8Bytes": 20
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0005",
+   "bytes": 22,
+   "id": "nfc",
+   "note": "NFC",
+   "sha256": "36121e233890d7f6c66912612895cac6fc73b02c73aa49345aba32fce44a58fb",
+   "transferName": {
+    "text": "SYNTH-EXP-caf\u00e9.txt",
+    "utf16Units": 18,
+    "utf8Bytes": 19
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0006",
+   "bytes": 26,
+   "id": "nfd",
+   "note": "NFD of the previous name",
+   "sha256": "0fe8861838e89aae534c26772c99a51385db9053001fc3be6518307392d9896b",
+   "transferName": {
+    "text": "SYNTH-EXP-cafe\u0301.txt",
+    "utf16Units": 19,
+    "utf8Bytes": 20
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0007",
+   "bytes": 22,
+   "id": "reserved-con",
+   "note": "Windows reserved name",
+   "sha256": "c1402987ccaae60f4f0313dacd54fdb244d409f544dac6c14c886cf6886e8c77",
+   "transferName": {
+    "text": "CON.txt",
+    "utf16Units": 7,
+    "utf8Bytes": 7
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0008",
+   "bytes": 27,
+   "id": "reserved-aux",
+   "note": "Windows reserved name, no extension",
+   "sha256": "d144f046713860c56c8b9559870bb4d598f00320b33a382b3ebdb95269bb6b89",
+   "transferName": {
+    "text": "aux",
+    "utf16Units": 3,
+    "utf8Bytes": 3
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0009",
+   "bytes": 88,
+   "id": "reserved-com1",
+   "note": "Windows reserved name",
+   "sha256": "160ac6ac07081ea2361eac9c857926bac11e64a9edaaabd0fd9c6e518a2cf7bb",
+   "transferName": {
+    "text": "COM1.png",
+    "utf16Units": 8,
+    "utf8Bytes": 8
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0010",
+   "bytes": 88,
+   "id": "reserved-nul",
+   "note": "Windows reserved name; declared JPEG, PNG bytes",
+   "sha256": "9338796820a58f38ddf70513e171ef6302e83526b1b64f0f2369a8e83665879f",
+   "transferName": {
+    "text": "nul.jpg",
+    "utf16Units": 7,
+    "utf8Bytes": 7
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0011",
+   "bytes": 88,
+   "id": "long-256",
+   "note": "over 255 UTF-8 bytes",
+   "sha256": "5b39844cab590aeb57824deb9a66c1c945eeddfe32e9230e6e8a73125c986a2b",
+   "transferName": {
+    "text": "SYNTH-EXP-\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9.png",
+    "utf16Units": 164,
+    "utf8Bytes": 314
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0012",
+   "bytes": 23,
+   "id": "trailing-dots",
+   "note": "trailing dots",
+   "sha256": "1e6cf70cff7105a2288560d0380c1aba06f04fc7d2516ca276abc97ccfc0b7b0",
+   "transferName": {
+    "text": "SYNTH-EXP-trailing.dots...",
+    "utf16Units": 26,
+    "utf8Bytes": 26
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0013",
+   "bytes": 88,
+   "id": "trailing-space",
+   "note": "trailing space",
+   "sha256": "114fe8beabc9f002b63a3c178cbd51d00c76a4c1e56c9a607ecbf41060be1dee",
+   "transferName": {
+    "text": "SYNTH-EXP-trailing space.png ",
+    "utf16Units": 29,
+    "utf8Bytes": 29
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0014",
+   "bytes": 88,
+   "id": "invisible",
+   "note": "invisible characters",
+   "sha256": "2ccea7f1f8dab72621c0dfcb6dc8eb8e206ff643ecbfa2d4e24b55b554dae647",
+   "transferName": {
+    "text": "SYNTH-EXP-in\u200bvisi\u2060ble.png",
+    "utf16Units": 25,
+    "utf8Bytes": 29
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0015",
+   "bytes": 27,
+   "id": "rlo-exe",
+   "note": "U+202E; executable extension",
+   "sha256": "b51a928f71894b6c360d92498e8b5a892f7ef521b90bff8e4c56c8de5fe5686d",
+   "transferName": {
+    "text": "SYNTH-EXP-\u202egpj.exe",
+    "utf16Units": 18,
+    "utf8Bytes": 20
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0016",
+   "bytes": 88,
+   "id": "formula-eq",
+   "note": "formula prefix",
+   "sha256": "9b706fbeca3db2573b53899414e5ff454eaf3eaaff9f05ba9a68928f595b40ca",
+   "transferName": {
+    "text": "=SYNTH-EXP-cmd.png",
+    "utf16Units": 18,
+    "utf8Bytes": 18
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0017",
+   "bytes": 88,
+   "id": "formula-plus",
+   "note": "formula prefix",
+   "sha256": "79754f44b0e8df6b94806c02a3ae620103ae703099140a7a0bbe5366a8a3f35b",
+   "transferName": {
+    "text": "+SYNTH-EXP-1.png",
+    "utf16Units": 16,
+    "utf8Bytes": 16
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0018",
+   "bytes": 88,
+   "id": "formula-at",
+   "note": "formula prefix",
+   "sha256": "446119f733a4dd3858c8b61c12ed486b51ac80cd9f55c34d686de5596526403e",
+   "transferName": {
+    "text": "@SYNTH-EXP-x.png",
+    "utf16Units": 16,
+    "utf8Bytes": 16
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0019",
+   "bytes": 88,
+   "id": "formula-minus",
+   "note": "formula prefix",
+   "sha256": "b91776b3a3e9533dbaafc312ad65e25accde7b3beea5ba51545c43be0ebc969b",
+   "transferName": {
+    "text": "-SYNTH-EXP-x.png",
+    "utf16Units": 16,
+    "utf8Bytes": 16
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0020",
+   "bytes": 27,
+   "id": "unknown-type",
+   "note": "unknown type",
+   "sha256": "bcc2b0e775629e88c4b87230cd97798d708ab5440fd32c79ef8d9a7c10f8a94a",
+   "transferName": {
+    "text": "SYNTH-EXP-data.xyz",
+    "utf16Units": 18,
+    "utf8Bytes": 18
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0021",
+   "bytes": 88,
+   "id": "mismatch-pdf",
+   "note": "declared PDF, sniffed PNG",
+   "sha256": "9c56053b33eb19549511669e267224a360177a2cfa4726304ed03fcbe42c0487",
+   "transferName": {
+    "text": "SYNTH-EXP-photo.pdf",
+    "utf16Units": 19,
+    "utf8Bytes": 19
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0022",
+   "bytes": 23,
+   "id": "mismatch-png",
+   "note": "declared PNG, sniffed text",
+   "sha256": "82f73bdee36133f1767e9fb68590440a2bf7740d81807a5c14d7a1ee700a084f",
+   "transferName": {
+    "text": "SYNTH-EXP-doc.png",
+    "utf16Units": 17,
+    "utf8Bytes": 17
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0023",
+   "bytes": 23,
+   "id": "html-ext",
+   "note": "active extension",
+   "sha256": "1a72cbbc31d9fc7ce2f934a062c827a747c6cff1f921b91cf02a3a2d9b9aed14",
+   "transferName": {
+    "text": "SYNTH-EXP-page.html",
+    "utf16Units": 19,
+    "utf8Bytes": 19
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0024",
+   "bytes": 23,
+   "id": "svg-ext",
+   "note": "active extension",
+   "sha256": "156098f447a9762515ffde0eec822b5d6a82547c5a44dfe818976c0a2d61af1c",
+   "transferName": {
+    "text": "SYNTH-EXP-image.svg",
+    "utf16Units": 19,
+    "utf8Bytes": 19
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0025",
+   "bytes": 88,
+   "id": "empty-name",
+   "note": "empty name (the sniffed extension)",
+   "sha256": "6a83c9ca8a2a58e6d544f8c8f0b366f4acb93ec539b1b9468ce089262f3bcbaa",
+   "transferName": {
+    "text": "",
+    "utf16Units": 0,
+    "utf8Bytes": 0
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0026",
+   "bytes": 88,
+   "id": "traversal-back",
+   "note": "backslash traversal",
+   "sha256": "889928224c610b7d72603bb270701f99d80c178e875af78cbbb75fb45800fdff",
+   "transferName": {
+    "text": "..\\..\\SYNTH-EXP-evil.png",
+    "utf16Units": 24,
+    "utf8Bytes": 24
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0027",
+   "bytes": 88,
+   "id": "traversal-fwd",
+   "note": "slash traversal",
+   "sha256": "5f9fc65e77add3f796235c8d35cfd433b50ae46390073c8f898aab2e6e89a317",
+   "transferName": {
+    "text": "../../SYNTH-EXP-evil.png",
+    "utf16Units": 24,
+    "utf8Bytes": 24
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0028",
+   "bytes": 88,
+   "id": "separator",
+   "note": "a path separator",
+   "sha256": "614b4844e5a06cfd772d1735661b7ab8316c6e5ba640513cee149f14eb3b343f",
+   "transferName": {
+    "text": "SYNTH-EXP-a/b.png",
+    "utf16Units": 17,
+    "utf8Bytes": 17
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0029",
+   "bytes": 23,
+   "id": "controls",
+   "note": "controls",
+   "sha256": "7c053786e48bb54674b73c7d625c40a09465f9603c7507c7ba27a108b6e81984",
+   "transferName": {
+    "text": "SYNTH-EXP-tab\tnew\nline.txt",
+    "utf16Units": 26,
+    "utf8Bytes": 26
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0030",
+   "bytes": 148,
+   "id": "shared-one",
+   "note": "one blob, two names",
+   "sha256": "a47b59f77adbf4491613a9d46160e494ec1c08aefbf3c2aa3ddd531cd6415c29",
+   "transferName": {
+    "text": "SYNTH-EXP-shared-one.png",
+    "utf16Units": 24,
+    "utf8Bytes": 24
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0031",
+   "bytes": 148,
+   "id": "shared-two",
+   "note": "one blob, two names",
+   "sha256": "a47b59f77adbf4491613a9d46160e494ec1c08aefbf3c2aa3ddd531cd6415c29",
+   "transferName": {
+    "text": "SYNTH-EXP-shared-two.png",
+    "utf16Units": 24,
+    "utf8Bytes": 24
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0032",
+   "bytes": 120,
+   "id": "corrupt",
+   "note": "the test corrupts its store file after the import",
+   "sha256": "8b94993a553296ba08a32f3fcd2690496a83b0a69bc62c3221498735f2324f20",
+   "transferName": {
+    "text": "SYNTH-EXP-corrupt-me.png",
+    "utf16Units": 24,
+    "utf8Bytes": 24
+   }
+  },
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0033",
+   "bytes": 88,
+   "id": "null-name",
+   "note": "transfer name NULL",
+   "sha256": "f4f8c889a95acd700e46bef883ff478f3b5eda7780121aa11f621470faa2ef89",
+   "transferName": null
+  }
+ ],
+ "format": "oma-export-expectations",
+ "formatVersion": 1,
+ "formulaCases": [
+  {
+   "after": null,
+   "id": "file-formula-eq",
+   "leading": "=",
+   "text": "=SYNTH-EXP-cmd.png",
+   "utf16Units": 18,
+   "utf8Bytes": 18,
+   "where": "fileName"
+  },
+  {
+   "after": null,
+   "id": "file-formula-plus",
+   "leading": "+",
+   "text": "+SYNTH-EXP-1.png",
+   "utf16Units": 16,
+   "utf8Bytes": 16,
+   "where": "fileName"
+  },
+  {
+   "after": null,
+   "id": "file-formula-at",
+   "leading": "@",
+   "text": "@SYNTH-EXP-x.png",
+   "utf16Units": 16,
+   "utf8Bytes": 16,
+   "where": "fileName"
+  },
+  {
+   "after": null,
+   "id": "file-formula-minus",
+   "leading": "-",
+   "text": "-SYNTH-EXP-x.png",
+   "utf16Units": 16,
+   "utf8Bytes": 16,
+   "where": "fileName"
+  }
+ ],
+ "hostile": [
+  {
+   "id": "file-allow-png",
+   "text": "SYNTH-EXP-picture.png",
+   "utf16Units": 21,
+   "utf8Bytes": 21,
+   "where": "fileName"
+  },
+  {
+   "id": "file-allow-txt",
+   "text": "SYNTH-EXP-notes.txt",
+   "utf16Units": 19,
+   "utf8Bytes": 19,
+   "where": "fileName"
+  },
+  {
+   "id": "file-case-upper",
+   "text": "SYNTH-EXP-Report.PDF",
+   "utf16Units": 20,
+   "utf8Bytes": 20,
+   "where": "fileName"
+  },
+  {
+   "id": "file-case-lower",
+   "text": "SYNTH-EXP-report.pdf",
+   "utf16Units": 20,
+   "utf8Bytes": 20,
+   "where": "fileName"
+  },
+  {
+   "id": "file-nfc",
+   "text": "SYNTH-EXP-caf\u00e9.txt",
+   "utf16Units": 18,
+   "utf8Bytes": 19,
+   "where": "fileName"
+  },
+  {
+   "id": "file-nfd",
+   "text": "SYNTH-EXP-cafe\u0301.txt",
+   "utf16Units": 19,
+   "utf8Bytes": 20,
+   "where": "fileName"
+  },
+  {
+   "id": "file-reserved-con",
+   "text": "CON.txt",
+   "utf16Units": 7,
+   "utf8Bytes": 7,
+   "where": "fileName"
+  },
+  {
+   "id": "file-reserved-aux",
+   "text": "aux",
+   "utf16Units": 3,
+   "utf8Bytes": 3,
+   "where": "fileName"
+  },
+  {
+   "id": "file-reserved-com1",
+   "text": "COM1.png",
+   "utf16Units": 8,
+   "utf8Bytes": 8,
+   "where": "fileName"
+  },
+  {
+   "id": "file-reserved-nul",
+   "text": "nul.jpg",
+   "utf16Units": 7,
+   "utf8Bytes": 7,
+   "where": "fileName"
+  },
+  {
+   "id": "file-long-256",
+   "text": "SYNTH-EXP-\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9.png",
+   "utf16Units": 164,
+   "utf8Bytes": 314,
+   "where": "fileName"
+  },
+  {
+   "id": "file-trailing-dots",
+   "text": "SYNTH-EXP-trailing.dots...",
+   "utf16Units": 26,
+   "utf8Bytes": 26,
+   "where": "fileName"
+  },
+  {
+   "id": "file-trailing-space",
+   "text": "SYNTH-EXP-trailing space.png ",
+   "utf16Units": 29,
+   "utf8Bytes": 29,
+   "where": "fileName"
+  },
+  {
+   "id": "file-invisible",
+   "text": "SYNTH-EXP-in\u200bvisi\u2060ble.png",
+   "utf16Units": 25,
+   "utf8Bytes": 29,
+   "where": "fileName"
+  },
+  {
+   "id": "file-rlo-exe",
+   "text": "SYNTH-EXP-\u202egpj.exe",
+   "utf16Units": 18,
+   "utf8Bytes": 20,
+   "where": "fileName"
+  },
+  {
+   "id": "file-unknown-type",
+   "text": "SYNTH-EXP-data.xyz",
+   "utf16Units": 18,
+   "utf8Bytes": 18,
+   "where": "fileName"
+  },
+  {
+   "id": "file-mismatch-pdf",
+   "text": "SYNTH-EXP-photo.pdf",
+   "utf16Units": 19,
+   "utf8Bytes": 19,
+   "where": "fileName"
+  },
+  {
+   "id": "file-mismatch-png",
+   "text": "SYNTH-EXP-doc.png",
+   "utf16Units": 17,
+   "utf8Bytes": 17,
+   "where": "fileName"
+  },
+  {
+   "id": "file-html-ext",
+   "text": "SYNTH-EXP-page.html",
+   "utf16Units": 19,
+   "utf8Bytes": 19,
+   "where": "fileName"
+  },
+  {
+   "id": "file-svg-ext",
+   "text": "SYNTH-EXP-image.svg",
+   "utf16Units": 19,
+   "utf8Bytes": 19,
+   "where": "fileName"
+  },
+  {
+   "id": "file-empty-name",
+   "text": "",
+   "utf16Units": 0,
+   "utf8Bytes": 0,
+   "where": "fileName"
+  },
+  {
+   "id": "file-traversal-back",
+   "text": "..\\..\\SYNTH-EXP-evil.png",
+   "utf16Units": 24,
+   "utf8Bytes": 24,
+   "where": "fileName"
+  },
+  {
+   "id": "file-traversal-fwd",
+   "text": "../../SYNTH-EXP-evil.png",
+   "utf16Units": 24,
+   "utf8Bytes": 24,
+   "where": "fileName"
+  },
+  {
+   "id": "file-separator",
+   "text": "SYNTH-EXP-a/b.png",
+   "utf16Units": 17,
+   "utf8Bytes": 17,
+   "where": "fileName"
+  },
+  {
+   "id": "file-controls",
+   "text": "SYNTH-EXP-tab\tnew\nline.txt",
+   "utf16Units": 26,
+   "utf8Bytes": 26,
+   "where": "fileName"
+  },
+  {
+   "id": "file-shared-one",
+   "text": "SYNTH-EXP-shared-one.png",
+   "utf16Units": 24,
+   "utf8Bytes": 24,
+   "where": "fileName"
+  },
+  {
+   "id": "file-shared-two",
+   "text": "SYNTH-EXP-shared-two.png",
+   "utf16Units": 24,
+   "utf8Bytes": 24,
+   "where": "fileName"
+  },
+  {
+   "id": "file-corrupt",
+   "text": "SYNTH-EXP-corrupt-me.png",
+   "utf16Units": 24,
+   "utf8Bytes": 24,
+   "where": "fileName"
+  }
+ ],
+ "membership": {
+  "chats": {
+   "guid:iMessage;-;synthetic-export-files-1@example.invalid": {
+    "items": 34,
+    "messages": [
+     "guid:SYNTH-EXP-FILE-MSG-0001",
+     "guid:SYNTH-EXP-FILE-MSG-0002",
+     "guid:SYNTH-EXP-FILE-MSG-0003",
+     "guid:SYNTH-EXP-FILE-MSG-0004",
+     "guid:SYNTH-EXP-FILE-MSG-0005",
+     "guid:SYNTH-EXP-FILE-MSG-0006",
+     "guid:SYNTH-EXP-FILE-MSG-0007",
+     "guid:SYNTH-EXP-FILE-MSG-0008",
+     "guid:SYNTH-EXP-FILE-MSG-0009",
+     "guid:SYNTH-EXP-FILE-MSG-0010",
+     "guid:SYNTH-EXP-FILE-MSG-0011",
+     "guid:SYNTH-EXP-FILE-MSG-0012",
+     "guid:SYNTH-EXP-FILE-MSG-0013",
+     "guid:SYNTH-EXP-FILE-MSG-0014",
+     "guid:SYNTH-EXP-FILE-MSG-0015",
+     "guid:SYNTH-EXP-FILE-MSG-0016",
+     "guid:SYNTH-EXP-FILE-MSG-0017",
+     "guid:SYNTH-EXP-FILE-MSG-0018",
+     "guid:SYNTH-EXP-FILE-MSG-0019",
+     "guid:SYNTH-EXP-FILE-MSG-0020",
+     "guid:SYNTH-EXP-FILE-MSG-0021",
+     "guid:SYNTH-EXP-FILE-MSG-0022",
+     "guid:SYNTH-EXP-FILE-MSG-0023",
+     "guid:SYNTH-EXP-FILE-MSG-0024",
+     "guid:SYNTH-EXP-FILE-MSG-0025",
+     "guid:SYNTH-EXP-FILE-MSG-0026",
+     "guid:SYNTH-EXP-FILE-MSG-0027",
+     "guid:SYNTH-EXP-FILE-MSG-0028",
+     "guid:SYNTH-EXP-FILE-MSG-0029",
+     "guid:SYNTH-EXP-FILE-MSG-0030",
+     "guid:SYNTH-EXP-FILE-MSG-0031",
+     "guid:SYNTH-EXP-FILE-MSG-0032",
+     "guid:SYNTH-EXP-FILE-MSG-0033",
+     "guid:SYNTH-EXP-FILE-MSG-0034"
+    ]
+   }
+  },
+  "noConversation": []
+ },
+ "patches": [],
+ "sentinels": {
+  "alternativeText": [],
+  "earlierText": [],
+  "editText": [],
+  "oneTimeCodes": [],
+  "subjectHistory": [],
+  "unsentAttachmentFiles": [
+   "SYNTH-EXP-UNSENT-FILE-SENTINEL-FILES"
+  ]
+ },
+ "unsentAttachments": [
+  {
+   "attachment": "SYNTH-EXP-FILE-ATT-0035",
+   "sha256": "50f327521de3a345059617f3393a842f2cdd20ad53fdec54549026c07c7376c3"
+  }
+ ],
+ "visible": []
+}

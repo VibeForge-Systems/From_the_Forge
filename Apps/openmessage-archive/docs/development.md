@@ -328,6 +328,269 @@ code (`examples/make_viewer_media/media.rs`) and compares the bytes, so an
 Windows, run the example the same way from PowerShell (it writes plain
 files); the Python step is not run on Windows.
 
+### Synthetic export fixtures and the independent oracles (M6)
+
+`tests/fixtures/export/` (M6 spec §15) is written only by
+`scripts/fixtures/make_synthetic_exports.py`, in the reference environment
+(it refuses any SQLite but 3.45.1). It imports the viewer generator (and,
+through it, the M2–M4 generators) as modules and changes none of them. Each
+entry is a plain backup with the viewer catalogue's `content.json`, plus an
+`export.json` of the generator's own: the masking sentinels by kind, the
+strings that must stay visible, every hostile, formula and file-name case
+with where it was planted, each conversation's members, and the archive
+patches and store corruption a test applies after the import. The
+catalogue's generated `README.md` describes each file.
+
+```sh
+.venv-fixtures/bin/python -I scripts/fixtures/make_synthetic_exports.py /tmp/export --seed 1
+rm -rf tests/fixtures/export && cp -r /tmp/export tests/fixtures/export
+sha256sum tests/fixtures/export/SHA256SUMS tests/fixtures/export/EXPECTED.SHA256SUMS
+cargo test -p oma-archive --test export_fixtures --test export_scope
+npx vitest run tests/frontend/hidden-vectors.spec.ts
+```
+
+| File | Covers | Pinned |
+|---|---|---|
+| `SHA256SUMS` | Every file of every backup, and `hidden-vectors.json` (the inputs) | Its SHA-256 is pinned in `crates/oma-archive/tests/export_fixtures.rs`; the inputs are frozen |
+| `EXPECTED.SHA256SUMS` | Every file under `*.expected/` and `scenarios/` (`content.json`, `export.json`) | Its own hash is pinned in the same test and is re-pinned when a slice settles a rule (say which) |
+
+`export_fixtures.rs` imports every entry and the `history` scenario and
+compares the archive with the model, checks that every case is stored where
+`export.json` says, applies the patches (codes an import cannot write) and
+assembles every patched item, and checks that the corrupted store file
+fails its re-hash. `export_scope.rs`'s masking oracle reads every item of
+the catalogue under each reveal. The volume cases (over 10,000 reactions
+on one target, over 50 versions, 200 × 16 MiB versions) are generated at
+test time, not committed.
+
+**The independent oracles** (spec §14.4; `scripts/oracles/`) run in CI's
+Linux `checks` job and by hand. The Rust side writes one archive per entry
+and scenario of the viewer and export catalogues (an ignored test); the
+Python side projects each with the standard library's `sqlite3` on a
+read-only copy (`project_archive.py`, written from `v1.sql` and the spec,
+not from the Rust export code), validates it with `jsonschema` against
+`scripts/oracles/schemas/`, and compares it with the generators' models:
+members, display text, dates, attachments, the sender reason, unsent
+parts, blob digests (every store file re-hashed) and the completeness
+identities. It also projects a copy of `golden-v1`. Install the packages
+only into a virtual environment, never system-wide:
+
+```sh
+python3 -m venv .venv-oracles
+.venv-oracles/bin/pip install --require-hashes --only-binary :all: --no-deps \
+  -r scripts/oracles/requirements.txt
+OMA_ORACLE_OUT=/tmp/oma-oracle-archives \
+  cargo test -p oma-archive --test export_fixtures -- --ignored --exact write_oracle_archives
+.venv-oracles/bin/python -I scripts/oracles/run_oracles.py --archives /tmp/oma-oracle-archives
+```
+
+`OMA_ORACLE_OUT` must be empty or absent. `--keep DIR` also writes each
+projection. The output is counts and check names only. Run here (Python
+3.13.16, SQLite 3.45.1): 22 archives and `golden-v1`, 4,817 checks, none
+failed. Whether `ubuntu-22.04`'s Python 3.10 and its system SQLite open
+schema v1 (it uses `STRICT` tables, SQLite 3.37 or later) is
+**UNVERIFIED** until CI runs the step. Each writer's oracle
+(`txt_grammar.py`, `data_oracle.py`, `html_oracle.py`, and later the XLSX
+and PDF ones) is **its own command** in the workflow's "Independent
+oracles (Python)" step, after `run_oracles.py`, not part of it; their
+commands are in the slice sections below. Each also scans for the export
+catalogue's masking sentinels with two guards: a floor (at least 7
+entries with sentinels and 14 distinct sentinels scanned for, so a
+listing that lost its `export` statements fails instead of passing with
+no check), and a positive control (a bundle of each such entry exported
+with history and both reveals must hold every sentinel). Setting every
+`export` to `null` in each listing by hand made all three fail on the
+floors.
+
+### The export record core (M6 slice 6d)
+
+`crates/oma-export` has three generated or pinned files; regenerate them
+only deliberately, and commit the result:
+
+```sh
+cargo test -p oma-export                                 # also rewrites src/types/generated/export-words.json
+OMA_REPIN_CODES=1 cargo test -p oma-export --test codes  # a new code: lines may only be added to tests/codes.pin
+node scripts/make-export-unicode-tables.mjs              # crates/oma-export/src/unicode_tables.rs
+```
+
+- `export-words.json` holds the sentence of every code; the Vitest
+  `tests/frontend/export-words.spec.ts` compares each entry that names a
+  viewer key with `src/services/viewerText.ts`, so run `npm test` after
+  changing either side.
+- `unicode_tables.rs` is computed from the regular-expression properties
+  of the Node that runs the script (Unicode 16.0 with Node 22.22.0 here;
+  the version is written into the file). The Rust classifier must keep
+  passing `tests/hidden_vectors.rs`, and the copy rule
+  `hidden-vectors.spec.ts`, after a regeneration.
+- `tests/record_catalogue.rs` imports every entry and scenario of the
+  viewer and export catalogues and maps them whole; it is the place for a
+  new record rule's test.
+
+### Export staging and crash tests (M6 slice 6e1)
+
+```sh
+cargo test -p oma-export --test stage    # staging, publish, removal, the sweep; the swap tests are Linux only
+cargo test -p oma-export --test crash    # kills a child export at every crash point
+cargo test -p oma-export --test fanout   # the writer trait and fan-out over the view catalogue's records
+```
+
+- `tests/crash.rs` re-runs its own binary with `OMA_EXPORT_TEST_FAULT`
+  and `OMA_EXPORT_TEST_DEST` set (`crash_child` does nothing without
+  them). A new `fault::point` goes into `FaultPoint::ALL` and into one of
+  the test's point lists in the same change: `every_fault_point_has_a_kill`
+  fails otherwise.
+- The tests write only below their own temporary folder and check that
+  nothing appears beside the destination. The swap tests rename the
+  staging folder (and the parent) mid-export and plant links; they need a
+  Linux file system with symbolic links.
+- Windows: the staging code was only compiled and linted for
+  `x86_64-pc-windows-msvc` with a scratch harness (the crate as a whole
+  needs MSVC for the bundled SQLite). Its behaviour there (sharing
+  violations, retries, `remove_dir_all` of a leftover) is **UNVERIFIED**
+  until the Windows CI job runs these tests.
+
+### Attachments, TXT and the pipeline (M6 slice 6e2)
+
+```sh
+cargo test -p oma-export --test txt          # every catalogue entry to TXT through the pipeline, parsed back
+cargo test -p oma-export --test attach       # copies, names, exclusions, the reveal, cancel; the swap test is Linux only
+cargo test -p oma-export --test golden_txt   # names-only TXT bundles against tests/fixtures/export/expected/
+OMA_REGEN_GOLDENS=1 cargo test -p oma-export --test golden_txt   # regenerate them (then re-pin the hash it prints)
+
+# The independent TXT oracle (Linux; in the oracle virtual environment):
+OMA_ORACLE_TXT_OUT=/tmp/oma-txt cargo test -p oma-export --test txt -- --ignored --exact write_oracle_txt
+python3 -I scripts/oracles/txt_grammar.py --exports /tmp/oma-txt
+
+# Attachment copy throughput (ignored; prints RECORD lines, asserts no timing):
+OMA_PERF_ATTACH_FILES=1000 OMA_PERF_ATTACH_BYTES=262144 \
+  cargo test -p oma-export --test perf_attach -- --ignored --nocapture
+```
+
+- `tests/txtgrammar/mod.rs` is a strict parser of the TXT grammar for the
+  Rust tests; `scripts/oracles/txt_grammar.py` is an independent one that
+  also compares each file with its archive through stdlib `sqlite3`
+  (membership, order, times, text, senders) and checks `SHA256SUMS`.
+  Both must change with the grammar. Run here (Python 3.13.16): 21
+  exports, 9,777 checks, 0 failed; with the header escaping turned off by
+  hand, both it and four Rust tests failed. After the review fixes
+  (sentinel floors and the revealed bundle): 9,801 checks, 0 failed, under
+  Python 3.13.16 and under a local CPython 3.10.20 (not CI).
+- The goldens are regenerated only when a TXT, manifest or README rule
+  changes on purpose; name the rule in the commit. Files over 64 KiB are
+  pinned by digest in `expected/SHA256SUMS` and not committed.
+- `perf_attach.rs` builds a bulk archive with store files through
+  `oma-archive`'s generator (its test module is included by path, which
+  needs `oma-archive`'s `fault-injection` feature and `oma-messages` as
+  `oma-export` dev-dependencies). Run once here, debug build, on the
+  container's disk (not a tmpfs): 953 files of 256 KiB (238 MiB) exported
+  in 1.76 s (135 MiB/s, TXT included, with one `sync_all` per file),
+  against 0.24 s to read and hash the same files once and 0.57 s to
+  `fs::copy` them. The spec's 100,000 files / 50 GB target needs about
+  100 GB free and was **not run**; the FAT32 manual row (§21) is not run
+  either.
+- Windows: `write_mark_of_the_web` and the Windows half of the FAT
+  boundary rule were only compiled and linted for
+  `x86_64-pc-windows-msvc` with the scratch harness; the Mark of the Web
+  assertions in `attach.rs` run only on the Windows CI job.
+
+### JSON, CSV and the data oracle (M6 slice 6f)
+
+```sh
+cargo test -p oma-export --test json         # every catalogue entry to JSON; lines equal the records; schema pins
+cargo test -p oma-export --test csv          # every entry to CSV read back; default-deny on every cell; both profiles
+cargo test -p oma-export --test golden_data  # names-only JSON + CSV bundles against tests/fixtures/export/expected-data/
+OMA_REGEN_GOLDENS=1 cargo test -p oma-export --test golden_data   # regenerate them (then re-pin the hash it prints)
+OMA_REPIN_CSV_COLUMNS=1 cargo test -p oma-export --test csv the_column_contract   # after appending CSV columns
+cargo test -p oma-export --test perf_smoke   # 20,000 messages to TXT, CSV and JSON in a child; Linux only
+
+# The schemas and the zone tables are generated; commit the result:
+python3 -I scripts/make-export-schemas.py    # then re-pin STRICT_SCHEMA_SHA256 in tests/json.rs (and bump schemaVersion)
+node scripts/make-export-zone-tables.mjs     # then rewrite zones/SHA256SUMS and re-pin ZONE_SUMS_SHA256
+
+# The independent data oracle (Linux; in the oracle virtual environment):
+OMA_ORACLE_DATA_OUT=/tmp/oma-data cargo test -p oma-export --test json -- --ignored --exact write_oracle_data
+python3 -I scripts/oracles/data_oracle.py --exports /tmp/oma-data
+
+# The spec's 500,000-message target (ignored; prints RECORD lines):
+cargo test -p oma-export --test perf_smoke -- --ignored --exact \
+  half_a_million_messages_to_txt_csv_and_json --nocapture
+```
+
+- `data_oracle.py` checks JSON against the projection and both schemas,
+  CSV against JSON (with its own trigger rule and column grammars), the
+  local times against `zoneinfo`, masking and `SHA256SUMS`. Run here
+  (Python 3.13.16): 21 entries, 126 bundles, 317,916 checks, 0 failed, in
+  about 50 s; the export step took about 10 s. With the neutralisation
+  turned off by hand it reported 119 failures.
+- CPython 3.10's `csv` reader refuses NUL (`line contains NUL`; 3.11 and
+  later accept it), and the "data tools" profile writes NUL raw, so the
+  first version of this oracle failed on 3.10 (found in review on a local
+  3.10.20). `read_csv` now swaps NUL for a private-use stand-in the file
+  does not hold (checked) before parsing and back in every cell. After the
+  review fixes (the revealed bundles, the sentinel floors and the
+  `edit_versions.csv` reason column): 21 entries, 133 bundles, 320,983
+  checks, 0 failed, both under Python 3.13.16 and under a local CPython
+  3.10.20 with the pinned jsonschema 4.26.0 (a virtual environment, not
+  CI). The run on CI's `ubuntu-22.04` is **UNVERIFIED** until the PR's CI
+  runs.
+- The perf smoke, run here (debug test build, `oma-export`, `csv` and
+  `csv-core` at `opt-level = 3`): 20,000 bulk messages (18,996 items and
+  1,004 folded reaction rows) exported to TXT, CSV and JSON in 4.8 s, 102
+  MB written, peak RSS 13,112 KiB against the 150 MiB bound. Without the
+  opt-level entries the same export took 17.1 s. The 500,000-message
+  variant needs about 3 GB of free disk and was **not run**.
+- Change a schema only with `make-export-schemas.py`; the strict schema's
+  hash is pinned against `schemaVersion`, so a change without a version
+  bump fails `tests/json.rs`.
+
+### HTML and the HTML oracle (M6 slice 6g)
+
+```sh
+cargo test -p oma-export --test html         # every catalogue entry to HTML read by the strict reader; previews, splits, hostile text
+cargo test -p oma-export --test golden_html  # names-only HTML bundles against tests/fixtures/export/expected-html/
+OMA_REGEN_GOLDENS=1 cargo test -p oma-export --test golden_html   # regenerate them (then re-pin the hash it prints)
+
+# The independent HTML oracle (Linux; in the oracle virtual environment):
+OMA_ORACLE_HTML_OUT=/tmp/oma-html cargo test -p oma-export --test html -- --ignored --exact write_oracle_html
+python3 -I scripts/oracles/html_oracle.py --exports /tmp/oma-html
+```
+
+- `html_oracle.py` reads every page with the standard library's
+  `html.parser` and with html5lib in strict mode, checks the template's
+  rules and compares each article with the same bundle's JSON item.
+  Run here (Python 3.13.16, html5lib 1.1): 42 bundles, 106 pages, 968
+  articles, 71 images, 115,719 checks, 0 failed; the export step took
+  3.4 s and the Python run 2.7 s. With `<` left unescaped by hand it
+  reported failures. After the review fixes (7 revealed bundles checked
+  for the positive control only, the sentinel floors): 116,113 checks, 0
+  failed, 14 sentinels scanned for and 14 found revealed, under Python
+  3.13.16 and under a local CPython 3.10.20 (not CI). Its run on CI's
+  Python 3.10 is **UNVERIFIED** until the PR's CI runs.
+- A change to the stylesheet changes its hash: re-pin `STYLE_SHA256` in
+  `writer/html.rs` (the unit test prints the new value) and regenerate
+  the goldens. The previews in `html.rs`'s writer tests come from a
+  test `PreviewSource` (a real 1 × 1 PNG); its feed tests use a fake
+  `RenditionPool`.
+
+### The export job, destinations and the preview pool (M6 slices 6h1, 6h2)
+
+```sh
+cargo test -p openmessage-archive --lib exports::        # drafts, destinations and tokens, the job, the pool, cancel latency
+cargo test -p openmessage-archive --test decode_helper   # RenditionPair through the real helper; stderr counted
+cargo test -p openmessage-archive --test log_hygiene     # exercise_export: no sentinel, path or exact size logged
+cargo test -p oma-export --test html -- --nocapture      # prints the RECORD lines of the feed and cancel tests
+```
+
+- The shell's export tests run without a window, against fake
+  destination probes and fake decode-helper backends; the job test with
+  real helpers is `log_hygiene.rs`. Cancel latency is asserted under one
+  second in two tests (a wait for a rendition that never comes, and a
+  helper that hangs); they print `RECORD cancel_latency_…_ms=` lines (53 ms
+  and well under a second here).
+- On Windows, `cargo test -p oma-export --test stage -- --nocapture`
+  also runs the held-handle publish test and prints `RECORD
+  publish_with_open_handle`; it has not run yet.
+
 ### The bulk generator (M5)
 
 `crates/oma-archive/tests/common/bulk.rs` writes a schema-valid v1 archive
@@ -335,7 +598,11 @@ of any size directly (M5 spec §14.2), through the test-only hook
 `oma_archive::hooks::bulk_writer` (the `fault-injection` feature, enabled
 only by the crate's own tests). It commits import-sized batches, runs the
 import's finalize statistics and FTS merge steps, and the result passes a
-quick verify (`tests/bulk.rs`). It replaces the import-based generator for
+quick verify (`tests/bulk.rs`). Attachments have no store files by
+default; `BulkSpec::blobs` (M6 slice 6c) gives each one its own file of
+`BulkSpec::blob_len` bytes, placed through
+`oma_archive::hooks::BulkWriter::put_blob` as the import places copies, and
+such an archive passes a full verify. It replaces the import-based generator for
 performance work; the calibration against an import-built archive is an
 ignored test:
 
@@ -567,6 +834,121 @@ PR A's run were `crash.rs` (78.2 s), `resume.rs` (52.0 s), `import_core.rs`
 (23.7 s), `viewer_search.rs` (19.6 s) and `viewer_details.rs` (16.2 s), and
 the shell's unit tests took 43.7 s. Run-to-run noise on the Windows runner
 is large: `oma-messages`' `resume.rs` alone took 94.0 s in PR A's run.
+
+**Milestone 6 (spec §0.1: at most 3 more minutes of Rust test time per
+Linux job, 6 on Windows), measured from slice 6a.** The baseline is `main`
+at `9883217` (milestones 1–5), run in a Linux container (4 CPUs, debug
+build, `CARGO_INCREMENTAL=0`, after compiling), then again with slice 6a:
+
+| What | Baseline (`9883217`) | Slice 6a | Slice 6b1 | Slice 6b2 | Slice 6c | Slice 6d | Slice 6e1 | Slice 6e2 | Slice 6f | Slice 6g | Slice 6h1 | Slice 6h2 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `cargo test --workspace`, wall clock | 2 min 8 s | 2 min 6 s | 2 min 26 s | 2 min 38 s | 2 min 42 s | 2 min 42 s | 2 min 41 s | 2 min 46 s | 2 min 59 s | 2 min 54 s | not timed alone (7 min 29 s with the rebuild) | 3 min 7 s |
+| Sum of all test binaries' run times | 124.2 s | 123.1 s | 142.9 s | 153.9 s | 158.5 s | 159.0 s | 150.0 s | 161.7 s | 174.9 s | 169.9 s | 173.7 s | 182.7 s |
+| Rust tests passed | 1,241 (12 ignored) | 1,251 (12 ignored) | 1,270 (12 ignored) | 1,284 (15 ignored) | 1,290 (16 ignored) | 1,332 (16 ignored) | 1,371 (16 ignored) | 1,392 (18 ignored) | 1,415 (21 ignored) | 1,436 (22 ignored) | 1,489 (22 ignored) | 1,502 (22 ignored) |
+| `oma-archive`'s `export_caps.rs` | — | 2.4 s (4 tests) | 3.0 s | 2.7 s | 3.3 s | 3.3 s | 2.6 s | 2.6 s | 2.8 s | — | — | 3.1 s |
+| `oma-archive`'s `export_reads.rs` | — | — | 5.4 s (12 tests) | 5.5 s | 5.3 s | 5.7 s | 5.6 s | 5.2 s | 5.6 s | — | — | 5.0 s |
+| `oma-archive`'s `export_scope.rs` | — | — | — | 2.0 s (7 tests) | 2.6 s (the oracle also reads the export catalogue) | 2.4 s | 2.6 s | 2.2 s | 2.5 s | — | 2.4 s | 2.3 s |
+| `oma-archive`'s `export_memory.rs` | — | — | — | 10.6 s (1 test; Linux only) | 9.8 s | 10.1 s | 8.9 s | 9.4 s | 10.1 s | — | — | 9.7 s |
+| `oma-archive`'s `export_fixtures.rs` | — | — | — | — | 0.7 s (5 tests, 1 ignored) | 0.7 s | 0.7 s | 0.6 s | 0.7 s | — | — | 0.6 s |
+| `oma-archive`'s `bulk.rs` | — | — | — | — | 0.9 s (2 tests; the blob option's test is new) | 0.8 s | 0.8 s | 1.0 s | 0.9 s | — | — | 0.9 s |
+| `oma-export`'s `record_catalogue.rs` | — | — | — | — | — | 8.1 s (7 tests) | 7.7 s | 8.2 s | 7.4 s | — | — | 7.3 s |
+| `oma-export`'s `stage.rs`, `crash.rs`, `fanout.rs` | — | — | — | — | — | — | 0.1 s, 0.1 s, 0.6 s (15, 4 and 3 tests) | 0.1 s, 0.3 s (5 tests), 0.5 s | 0.1 s, 0.3 s, 0.5 s | — | — | 0.1 s, 0.3 s, 0.6 s |
+| `oma-export`'s `txt.rs`, `attach.rs`, `golden_txt.rs` | — | — | — | — | — | — | — | 3.4 s (7 tests, 1 ignored), 0.8 s (6 tests), 3.1 s (1 test) | 3.3 s, 0.7 s, 2.5 s | 3.0 s, —, 2.0 s | — | 2.9 s, 0.6 s, 2.6 s |
+| `oma-export`'s `json.rs`, `csv.rs`, `golden_data.rs`, `perf_smoke.rs` | — | — | — | — | — | — | — | — | 3.3 s (5 tests, 1 ignored), 3.2 s (7 tests), 3.2 s (1 test), 6.2 s (1 test, 2 ignored; Linux only) | — | — | 3.0 s, 3.5 s, 3.0 s, 6.6 s |
+| `oma-export`'s `html.rs`, `golden_html.rs` | — | — | — | — | — | — | — | — | — | 3.6 s (11 tests, 1 ignored), 2.4 s (1 test) | — | 3.9 s (14 tests, 1 ignored), 2.8 s |
+
+The difference between the two runs is inside the run-to-run noise: a
+first, cold run of the baseline in the same container took 3 min 58 s
+(148.4 s summed). Slice 6a's own cost is `export_caps.rs` plus six quick
+unit tests. Slice 6b1 adds `export_reads.rs` (5.4 s), one plan test and
+six unit tests; the rest of its run's increase is inside the noise above
+(the same binaries' times move by several seconds between runs). Slice
+6b2 adds `export_scope.rs` (2.0 s), `export_memory.rs` (10.6 s: it writes
+and reads back 336 MiB of version text), one plan test's new pins, six
+unit tests and three ignored tests (the memory test's child helper, its
+200-version variant and `perf_export.rs`). Slice 6c adds
+`export_fixtures.rs` (0.7 s), the export catalogue in `export_scope.rs`'s
+oracle (about 0.6 s) and the bulk blob test, plus the Linux CI oracle step
+(about 2.5 s here: writing 22 archives, then the Python run, outside
+`cargo test`); the Vitest `hidden-vectors.spec.ts` adds 32 frontend tests. Slice 6d
+adds the crate `oma-export`: 42 tests, of which `record_catalogue.rs`
+(8.1 s: it imports all 21 entries and scenarios of the two catalogues for
+each of its 7 tests, in parallel) is the only one that takes measurable
+time; the rest of its run is inside the noise. The Vitest
+`export-words.spec.ts` adds 4 frontend tests. Slice 6e1 adds 39 tests (2
+in `oma-fs`, 14 unit tests and 23 integration tests in `oma-export`); the
+crash test's 14 child processes take about 0.1 s together. The lower
+summed time of that run is within the run-to-run noise described above.
+Slice 6e2 adds 21 tests (6 unit tests and 15 integration tests in
+`oma-export`) and two ignored ones (`write_oracle_txt`, `perf_attach`):
+`txt.rs` and `golden_txt.rs` each import every catalogue entry and export
+it through the pipeline (about 3 s each), and the crash test's new kill
+imports one entry and runs two child exports. The Linux CI oracle step
+gains the TXT oracle (about 2.5 s for the export, under 1 s for the
+Python run here). Slice 6f adds 23 tests (9 unit tests and 14 integration tests in four
+files) and three ignored ones (`write_oracle_data`, the perf child and its
+500,000-message variant); `json.rs`, `csv.rs` and `golden_data.rs` each
+import every catalogue entry (about 3 s each), and `perf_smoke.rs`
+generates and exports 20,000 messages (6.2 s). The other binaries' times
+moved within the noise. The Linux CI oracle step gains the data oracle
+(about 10 s for the exports and about 50 s for the Python run here).
+Slice 6g adds 21 tests (9 unit tests, 11 in `html.rs` and the golden
+test) and one ignored (`write_oracle_html`); in its column a dash means a
+binary that was not timed on its own in this slice (the `txt.rs` and
+`golden_txt.rs` figures are from a separate run of those binaries). The
+Linux CI oracle step gains the HTML oracle (about 3 s for the exports and
+3 s for the Python run here).
+Slice 6h1 adds 18 shell tests (`src-tauri/src/exports/tests.rs`, about
+3 s together inside the shell's unit tests, which took 37.7 s) and 35
+ts-rs binding tests for the new export types; `export_scope.rs` gains the
+search-preview check. Its run was timed with the rebuild included, so
+only the summed run time is comparable.
+Slice 6h2 (the column above; the whole of PR A) was timed alone after
+`cargo test --workspace --no-run`: 1,502 Rust tests passed, 22 ignored,
+3 min 7 s wall clock and 182.7 s summed. It adds 13 tests: the pair
+rendition (`oma-archive`), two `decode_helper.rs` tests, three `html.rs`
+feed tests, six shell tests and one ts-rs binding; the shell's unit tests
+took 38.4 s (37.7 s in 6h1), `decode_helper.rs` 0.5 s and
+`log_hygiene.rs`, now also running `exercise_export`, 3.7 s. The
+Windows-only `stage.rs` test is not compiled here.
+
+**PR A as a whole, on Linux here:** 182.7 s summed against the baseline's
+124.2 s, so M6's PR A adds about 58 s of Rust test time (inside the
+3-minute budget), plus the CI oracle step outside `cargo test` (about
+70 s here for the four writers' exports and Python runs, measured per
+slice). **Windows has not been measured for M6:** PR A has not run on
+CI. With the 4× factor seen in M4 and M5, it would add about 4 minutes on
+`windows-2022`, inside the 6-minute budget; that is an extrapolation
+until CI's run is recorded (slice 6l records it again).
+
+**Export read measurements (slice 6b2; synthetic, one host, no timing
+asserted).** In the same container, debug test build with `oma-archive`
+and SQLite at `opt-level = 3`, the archive and temporary files on a tmpfs:
+
+```sh
+TMPDIR=/dev/shm cargo test -p oma-archive --test perf_export -- --ignored --nocapture
+TMPDIR=/dev/shm cargo test -p oma-archive --test export_memory -- --ignored --exact \
+  history_of_two_hundred_16_mib_versions_streams_under_300_mib --nocapture
+```
+
+| Read (bulk archive: 500,000 messages, 2,000 chats, 412 MiB) | Time |
+|---|---|
+| `export_preview`, whole archive (500,000 rows, 474,991 distinct, 25,009 folded) | 7.0 s |
+| `export_preview`, the largest conversation (200,375 rows) | 1.5 s |
+| `scope_index`, whole archive | 1.9 s |
+| Cursors, pre-measure, byte batches and `assemble` at `Items`, every timeline item (474,991 items, 3,302 batches) | 77.8 s (6,107 items/s) |
+| `search_ids`, cap 1,000,000, words ("zephyr": 88,731 hits) / exact text (88,777 hits) | 0.26 s / 0.91 s |
+| `search_scope` over those sets (no code or withheld text in the bulk data, so every hit takes the fast path) | 0.33 s each |
+| Peak resident set of the whole test process (`VmHWM`) | 49 MiB |
+
+The hostile history (one message, a 16 MiB current body and 199 earlier
+versions of 16 MiB, 3.2 GiB of text) streamed in 64 s with the child's
+`VmHWM` at 74,248 KiB (72.5 MiB); the 21-version test that runs on every
+push peaked at 74,256 KiB. The 500,000-message targets of spec §12 (the
+formats, 5 minutes, 300 MiB) are slice 6f's; these figures are the read
+side only. The classification's cost for hits that need the slow path
+(masked or withheld content) and the grouping of 1,000,000 hits were not
+measured.
 
 **Optional oracles** (manual; nothing enters the repository or CI; each
 run is recorded in `docs/compatibility.md` with the checksum it tested):

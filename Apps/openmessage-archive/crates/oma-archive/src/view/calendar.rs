@@ -23,6 +23,7 @@ use crate::conn::{Phase, ViewBudget};
 use crate::error::ArchiveError;
 use crate::reader::ArchiveReader;
 use crate::sortkey;
+use crate::stmt::StmtCache;
 
 /// The most bounds one [`ArchiveReader::day_counts`] call takes: 42 days,
 /// a six-week calendar.
@@ -92,7 +93,9 @@ fn seek(p: &Phase<'_>, chat: i64, ns: i64, dir: SeekDir) -> Result<Option<i64>, 
         let n = got.len();
         for (id, key) in got {
             p.checkpoint()?;
-            if p.sql(|c| folds_into(c, chat, id))?.is_none() {
+            if p.sql(|c| folds_into(&StmtCache::new(c), chat, id))?
+                .is_none()
+            {
                 return Ok(Some(id));
             }
             cursor = Bound { key, id };

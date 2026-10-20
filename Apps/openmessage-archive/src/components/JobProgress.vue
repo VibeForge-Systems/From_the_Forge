@@ -49,6 +49,14 @@ const LABEL: Record<JobPhase, string> = {
   verifyingDatabase: 'Checking the archive database',
   verifyingIndex: 'Checking the search index',
   verifyingFiles: 'Checking attachment files',
+  // The export (M6 §9.4).
+  preparingExport: 'Counting what to export',
+  writingMessages: 'Writing messages',
+  renderingPreviews: 'Making image previews',
+  writingSpreadsheet: 'Writing the spreadsheet',
+  layingOutPdf: 'Laying out the PDF',
+  finishingExport: 'Finishing the export',
+  removingPartial: 'Removing the unfinished export',
 };
 
 /**
@@ -73,6 +81,9 @@ const COUNTED: ReadonlySet<JobPhase> = new Set<JobPhase>([
   'importingAttachmentLinks',
   'importingRecentlyDeleted',
   'verifyingFiles',
+  'writingMessages',
+  'writingSpreadsheet',
+  'layingOutPdf',
 ]);
 
 /** Whether this job's phase counts bytes. */
@@ -110,6 +121,7 @@ const ARIA: Record<JobKind, string> = {
   extractionCheck: 'Extraction check progress',
   import: 'Import progress',
   verify: 'Verification progress',
+  export: 'Export progress',
 };
 const ariaLabel = computed(() => ARIA[props.job.kind]);
 

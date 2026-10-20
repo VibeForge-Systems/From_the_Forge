@@ -24,6 +24,7 @@ dunce.workspace = true
 getrandom.workspace = true
 oma-archive.workspace = true
 oma-backup.workspace = true
+oma-export.workspace = true
 oma-fs.workspace = true
 oma-messages.workspace = true
 serde.workspace = true

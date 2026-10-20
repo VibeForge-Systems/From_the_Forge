@@ -1,0 +1,147 @@
+{
+  "format": "openmessage-archive-export-manifest",
+  "manifestVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
+  "tabularColumnsVersion": "1.1.0",
+  "appVersion": "0.0.0-test",
+  "archiveSchemaVersion": 1,
+  "exportId": "09090909090909090909090909090909",
+  "createdUtc": "2027-01-01T00:00:00Z",
+  "snapshot": {
+    "kind": "singleReadTransaction",
+    "archiveLockHeld": true
+  },
+  "scope": {
+    "kind": "archive",
+    "conversations": 5
+  },
+  "formats": [
+    "txt"
+  ],
+  "options": {
+    "attachments": "namesOnly",
+    "keepExtensions": false,
+    "previews": false,
+    "largerPreviews": false,
+    "history": false,
+    "reactions": true,
+    "events": true,
+    "reveal": {
+      "oneTimeCodes": false,
+      "earlierContent": false,
+      "oneTimeCodesConfirmedUpTo": null,
+      "earlierContentConfirmedUpTo": null
+    },
+    "clock": "h23",
+    "seconds": true,
+    "lineEndings": "lf",
+    "hiddenCharacterMarkers": true,
+    "csvProfile": null,
+    "identifiers": "ordinals",
+    "pageSize": null
+  },
+  "zone": {
+    "name": "UTC",
+    "source": "utc",
+    "windowUtc": null,
+    "transitions": []
+  },
+  "derivation": {
+    "derivedBy": {
+      "1": 284
+    },
+    "decoderVersion": {
+      "1": 284
+    }
+  },
+  "counts": {
+    "conversations": 5,
+    "timelineRows": 285,
+    "distinctMessages": 284,
+    "crossConversationRows": 1,
+    "foldedReactionRows": 214,
+    "items": 71,
+    "undatedExcluded": 0,
+    "before2007": 1,
+    "noText": 240,
+    "lossy": 1,
+    "orderTies": 0,
+    "eventsNotIncluded": 0,
+    "oneTimeCodesMasked": 1,
+    "bodiesWithheldWhole": 0,
+    "earlierTextWithheld": 0,
+    "editTextWithheld": 0,
+    "alternativeTextWithheld": 0,
+    "hiddenCharactersMarked": 1,
+    "controlsEscaped": 0,
+    "combiningRunsLimited": 0,
+    "neutralisedCells": 0,
+    "continuationRows": 0,
+    "pdfUndrawableCharacters": 0,
+    "pdfForcedWraps": 0,
+    "timesOutsideZoneWindow": 0,
+    "attachments": {
+      "records": 2,
+      "withFile": 0,
+      "notRequested": 2,
+      "excluded": {
+        "checksumMismatch": 0,
+        "tooLargeForVolume": 0,
+        "withheldUnsent": 0,
+        "writeFailed": 0
+      },
+      "filesWritten": 0,
+      "deduplicated": 0,
+      "blocked": 0,
+      "namesShortened": 0,
+      "previewsEmbedded": 0,
+      "previewsUnavailable": 0,
+      "previewsSkippedAfterHelperFailures": 0,
+      "motwNotWritten": 0
+    }
+  },
+  "search": null,
+  "importSessions": [],
+  "exclusions": [
+    "d94",
+    "d115Raw",
+    "rawSourceBytes",
+    "sourceIdentifierOptIn",
+    "sessionLocalRowid",
+    "storageInternal",
+    "recentlyDeletedOnlyNeverImported",
+    "attachmentsNotConverted"
+  ],
+  "files": [
+    {
+      "path": "README.txt",
+      "bytes": 2407,
+      "sha256": "1d13366100ecb3f48c6732c0099046b9496f16f69e6ff6828fa64932faa311ff"
+    },
+    {
+      "path": "txt/c0001.txt",
+      "bytes": 10834,
+      "sha256": "3d1d9f89f4638f2c7c47cbb70d4bad6708d5b9dd177089de877c025d36694987"
+    },
+    {
+      "path": "txt/c0002.txt",
+      "bytes": 6226,
+      "sha256": "c842acc6ab4930cf3fb8db3c56543a4bfd8ed80ff6fdda147bab1924c12ecace"
+    },
+    {
+      "path": "txt/c0003.txt",
+      "bytes": 2242,
+      "sha256": "6e6485c2cb037196f6ed93e1765ebcbde0a02819f2dc93a30065ccecfd0165cb"
+    },
+    {
+      "path": "txt/c0004.txt",
+      "bytes": 2236,
+      "sha256": "67ca73bb24504d2f475e702b8ca62a0105c3d276054e96c501bd48cbb7d64129"
+    },
+    {
+      "path": "txt/c0005.txt",
+      "bytes": 2244,
+      "sha256": "56665feb865a28b17ac7d4abf773ca2f70381a07ae35aaf5ff99a66191fc584f"
+    }
+  ]
+}

@@ -9,6 +9,9 @@
 //!   the dates, and undated rows sort after every dated one.
 //! - Reactions target an earlier message of the same chat; replies name an
 //!   existing message; full-text search finds generated tokens.
+//! - With the blob option (M6 slice 6c), every attachment has its own
+//!   store file: a full [`Archive::verify`] re-hashes them all, and
+//!   `open_blob` reads back exactly what the generator wrote.
 //!
 //! `calibrate_bulk_against_import` (ignored) compares a bulk archive with an
 //! import-built one of the same size; its numbers are recorded in
@@ -39,6 +42,18 @@ fn quick_verify(a: &mut oma_archive::Archive) -> VerifyOutcome {
     a.verify(VerifyDepth::Quick, &mut ctx)
         .expect("verify")
         .outcome
+}
+
+fn verify(a: &mut oma_archive::Archive, depth: VerifyDepth) -> VerifyOutcome {
+    let cancel = CancelToken::new();
+    let clock = FixedClock(MODEL_NOW_NS);
+    let mut progress = NoProgress;
+    let mut ctx = ArchiveCtx {
+        cancel: &cancel,
+        progress: &mut progress,
+        clock: &clock,
+    };
+    a.verify(depth, &mut ctx).expect("verify").outcome
 }
 
 fn count(c: &rusqlite::Connection, sql: &str) -> i64 {
@@ -258,4 +273,76 @@ fn calibrate_bulk_against_import() {
         facts(&bdb),
         peak_rss_kib()
     );
+}
+
+#[test]
+fn the_blob_option_gives_every_attachment_a_verified_store_file() {
+    use std::io::Read;
+
+    let (tmp, lib) = library();
+    let id = lib.create(None).expect("create");
+    let mut a = lib.open(&id).expect("open");
+    let mut spec = BulkSpec::new(3_000);
+    spec.batch_rows = 1_000;
+    spec.attachment_permille = 40;
+    spec.blobs = true;
+    spec.blob_len = 4_096;
+    let r = generate(&mut a, &spec);
+    assert!(r.attachments > 50, "{r:?}");
+    assert_eq!(r.blobs, r.attachments);
+    assert_eq!(r.blob_bytes, r.blobs * 4_096);
+    assert_eq!(verify(&mut a, VerifyDepth::Full), VerifyOutcome::Ok);
+    drop(a);
+
+    let c = read_only(&db_path(&tmp, &id));
+    assert_eq!(
+        count(&c, "SELECT count(*) FROM blob") as u64,
+        r.blobs,
+        "one blob per attachment"
+    );
+    assert_eq!(
+        count(
+            &c,
+            "SELECT count(*) FROM attachment WHERE current_blob_id IS NULL"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            &c,
+            "SELECT count(*) FROM attachment_observation WHERE blob_id IS NULL"
+        ),
+        0
+    );
+    let rows: Vec<(i64, i64)> = c
+        .prepare("SELECT id, current_blob_id FROM attachment ORDER BY id")
+        .expect("prepare")
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("rows");
+    let reader = lib.open_read(&id).expect("reader");
+    for (att, blob) in rows {
+        let mut got = Vec::new();
+        let mut r = reader
+            .open_blob(oma_archive::BlobId::new(blob))
+            .expect("open");
+        assert_eq!(r.verified_digest(), None, "not verified before the end");
+        r.read_to_end(&mut got).expect("read");
+        assert!(r.verified_digest().is_some(), "verified at the end");
+        assert_eq!(
+            got,
+            common::bulk::blob_bytes(att, 4_096),
+            "attachment {att}"
+        );
+    }
+    // The default leaves the store empty, as before.
+    let (tmp2, lib2) = library();
+    let id2 = lib2.create(None).expect("create");
+    let mut a2 = lib2.open(&id2).expect("open");
+    let r2 = generate(&mut a2, &BulkSpec::new(1_000));
+    assert_eq!(r2.blobs, 0);
+    drop(a2);
+    let c2 = read_only(&db_path(&tmp2, &id2));
+    assert_eq!(count(&c2, "SELECT count(*) FROM blob"), 0);
 }

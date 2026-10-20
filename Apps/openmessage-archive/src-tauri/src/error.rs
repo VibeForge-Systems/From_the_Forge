@@ -102,6 +102,29 @@ pub enum ErrorCode {
     /// The attachment was not shown in this session, or its file cannot be
     /// read.
     AttachmentUnavailable,
+    // Milestone 6: exports (spec §9.5). Each has a fixed sentence in
+    // `exports::messages`.
+    /// The chosen folder cannot take an export (inside a backup or the
+    /// archive folder, not a folder, not writable).
+    ExportDestinationRefused,
+    /// Every name the export may use is taken, or a replace was not
+    /// confirmed.
+    ExportTargetExists,
+    /// The chosen file name is one the export may not write under.
+    ExportNameRefused,
+    /// The export's draft is unknown, expired or was discarded.
+    ExportDraftExpired,
+    /// The archive changed, or more messages qualify than were confirmed.
+    ExportConfirmationStale,
+    /// The time zone table does not cover the export.
+    ExportZoneTableStale,
+    /// A file of the export could not be written (the kind only).
+    ExportWriteFailed,
+    /// A helper process failed, or its output was refused.
+    ExportHelperFailed,
+    /// A format, option or scope this version does not build yet (PDF,
+    /// XLSX, image previews, saving one attachment, leaving events out).
+    ExportUnavailable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS, thiserror::Error)]

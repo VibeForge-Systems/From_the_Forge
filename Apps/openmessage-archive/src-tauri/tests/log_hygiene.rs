@@ -21,6 +21,16 @@
 //! every attachment token, with the real decode helper (this package's
 //! binary): no token, URI, range or exact size is logged (§6.4 rule 5).
 //!
+//! M6 (§9.6, slice 6h2): `exercise_export` runs every export command's
+//! work (preview and its count, the destination checks, start, the job,
+//! discard, a refused request) and every in-process format, HTML with
+//! previews from the real decode helpers, over the hostile and media
+//! archives, into a destination whose folder name is a sentinel. No
+//! sentinel, destination component or exact output size reaches a log
+//! line, a `JobEvent`, a `PreviewEvent` or an error's message; the
+//! helpers' stderr is only counted (`decode_helper.rs` shows its text
+//! never reaches the host).
+//!
 //! Its own test binary with one global capturing subscriber: a thread-local
 //! subscriber would miss events from worker threads.
 
@@ -660,6 +670,173 @@ fn exercise_viewer(
     out
 }
 
+/// The export destination's folder name: it must never be logged.
+const DEST_SENTINEL: &str = "SYNTH-DEST-SENTINEL";
+
+/// Run the export commands' work over archive `id` of `library` into
+/// `<dest_root>/SYNTH-DEST-SENTINEL`, every in-process format and HTML
+/// previews through the real decode helper. `texts` receives every event
+/// and DTO as JSON; returns the sizes of the files written, and how many
+/// HTML pages embed a preview the helper made.
+fn exercise_export(
+    library: &Path,
+    id: &str,
+    dest_root: &Path,
+    texts: &mut Vec<String>,
+) -> (Vec<u64>, usize) {
+    use openmessage_archive_lib::exports::destination::RealProbe;
+    use openmessage_archive_lib::exports::dto::{
+        ExportConfirmationsInput, PreviewEvent, PreviewExportRequest,
+    };
+    use openmessage_archive_lib::exports::{self, worker, ExportHost};
+    use openmessage_archive_lib::viewer::media::helper::{
+        BackendFactory, HelperCommand, HelperHost, RenderBackend, HELPER_FLAG,
+    };
+    use serde_json::json;
+
+    let now_ms = 1_792_368_000_000i64;
+    let env = ArchiveEnv {
+        space: Some(std::sync::Arc::new(FakeSpace)),
+    };
+    let dest = dest_root.join(DEST_SENTINEL);
+    std::fs::create_dir_all(&dest).expect("dest");
+    let helper: BackendFactory = Arc::new(|| {
+        Box::new(HelperHost::new(Some(HelperCommand::new(
+            PathBuf::from(env!("CARGO_BIN_EXE_openmessage-archive")),
+            vec![std::ffi::OsString::from(HELPER_FLAG)],
+        )))) as Box<dyn RenderBackend>
+    });
+    let host = Arc::new(ExportHost::default());
+    let viewer = openmessage_archive_lib::viewer::ViewerHost::default();
+    let jobs = Jobs::default();
+    let options = |over: serde_json::Value| {
+        let mut o = json!({
+            "attachments": "copyOriginals", "keepExtensions": false, "previews": false,
+            "largerPreviews": false, "history": true, "reactions": true, "events": true,
+            "revealOneTimeCodes": false, "revealEarlierContent": false,
+            "hiddenCharacterMarkers": true, "seconds": true, "includeIdentifiers": false,
+            "clock": "h23", "lineEndings": "lf", "zone": "utc",
+        });
+        for (k, v) in over.as_object().expect("object") {
+            o[k] = v.clone();
+        }
+        o
+    };
+    let runs = [
+        (
+            json!(["txt", "csv", "json"]),
+            json!({ "csvProfile": "spreadsheet" }),
+        ),
+        (
+            json!(["html"]),
+            json!({ "previews": true, "largerPreviews": true, "attachments": "none" }),
+        ),
+        (json!(["html", "json"]), json!({ "previews": true })),
+    ];
+    for (formats, over) in runs {
+        let req: PreviewExportRequest = serde_json::from_value(json!({
+            "scope": { "kind": "archive", "archiveId": id },
+            "formats": formats, "options": options(over),
+        }))
+        .expect("request");
+        let work = exports::begin_preview(&host, &viewer, &req, now_ms).expect("draft");
+        let draft = work.draft.clone();
+        let mut previews: Vec<PreviewEvent> = Vec::new();
+        exports::run_count(&host, &env, library, work, now_ms, &mut |e| {
+            previews.push(e)
+        });
+        texts.extend(
+            previews
+                .iter()
+                .map(|e| serde_json::to_string(e).expect("json")),
+        );
+        let plan = exports::prepare_destination(&host, &draft, None, now_ms).expect("plan");
+        let chosen =
+            exports::attach_destination(&host, &draft, &dest, &plan, Some(library), &RealProbe)
+                .expect("destination");
+        texts.push(serde_json::to_string(&chosen).expect("json"));
+        let c: ExportConfirmationsInput = serde_json::from_value(json!({
+            "warnings": chosen.warnings, "replace": false, "reveal": null,
+            "keepRiskyExtension": false, "removeLeftovers": false,
+        }))
+        .expect("confirmations");
+        let taken = host
+            .take_for_start(&draft, &chosen.destination_token)
+            .expect("draft");
+        let prepared = worker::prepare(taken, &c).expect("prepared");
+        worker::recheck(&prepared, &env, library, &c.warnings, &RealProbe).expect("recheck");
+        let r = jobs
+            .reserve(JobSubject::archive(id), JobKind::Export)
+            .expect("reserve");
+        let hold = env
+            .library(library)
+            .and_then(|l| l.hold_for_export(&prepared.archive))
+            .expect("hold");
+        let mut sink = Sink::default();
+        worker::run_export(
+            worker::ExportSpec {
+                job_id: r.job_id.clone(),
+                prepared,
+                library: library.to_path_buf(),
+                env: env.clone(),
+                hold,
+                cancel: r.cancel.clone(),
+                host: Arc::clone(&host),
+                renderers: Arc::clone(&helper),
+            },
+            &jobs,
+            &mut sink,
+        );
+        drop(r.done);
+        assert!(
+            sink.0
+                .iter()
+                .any(|e| matches!(e, JobEvent::ExportFinished { .. })),
+            "the export published: {:?}",
+            sink.0.last()
+        );
+        texts.extend(
+            sink.0
+                .iter()
+                .map(|e| serde_json::to_string(e).expect("json")),
+        );
+    }
+    // A discarded draft, and a refused request carrying a sentinel.
+    let req: PreviewExportRequest = serde_json::from_value(json!({
+        "scope": { "kind": "archive", "archiveId": id },
+        "formats": ["txt"], "options": options(json!({})),
+    }))
+    .expect("request");
+    let work = exports::begin_preview(&host, &viewer, &req, now_ms).expect("draft");
+    assert!(host.discard(&work.draft));
+    let bad = openmessage_archive_lib::viewer::input::parse_raw::<PreviewExportRequest>(Some(
+        &json!({ "request": { "scope": DEST_SENTINEL, "formats": [], "options": {} } }),
+    ))
+    .expect_err("refused");
+    texts.push(bad.message.clone());
+    // The sizes of everything written.
+    let mut sizes = Vec::new();
+    let mut embedded = 0;
+    let mut stack = vec![dest.clone()];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).expect("read_dir") {
+            let e = e.expect("entry");
+            let m = e.metadata().expect("meta");
+            if m.is_dir() {
+                stack.push(e.path());
+            } else {
+                sizes.push(m.len());
+                if e.path().extension().is_some_and(|x| x == "html") {
+                    let page = std::fs::read_to_string(e.path()).expect("page");
+                    embedded += usize::from(page.contains("src=\"data:image/"));
+                }
+            }
+        }
+    }
+    assert!(sizes.len() > 10, "the exports wrote files");
+    (sizes, embedded)
+}
+
 /// The `name=value` fields of a captured event line.
 fn fields_of(e: &str) -> Vec<(&str, &str)> {
     e.split(' ').filter_map(|t| t.split_once('=')).collect()
@@ -773,6 +950,70 @@ fn nothing_identifying_is_logged() {
         viewer_outputs.iter().any(|o| o.contains("SYNTH-")),
         "the viewer returned content (so the log check means something)"
     );
+
+    // M6: exports of the hostile and media archives.
+    let export_from = capture.0.lock().expect("lock").len();
+    let mut export_texts = Vec::new();
+    let mut export_sizes = Vec::new();
+    for (name, id) in [
+        (
+            "view-hostile-text-plain",
+            &archive_ids[archive_ids.len() - 2],
+        ),
+        ("view-media-plain", &archive_ids[archive_ids.len() - 1]),
+    ] {
+        let library = tmp.path().join(format!("implib-{name}"));
+        let (sizes, embedded) = exercise_export(
+            &library,
+            id,
+            &tmp.path().join(format!("exports-{name}")),
+            &mut export_texts,
+        );
+        export_sizes.extend(sizes);
+        if name == "view-media-plain" {
+            assert!(embedded > 0, "the decode helpers made previews");
+        }
+    }
+    let export_events: Vec<String> = capture.0.lock().expect("lock")[export_from..].to_vec();
+    assert!(
+        export_events.iter().any(|e| e.contains("export published")),
+        "the export job logged (so the check means something)"
+    );
+    let exact: Vec<u64> = export_sizes.iter().copied().filter(|n| *n >= 64).collect();
+    for e in &export_events {
+        assert!(
+            !e.contains(DEST_SENTINEL),
+            "the destination was logged: {e}"
+        );
+        assert!(
+            !e.contains("Messages export"),
+            "a bundle name was logged: {e}"
+        );
+        for (k, v) in fields_of(e) {
+            if k == "elapsed_ms" {
+                continue;
+            }
+            if let Ok(n) = v.parse::<u64>() {
+                assert!(!exact.contains(&n), "an exact size was logged ({k}): {e}");
+            }
+        }
+    }
+    for t in &export_texts {
+        for sentinel in VIEWER_SENTINELS.iter().chain(MESSAGE_SENTINELS) {
+            assert!(
+                !t.contains(sentinel),
+                "{sentinel:?} in an export event: {t}"
+            );
+        }
+        assert!(
+            !t.contains(DEST_SENTINEL),
+            "the destination in an event: {t}"
+        );
+        assert!(
+            !t.contains(&*tmp.path().to_string_lossy()),
+            "a path in an event: {t}"
+        );
+    }
 
     openmessage_archive_lib::panic_hook::install();
     let panicked = std::panic::catch_unwind(|| {

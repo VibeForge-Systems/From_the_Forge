@@ -7,3 +7,10 @@ tests/fixtures/** binary
 # compared byte for byte by the fingerprint, so an archive created on
 # Windows must carry the same LF text as one created on Linux.
 crates/oma-archive/src/schema/*.sql text eol=lf
+
+# The export's JSON schemas (M6 slice 6f) are shipped byte for byte in
+# every JSON bundle and their SHA-256 is pinned against schemaVersion; the
+# CSV column contract and the code registry are compared as text. All keep
+# LF on every checkout.
+crates/oma-export/schema/*.json text eol=lf
+crates/oma-export/tests/*.pin text eol=lf

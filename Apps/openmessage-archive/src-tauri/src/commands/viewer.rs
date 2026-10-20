@@ -34,7 +34,7 @@ fn prefs(state: &AppState) -> IpcResult<ViewerPreferences> {
     Ok(state.settings()?.settings().viewer)
 }
 
-fn json_body<'a>(request: &'a Request<'_>) -> Option<&'a serde_json::Value> {
+pub(crate) fn json_body<'a>(request: &'a Request<'_>) -> Option<&'a serde_json::Value> {
     match request.body() {
         InvokeBody::Json(v) => Some(v),
         InvokeBody::Raw(_) => None,
@@ -54,17 +54,18 @@ pub async fn open_viewer(
     blocking(move || viewer::open(&host, &library, &env, &jobs, &request.archive_id)).await
 }
 
-/// Close the viewer session (a stale generation is ignored).
+/// Close the viewer session (a stale generation is ignored), and discard
+/// any export draft (M6 §9.2).
 #[tauri::command]
 pub fn close_viewer(state: State<'_, AppState>, request: ViewerRef) -> IpcResult<()> {
-    state.viewer.close(request.viewer)
+    state.close_viewer(request.viewer)
 }
 
-/// The privacy screen is up: drop the session's cached renditions (D120).
+/// The privacy screen is up: drop the session's cached renditions (D120)
+/// and discard any export draft (M6 §9.2).
 #[tauri::command]
 pub fn hide_viewer(state: State<'_, AppState>, request: ViewerRef) -> IpcResult<()> {
-    let s = state.viewer.get(request.viewer)?;
-    viewer::hide(&s)
+    state.hide_viewer(request.viewer)
 }
 
 /// The conversation ids in order, optionally filtered by name.

@@ -20,17 +20,21 @@
 //! decoded at read time, the reaction history, `message_text`, value
 //! history and the attachment facts and cards ([`detail`]), and date seek
 //! and day counts ([`calendar`]). Slice 5c adds search in `crate::search`;
-//! media follows in slice 5d.
+//! media follows in slice 5d. M6 slice 6a adds the uncapped assembly an
+//! export uses ([`uncapped`]: `Caps::EXPORT` and its check) and the raw
+//! codes and states it keeps ([`raw`]).
 
 pub mod assemble;
 pub mod calendar;
 pub mod conversations;
 pub mod detail;
+pub mod raw;
 pub mod text;
 pub mod thread;
+pub mod uncapped;
 
 use rusqlite::types::ValueRef;
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::OptionalExtension;
 
 pub use assemble::{
     AssembledMessage, AssocVisibility, AssociationFacts, AttachmentRef, BodyText, BodyView,
@@ -53,6 +57,10 @@ pub use detail::{
     DETAIL_EDIT_ENTRIES, DETAIL_VERSIONS, REACTION_HISTORY_LIMIT, REACTION_HISTORY_PAGE,
     TEXT_CHUNK_UTF16,
 };
+pub use raw::{
+    AssociationCodes, AttachmentCodes, BodyCodes, Coded, RawCodes, RawDirection, RawInt, RawTime,
+    StateBool,
+};
 pub use text::{
     ContentText, MaskKind, OptContent, TextPiece, UrlRun, BODY_PAGE_UTF16, IDENTIFIER_UTF16,
     PREVIEW_UTF16,
@@ -61,8 +69,10 @@ pub use thread::{
     Anchor, Direction, Focus, FocusReason, PageRange, SortKeyHint, ThreadPage, PAGE_HANDLES,
     PAGE_ITEMS, REPLY_THREAD_LIMIT,
 };
+pub use uncapped::{CapMiss, ExportItem};
 
 use crate::schema::codes::{AssocKindCode, Entity};
+use crate::stmt::StmtCache;
 
 macro_rules! row_id {
     ($(#[$meta:meta])* $name:ident) => {
@@ -131,7 +141,8 @@ impl CappedCount {
 }
 
 /// `message.is_from_me` as the viewer shows it (§3.6). Read, delivery and
-/// sent state are never shown (D94).
+/// sent state are never shown (D94). An export keeps the raw value
+/// instead ([`RawDirection`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum DirectionCode {
@@ -182,7 +193,7 @@ const SQL_VALUE_ISSUE: &str = "SELECT 1 FROM value_issue \
 /// Whether the value of `entity` row `id`, column `col`, was stored as a
 /// BLOB in the source.
 pub(crate) fn stored_as_blob(
-    c: &Connection,
+    c: &StmtCache<'_>,
     entity: Entity,
     id: i64,
     col: i64,
@@ -209,7 +220,7 @@ const SQL_IN_CHAT: &str = "SELECT 1 FROM chat_message WHERE chat_id = ?1 AND mes
 /// visible (the target's own association is resolved once, at depth one:
 /// a chain or a cycle of reactions never hides a row). `None` when the row
 /// stays visible.
-pub(crate) fn folds_into(c: &Connection, chat: i64, id: i64) -> rusqlite::Result<Option<i64>> {
+pub(crate) fn folds_into(c: &StmtCache<'_>, chat: i64, id: i64) -> rusqlite::Result<Option<i64>> {
     let Some(target) = fold_target(c, chat, id)? else {
         return Ok(None);
     };
@@ -222,7 +233,7 @@ pub(crate) fn folds_into(c: &Connection, chat: i64, id: i64) -> rusqlite::Result
 /// The target `id` would fold into in chat `chat` if its target were a
 /// timeline item: a reaction whose target resolves to a keyed message of
 /// the same chat, whether or not that message folds itself.
-pub(crate) fn fold_target(c: &Connection, chat: i64, id: i64) -> rusqlite::Result<Option<i64>> {
+pub(crate) fn fold_target(c: &StmtCache<'_>, chat: i64, id: i64) -> rusqlite::Result<Option<i64>> {
     let Some(target) = reaction_target(c, id)? else {
         return Ok(None);
     };
@@ -237,7 +248,7 @@ pub(crate) fn fold_target(c: &Connection, chat: i64, id: i64) -> rusqlite::Resul
 /// The keyed message reaction `id` targets: `None` when `id` is not a
 /// reaction (`assoc_present = 1`, kind 10–17 or 20–27) or its target GUID
 /// resolves to no keyed message.
-pub(crate) fn reaction_target(c: &Connection, id: i64) -> rusqlite::Result<Option<i64>> {
+pub(crate) fn reaction_target(c: &StmtCache<'_>, id: i64) -> rusqlite::Result<Option<i64>> {
     let row: Option<(i64, Option<i64>, Option<Vec<u8>>)> = c
         .prepare(SQL_FOLD_ROW)?
         .query_row([id], |r| {

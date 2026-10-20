@@ -1,0 +1,105 @@
+{
+ "corruptStoreFiles": [],
+ "fileCases": [],
+ "format": "oma-export-expectations",
+ "formatVersion": 1,
+ "formulaCases": [],
+ "hostile": [],
+ "membership": {
+  "chats": {
+   "guid:iMessage;+;chatSYNTHEXPREC2": {
+    "items": 2,
+    "messages": [
+     "guid:SYNTH-EXP-REC-MSG-0016",
+     "guid:SYNTH-EXP-REC-MSG-0018"
+    ]
+   },
+   "guid:iMessage;-;+15550000301": {
+    "items": 9,
+    "messages": [
+     "guid:SYNTH-EXP-REC-MSG-0031",
+     "guid:SYNTH-EXP-REC-MSG-0030",
+     "guid:SYNTH-EXP-REC-MSG-0032",
+     "guid:SYNTH-EXP-REC-MSG-0033",
+     "guid:SYNTH-EXP-REC-MSG-0034",
+     "guid:SYNTH-EXP-REC-MSG-0035",
+     "guid:SYNTH-EXP-REC-MSG-0036",
+     "guid:SYNTH-EXP-REC-MSG-0037",
+     "guid:SYNTH-EXP-REC-MSG-0038"
+    ]
+   },
+   "guid:iMessage;-;synthetic-export-rec-1@example.invalid": {
+    "items": 16,
+    "messages": [
+     "guid:SYNTH-EXP-REC-MSG-0001",
+     "guid:SYNTH-EXP-REC-MSG-0002",
+     "guid:SYNTH-EXP-REC-MSG-0003",
+     "guid:SYNTH-EXP-REC-MSG-0004",
+     "guid:SYNTH-EXP-REC-MSG-0005",
+     "guid:SYNTH-EXP-REC-MSG-0006",
+     "guid:SYNTH-EXP-REC-MSG-0007",
+     "guid:SYNTH-EXP-REC-MSG-0008",
+     "guid:SYNTH-EXP-REC-MSG-0009",
+     "guid:SYNTH-EXP-REC-MSG-0010",
+     "guid:SYNTH-EXP-REC-MSG-0011",
+     "guid:SYNTH-EXP-REC-MSG-0012",
+     "guid:SYNTH-EXP-REC-MSG-0013",
+     "guid:SYNTH-EXP-REC-MSG-0014",
+     "guid:SYNTH-EXP-REC-MSG-0015",
+     "guid:SYNTH-EXP-REC-MSG-0016"
+    ]
+   }
+  },
+  "noConversation": [
+   "guid:SYNTH-EXP-REC-MSG-0017"
+  ]
+ },
+ "patches": [
+  {
+   "guid": "SYNTH-EXP-REC-MSG-0004",
+   "set": {
+    "is_from_me": null,
+    "is_from_me_st": 7
+   },
+   "table": "message",
+   "why": "an is_from_me state this build does not know"
+  },
+  {
+   "guid": "SYNTH-EXP-REC-MSG-0014",
+   "set": {
+    "date_unit": 9,
+    "date_utc_ns": null
+   },
+   "table": "message",
+   "why": "a time unit this build does not know (the sort key keeps the dated place)"
+  },
+  {
+   "guid": "SYNTH-EXP-REC-MSG-0005",
+   "set": {
+    "item_kind": 99
+   },
+   "table": "message",
+   "why": "an item kind this build does not know"
+  }
+ ],
+ "sentinels": {
+  "alternativeText": [
+   "SYNTH-EXP-ALT-OTC-PLAIN-COLUMN",
+   "SYNTH-EXP-ALT-UNSENT-PLAIN-COLUMN"
+  ],
+  "earlierText": [],
+  "editText": [
+   "SYNTH-EXP-EDIT-BEFORE-UNSEND-REC"
+  ],
+  "oneTimeCodes": [
+   "SYNTH-EXP-OTC-ALTCODE",
+   "SYNTH-EXP-OTC-KWQZ"
+  ],
+  "subjectHistory": [],
+  "unsentAttachmentFiles": []
+ },
+ "unsentAttachments": [],
+ "visible": [
+  "SYNTH-EXP-ALT-PLAIN-COLUMN"
+ ]
+}

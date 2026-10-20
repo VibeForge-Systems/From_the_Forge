@@ -1,0 +1,25 @@
+# Clippy configuration for oma-export (M6 spec §4.1, §8.3, I2).
+#
+# Every file an export writes is created inside its staging folder by
+# `stage.rs`: relative to directory handles on Linux (rustix `openat`), or
+# through `oma_fs::create_new_private` elsewhere, never replacing anything
+# and never in a temporary directory. No other way to create or write a
+# file by path may appear in the crate's code.
+#
+# Integration tests build hostile trees directly; each test file that does
+# allows `disallowed_methods` explicitly.
+
+disallowed-methods = [
+    { path = "std::fs::File::create", reason = "create files inside staging through stage.rs" },
+    { path = "std::fs::File::create_new", reason = "create files inside staging through stage.rs" },
+    { path = "std::fs::OpenOptions::new", reason = "create files inside staging through stage.rs" },
+    { path = "std::fs::write", reason = "write files inside staging through stage.rs" },
+    { path = "std::fs::copy", reason = "attachments are copied through the archive's BlobReader" },
+    { path = "std::env::temp_dir", reason = "nothing is written outside the destination (spec §8.3)" },
+    { path = "tempfile::tempdir", reason = "nothing is written outside the destination (spec §8.3)" },
+    { path = "tempfile::tempfile", reason = "nothing is written outside the destination (spec §8.3)" },
+    { path = "tempfile::NamedTempFile::new", reason = "nothing is written outside the destination (spec §8.3)" },
+    { path = "tempfile::Builder::new", reason = "nothing is written outside the destination (spec §8.3)" },
+    { path = "csv::Writer::from_path", reason = "CSV is written only through Writer::from_writer over a staged file (spec §5.2)" },
+    { path = "csv::WriterBuilder::from_path", reason = "CSV is written only through WriterBuilder::from_writer over a staged file (spec §5.2)" },
+]

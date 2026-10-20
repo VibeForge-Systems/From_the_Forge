@@ -34,13 +34,11 @@ use std::io::Cursor;
 use std::path::Path;
 
 use common::import::*;
-use common::viewer::{self, at, json_at, viewer_root, ENTRIES, SCENARIOS};
-use common::*;
+use common::viewer::{self, at, json_at, sha256_hex, viewer_root, ENTRIES, SCENARIOS};
 use image::codecs::gif::GifDecoder;
 use image::codecs::jpeg::JpegDecoder;
 use image::{AnimationDecoder, ColorType, ImageDecoder, ImageReader};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 /// The SHA-256 of `tests/fixtures/viewer/SHA256SUMS`. The inputs are
 /// frozen: regenerating them invalidates every recorded run.
@@ -53,14 +51,6 @@ const INPUT_SUMS_SHA256: &str = "ee33f1fde09cf332384f61595c9705a5b256fb12cf86a0c
 /// itself stays visible. Only the main entry's expectations changed.
 const EXPECTED_SUMS_SHA256: &str =
     "4d03c9747721e18dc4da5ab2e39226793bdaf16e0246d9f5a121c652cb4f9412";
-
-/// Text values over this many UTF-8 bytes are written as
-/// `sha256:<hex>:<bytes>` in the manifests (the generator's `LONG_TEXT`).
-const LONG_TEXT: usize = 4096;
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    hex(&Sha256::digest(bytes))
-}
 
 /// Every file below `dir`, relative to `base`, with `/` separators.
 fn walk(dir: &Path, base: &Path, out: &mut BTreeSet<String>) {
@@ -322,68 +312,10 @@ fn containers_and_hostile_files_have_their_designed_shape() {
 // The import check against the model's content manifest
 // ---------------------------------------------------------------------------
 
-/// The generator's long-text rule, applied to what is read back.
-fn shorten(v: &mut Value) {
-    match v {
-        Value::Object(map) => {
-            for (k, x) in map.iter_mut() {
-                match x {
-                    Value::String(s) if k == "text" && s.len() > LONG_TEXT => {
-                        *x = Value::String(format!(
-                            "sha256:{}:{}",
-                            sha256_hex(s.as_bytes()),
-                            s.len()
-                        ));
-                    }
-                    _ => shorten(x),
-                }
-            }
-        }
-        Value::Array(a) => a.iter_mut().for_each(shorten),
-        _ => {}
-    }
-}
-
-fn sorted_strings(v: &[Value]) -> Vec<String> {
-    let mut s: Vec<String> = v.iter().map(Value::to_string).collect();
-    s.sort();
-    s
-}
-
-fn assert_same(got: &[Value], want: &[Value], what: &str) {
-    let (g, w) = (sorted_strings(got), sorted_strings(want));
-    if g != w {
-        let gs: BTreeSet<&String> = g.iter().collect();
-        let ws: BTreeSet<&String> = w.iter().collect();
-        panic!(
-            "{what}: differ\n  only in the archive: {:#?}\n  only in the model: {:#?}",
-            gs.difference(&ws).collect::<Vec<_>>(),
-            ws.difference(&gs).collect::<Vec<_>>()
-        );
-    }
-}
-
 /// The archive at `db` holds what the manifest `m` says: handles, chats,
 /// attachments, messages (with their order), blobs and the masked strings.
 fn assert_matches_model(db: &Path, m: &Value, labels: &LineageLabels, what: &str) {
-    let mut view = manifest_view(db, labels);
-    for plural in ["handles", "chats", "attachments"] {
-        let got = view.get_mut(plural).expect("plural");
-        got.iter_mut().for_each(shorten);
-        assert_same(
-            got,
-            &manifest_expected(m, plural),
-            &format!("{what}: {plural}"),
-        );
-    }
-    let mut got = message_view(db, labels);
-    got.iter_mut().for_each(shorten);
-    let want = message_expected(m);
-    assert_same(&got, &want, &format!("{what}: messages"));
-    let sorts = |v: &[Value]| v.iter().map(|x| x["sort"].clone()).collect::<Vec<_>>();
-    assert_eq!(sorts(&got), sorts(&want), "{what}: message order");
-    assert_eq!(blob_list(db), m["content"]["blobs"], "{what}: blobs");
-    assert_store_consistent(db, true);
+    viewer::assert_content_matches(db, m, labels, what);
     // Every masked string the viewer must withhold is in the archive.
     let c = read_only(db);
     for kind in ["oneTimeCodes", "earlierText"] {

@@ -38,6 +38,11 @@ const COMMANDS: &[&str] = &[
     "get_search_results",
     "cancel_search",
     "inspect_attachment",
+    "preview_export",
+    "choose_export_destination",
+    "start_export",
+    "discard_export_draft",
+    "show_export_in_folder",
 ];
 
 fn main() {

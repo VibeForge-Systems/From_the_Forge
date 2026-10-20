@@ -1,0 +1,6 @@
+﻿"conversation","name","name_state","chat_identifier","chat_identifier_state","service_name","service_name_state","service","service_code","style","style_state","is_filtered","is_filtered_state","is_archived","is_archived_state","is_blackholed","is_blackholed_state","is_pending_review","is_pending_review_state","is_recovered","is_recovered_state","properties_bytes","properties_bytes_state","participants","source_archive_id","source_guid","source_room_name","source_group_id","neutralised_columns"
+"1","","null","synthetic-viewer-1@example.invalid","","iMessage","","iMessage","1","45","","0","","0","","0","","0","","0","","","null","1","","","","",""
+"2","SYNTH-VIEW-CHAT-GROUP","","chatSYNTHVIEW2","","iMessage","","iMessage","1","43","","0","","0","","0","","0","","0","","","null","1;2;3","","","","",""
+"3","","null","'+15550000103","","SMS","","sms","2","45","","0","","0","","0","","0","","0","","","null","4","","","","","chat_identifier"
+"4","","null","synthetic-viewer-5@example.invalid","","iMessage","","iMessage","1","45","","0","","0","","0","","0","","0","","","null","5","","","","",""
+"5","","null","chatSYNTHVIEW6","","iMessage","","iMessage","1","45","","0","","0","","0","","0","","0","","","null","1;2","","","","",""

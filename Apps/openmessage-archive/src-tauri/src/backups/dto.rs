@@ -19,6 +19,7 @@ use crate::archives::dto::{
     GateEndingDto, ImportOutcomeDto, NotImportableDto, StopReasonDto, VerifyOutcomeDto,
 };
 use crate::error::IpcError;
+use crate::exports::dto::{ExportOutcomeDto, ExportSummaryDto};
 use crate::settings::CheckLevel;
 
 /// `Number.MAX_SAFE_INTEGER`.
@@ -425,6 +426,23 @@ pub enum JobPhase {
     VerifyingIndex,
     /// Rows in a quick verify, bytes re-hashed in a full one.
     VerifyingFiles,
+    // The export (M6 §9.4); `copyingAttachments` above is shared (an
+    // export copies files while it writes the messages that name them, so
+    // its progress is reported under `writingMessages`).
+    /// The pre-count, the consent check and the scope index.
+    PreparingExport,
+    /// `done` and `total` count timeline rows.
+    WritingMessages,
+    /// Image previews from the decode helper (slice 6h2).
+    RenderingPreviews,
+    /// The export-render helper's spreadsheet (slice 6i).
+    WritingSpreadsheet,
+    /// The export-render helper's PDF layout (slice 6j).
+    LayingOutPdf,
+    /// The writers finish; provenance is hashed and the output published.
+    FinishingExport,
+    /// A cancel or a failure: the unfinished output is being removed.
+    RemovingPartial,
 }
 
 impl From<oma_messages::MessagesPhase> for JobPhase {
@@ -460,6 +478,8 @@ pub enum JobKind {
     Import,
     /// Verify an archive (M4).
     Verify,
+    /// Export from an archive (M6): holds the archive's lock.
+    Export,
 }
 
 impl From<oma_backup::Phase> for JobPhase {
@@ -498,7 +518,7 @@ pub struct JobSummary {
 
 /// Delivered over a `tauri::ipc::Channel` (D2). Exactly one terminal event
 /// (`finished`, `extractionFinished`, `importFinished`, `verifyFinished`,
-/// `failed` or `cancelled`) ends every job. `progress` and
+/// `exportFinished`, `failed` or `cancelled`) ends every job. `progress` and
 /// `importPreflight` are the only non-terminal events. Every event stays
 /// under 1 KiB (D47): reports and the preflight are fetched with
 /// `get_backup_details` and `get_archive_details`.
@@ -575,6 +595,16 @@ pub enum JobEvent {
         /// The result was recorded in the archive.
         recorded: bool,
     },
+    /// The end of an export that published its output (M6 §9.3): counts
+    /// and codes only, never a name or a path. A cancel or a failure ends
+    /// with `cancelled` or `failed`.
+    ExportFinished {
+        job_id: String,
+        outcome: ExportOutcomeDto,
+        summary: ExportSummaryDto,
+        /// Always `true` once published: nothing unfinished was left.
+        staging_removed: bool,
+    },
 }
 
 impl JobEvent {
@@ -596,7 +626,8 @@ impl JobEvent {
             | JobEvent::Cancelled { job_id, .. }
             | JobEvent::ImportPreflight { job_id }
             | JobEvent::ImportFinished { job_id, .. }
-            | JobEvent::VerifyFinished { job_id, .. } => job_id,
+            | JobEvent::VerifyFinished { job_id, .. }
+            | JobEvent::ExportFinished { job_id, .. } => job_id,
         }
     }
 }

@@ -231,17 +231,88 @@ pub fn render(
     rendition: Rendition,
     limits: &RenderLimits,
 ) -> Result<Rendered, RenderError> {
+    check_input(bytes, limits)?;
+    #[cfg(feature = "heic")]
+    if is_heif(bytes) {
+        return heif::render(bytes, rendition, limits);
+    }
+    let d = decode(bytes, limits)?;
+    finish(d.img, d.orientation, d.has_alpha, d.animated, rendition)
+}
+
+/// Both renditions of `bytes` from **one** decode (M6 spec §6.5, the
+/// export's `RenditionPair`): the display rendition is made from the
+/// decoded image, the thumbnail from the display rendition, so the
+/// full-size image is held once and dropped before the thumbnail is made.
+/// Each is oriented and encoded as [`render`] does; the limits are the
+/// same. A HEIF build decodes HEIF twice (its decoder applies the
+/// transforms at full size).
+pub fn render_pair(
+    bytes: &[u8],
+    limits: &RenderLimits,
+) -> Result<(Rendered, Rendered), RenderError> {
+    check_input(bytes, limits)?;
+    #[cfg(feature = "heic")]
+    if is_heif(bytes) {
+        return Ok((
+            heif::render(bytes, Rendition::Thumb, limits)?,
+            heif::render(bytes, Rendition::Display, limits)?,
+        ));
+    }
+    let d = decode(bytes, limits)?;
+    let (w, h) = (d.img.width(), d.img.height());
+    let display_edge = Rendition::Display.long_edge();
+    let display = if w.max(h) > display_edge {
+        d.img
+            .resize(display_edge, display_edge, FilterType::Triangle)
+    } else {
+        d.img
+    };
+    let thumb = {
+        let edge = Rendition::Thumb.long_edge();
+        if display.width().max(display.height()) > edge {
+            display.resize(edge, edge, FilterType::Triangle)
+        } else {
+            display.clone()
+        }
+    };
+    let source = (w, h);
+    let t = encode(thumb, d.orientation, d.has_alpha, d.animated, source)?;
+    let full = encode(display, d.orientation, d.has_alpha, d.animated, source)?;
+    Ok((t, full))
+}
+
+/// Input over [`RenderLimits::max_input_bytes`] is refused first.
+fn check_input(bytes: &[u8], limits: &RenderLimits) -> Result<(), RenderError> {
     let len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
     if len > limits.max_input_bytes {
         return Err(RenderError::InputTooLarge);
     }
+    Ok(())
+}
+
+#[cfg(feature = "heic")]
+fn is_heif(bytes: &[u8]) -> bool {
+    let len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    matches!(sniff(bytes, len), SniffedKind::Heif)
+}
+
+/// A decoded image and what its header said.
+struct Decoded {
+    img: DynamicImage,
+    orientation: Orientation,
+    has_alpha: bool,
+    animated: bool,
+}
+
+/// The limits, in order, then the decode (see the module docs).
+fn decode(bytes: &[u8], limits: &RenderLimits) -> Result<Decoded, RenderError> {
+    let len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
     let (format, animated) = match sniff(bytes, len) {
         SniffedKind::Png => (ImageFormat::Png, false),
         SniffedKind::Jpeg => (ImageFormat::Jpeg, false),
         SniffedKind::Gif => (ImageFormat::Gif, gif_frames(bytes) > 1),
         SniffedKind::Webp => (ImageFormat::WebP, webp_animated(bytes)),
-        #[cfg(feature = "heic")]
-        SniffedKind::Heif => return heif::render(bytes, rendition, limits),
         _ => return Err(RenderError::NotAnImage),
     };
     let mut reader = ImageReader::with_format(Cursor::new(bytes), format);
@@ -268,7 +339,12 @@ pub fn render(
     // An orientation that cannot be read is no orientation.
     let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
     let img = DynamicImage::from_decoder(decoder).map_err(|e| decode_error(&e))?;
-    finish(img, orientation, color.has_alpha(), animated, rendition)
+    Ok(Decoded {
+        img,
+        orientation,
+        has_alpha: color.has_alpha(),
+        animated,
+    })
 }
 
 /// Downscale, orient and encode.
@@ -283,11 +359,24 @@ fn finish(
     let edge = rendition.long_edge();
     // `resize` keeps the aspect ratio inside an edge × edge box; the
     // full-size image is dropped before the orientation copy is made.
-    let mut small = if w.max(h) > edge {
+    let small = if w.max(h) > edge {
         img.resize(edge, edge, FilterType::Triangle)
     } else {
         img
     };
+    encode(small, orientation, has_alpha, animated, (w, h))
+}
+
+/// Orient an already downscaled image and encode it; `source` is the
+/// decoded size before orientation.
+fn encode(
+    mut small: DynamicImage,
+    orientation: Orientation,
+    has_alpha: bool,
+    animated: bool,
+    source: (u32, u32),
+) -> Result<Rendered, RenderError> {
+    let (w, h) = source;
     small.apply_orientation(orientation);
     let swaps = matches!(
         orientation,
@@ -543,6 +632,50 @@ mod tests {
                 "orientation {o}"
             );
         }
+    }
+
+    #[test]
+    fn a_pair_is_both_renditions_from_one_decode() {
+        // 3000 × 1000 with orientation 6: display 683 × 2048, thumb 214 × 640.
+        let img = RgbImage::from_pixel(3000, 1000, Rgb([9, 9, 9]));
+        let bytes = with_orientation(&jpeg(&img), 6);
+        let limits = RenderLimits::default();
+        let (thumb, display) = render_pair(&bytes, &limits).expect("pair");
+        let single_t = render(&bytes, Rendition::Thumb, &limits).expect("thumb");
+        let single_d = render(&bytes, Rendition::Display, &limits).expect("display");
+        assert_eq!((display.width, display.height), (683, 2048));
+        assert_eq!(
+            (display.width, display.height),
+            (single_d.width, single_d.height)
+        );
+        assert_eq!(
+            (thumb.width, thumb.height),
+            (single_t.width, single_t.height)
+        );
+        assert!(thumb.width.max(thumb.height) <= 640);
+        for r in [&thumb, &display] {
+            assert_eq!((r.source_width, r.source_height), (1000, 3000));
+            assert_eq!(r.format, RenderedFormat::Jpeg);
+            assert!(!r.bytes.expose().windows(6).any(|w| w == b"Exif\0\0"));
+        }
+        // Small images keep their size in both; alpha stays PNG.
+        let rgba = RgbaImage::from_pixel(5, 3, Rgba([1, 2, 3, 100]));
+        let (t, d) = render_pair(&png_rgba(&rgba), &limits).expect("small");
+        assert_eq!((t.width, t.height, d.width, d.height), (5, 3, 5, 3));
+        assert_eq!(
+            (t.format, d.format),
+            (RenderedFormat::Png, RenderedFormat::Png)
+        );
+        // The same refusals as one rendition.
+        assert_eq!(
+            render_pair(b"<svg/>", &limits),
+            Err(RenderError::NotAnImage)
+        );
+        let tight = RenderLimits {
+            max_input_bytes: 4,
+            ..RenderLimits::default()
+        };
+        assert_eq!(render_pair(&bytes, &tight), Err(RenderError::InputTooLarge));
     }
 
     #[test]

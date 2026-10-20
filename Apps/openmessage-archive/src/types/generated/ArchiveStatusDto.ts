@@ -3,4 +3,4 @@
 /**
  * One archive's status badge (spec §16).
  */
-export type ArchiveStatusDto = "ready" | "importing" | "verifying" | "inUse" | "needsUpgrade" | "newerVersion" | "damaged" | "notAnArchive" | "refused";
+export type ArchiveStatusDto = "ready" | "importing" | "verifying" | "exporting" | "inUse" | "needsUpgrade" | "newerVersion" | "damaged" | "notAnArchive" | "refused";

@@ -10,19 +10,30 @@
 //!
 //! The generator itself (`tests/common/bulk.rs`) decides the rows; this
 //! module only provides the transaction boundary, the import's `sort_key`
-//! encoder and the finalize steps, so a generated archive is laid out like
-//! an imported one.
+//! encoder, the finalize steps and the store placement
+//! ([`BulkWriter::put_blob`], M6 slice 6c), so a generated archive is laid
+//! out like an imported one.
+
+use std::io::Write;
+use std::sync::Arc;
 
 use rusqlite::Connection;
+use sha2::{Digest, Sha256};
 
 use crate::archive::{Archive, Recovery};
-use crate::error::ArchiveError;
+use crate::blobs::{Partial, Placement, Placer, StorageName};
+use crate::error::{ArchiveError, IoOp};
+use crate::layout::ArchiveDir;
+use crate::store_fs::StoreFs;
 
 /// A write handle for generating rows directly. Borrowed from an
 /// [`Archive`] that stays open (and locked) while it lives.
 pub struct BulkWriter<'a> {
     conn: &'a Connection,
     batches: u64,
+    dir: ArchiveDir,
+    store: Arc<dyn StoreFs>,
+    next_partial: u64,
 }
 
 /// What [`BulkWriter::finalize`] did.
@@ -38,8 +49,52 @@ pub struct BulkFinalize {
 impl<'a> BulkWriter<'a> {
     pub(crate) fn new(archive: &'a mut Archive) -> Result<BulkWriter<'a>, ArchiveError> {
         archive.begin_write(Recovery::Run)?;
+        let (_, dir, store) = archive.store_parts();
         let conn = archive.ensure_writer()?.conn();
-        Ok(BulkWriter { conn, batches: 0 })
+        Ok(BulkWriter {
+            conn,
+            batches: 0,
+            dir,
+            store,
+            next_partial: 0,
+        })
+    }
+
+    /// Place `bytes` in the attachment store the way the import's copy does
+    /// (spec §9.1): a new `.incoming` partial, written, synced and
+    /// length-checked, then the no-replace placement and one directory
+    /// flush. Returns the SHA-256, which names the file; the caller writes
+    /// the `blob` row (in a later [`BulkWriter::batch`]). Bytes the store
+    /// already holds are deduplicated. There is no `blob_intent` and no
+    /// crash safety: this is a generator for tests, never an import.
+    pub fn put_blob(&mut self, bytes: &[u8]) -> Result<[u8; 32], ArchiveError> {
+        let sha: [u8; 32] = Sha256::digest(bytes).into();
+        let name = StorageName::of_sha256(&sha).ok_or(ArchiveError::Internal("bulk blob name"))?;
+        let len =
+            u64::try_from(bytes.len()).map_err(|_| ArchiveError::Internal("bulk blob size"))?;
+        let mut partial = Partial::create(&self.dir, &mut self.next_partial)
+            .map_err(|e| ArchiveError::io(IoOp::CreateFile, &e))?;
+        partial
+            .file()
+            .and_then(|f| f.write_all(bytes))
+            .map_err(|e| ArchiveError::io(IoOp::CreateFile, &e))?;
+        partial
+            .finish(self.store.as_ref(), len)
+            .map_err(|e| ArchiveError::io(IoOp::Sync, &e))?;
+        let mut placer = Placer::new(&self.dir, self.store.as_ref());
+        match placer.place(partial, &name, None) {
+            Placement::Placed
+            | Placement::Deduplicated
+            | Placement::Adopted
+            | Placement::OrphanReplaced => {}
+            Placement::Conflict | Placement::Failed(_) => {
+                return Err(ArchiveError::Internal("bulk blob not placed"))
+            }
+        }
+        placer
+            .sync()
+            .map_err(|e| ArchiveError::io(IoOp::Sync, &e))?;
+        Ok(sha)
     }
 
     /// Run `f` in one `BEGIN IMMEDIATE` transaction, committed on success

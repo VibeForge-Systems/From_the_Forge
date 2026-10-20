@@ -1,0 +1,11 @@
+﻿"handle","address","address_state","service","service_state","service_class","service_class_code","country","country_state","source_archive_id","source_uncanonicalized_id","source_person_centric_id","neutralised_columns"
+"1","synthetic-export-1@example.invalid","","iMessage","","iMessage","1","us","","","","",""
+"2","'+15550000201","","iMessage","","iMessage","1","us","","","","","address"
+"3","'-synthetic-export-3@example.invalid","","iMessage","","iMessage","1","us","","","","","address"
+"4","'@synthetic-export-4","","iMessage","","iMessage","1","us","","","","","address"
+"5","'=synthetic-export-5@example.invalid","","iMessage","","iMessage","1","us","","","","","address"
+"6","synthetic-export-6 line@example.invalid","","iMessage","","iMessage","1","us","","","","",""
+"7","synthetic-export-7⟨U+0085⟩next‮@example.invalid","","iMessage","","iMessage","1","us","","","","",""
+"8","synthetic-export-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb@example.invalid","","iMessage","","iMessage","1","us","","","","",""
+"9","'＝synthetic-export-9@example.invalid","","iMessage","","iMessage","1","us","","","","","address"
+"10","'​=synthetic-export-10@example.invalid","","iMessage","","iMessage","1","us","","","","","address"

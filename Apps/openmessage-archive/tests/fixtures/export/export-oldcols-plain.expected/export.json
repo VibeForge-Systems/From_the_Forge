@@ -1,0 +1,31 @@
+{
+ "corruptStoreFiles": [],
+ "fileCases": [],
+ "format": "oma-export-expectations",
+ "formatVersion": 1,
+ "formulaCases": [],
+ "hostile": [],
+ "membership": {
+  "chats": {
+   "guid:iMessage;-;synthetic-export-old-1@example.invalid": {
+    "items": 2,
+    "messages": [
+     "guid:SYNTH-EXP-OLD-MSG-0001",
+     "guid:SYNTH-EXP-OLD-MSG-0002"
+    ]
+   }
+  },
+  "noConversation": []
+ },
+ "patches": [],
+ "sentinels": {
+  "alternativeText": [],
+  "earlierText": [],
+  "editText": [],
+  "oneTimeCodes": [],
+  "subjectHistory": [],
+  "unsentAttachmentFiles": []
+ },
+ "unsentAttachments": [],
+ "visible": []
+}

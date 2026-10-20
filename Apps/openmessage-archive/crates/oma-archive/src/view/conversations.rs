@@ -38,6 +38,7 @@ use crate::schema::codes::{
     ValueState,
 };
 use crate::sortkey;
+use crate::stmt::StmtCache;
 
 /// The most ids [`ArchiveReader::conversation_index`] returns.
 pub const CONVERSATION_INDEX_LIMIT: usize = 100_000;
@@ -482,7 +483,7 @@ fn identifier(
 ) -> rusqlite::Result<OptContent> {
     Ok(match OptContent::from_cell(v, st, IDENTIFIER_UTF16) {
         OptContent::Text(t) => {
-            OptContent::Text(t.stored_as_blob(stored_as_blob(c, entity, id, col)?))
+            OptContent::Text(t.stored_as_blob(stored_as_blob(&StmtCache::new(c), entity, id, col)?))
         }
         missing => missing,
     })
@@ -542,7 +543,7 @@ fn label(display: OptContent, first: Vec<Participant>, total: u64, ident: OptCon
 /// (`display_source = 1`, no `run_issue`, §3.6); otherwise a body with a
 /// one-time-code part is withheld whole.
 pub(crate) fn masked_preview(
-    c: &Connection,
+    c: &StmtCache<'_>,
     body: i64,
     text: &str,
     source: Option<i64>,
@@ -598,7 +599,7 @@ type PreviewRow = (
 /// and current body, with every one-time code withheld, the text capped at
 /// `cap` UTF-16 units.
 pub(crate) fn preview_of(
-    c: &Connection,
+    c: &StmtCache<'_>,
     message: i64,
     utc_ns: i64,
     cap: u32,
@@ -726,11 +727,11 @@ fn conversation(
     let last_dated_utc_ns = newest.first().and_then(|(_, k)| sortkey::decode_dated(k));
     let mut preview = None;
     for (id, key) in &newest {
-        if folds_into(c, chat, *id)?.is_some() {
+        if folds_into(&StmtCache::new(c), chat, *id)?.is_some() {
             continue;
         }
         if let Some(ns) = sortkey::decode_dated(key) {
-            preview = preview_of(c, *id, ns, PREVIEW_UTF16)?;
+            preview = preview_of(&StmtCache::new(c), *id, ns, PREVIEW_UTF16)?;
         }
         break;
     }
