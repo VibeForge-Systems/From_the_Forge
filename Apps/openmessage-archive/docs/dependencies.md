@@ -8,7 +8,8 @@ of this file.
 Two automated audits enforce the license policy:
 
 - **Rust:** [`deny.toml`](../deny.toml), via `cargo deny check`. It allows
-  permissive licenses, plus MPL-2.0 for five named crates (see below). It
+  permissive licenses, plus MPL-2.0 for five named crates and
+  BSD-2-Clause for `arrayref` alone (see below). It
   rejects unknown registries and git sources, and fails on yanked crates
   and vulnerabilities. It runs in CI.
 - **JavaScript:** [`scripts/check-licenses.mjs`](../scripts/check-licenses.mjs),
@@ -138,7 +139,7 @@ change dependencies and the licence policy in PR B (slices 6i and 6j);
 
 - **Q1, the PDF engine (owner-confirmed):** krilla 0.8.2 with parley
   0.12.0 (both MIT OR Apache-2.0). krilla's `tiny-skia-path` 0.12.0
-  pulls in `arrayref` 0.3.9, which is **BSD-2-Clause**. It will be
+  pulls in `arrayref` 0.3.9, which is **BSD-2-Clause**. It is
   allowed as a **per-crate exception for `arrayref` only**, named in
   `deny.toml` the way the MPL-2.0 crates above are, and **not** added to
   the global allowlist, so any other BSD-2-Clause crate still fails CI.
@@ -146,8 +147,9 @@ change dependencies and the licence policy in PR B (slices 6i and 6j);
   emoji and subsetting with ToUnicode, against an estimated 1,000–1,500
   lines (**UNVERIFIED**) of our own writer with no tagged structure.
   krilla's MSRV is 1.92, so the workspace `rust-version` rises from 1.90
-  to 1.92 (the pinned toolchain is already 1.97.0). Both changes are
-  recorded in the upgrade log when slice 6j makes them. **Applied in
+  to 1.92 (the pinned toolchain is already 1.97.0; CI and
+  `rust-toolchain.toml`'s channel did not need to change). Both changes
+  are recorded in the upgrade log (slice 6j1). **Applied in
   slice 6j1** (2026-10-20), with one deviation: **parley is pinned at
   0.11.1, not 0.12.0.** parley 0.12.0 (and its `fontique`, `parley_data`
   and `parlance` 0.1.1 releases) were published on 2026-10-09, eleven
@@ -377,6 +379,25 @@ Tauri); the npm package virtua 0.53.1 added for spike 5s(1) and removed
 again (41 runtime npm packages, as before); `deny.toml` unchanged. Slice 5k
 changed no dependency.
 
+**Milestone 6 in summary** (owner decisions Q1 and Q2 of 2026-10-19):
+PR A added `csv` 1.4.0 (with `csv-core` 0.1.13 and `ryu` 1.0.23) and the
+hash-pinned export oracles in `scripts/oracles/requirements.txt`; PR B
+added `miniz_oxide` 0.8.9 as a direct dependency (already locked),
+krilla 0.8.2 (with `raster-images`, so `imagesize` 0.14.0) and parley
+**0.11.1** (owner Q1 named 0.12.0, which is not 14 days old until
+2026-10-23) with 31 crates they bring, the per-crate BSD-2-Clause
+exception for `arrayref` 0.3.9 in `deny.toml` (BSD-2-Clause stays off
+the global allowlist), the workspace `rust-version` raised from 1.90 to
+1.92 (krilla's MSRV; the pinned toolchain 1.97.0, CI and
+`rust-toolchain.toml`'s channel are unchanged), twelve OFL-1.1 Noto
+fonts (30,355,252 bytes, each pinned by SHA-256, provenance above), and
+pypdf 6.19.0 among the oracles. **No XLSX crate was added:**
+rust_xlsxwriter 0.100.0 (published 2026-10-17) may not be pinned before
+2026-10-31, and 0.99.x is rejected (advisories); the XLSX slice adds it
+then, with `openpyxl` for its oracle. The UI slices (6k1, 6k2) and the
+documents (6l) changed no dependency; `npm run licenses` still reports
+41 runtime packages.
+
 | Date | Change | Reason |
 |---|---|---|
 | 2026-10-17 | Initial set (Milestone 1) | — |
@@ -425,3 +446,6 @@ changed no dependency.
 | on merge (M6, slice 6i) | Added miniz_oxide 0.8.9 (`=0.8.9`, default features off, `with-alloc` on) as a workspace dependency and a dependency of `oma-export`; `oma-export` gains a `render` feature (no crates), enabled by the shell (`src-tauri`) and by its own tests | The export-render helper (spec §5.7, D133): the main process inflates every Flate stream of a helper's PDF output before checking its names. No new crate in `Cargo.lock`: 0.8.9 was already locked through `png` (crates.io lists it as published 2025-06-09, checked 2026-10-20 against the 14-day rule); the only lockfile change is `miniz_oxide` in `oma-export`'s own dependency list. `cargo deny check` passes with the unchanged `deny.toml`. No XLSX crate is added (deferred, above); krilla, parley and the fonts are slice 6j's. `package.json`, `package-lock.json` and `scripts/oracles/requirements.txt` are unchanged |
 | on merge (M6, slice 6j1) | Added krilla 0.8.2 (`=0.8.2`, default features off) and parley **0.11.1** (`=0.11.1`, default features off, `std` and `complex-scripts`) as workspace dependencies and **optional** dependencies of `oma-export` behind its `render` feature (only the shell enables it); `deny.toml` gains the per-crate exception `{ crate = "arrayref", allow = ["BSD-2-Clause"] }`; the workspace `rust-version` rises from 1.90 to **1.92** (krilla's MSRV; the pinned toolchain 1.97.0, CI and `rust-toolchain.toml`'s channel are unchanged, only its comment); dev and test builds compile krilla, parley, fontique, harfrust, skrifa, read-fonts, subsetter, icu_segmenter, pdf-writer, flate2 and miniz_oxide at `opt-level = 3`; the twelve PDF fonts (above) under `src-tauri/resources/fonts/`; pypdf 6.19.0 in `scripts/oracles/requirements.txt` | Owner decisions Q1 and Q2: PDF layout and serialisation in the export-render helper (spec §5.6). 31 crates are new in `Cargo.lock` (listed in the krilla and parley rows above), and every one was published at least 14 days before 2026-10-20 (checked against the crates.io API): parley 0.12.0 was not, so 0.11.1 is pinned (owner Q1 named 0.12.0; upgrade on or after 2026-10-23), and `parlance` and `font-types` were pinned back to 0.1.0 and 0.12.6 with `cargo update --precise`. Licences: MIT OR Apache-2.0, Apache-2.0 OR MIT, MIT (`harfrust`, `float-cmp`, `strict-num`), Zlib OR Apache-2.0 OR MIT, Unicode-3.0 (the ICU4X crates), BSD-3-Clause (`tiny-skia-path`) and BSD-2-Clause (`arrayref`, the exception). `cargo deny check` passes. The opt-level entries keep the layout tests (whole documents with the 30 MB font set, in debug builds) fast; release builds are unaffected. The fonts add 30,355,252 bytes to the repository and, from slice 6j2's bundling, to the installer. `package.json` and `package-lock.json` are unchanged |
 | on merge (M6, slice 6j2) | krilla's `raster-images` feature turned on (`features = ["raster-images"]`, still `=0.8.2` with default features off). One crate is new in `Cargo.lock`: **imagesize 0.14.0** (MIT; published 2025-04-06 per the crates.io API, checked 2026-10-20, so well over 14 days old; 0.15.0 of 2026-07-09 is newer but krilla 0.8.2 asks for `^0.14`). krilla now also depends on `png` 0.18.1, `zune-jpeg` 0.5.15, `gif` 0.14.2 and `image-webp` 0.2.4, which were already locked through `image` 0.25.10 at the same versions | The PDF previews (spec §5.6, §6.5): the helper draws the decode helper's checked renditions, so krilla must read JPEG and PNG. The decoders run only in the export-render helper (`render/pdf/`, feature `render`); the main process never decodes an image. `deny.toml`, `package.json`, `package-lock.json` and `scripts/oracles/requirements.txt` are unchanged (the new PDF oracle uses pypdf 6.19.0, pinned in slice 6j1); `cargo deny check` passes. XLSX stays deferred: no XLSX crate was added |
+| on merge (M6, slice 6k1) | No dependency change | The Export dialog, its store, its words and the zone table use Vue, Pinia and the browser's `Intl` only. `Cargo.lock`, `package.json`, `package-lock.json`, `deny.toml` and `scripts/oracles/requirements.txt` are unchanged; `cargo deny check` and `npm run licenses` pass |
+| on merge (M6, slice 6k2) | No dependency change | Entry points, the status chip, events off and "Save a copy" use existing crates and packages only (checked with `git diff` of the five files above across the slice). `cargo deny check` and `npm run licenses` pass |
+| on merge (M6, slice 6l) | No dependency change | Documents, and the krilla comment in `Cargo.toml` corrected (it still said `raster-images` was off). `Cargo.lock` is unchanged; `cargo deny check` passes on the final branch state |

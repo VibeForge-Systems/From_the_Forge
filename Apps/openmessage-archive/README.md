@@ -8,22 +8,27 @@ services, accounts, subscriptions or telemetry.
 Targets **Windows 11** and **Linux**. Built with Tauri 2, Rust, Vue 3,
 TypeScript, Bootstrap 5 and SQLite. Licensed **Apache-2.0**.
 
-> **Status: Milestone 5 (the rich viewer) is implemented and awaiting
-> sign-off.** The app finds iPhone backups, checks them, **imports their
-> messages and attachment files into a local archive** (a versioned SQLite
-> database with a full-text index, and a folder of attachment files), and
-> **shows them**: a conversation list, threads with reactions, replies,
-> edits and attachments, image previews, search and "jump to a date". The
-> viewer reads the archive and never writes to it. **Archives are stored
-> unencrypted** (archive encryption is milestone 8), and the viewer's
-> privacy screen hides the window but is not a lock. Milestones 2 to 5
-> have been tested only on synthetic data (and, for the extraction check,
-> two third-party macOS samples), never on a backup made from a real
-> iPhone. The viewer has run in a real window only in a headless Linux
-> container; nobody has used it on a desktop or on Windows yet, and its
-> manual checklist is open ([compatibility.md](docs/compatibility.md)).
-> Every unfinished capability appears in the app disabled and marked
-> "Planned · M*n*". See [the roadmap](#roadmap).
+> **Status: Milestone 6 (exports) is implemented, except XLSX, and
+> awaiting sign-off.** The app finds iPhone backups, checks them,
+> **imports their messages and attachment files into a local archive** (a
+> versioned SQLite database with a full-text index, and a folder of
+> attachment files), **shows them** (a conversation list, threads with
+> reactions, replies, edits and attachments, image previews, search and
+> "jump to a date"), and **exports them** as PDF, HTML, plain text, CSV
+> or JSON, with the original attachment files if you choose, or saves a
+> copy of one attachment. XLSX follows in a later slice, after
+> 2026-10-31, and is shown as unavailable until then. **Archives are
+> stored unencrypted** (archive encryption is milestone 8), **exports are
+> plaintext copies the app cannot protect once written**, and the
+> viewer's privacy screen hides the window but is not a lock. Milestones
+> 2 to 6 have been tested only on synthetic data (and, for the extraction
+> check, two third-party macOS samples), never on a backup made from a
+> real iPhone. The viewer and the Export dialog have run in a real window
+> only in a headless Linux container; nobody has used them on a desktop
+> or on Windows yet, and their manual checklists are open
+> ([compatibility.md](docs/compatibility.md)). Every unfinished
+> capability appears in the app disabled and marked "Planned · M*n*" or
+> unavailable with its reason. See [the roadmap](#roadmap).
 
 ## What works today
 
@@ -126,6 +131,41 @@ TypeScript, Bootstrap 5 and SQLite. Licensed **Apache-2.0**.
     actions in each message's menu, and guards against printing, saving
     and dragging out. Viewer settings (time format and zone, playback,
     zoom and the privacy options) are on the Settings page.
+- **Exports** (milestone 6; **Export conversation…** in a thread's header,
+  **Export results…** in the search panel, **Export…** on the Archive
+  page, **Save a copy…** on an attachment):
+  - One dialog chooses the scope (a conversation, a date range, a search
+    result set, the whole archive), the formats (PDF, HTML, TXT, CSV,
+    JSON; XLSX is shown as unavailable with its reason), the options and,
+    last, the destination through a native dialog that Rust opens. Review
+    shows exact counts, the estimated size, the warnings, the time zone
+    with **Use UTC instead**, and a fixed disclosure that an export is a
+    plaintext copy, every time.
+  - One-time codes the phone marked and content captured before an
+    unsend or edit stay out unless you include them for that export: two
+    separate opt-ins, off on every opening, each confirmed against its
+    exact count. Read, delivery and sent state is never exported. Numbers
+    are local to the export unless you include archive identifiers.
+    Group and system events can be left out.
+  - A folder export holds `README.txt`, `manifest.json` (scope, options,
+    counts, versions, the time zone) and `SHA256SUMS`; a single file has
+    an "About this export" section. Original attachment files are copied
+    byte for byte where chosen (by default for HTML, JSON and the whole
+    archive), with `.blocked` added unless the type is a passive one the
+    file's content confirms, and on Windows a Mark of the Web.
+  - PDF is laid out by a separate helper process with the bundled Noto
+    fonts (Latin, Arabic, Hebrew, Devanagari, Thai, Chinese, Japanese,
+    Korean and colour emoji), embedded as subsets, with tagged structure,
+    an outline and image previews; very large conversations are split
+    into volumes. HTML pages are static, script-free and block network
+    loads with a Content-Security-Policy. CSV neutralises formulas by
+    default.
+  - Everything is written inside the chosen folder and published with
+    one rename that never replaces anything; cancelling removes the
+    unfinished export, and a crash leftover is offered for removal the
+    next time you export there. **Continue in background** keeps the
+    export running while you browse, with a chip in the navigation bar.
+    Nothing about an export is remembered.
 - Strict security posture:
   - The webview can call only the app's own allow-listed commands.
   - The Content Security Policy allows no network connections.
@@ -168,7 +208,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | [architecture.md](docs/architecture.md) | Invariants, components, IPC boundary, key decisions |
 | [supported-formats.md](docs/supported-formats.md) | Research on backup formats, encryption, the sms.db schema and device tooling, with sources |
 | [compatibility.md](docs/compatibility.md) | What has actually been tested, by OS, iOS version and backup type, including the synthetic catalogues, oracle runs, synthetic performance, headless smoke tests (including the viewer's, M5) and the manual checklists, with what each engine was seen to do |
-| [privacy.md](docs/privacy.md) | What is stored and where, the backup-password path, what validation, the extraction check and an import copy and for how long, what an archive holds (unencrypted), Recently Deleted and edited messages, what the viewer lets into the window, plays, keeps in memory and lets you copy, and what it cannot prevent (M5), network posture, the difference between backup and archive encryption, deletion limits |
+| [privacy.md](docs/privacy.md) | What is stored and where, the backup-password path, what validation, the extraction check and an import copy and for how long, what an archive holds (unencrypted), Recently Deleted and edited messages, what the viewer lets into the window, plays, keeps in memory and lets you copy, and what it cannot prevent (M5), what an export contains and where it is written (M6), network posture, the difference between backup and archive encryption, deletion limits |
 | [development.md](docs/development.md) | Setup, commands, adding IPC commands, testing |
 | [dependencies.md](docs/dependencies.md) | Every dependency and its license, the audit policy, the upgrade log |
 
@@ -181,14 +221,99 @@ cargo clippy --workspace --all-targets -- -D warnings
 | 3 Extraction check | Locate sms.db, probe the schema, and check that messages, chats, handles and attachment references can be read (counts only) | Implemented; sign-off pending (Windows CI, the clean-room review of the typedstream decoder and the fixture generators, the manual tests) |
 | 4 Archive database | Extract messages and copy attachments into the archive; versioned SQLite schema, transactional and resumable imports, FTS5, integrity verification | Implemented; sign-off pending (CI of slices 4g–4n, two §18.8 Windows tests that are not written yet (a held partial file, a killed lock holder; see `docs/compatibility.md`), the manual tests, the owner's answers on D69, D70, D71, D79 and D82) |
 | 5 Rich viewer | Conversation list, threads, inline media, search, date navigation | Implemented; sign-off pending (CI of PR B, the manual checklist in `docs/compatibility.md`: nothing of the viewer has been used on a desktop or on Windows; only a headless smoke test in a Linux container ran it in a real window). PR A (viewer reads, search, media checks, the viewer commands, the `oma-media` protocol, the image decode helper and the window built in Rust) passed CI on `ubuntu-22.04` and `windows-2022` ([run 39205163013](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39205163013)); PR B (the screens and the documents) is in review |
-| 6 Exports | TXT, CSV, JSON, HTML, PDF, XLSX, and attachments | In progress: **PR A of M6 (the engine)** is merged; **PR B** (on its branch) adds PDF, the Export dialog with its entry points (a conversation, search results, the whole archive), "Save a copy" of one attachment and leaving events out. Tested on Linux with synthetic data, the dialog in jsdom only: not yet in a real window, on CI for PR B, or on Windows. XLSX is deferred and refused. The documents and the manual checklist (slice 6l) are next |
-| 7 Direct device backup | USB device detection and local backup creation | Planned |
-| 8 Hardening and release | Archive repair, recovery tests, diagnostic log, accessibility, archive encryption at rest, signed packages | Planned |
+| 6 Exports | TXT, CSV, JSON, HTML, PDF, XLSX, and attachments | **Done except XLSX**, which follows as its own slice after 2026-10-31 (its writer crate is not yet 14 days old) and is refused until then; sign-off pending (CI of PR B, the M6 manual checklist in `docs/compatibility.md`: nothing of M6 has run on a Windows desktop, in a browser, a PDF viewer or a spreadsheet program, or on a real archive; Windows test time over budget, see `docs/development.md`). PR A (the engine: TXT, CSV, JSON, HTML) passed CI on `ubuntu-22.04` and `windows-2022` ([run 39340011184](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39340011184)) and is merged; PR B (PDF, the Export dialog and its entry points, "Save a copy", leaving events out, the documents) is on its branch |
+| 7 Direct device backup | USB device detection and local backup creation | **Next**; planned |
+| 8 Hardening and release | Archive repair, recovery tests, diagnostic log, accessibility, archive encryption at rest (it will not cover exports, `docs/privacy.md`), encrypted exports (a candidate), signed packages | Planned |
 
 ## Known limitations
 
-These apply to Milestone 5. The viewer's come first, then the archive's
-(milestone 4), then those carried over from milestones 2 and 3.
+These apply to Milestone 6. The exports' come first, then the viewer's
+(milestone 5), the archive's (milestone 4), and those carried over from
+milestones 2 and 3.
+
+### Exports (milestone 6)
+
+- **Exports are plaintext copies outside the app's control.** The app
+  cannot encrypt, track or delete them, and archive encryption (M8) will
+  not cover them. Sync clients may upload partial files before a cancel
+  removes them. Original attachments keep their metadata, location
+  included.
+- **XLSX is not available yet.** Its writer crate (rust_xlsxwriter
+  0.100.0, published 2026-10-17) cannot be pinned before 2026-10-31
+  under the project's 14-day rule; it follows as its own slice and is
+  refused, never faked, until then. The XLSX limits of the spec
+  (continuation rows over 32,767 UTF-16 units, sheets rolling over at
+  1,048,575 rows, dates before 1900 as text) apply from that slice.
+- **Not used for real yet.** Nothing of M6 has run on a Windows desktop,
+  on a real archive, in a browser, a PDF viewer, a spreadsheet program
+  or with a screen reader; the Export dialog has run in a real window
+  only headlessly in a Linux container. PR B has not run on CI. The M6
+  manual checklist in [compatibility.md](docs/compatibility.md) is open
+  (**not tested**, row by row). All performance figures are synthetic.
+- **Masking covers only one-time codes the phone marked.** Codes in plain
+  text are exported as written.
+- **"Raw" has limits.** JSON is the most complete format, but lossy text
+  is replaced with U+FFFD, the raw stored text (`text_raw`) and raw source
+  bytes are never exported, and text is not normalised. Every format
+  except JSON escapes the reserved `⟨` character.
+- **CSV:** formula protection can be undone by Excel on save and reopen
+  (OWASP); the "for data tools" profile is unprotected by design and can
+  carry terminal escapes; Excel may turn long raw numbers into floats and
+  truncate very long cells (**UNVERIFIED**).
+- **PDF:**
+  - characters no bundled font has (for example Tibetan or Cherokee, and
+    rare ideographs outside the four regional CJK subsets) draw as boxes;
+    the text layer keeps them, and they are counted;
+  - Han characters without kana or hangul in the same run use the
+    Simplified Chinese face (there is no Traditional Chinese option yet);
+  - message styles are not rendered; combining-mark floods are shortened
+    and marked;
+  - the structure is tagged, with no PDF/UA claim (no validator was run);
+  - very large conversations split into volumes;
+  - a large export is slow: 80,000 messages took 65 s to 121 s in a
+    release build here (against a 30 s target), with a peak of 170 MiB;
+  - the fonts add about 30 MB to the app and the repository.
+- **HTML:** the Content-Security-Policy was checked only by parsers, not
+  in any browser; only previews are shown (never originals); no audio or
+  video; no links in message text; reply links point backward only.
+- **Attachments:** they are not converted (HEIC stays HEIC, CAF stays
+  CAF); only allowlisted passive types keep their extension unless you
+  choose otherwise; Mark of the Web is best effort and NTFS only, and its
+  effect is **UNVERIFIED**; attachments of unsent parts are left out
+  unless included.
+- **Identifiers** are export-local by default, so two exports cannot be
+  joined on ids without the opt-in (a lean awaiting the owner, Q5).
+- **Time zones** come from the web engine's ICU data, and only zones the
+  engine lists are offered (`Intl.supportedValuesOf` was not checked on
+  WebKitGTK or WebView2). Times before 1900 or more than a year in the
+  future are shown in UTC.
+- **Search exports:** the "all matches" re-run is capped at 1,000,000;
+  exact-text coverage stays bounded to the newest 2,000,000 messages;
+  hits that matched only hidden content are left out unless included.
+- **The archive is locked during an export,** so imports and verifies in
+  any instance are refused until it ends.
+- **No export state is kept.** Crash leftovers are found only when
+  exporting to the same folder again. Leftovers are removed with ordinary
+  deletion, not secure deletion.
+- **Windows:** FAT cannot be detected in advance, so files over 4 GiB
+  fail per file and are counted; the staging folder is visible; a
+  junction swap by another account in a shared folder is not prevented;
+  antivirus or indexer locks can delay publish; and CI timings suggest
+  that **every folder export waits about 9 s at publish on Windows**
+  (a probable retry delay, not reproduced or fixed yet; it also puts the
+  Windows test time far over budget, see
+  [development.md](docs/development.md)).
+- **Defects seen in the headless smoke run (slice 6l), not fixed yet:**
+  Review offers "Use UTC instead" and says the zone name suggests where
+  you are even when the zone is already UTC; the finished step shows
+  "Export finished" twice; poppler's `pdfinfo` prints a syntax warning
+  about the PDF's `Suspects` entry (the file still opened in poppler's
+  tools); and the GTK folder picker could not select a typed folder in
+  the container (a desktop is needed to check it).
+- **Network and SMB destinations** are warned about; their atomicity is
+  **UNVERIFIED**.
+- **Not prevented:** search indexers and thumbnailers reading exported
+  files, and the file dialogs' recently-used lists (`privacy.md`).
 
 ### The viewer (milestone 5)
 
@@ -249,8 +374,8 @@ These apply to Milestone 5. The viewer's come first, then the archive's
   shown at all.** Group events do not say who did what to whom.
 - **No links, link previews, polls or app content.** URLs are text; a link
   with hidden characters cannot be copied as a link.
-- **No attachment can be opened in another program or saved;** saving a
-  copy is milestone 6.
+- **No attachment can be opened in another program.** "Save a copy…"
+  (milestone 6) writes one where you choose; see "Exports" above.
 - **Ways content can still leave the screen:** printing (if an engine
   handles Ctrl+P before the app; not tested), copied text in clipboard
   history or cloud clipboard, crash dumps, swap and hibernation files,
@@ -445,34 +570,20 @@ against attachment rows, date-unit histograms, tapback-history counts, and
 the extraction report's sections for services, reactions, replies, edits
 and message bodies.
 
-### Milestone 6 (exports): where it stands
+### Next: milestone 7
 
-**PR A of M6, the engine, is built, with no export UI yet.** What it has
-(tested on Linux with synthetic data; `docs/architecture.md`, "Exports
-(M6)", and `docs/privacy.md`, "Exports (M6)"):
+The next milestone is **milestone 7, direct device backup**: detecting an
+iPhone over USB and creating a local backup, which the app then imports
+as it imports any other. Exports need no change for it; the backup
+locations M7 writes join the folders an export refuses.
 
-- the archive's export reads: one read transaction under the archive's
-  lock, exact counts, masking before anything leaves the archive code;
-- `crates/oma-export`: one record model and column ledger, and the TXT,
-  CSV (two profiles, formula neutralisation), JSON (with schemas) and
-  HTML (static, CSP-locked, previews re-encoded by the decode helpers)
-  writers; attachment copies with one hash, the passive extension
-  allowlist and Mark of the Web; staging inside the destination and a
-  no-replace publish; `README.txt`, `manifest.json` and `SHA256SUMS`;
-- the shell: drafts with exact counts, Rust-opened destination dialogs
-  with checks on the canonical folder, the export job holding the
-  archive's lock, and five IPC commands.
-
-Known limitations of PR A: no export could be made from the app (the
-dialog is PR B); nothing ran on Windows, in a browser or in a
-spreadsheet program. PR B (on `feat/oma-m6-export-ui`) adds the
-export-render helper and PDF (krilla and the Noto fonts,
-owner-confirmed), the Export dialog and its entry points, "Save a copy"
-of one attachment and leaving events out (slices 6i–6k2); XLSX is
-deferred until its writer crate can be pinned, and the M6 manual
-checklist and documents are slice 6l. The dialog has run in jsdom only,
-never in a real window. The milestone after M6 is milestone 7 (direct
-device backup).
+Left from milestone 6 for later work: the XLSX writer (a follow-up slice
+after 2026-10-31); the parley 0.12.0 upgrade (due on or after
+2026-10-23); and, for milestone 8, encrypted exports, refusing exports
+of a locked archive, OS sandboxing of both helper processes, a
+handle-relative write path on Windows, a PDF/UA validation and a
+screen-reader pass over HTML and PDF, signed packages that include the
+fonts, and a secure-delete statement for leftovers.
 
 ## Contributing
 

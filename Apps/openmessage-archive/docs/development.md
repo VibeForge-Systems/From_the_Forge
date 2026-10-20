@@ -748,6 +748,42 @@ npx vitest run tests/frontend/export-copy.spec.ts       # Save a copy, events wo
   linted for `x86_64-pc-windows-msvc` through the scratch harness that
   includes `stage.rs` and `naming.rs` by path; it has not run.
 
+### Milestone 6 as a whole: the oracle step, the fonts and a smoke test (slice 6l)
+
+- **The whole oracle step.** The workflow's "Independent oracles
+  (Python)" step runs the six oracles of slices 6c, 6e2, 6f, 6g, 6j1 and
+  6j2 in that order, each with the commands in its section above, plus
+  `sha256sum -c` on every bundle. To run it locally, make the oracle
+  virtual environment once (`python3 -m venv <dir>`, then
+  `<dir>/bin/pip install --require-hashes --only-binary :all: --no-deps
+  -r scripts/oracles/requirements.txt`), install `poppler-utils`, and
+  run the step's lines with `<dir>/bin/python -I` and an empty output
+  folder per oracle. Slice 6l ran all of it in about 5 minutes here
+  (results in `docs/compatibility.md`).
+- **The fonts.** Check the shipped files against the table in
+  `docs/dependencies.md` ("PDF fonts") with
+  `sha256sum src-tauri/resources/fonts/*.ttf src-tauri/resources/fonts/*.otf`;
+  the tests do the same against `PINS` in
+  `crates/oma-export/src/pdf/fonts.rs`. A release build copies them to
+  `target/release/fonts/` (`bundle.resources`); without that folder a
+  PDF export stops before writing anything and says so.
+- **A smoke test of the Export dialog** uses the viewer's prepared
+  library (`smoke_library.rs`, "Headless smoke test" below) and the
+  release binary under Xvfb, started inside `dbus-run-session -- <binary>`
+  so the GTK dialogs get a session bus. The save dialog then accepts a
+  full path typed into its Name field (`xdotool key ctrl+a`, then
+  `xdotool type`), so a single-file export (a thread's "Export
+  conversation…" with one format and names only) can be made through
+  the window; the folder picker opened but could not select a typed
+  folder in the container, so folder exports still need a desktop.
+  Window titles of the native dialogs (which name the sensitive options)
+  are readable with `xdotool getwindowname` for each window id that
+  `xdotool search --name ''` lists (there is no window manager to draw them). Delete
+  `target/release` afterwards. The slice 6l run is recorded in
+  `docs/compatibility.md`.
+- **Test time** for the whole milestone, locally and on CI, is in "Test
+  time" below.
+
 ### The bulk generator (M5)
 
 `crates/oma-archive/tests/common/bulk.rs` writes a schema-valid v1 archive
@@ -1077,6 +1113,59 @@ slice). **Windows has not been measured for M6:** PR A has not run on
 CI. With the 4× factor seen in M4 and M5, it would add about 4 minutes on
 `windows-2022`, inside the 6-minute budget; that is an extrapolation
 until CI's run is recorded (slice 6l records it again).
+
+**Milestone 6 as a whole, measured in slice 6l** (spec §0.1), in the same
+container and the same way (`CARGO_INCREMENTAL=0`, after
+`cargo test --workspace --no-run`; 1,601 Rust tests passed, 25 ignored):
+
+| What | Time |
+|---|---|
+| `cargo test --workspace`, wall clock | 3 min 31 s |
+| Sum of all test binaries' run times | 206.3 s |
+| Added since the M6 baseline (`9883217`: 124.2 s) | about 82 s |
+| of which PR B's `pdf_writer.rs`, `pdf_check.rs`, `pdf_layout.rs`, `events.rs`, `copy.rs` (`oma-export`) and the shell's `export_helper.rs` | 7.0 s, 0.9 s, 0.5 s, 0.3 s, 0.4 s, 2.0 s |
+| the shell's unit tests (521) | 34.8 s |
+| `log_hygiene.rs` (now also PDF through the real helper, events off and a copy) | 7.3 s |
+| `npm test` (751 frontend tests in 58 files, the four DST projects included), wall clock | 29 s |
+
+So M6 adds under 1.5 minutes of Rust test time per Linux job here,
+inside the 3-minute budget, plus the CI oracle step outside
+`cargo test`.
+
+**On CI**, PR A's run ([39340011184](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39340011184))
+and the push to `main` after its merge
+([39347992924](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39347992924)),
+against the last `main` run before M6
+([39248435740](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39248435740),
+milestones 1–5), as the sums of the test binaries' own times read from the
+job logs (PR B has not run on CI):
+
+| Job | `main` before M6 | PR A run | `main` after PR A | Added by PR A |
+|---|---|---|---|---|
+| `checks` (ubuntu-22.04) | 97.3 s | 172.5 s | 175.3 s | 75–78 s |
+| `build` (ubuntu-22.04) | 108.5 s | 162.9 s | 164.1 s | 54–56 s |
+| `build` (windows-2022) | 366.1 s | 2,325.0 s | 2,118.5 s | **1,752–1,959 s (29–33 min)** |
+
+**The Windows budget is broken.** M6's budget is 6 more minutes on
+`windows-2022`; PR A alone adds about half an hour (the job's "Rust
+tests" step took 48 min in the PR run and 46 min on `main`). Seven
+binaries account for almost all of it, at 200–213 s each in both runs:
+`oma-export`'s `txt.rs`, `csv.rs`, `json.rs`, `html.rs`, `golden_txt.rs`,
+`golden_data.rs` and `golden_html.rs` (2–5 s each on Linux). The job
+log's timestamps show the pattern: a test that exports one bundle takes
+about 10 s on Windows, a single-file export about 1 s, and the tests that
+export every catalogue entry about 200 s. The **probable cause**, from
+reading the code and those timestamps but not reproduced on Windows: on
+Windows a bundle's publish rename fails while the marker file inside the
+staging folder is open, `stage.rs` retries it through the whole
+`RETRY_BACKOFF_MS` backoff (9.1 s) before it closes the marker and tries
+once more, and so every bundle export waits about 9 s at publish
+(`stage.rs` itself calls whether an open handle blocks the rename
+**UNVERIFIED**). If that is right it is a user-visible delay on Windows,
+not only test time. The fix (close the marker's handle before the first
+retry, or before the rename on Windows) belongs to a code change with a
+Windows CI run, not to this documents slice; it is listed as open in
+`compatibility.md` and the README.
 
 **Export read measurements (slice 6b2; synthetic, one host, no timing
 asserted).** In the same container, debug test build with `oma-archive`

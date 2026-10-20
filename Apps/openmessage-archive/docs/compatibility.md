@@ -53,19 +53,34 @@ container** (below). Nothing of the viewer has been used on a desktop, with
 audio, with a screen reader, or on WebView2; the manual checklist for
 milestone 5 is open, so **no engine floor is established yet**.
 
-Last updated: Milestone 5 (2026-10-19).
+**And for milestone 6.** Exports have been made only from archives of the
+synthetic catalogues (`tests/fixtures/export/`, the viewer and import
+catalogues) and from generated bulk archives, and read back only by
+programs: the independent Python oracles (stdlib `csv`, `json`,
+`html.parser`, html5lib, jsonschema, pypdf, poppler's `pdftotext`) and
+our own tests. PR A (slices 6a–6h2) passed CI on `ubuntu-22.04` and
+`windows-2022` in [run 39340011184](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39340011184)
+(see "Milestone 6 CI (PR A)"). PR B (slices 6i–6l: PDF, the Export
+dialog, "Save a copy", events off) ran only in a Linux container, the
+dialog in jsdom and in one headless smoke run (slice 6l, below). **No
+export has been opened in a browser, a PDF viewer, a spreadsheet program
+or a screen reader, made on a Windows desktop, or made from a real
+archive;** the manual checklist for milestone 6 is open. XLSX is not
+built (deferred until after 2026-10-31).
+
+Last updated: Milestone 6 (2026-10-20).
 
 ## Operating systems
 
-| Platform | Shell and settings (M1) | Backup discovery and validation (M2) | Extraction check (M3) | Archive import (M4) | Viewer (M5) | Direct device backup (M7) | Notes |
-|---|---|---|---|---|---|---|---|
-| Windows 11 x64 | CI | CI (synthetic fixtures only; windows-2022 runner, [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)). Default-location discovery: **Untested** until run on Windows 11. | CI (synthetic fixtures only; windows-2022 runner, [run 39117881774](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39117881774)). Nobody has run it on Windows 11. | Slices 4a–4f: CI (synthetic fixtures only; windows-2022 runner, [run 39137381988](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39137381988)). Slices 4g–4n: CI (synthetic fixtures only; windows-2022 runner, [run 39163096062](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39163096062)). Nobody has run it on Windows 11. | PR A (slices 5a–5f): CI (synthetic fixtures only; windows-2022 runner, [run 39205163013](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39205163013)). The screens: Untested (never run in WebView2) | Planned | Needs WebView2, which ships with Windows 11. CI builds bundled SQLite with MSVC and runs the Windows-only tests (junctions, a ~200-character library path). That long-path test found that bundled SQLite's default VFS cannot open a staged copy beyond MAX_PATH; staged databases are now opened through the `win32-longpath` VFS. Direct backup will need Apple's Mobile Device Service (Apple Devices app or iTunes). |
-| Windows 11 ARM64 | Untested | Untested | Untested | Untested | Untested | Planned | Not built in CI yet |
-| Ubuntu 22.04 x64 | CI | CI (synthetic fixtures only; [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)) | CI (synthetic fixtures only; [run 39117881774](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39117881774)) | Slices 4a–4f: CI (synthetic fixtures only; [run 39137381988](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39137381988)). Slices 4g–4n: CI (synthetic fixtures only; [run 39163096062](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39163096062)) | PR A: CI (synthetic fixtures only; [run 39205163013](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39205163013)). The screens: Untested in a window | Planned | CI build baseline, which sets the glibc floor. Needs `libwebkit2gtk-4.1-0`. |
-| Ubuntu 24.04 x64 | Supported (built and unit-tested during M1 development) | Local run only (synthetic fixtures only): `cargo test --workspace` and `npm test` passed in an Ubuntu 24.04.5 LTS container on 2026-10-18. Not CI, not a desktop. | Local run only (synthetic fixtures only): `cargo test --workspace`, `npm test`, `npm run typecheck`, clippy, `cargo deny check` and `npm run licenses` passed in an Ubuntu 24.04.5 LTS container on 2026-10-18, plus the headless smoke test below. Not CI, not a desktop. | Local run only (synthetic fixtures only): every check in the app's AGENTS.md list passed in an Ubuntu 24.04.5 LTS container on 2026-10-18, plus the headless smoke test below. Not a desktop. | Local run only (synthetic data only): every check in the app's AGENTS.md list passed in an Ubuntu 24.04.5 LTS container on 2026-10-19, plus the headless smoke test of the viewer below (WebKitGTK 2.52.6). Not a desktop, no audio | Planned | Ships libimobiledevice 1.3.0, which is old. M7 will not depend on it. |
-| Ubuntu 26.04.1 LTS x64 | **Supported** (built from source with `npm run tauri dev`, every M1 check done by hand on a real desktop, a QEMU VM; 2026-10-17/18) | Untested on a real desktop (see the headless smoke test below) | Untested on a real desktop | Untested on a real desktop | Untested on a real desktop | Planned | First manual run anywhere. The native picker chose an ordinary folder. A folder laid out like a backup (`Manifest.db` + `Info.plist`) was refused with the reason shown, and the previous location was kept. The choice survived a restart. Ships libimobiledevice 1.4.0. |
-| Debian 12, Fedora 40+ | Untested | Untested | Untested | Untested | Untested | Planned | Need WebKitGTK 4.1 |
-| macOS | Unsupported for now | — | — | — | — | — | The architecture keeps platform code behind interfaces so it can be added later |
+| Platform | Shell and settings (M1) | Backup discovery and validation (M2) | Extraction check (M3) | Archive import (M4) | Viewer (M5) | Exports (M6) | Direct device backup (M7) | Notes |
+|---|---|---|---|---|---|---|---|---|
+| Windows 11 x64 | CI | CI (synthetic fixtures only; windows-2022 runner, [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)). Default-location discovery: **Untested** until run on Windows 11. | CI (synthetic fixtures only; windows-2022 runner, [run 39117881774](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39117881774)). Nobody has run it on Windows 11. | Slices 4a–4f: CI (synthetic fixtures only; windows-2022 runner, [run 39137381988](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39137381988)). Slices 4g–4n: CI (synthetic fixtures only; windows-2022 runner, [run 39163096062](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39163096062)). Nobody has run it on Windows 11. | PR A (slices 5a–5f): CI (synthetic fixtures only; windows-2022 runner, [run 39205163013](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39205163013)). The screens: Untested (never run in WebView2) | PR A (slices 6a–6h2): CI (synthetic fixtures only; windows-2022 runner, [run 39340011184](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39340011184), including the Mark of the Web read-back and the held-handle publish). PR B: Untested (not on CI yet; never run on Windows). The UI: Untested | Planned | Needs WebView2, which ships with Windows 11. CI builds bundled SQLite with MSVC and runs the Windows-only tests (junctions, a ~200-character library path). That long-path test found that bundled SQLite's default VFS cannot open a staged copy beyond MAX_PATH; staged databases are now opened through the `win32-longpath` VFS. Direct backup will need Apple's Mobile Device Service (Apple Devices app or iTunes). |
+| Windows 11 ARM64 | Untested | Untested | Untested | Untested | Untested | Untested | Planned | Not built in CI yet |
+| Ubuntu 22.04 x64 | CI | CI (synthetic fixtures only; [run 39097397524](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39097397524)) | CI (synthetic fixtures only; [run 39117881774](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39117881774)) | Slices 4a–4f: CI (synthetic fixtures only; [run 39137381988](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39137381988)). Slices 4g–4n: CI (synthetic fixtures only; [run 39163096062](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39163096062)) | PR A: CI (synthetic fixtures only; [run 39205163013](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39205163013)). The screens: Untested in a window | PR A: CI (synthetic fixtures only; [run 39340011184](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39340011184), with the Python oracles on Python 3.10). PR B: Untested on CI | Planned | CI build baseline, which sets the glibc floor. Needs `libwebkit2gtk-4.1-0`. |
+| Ubuntu 24.04 x64 | Supported (built and unit-tested during M1 development) | Local run only (synthetic fixtures only): `cargo test --workspace` and `npm test` passed in an Ubuntu 24.04.5 LTS container on 2026-10-18. Not CI, not a desktop. | Local run only (synthetic fixtures only): `cargo test --workspace`, `npm test`, `npm run typecheck`, clippy, `cargo deny check` and `npm run licenses` passed in an Ubuntu 24.04.5 LTS container on 2026-10-18, plus the headless smoke test below. Not CI, not a desktop. | Local run only (synthetic fixtures only): every check in the app's AGENTS.md list passed in an Ubuntu 24.04.5 LTS container on 2026-10-18, plus the headless smoke test below. Not a desktop. | Local run only (synthetic data only): every check in the app's AGENTS.md list passed in an Ubuntu 24.04.5 LTS container on 2026-10-19, plus the headless smoke test of the viewer below (WebKitGTK 2.52.6). Not a desktop, no audio | Local run only (synthetic data only): every check in the app's AGENTS.md list and the oracles passed in an Ubuntu 24.04.5 LTS container on 2026-10-20, plus the slice 6l headless smoke test below. Not a desktop; no export opened in another program | Planned | Ships libimobiledevice 1.3.0, which is old. M7 will not depend on it. |
+| Ubuntu 26.04.1 LTS x64 | **Supported** (built from source with `npm run tauri dev`, every M1 check done by hand on a real desktop, a QEMU VM; 2026-10-17/18) | Untested on a real desktop (see the headless smoke test below) | Untested on a real desktop | Untested on a real desktop | Untested on a real desktop | Untested on a real desktop | Planned | First manual run anywhere. The native picker chose an ordinary folder. A folder laid out like a backup (`Manifest.db` + `Info.plist`) was refused with the reason shown, and the previous location was kept. The choice survived a restart. Ships libimobiledevice 1.4.0. |
+| Debian 12, Fedora 40+ | Untested | Untested | Untested | Untested | Untested | Untested | Planned | Need WebKitGTK 4.1 |
+| macOS | Unsupported for now | — | — | — | — | — | — | The architecture keeps platform code behind interfaces so it can be added later |
 
 "Supported (built and unit-tested)" on Ubuntu 24.04 means the release build,
 all unit tests, and the `.deb` bundle succeeded.
@@ -1399,9 +1414,9 @@ compile). PR B (slices 5g–5k) has not run on CI at the time of writing.
 
 PR A (`feat/oma-m6-export-engine`: the export reads, `oma-export` with
 TXT, CSV, JSON and HTML, the export job and commands, the decode-helper
-pool) **has not run on CI** at the time of writing, so nothing below was
-run on `ubuntu-22.04` or `windows-2022`. Everything was run in one Linux
-container (Ubuntu 24.04.5 LTS, 4 CPUs, Rust 1.97.0, Python 3.13.16,
+pool). This section records the local runs, written before CI ran; CI's
+run is in "Milestone 6 CI (PR A)" below. Everything here was run in one
+Linux container (Ubuntu 24.04.5 LTS, 4 CPUs, Rust 1.97.0, Python 3.13.16,
 SQLite 3.45.1 for the fixture generator), on synthetic data only, on
 2026-10-19:
 
@@ -1449,6 +1464,34 @@ projection oracle was not re-run there). Setting every listing's
 sentinel floors. The staging, naming and attachment modules compile
 clippy-clean for `x86_64-pc-windows-msvc` through the scratch harness;
 nothing ran on Windows.
+
+### Milestone 6 CI (PR A)
+
+PR A passed the workflow's three jobs in
+[run 39340011184](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39340011184)
+and was merged into `main` as `abd531f` on 2026-10-20; the push to `main`
+passed again in [run 39347992924](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39347992924).
+The first CI run ([39332736622](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39332736622))
+failed one Windows test, whose `a:b.txt` case is a drive prefix on
+Windows; the fix (`5e08ae3`) changed only the test. From the job logs of
+run 39340011184:
+
+| Job | Rust tests | Oracles |
+|---|---|---|
+| `Checks (Linux)`, ubuntu-22.04 | 1,518 passed, 22 ignored, 0 failed | Python 3.10.12: projection 22 archives and `golden-v1`, 4,817 checks; TXT 21 exports, 9,801 checks; data 21 exports, 320,983 checks; HTML 42 bundles, 106 pages, 116,113 checks; each 0 failed |
+| `Build (Linux)`, ubuntu-22.04 | 1,514 passed, 22 ignored, 0 failed | — |
+| `Build (Windows)`, windows-2022 | 1,496 passed, 19 ignored, 0 failed | — |
+
+On `windows-2022` this ran PR A's Windows-only tests for the first time,
+among them a publish with a handle held open
+(`a_publish_with_a_handle_held_open_retries_then_succeeds`) and the
+attachment copy test, which reads back each copy's `Zone.Identifier`
+stream as `ZoneId=3`; and the TXT, CSV, JSON and HTML golden comparisons
+(spec §0.1 item 4). It says nothing about Explorer, Office, Defender or
+SmartScreen. **The Windows test time was far over budget** (the "Rust
+tests" step took 48 minutes; `docs/development.md`, "Test time"), which
+points at a probable delay of about 9 s in every bundle publish on
+Windows; that is not reproduced or fixed yet.
 
 ### Milestone 6 PR B, slice 6i: the export-render helper (Linux container only)
 
@@ -1557,6 +1600,98 @@ WebView2), with a screen reader (the chip's live region, the dialog's
 steps), or on Windows (the Mark of the Web beside a saved copy, sharing
 violations, the save dialog's own overwrite prompt); a copy of a real
 attachment; events in a real archive (the tests make synthetic ones).
+
+### Milestone 6 PR B, slice 6l: the whole branch, the oracles and a headless smoke test (Linux container only)
+
+Run on 2026-10-20 in the same Linux container (Ubuntu 24.04.5 LTS, 4
+CPUs, Rust 1.97.0, Node 22.22.0, Python 3.13.16, poppler 24.02.0), on
+`feat/oma-m6-export-ui` with every PR B slice, synthetic data only:
+
+| What | Result here |
+|---|---|
+| `cargo test --workspace` (after `--no-run`) | 1,601 passed, 25 ignored, 0 failed; 3 min 31 s wall clock, 206.3 s summed (`development.md`, "Test time") |
+| `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo deny check` | Pass (`advisories ok, bans ok, licenses ok, sources ok`) |
+| `npm test`, `npm run typecheck`, `npm run licenses` | 751 passed in 58 files (29 s); pass; 41 runtime packages, all on the allowlist |
+| `src/types/generated/` after the tests | Unchanged |
+| The CI oracle step, run locally in the workflow's order (the oracle virtual environment, `python3 -I`) | Projection: 22 archives and `golden-v1`, 4,817 checks. TXT: 21 exports, 9,801 checks. Data: 21 exports, 320,983 checks. HTML: 42 bundles, 106 pages, 116,113 checks. PDF text: 11 samples, 0 errors. PDF exports: 49 bundles, 77 volumes, 1,138 items, 4,168 checks. Each 0 failed, and every bundle's `SHA256SUMS` passed `sha256sum -c`. About 5 minutes in all |
+| PR A's CI logs, read back (runs 39340011184 and 39347992924) | The test counts and oracle results in "Milestone 6 CI (PR A)" above; the Windows test time over budget (`development.md`) |
+
+**The headless smoke test of the Export dialog.** The release binary
+(`npx tauri build --no-bundle`; 17,783,512 bytes, with
+`target/release/fonts/` holding the 12 fonts and `OFL.txt`) ran under
+Xvfb (1360×860, no window manager) with **WebKitGTK 2.52.6**, inside
+`dbus-run-session` (so the GTK dialogs had a session bus, unlike the M5
+run), with `WEBKIT_DISABLE_DMABUF_RENDERER=1`,
+`WEBKIT_DISABLE_COMPOSITING_MODE=1`, `LIBGL_ALWAYS_SOFTWARE=1`,
+`OMA_LOG=debug`, private `XDG_*` folders and `HOME`, and the container's
+zone (UTC). `settings.json` pointed at a library made by
+`smoke_library.rs` on `/dev/shm`. It was driven with `xdotool` and
+photographed with ImageMagick's `import`; the screenshots are not
+committed. Observed:
+
+- **The Archive page's Export card** ("Export this archive, a date range
+  or one conversation as PDF, HTML, plain text, CSV or JSON. An export is
+  a plaintext copy you keep elsewhere.") opened the dialog at "What to
+  export" with "The whole archive" chosen and focus on the first radio.
+- **Formats:** PDF, HTML, Plain text (TXT), CSV and JSON as checkboxes
+  with their "best for" lines; **Excel workbook (XLSX) disabled** with
+  "Not available in this version. … CSV opens in Excel and LibreOffice
+  meanwhile."; Next disabled until a format was ticked.
+- **Options:** the summary "Codes hidden · earlier content left out ·
+  attachments copied · this computer's zone, 24-hour" for the whole
+  archive, and "attachment names only" for one conversation as a single
+  file (Q3a). "Change…" showed the attachment, content and sensitive
+  groups with both reveals unticked.
+- **Review** (whole archive, PDF + JSON, one-time codes included): "A
+  folder, with README.txt, manifest.json and SHA256SUMS describing it.",
+  "355 items (354 messages) from 8 conversations." (the viewer lists 9
+  conversations; the difference was not investigated), "46 attachments,
+  29 files to copy (271.1 KB); 6 not available.", the fixed disclosure,
+  and a required checkbox "This export will include one-time codes from
+  2 messages that the app normally hides."; "Choose where to save…"
+  stayed disabled until it was ticked. **Wording defect seen:** with the
+  zone already UTC, Review still said "Times will be shown in UTC. The
+  zone name suggests where you are." and offered "Use UTC instead".
+- **The folder picker** opened with the title "Save export — includes
+  one-time codes" (read with `xdotool getwindowname`), but could not
+  select a typed folder in this container (Open stayed disabled), so no
+  folder export was made through the window. Cancelling returned to
+  Review unchanged, and nothing was written to the destination.
+- **Reopening** the dialog after Close showed "Codes hidden" again: the
+  reveal did not carry over.
+- **A single-file PDF** from a thread's "Export conversation…" (the group
+  conversation, 19 items): the GTK save dialog (title "Save export")
+  offered "Messages export 2026-10-20 20-12.pdf" and started in the
+  process's working directory (no Documents folder existed in the
+  private `HOME`). Typing `/dev/shm/oma-smoke/out/notes.html` gave "The
+  export will be saved as notes.html.pdf." with a free-space line; "Start
+  export" finished in 298 ms (the log's `elapsed_ms`) with "Exported 19
+  items from 1 conversation as PDF." (the heading "Export finished" is
+  shown twice, as a heading and a bold sentence: a cosmetic defect). The
+  file was `0600` and alone in the folder (no `.oma-export-*` left).
+  `pdfinfo` 24.02: title "Messages export — conversation 1", tagged,
+  5 pages, PDF 1.7, and the warning "Syntax Error: Suspects object is
+  wrong type (boolean)" (not investigated); `pdffonts`: Noto Sans and
+  Noto Sans Math embedded as subsets with ToUnicode; `pdftotext` gave the
+  heading, the plaintext notice and the items' text.
+- **The privacy screen** (Ctrl+Shift+H) with the dialog open showed
+  "Screen hidden"; after "Show" the dialog was closed and the viewer was
+  where it had been.
+- **The log** (`OMA_LOG=debug`) held the draft, preview, destination,
+  job and publish lines with kinds, buckets and outcomes, and the helper
+  stderr sizes ("0"); a search of it for the destination, the file name,
+  `SYNTH`, `example.invalid` and the phone numbers found nothing.
+
+Not done in this run: a folder export through the window, "Show in
+folder", "Continue in background" and the chip, "Save a copy", the
+search panel's entry point, a cancel, and any check of the PDF in a
+viewer; none of this is a pass of a checklist row.
+
+
+**Not run, so UNVERIFIED:** PR B on CI (`ubuntu-22.04` with Python 3.10
+and poppler 22.02, `windows-2022`); anything of PR B on Windows; the
+installed packages (`.deb`, AppImage, MSI) and their fonts folder; every
+row of the manual checklist below.
 
 ## iOS versions and backup types
 
@@ -1817,6 +1952,48 @@ slice 5d (`media_corpus.rs`, `perf_render_a_large_photo`: a 4032 × 3024
 noise JPEG in 0.84 s for `thumb` and 1.33 s for `display` under the
 release profile's `opt-level = "s"`, in process, against a 700 ms target
 that includes the helper; **not met** at that level).
+
+## Manual checklist for milestone 6 (not yet run)
+
+The owner's checklist of M6 spec §21. **None of it has been run.** Record
+each row here only once it has actually been done, with the date, the
+operating system, the engine or program and its version (WebKitGTK,
+WebView2, Firefox, Chromium or Edge, Epiphany, Acrobat Reader, Evince,
+Okular, Excel, LibreOffice, Notepad, gedit, the terminal), the file
+system of the destination, and the commit. Use synthetic data only: the
+export catalogue (`tests/fixtures/export/`), the viewer catalogue
+(`smoke_library.rs`) and bulk archives; never commit anything from a
+real backup or a real export. "Container" means the slice 6l headless
+smoke run above, which is **not** a pass of any row. XLSX rows wait for
+the XLSX slice (after 2026-10-31).
+
+| # | Check | Linux desktop | Windows 11 |
+|---|---|---|---|
+| 1 | **Dialogs:** the folder and save pickers open over the window; their titles name the sensitive options; whether each native save dialog asks before replacing (**UNVERIFIED**), and that the app's own prompt still appears; typing `notes.html` for a TXT export yields `notes.html.txt`; a cancelled dialog changes nothing | Not tested (container: both GTK dialogs opened; the folder picker's title named the codes; `notes.html` for a PDF gave `notes.html.pdf`; a cancelled folder picker changed nothing; the folder picker could not select a folder there) | Not tested |
+| 2a | **Destinations:** a local folder and a drive root | Not tested | Not tested |
+| 2b | A FAT32 USB stick: a 4 GiB file, case-insensitive names, a 10,000-attachment export (sharding) | Not tested | Not tested |
+| 2c | exFAT, with a file over 4 GiB written | Not tested | Not tested |
+| 2d | A OneDrive or Dropbox folder (warning shown; behaviour on cancel recorded) | Not tested | Not tested |
+| 2e | An SMB share (warning shown; the result recorded) | Not tested | Not tested |
+| 2f | A long path (over 260 characters) opened in Explorer and Office | — | Not tested |
+| 2g | A shared folder without the sticky bit (warning shown) | Not tested | — |
+| 3a | **Interruptions:** cancel at 10 %, 50 % and 90 % of each phase leaves nothing under a final name | Not tested | Not tested |
+| 3b | Killing the app mid-export leaves only `.oma-export-*` entries, which the next export to that folder offers to remove; a second instance's live export is not offered | Not tested | Not tested |
+| 3c | A full disk mid-copy (and mid-XLSX, with the XLSX slice): the app survives | Not tested | Not tested |
+| 3d | Windows Defender scanning during publish; **and the publish delay**: whether a bundle's publish waits about 9 s (the probable cause of the CI test time, `development.md`) | — | Not tested |
+| 4 | **CSV:** Excel (Windows): UTF-8 with BOM shows correctly; `=1+1`, `=HYPERLINK(…)` and ignorable-prefixed formulas are inert; behaviour after save and reopen; 18-digit `date_raw` values; cells over 32,767 characters. LibreOffice Calc (Linux): the same. Numbers: **UNVERIFIED** | Not tested (LibreOffice) | Not tested (Excel) |
+| 5 | **XLSX** in Excel and LibreOffice: `quotePrefix` cells stay text after editing; long-text continuation; sheet rollover; datetime cells and offsets; no macro or external-link prompts | Not built (deferred) | Not built (deferred) |
+| 6 | **HTML** from `file://` in Firefox, Chromium/Edge and WebKit (Epiphany): the CSP meta applies (a planted test resource is blocked); devtools shows no network request; `data:` previews load, and "Larger preview" links work when on; markers display as intended; combining floods stay inside their item; print, dark mode and keyboard use; NVDA, Narrator and Orca reading order | Not tested | Not tested |
+| 7 | **PDF** in Edge, Acrobat Reader, Evince and Okular: Latin, Arabic, Hebrew, Devanagari, Thai, CJK (JP, KR, SC) and emoji glyphs; copy and paste returns the true text, or the markers when they are on; an outline entry per conversation and a heading per day; fonts embedded; veraPDF or PAC results noted (no claim made) | Not tested (only `pdftoppm` renders were looked at, slices 6j1 and 6j2) | Not tested |
+| 8 | **TXT** in Notepad, gedit and `cat` in a terminal: the hostile fixtures cannot inject escapes or fake item headers, through bodies or through sender and conversation names | Not tested | Not tested |
+| 9 | **JSON** validates against the shipped schemas with an external validator, and JSON Lines splits correctly in Python's `splitlines()` | Not tested by hand (the CI oracle validates with jsonschema) | — |
+| 10 | **Attachments:** copies are byte-identical (`SHA256SUMS` passes with `sha256sum -c` and `Get-FileHash`); `.blocked` files do not run on double-click; allowlisted files open normally; Mark of the Web is visible in Properties; Office opens a marked `.docx.blocked`, renamed, in Protected View; Windows Defender behaviour with a hostile fixture recorded as observed; thumbnail-cache behaviour after "Show in folder" recorded | Not tested (`sha256sum -c` passes in the oracle runs only) | Not tested (CI read the `Zone.Identifier` stream back; nothing else) |
+| 11 | **Masking:** no code, earlier text or unsent-part attachment appears in any format without the opt-in; each is present with it; the reveal confirmation shows the exact count | Not tested by hand (the oracles scan every format for the sentinels) | Not tested |
+| 12 | **Permissions:** Linux exports are 0600 and 0700 on ext4 and follow mount options on FAT and exFAT; Windows exports inherit the folder's ACL | Not tested by hand | Not tested |
+| 13 | **Logs** (`OMA_LOG=debug`) after a full export of every format contain no path, name, id, query, zone or content | Not tested by hand (`log_hygiene.rs`; container: one PDF export's log searched, nothing found) | Not tested |
+| 14 | **Viewer interplay:** the export continues after leaving the viewer and after idle hide; the privacy screen closes the dialog and discards the draft; an import is refused during an export, and vice versa; a second app instance cannot import the archive during an export; the Archive page shows "Exporting" | Not tested (container: the privacy screen closed the dialog; the rest jsdom and Rust tests only) | Not tested |
+| 15 | **OS traces:** the recently-used folder lists of the Windows and GTK dialogs after an export (**UNVERIFIED** entries), recorded as observed | Not tested | Not tested |
+| 16 | **The M5 manual checklist rows still unrun** (below): M6 sign-off depends on them too | Open | Open |
 
 ## Manual checklist for milestone 5 (not yet run)
 

@@ -89,8 +89,8 @@ miniz_oxide = { version = "=0.8.9", default-features = false, features = ["with-
 # Milestone 6 slice 6j1: PDF in the export-render helper only (owner Q1,
 # spec §5.6, D133), behind oma-export's `render` feature, which only the
 # shell enables. krilla: no default features (no `simple-text`, whose
-# rustybuzz duplicates parley's shaping; no `raster-images` until the
-# thumbnails need it). parley: never its default `system` feature (system
+# rustybuzz duplicates parley's shaping); `raster-images` on since slice
+# 6j2, for the previews. parley: never its default `system` feature (system
 # font discovery through fontconfig, ISC `libloading`); fonts come only
 # from the pinned bundled set. krilla needs Rust 1.92 (the workspace
 # `rust-version` above) and brings `arrayref` (BSD-2-Clause, the per-crate

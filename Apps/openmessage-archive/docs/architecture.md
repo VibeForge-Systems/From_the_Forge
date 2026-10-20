@@ -1,8 +1,9 @@
 # Architecture
 
-Status: Milestone 5 (the rich viewer) is implemented; its sign-off, like
-that of milestones 2 to 4, is pending (see the README roadmap and the
-manual checklists in `compatibility.md`). Sections marked *planned* describe the intended design for later
+Status: Milestone 6 (exports) is implemented except XLSX (a follow-up
+slice after 2026-10-31); its sign-off, like that of milestones 2 to 5, is
+pending (see the README roadmap and the manual checklists in
+`compatibility.md`). Sections marked *planned* describe the intended design for later
 milestones. They will be revised against evidence as each milestone lands.
 Nothing in them is implemented yet.
 
@@ -59,9 +60,10 @@ flowchart LR
     Shell --> Backup["oma-backup ✔"]
     Shell --> Messages["oma-messages ✔"]
     Shell --> Archive["oma-archive ✔"]
-    Shell --> Export["oma-export (M6 PR A: TXT, CSV, JSON, HTML)"]
+    Shell --> Export["oma-export ✔ (TXT, CSV, JSON, HTML, PDF; XLSX later)"]
     Shell --> Decode["decode helper processes (M5; export pool M6)"]
-    Shell -.-> Render["export-render helper (M6 PR B: PDF, XLSX)"]
+    Shell --> Render["export-render helper (M6: PDF layout; XLSX later)"]
+    Render --> Fonts[("pinned Noto fonts (resources)")]
     Shell -.-> Device["oma-device (M7)"]
     Backup --> FS
     Messages --> Backup
@@ -78,13 +80,13 @@ flowchart LR
 
 | Unit | Responsibility | State |
 |---|---|---|
-| `src/` | Vue 3 UI: views, Pinia stores, the typed IPC client, the shortcut registry, and the capability roadmap | M1, M2 (Backups page), M3 (extraction report), M4 slice 4m (Archive page), M5 slices 5g–5j (the viewer) |
-| `src-tauri/` | Tauri shell. Holds IPC commands, application state, settings persistence, archive-location validation, the backup registry, job table and DTOs, (M3) the report mapping and the panic hook, (M4 slice 4l) the archive commands, the import gate and the import and verify jobs, and (M5 slices 5e, 5f) the viewer session and commands, the `oma-media` protocol handler, the decode helper host and the main window built in Rust, and (M6 slices 6h1, 6h2) the export drafts, destination checks and tokens, the export job and its five commands, and the export's decode-helper pool. Contains no domain logic. | M1, M2, M3, M4 (slice 4l), M5 (slices 5e, 5f), M6 PR A (slices 6h1, 6h2) |
+| `src/` | Vue 3 UI: views, Pinia stores, the typed IPC client, the shortcut registry, and the capability roadmap | M1, M2 (Backups page), M3 (extraction report), M4 slice 4m (Archive page), M5 slices 5g–5j (the viewer), M6 slices 6k1, 6k2 (the Export dialog, `stores/exports.ts`, `services/exportText.ts`, `services/zoneTable.ts`, the entry points and the navbar chip) |
+| `src-tauri/` | Tauri shell. Holds IPC commands, application state, settings persistence, archive-location validation, the backup registry, job table and DTOs, (M3) the report mapping and the panic hook, (M4 slice 4l) the archive commands, the import gate and the import and verify jobs, and (M5 slices 5e, 5f) the viewer session and commands, the `oma-media` protocol handler, the decode helper host and the main window built in Rust, and (M6 slices 6h1, 6h2) the export drafts, destination checks and tokens, the export job and its five commands, and the export's decode-helper pool, and (M6 PR B) the export-render helper's host and entry, the font pin check, the PDF source, "Save a copy" and leaving events out. Contains no domain logic. | M1, M2, M3, M4 (slice 4l), M5 (slices 5e, 5f), M6 (slices 6h1, 6h2, 6i, 6j1, 6j2, 6k2) |
 | `crates/oma-fs` | Filesystem safety: filename sanitization, contained path resolution, and guards for backups, MobileSync, iMazing's default store and cloud sync. From M4: volume facts (`volume`: free space, network/virtualised/FAT detection), the Unix private-permission check (`perm::check_private`), and durable placement (`place`: `fsync_dir`, `create_dir_durable`, `place_noreplace`, `open_nofollow`). From slice 4d: `check_owned_unshared` (the library folder), `rename_dir_noreplace`, `create_new_private` and `total_space` | M1, M4 (slices 4a, 4d) |
 | `crates/oma-backup` | Discovers backups, parses Manifest.plist, Info.plist and Status.plist under a budget, classifies them, unwraps the keybag, stages and validates Manifest.db, checks sms.db in place, and extracts single files. From M3 it also stages sms.db with its `-wal` (blob stamps, content digest, WAL facts), opens staged databases under a read-only authorizer and operation budgets, and probes attachment blobs without extracting them. From M4: `copy_file_to` streams one listed file's plaintext into a caller's writer, hashing it, under `Limits::attachment_bytes` and per-file stamps | ✔ M2, M3, M4 (slice 4b) |
 | `crates/oma-messages` | Scans and probes the sms.db schema by capability, streams typed records (handles, chats, the joins, messages, attachments, Recently Deleted links) as `Col<T>` values, decodes `attributedBody` with a clean-room typedstream decoder, and produces the aggregate `ExtractionReport`. Persists nothing. From M4: stable `KnownColumn` codes, raw values of unreadable cells (`raw_issues`), `payload_data` on request, the raw association columns, key-only passes and the storage class of text cells | ✔ M3, M4 (slice 4c) |
 | `crates/oma-archive` | Owns the versioned archive schema and migrations, runs transactional and resumable imports, builds FTS5 indexes, verifies integrity. Slice 4d ships the skeleton: create, list, open (read-only first), the lock, the one hardened opener, the lock-free reader, schema v1 with its codes and fingerprint, the migration framework, write-open recovery and the creation sweep; slices 4e–4j the import; slice 4k the report-only verifier and `open_blob`. Used by the shell since slice 4l. From M5: the viewer reads (`view/`, `sortkey.rs`, phased budgets), search (`search/`) and media sniffing, checks and rendering (`media/`, `blobs::open_range`) | ✔ M4 (slices 4d–4k), M5 (slices 5a–5d) |
-| `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX. Tauri-free and SQLite-free: it reads only through `oma-archive`'s export APIs. Slice 6d ships the record core: the validated plan, the code registry, the column ledger, the canonical record and its mapping, export-local ordinals, the Rust word tables, time zones and local-day bounds, and the hidden-character markers. Slice 6e1 adds the files core: names, staging and publish, leftovers, the manifest and the writer trait. Slice 6e2 adds the attachment copy, the TXT writer and the pipeline (`pipeline::run`); 6f the JSON and CSV writers; 6g the HTML writer; 6h2 the preview feed between the pipeline and the decode-helper pool. Driven by the shell's export job (slice 6h1). PDF and XLSX are PR B: slice 6i adds the export-render helper and the output check, 6j1 the PDF layout (parley, krilla, behind the `render` feature) with the pinned fonts, 6j2 the PDF writer | ✔ M6 PR A (slices 6d–6h2); PR B: 6i, 6j1, 6j2 built; XLSX deferred; the Export dialog (6k1) with its entry points, chip, events off and "Save a copy" (6k2) |
+| `crates/oma-export` | Exports to TXT, CSV, JSON, HTML, PDF and XLSX. Tauri-free and SQLite-free: it reads only through `oma-archive`'s export APIs. Slice 6d ships the record core: the validated plan, the code registry, the column ledger, the canonical record and its mapping, export-local ordinals, the Rust word tables, time zones and local-day bounds, and the hidden-character markers. Slice 6e1 adds the files core: names, staging and publish, leftovers, the manifest and the writer trait. Slice 6e2 adds the attachment copy, the TXT writer and the pipeline (`pipeline::run`); 6f the JSON and CSV writers; 6g the HTML writer; 6h2 the preview feed between the pipeline and the decode-helper pool. Driven by the shell's export job (slice 6h1). PDF and XLSX are PR B: slice 6i adds the export-render helper and the output check, 6j1 the PDF layout (parley, krilla, behind the `render` feature) with the pinned fonts, 6j2 the PDF writer | ✔ M6 (PR A: slices 6d–6h2; PR B: 6i, 6j1, 6j2, 6k2 `copy.rs` and events off); XLSX deferred to a follow-up slice after 2026-10-31 |
 | `crates/oma-device` | Detects devices and creates backups behind a platform trait | planned, M7 |
 
 Each library crate can be built and tested without Tauri. The shell only
@@ -2990,6 +2992,74 @@ short:
   archive encryption will not cover them, and an encrypted export format
   is an M8 candidate (spec §13).
 
+### Exports (M6): what PR B builds, and the milestone as built
+
+PR B (slices 6i–6l, on `feat/oma-m6-export-ui`) adds the export-render
+helper, PDF, the user interface and the documents. The slice sections
+below hold the detail; in short:
+
+- **The export-render helper (slice 6i, D133).** The app's own binary
+  started with `--oma-export-helper`, before Tauri, one per export that
+  includes PDF. Frames are bounded before allocation (16 MiB, resources
+  64 MiB in 16 slots), a reader thread feeds the host, and the cancel
+  path, a crash, two minutes of silence or a malformed frame kill it.
+  The main process checks every byte the helper returns
+  (`check::check_output`: the PDF's syntax, every Flate stream inflated
+  under a bound, forbidden names such as JavaScript, actions, forms,
+  embedded files and links refused) before anything is staged. Its
+  stderr is counted, never logged. It is not an OS sandbox.
+- **PDF (slices 6j1, 6j2; owner Q1, Q2).** The main process maps
+  records to blocks (`writer/pdf.rs`, after masking, with the TXT
+  writer's lines); the helper lays them out with parley (bidi, shaping,
+  line breaking with the Thai dictionary, per-cluster fallback over the
+  bundled fonts only) and writes them with krilla: subset fonts with
+  ToUnicode and ActualText (the hidden-character marker rule), COLRv1
+  emoji, an outline entry per conversation and a heading per local day,
+  generic titles, previews from checked
+  decode-helper renditions, and tagged structure (headings, paragraphs,
+  figures; no PDF/UA claim). Volumes are cut by an estimate (2,000
+  pages or 40 MiB); a single file is never split. The twelve fonts
+  under `src-tauri/resources/fonts/` are pinned by length and SHA-256 in
+  `pdf/fonts.rs`, checked by the main process before the bytes are sent
+  and again by the helper.
+- **The UI (slices 6k1, 6k2; spec §10).** `ExportDialog.vue` (through
+  `ModalDialog`, mounted once in `ArchiveDialogs.vue`) with
+  `stores/exports.ts`, which persists nothing and builds a fresh form on
+  every open (both reveals and kept extensions off), `exportText.ts`
+  (every sentence) and `zoneTable.ts` (the D128 offset table, built from
+  the webview's ICU). Entry points: the thread header, the search panel,
+  the Archive page's Export card, and "Save a copy…" on attachment cards
+  and in the media viewer. "Continue in background" closes the dialog
+  into `ExportStatusChip.vue`; the Archive page shows "Exporting". Every
+  call goes through `services/ipc.ts`; no path reaches the webview.
+- **Two additions beyond the spec's PR B plan (slice 6k2):** leaving
+  group and system events out (`ExportSnapshot::leave_out_events`,
+  counted in the manifest) and "Save a copy" of one attachment
+  (`oma_export::copy::save_copy`, spec §6.6), both through the existing
+  commands.
+- **XLSX is not built.** rust_xlsxwriter 0.100.0 cannot be pinned before
+  2026-10-31 (14-day rule) and 0.99.x is rejected (advisories), so the
+  helper refuses its `Xlsx` backend, the output check accepts no XLSX,
+  the draft refuses it (`exportUnavailable`), and the dialog shows it
+  disabled with that reason. Its writer is a follow-up slice (D131).
+- **Deviations recorded in the slice sections:** blocks are made in the
+  main process, not the helper; the Han face is always SC (no TC option
+  yet); the volume estimate counts characters, not glyphs; a bundle's
+  PDF points to `README.txt` and `manifest.json` instead of carrying
+  "About this export"; the helper's `Done` frame gained a `figures`
+  count; krilla's `raster-images` is on (adding `imagesize`); parley is
+  0.11.1, not the owner's 0.12.0, until 0.12.0 is 14 days old
+  (2026-10-23); Noto Sans Math was added for the marker's brackets;
+  the Options step is a summary with "Change…"; the zone table window
+  is extended by two days; a failed Mark of the Web is reported as
+  yes/no (`motwMissing`) to keep `exportFinished` under 1 KiB.
+- **What has run.** Everything on Linux in one container, with synthetic
+  data; the dialog in jsdom and once headlessly in a real window (slice
+  6l, `compatibility.md`). PR A also passed CI on both runners
+  ([run 39340011184](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39340011184)).
+  PR B has not run on CI or on Windows; no PDF or HTML export was opened
+  in a viewer or browser.
+
 ### Export caps and raw codes (M6 slice 6a)
 
 Slice 6a prepares the assembly layer for exports (M6 spec §3.1, §3.3,
@@ -5194,7 +5264,8 @@ engine and fonts, apply to PR B: D133; Q3 is D134; Q4 is D125). Q5
 (identifiers, D141) was not put to the owner: its lean is applied and
 awaits confirmation. Every other row is the spec's engineering lean,
 applied as the decision; the owner may still override any of them. Rows
-marked PR B are decided but not built in PR A.
+marked PR B are decided but not built in PR A. The status of each, as
+of slice 6l, is in the table after this one.
 
 | # | Topic | Choice | Main alternative | Trade-off |
 |---|---|---|---|---|
@@ -5222,6 +5293,41 @@ marked PR B are decided but not built in PR A.
 | D131 | XLSX (lean; **deferred** to a follow-up slice after 2026-10-31) | rust_xlsxwriter 0.100.0 in constant-memory mode in the export-render helper; `quotePrefix`; our own 32,767 UTF-16 limit with continuation rows; temp directory in staging. Slice 6i built the helper without it: 0.100.0 (published 2026-10-17) is not 14 days old until 2026-10-31, and 0.99.x is rejected (advisories), so XLSX stays refused | In-process | A panic on temp-file I/O cannot end the app; exact values |
 | D133 | Export-render helper (**owner-confirmed Q1, Q2**; **PR B**, slices 6i, 6j) | PDF layout and XLSX writing in `--oma-export-helper`; bounded frames; main-process output checks; PDF with krilla 0.8.2 + parley 0.12.0 (a per-crate BSD-2-Clause exception for `arrayref` only; `rust-version` 1.92); fonts: the base scripts, Noto Sans CJK and Noto Color Emoji, pinned by SHA-256. Slice 6j1 applied it with parley **0.11.1** until 0.12.0 is 14 days old (2026-10-23), the regional CJK subsets, the COLRv1 emoji build and Noto Sans Math added for the marker's brackets; slice 6j2 wired the PDF writer (volumes by estimate, previews, tagged structure), with krilla's `raster-images` on for the previews | In-process; our own PDF writer | Hostile text and full disks cannot end the app |
 | D139 | Job (slice 6h1) | `JobKind::Export` on the archive subject, holding the archive lock until its cleanup ends; its own reader, so damaged or migrating archives are refused; survives the viewer closing; `removingPartial` keeps the slot | A viewer-session task | One job model; excludes writers in every instance |
+
+**Status of D123–D147 after slice 6l.** "Owner-confirmed" means the
+owner's answer of 2026-10-19 to Q1–Q4; "lean" means the spec's choice,
+applied and open to the owner's override; Q5 (D141) is a lean that
+awaits the owner's confirmation. "Built" means implemented and tested on
+Linux with synthetic data; PR A's rows also passed CI on `ubuntu-22.04`
+and `windows-2022` ([run 39340011184](https://github.com/VibeForge-Systems/From_the_Forge/actions/runs/39340011184)).
+No row has been checked by the M6 manual checklist (`compatibility.md`).
+
+| # | Basis | State |
+|---|---|---|
+| D123 | Lean | Built (PR A; PR B adds the PDF writer behind the same trait) |
+| D124 | Lean | Built (PR A) |
+| D125 | **Owner-confirmed (Q4)** | Built (PR A's reads and opt-ins; PR B's dialog confirms each against its exact count) |
+| D126 | Lean | Built (PR A; "Save a copy" in PR B uses the single-file placement) |
+| D127 | Lean | Built (PR A's dialogs and tokens; PR B's dialog drives them); the native dialogs' own overwrite prompts are not tested |
+| D128, D145 | Lean | Built (PR A in Rust; PR B's `zoneTable.ts` builds the table); WebKitGTK's and WebView2's `Intl` support not tested |
+| D129 | Lean | Built (PR A; PR B's `exportText.ts` for the dialog) |
+| D130 | Lean | Built (PR A) |
+| D131 | Lean | **Not built: XLSX deferred** to a follow-up slice after 2026-10-31 (rust_xlsxwriter 0.100.0 is not 14 days old before then; 0.99.x rejected); XLSX is refused |
+| D132 | Lean | Built (PR A); not opened in any browser |
+| D133 | **Owner-confirmed (Q1, Q2)** | Built for PDF (PR B: slices 6i, 6j1, 6j2), with parley 0.11.1 until 0.12.0 can be pinned (on or after 2026-10-23); its XLSX half waits for D131 |
+| D134 | **Owner-confirmed (Q3a–Q3c)** | Built (PR A; "Save a copy" in PR B applies the same allowlist and Mark of the Web); Mark of the Web written and read back on CI's NTFS, its effect not tested |
+| D135 | Lean | Built (PR A; PR B adds the PDF volumes and the events-left-out count) |
+| D136 | Lean | Built (PR A; PR B adds `copyReady`, `riskyName`, `eventsLeftOut`, `motwMissing`) |
+| D137 | Lean | Built (PR A; PR B's search panel entry point) |
+| D138 | Lean | Built (PR A; PR B's PDF text layer follows the markers) |
+| D139 | Lean | Built (PR A; PR B's "Exporting" state and the navbar chip) |
+| D140 | Lean | Built (PR A) on Linux; Windows ACL inheritance not tested |
+| D141 | **Lean awaiting the owner (Q5)** | Built (PR A; PR B's dialog offers the opt-in for JSON and CSV) |
+| D142 | Lean | Built (PR A) |
+| D143 | Lean | Built (PR A); the Windows residual stays disclosed |
+| D144 | Lean | Built (PR A) |
+| D146 | Lean | Built (PR A's oracles; PR B adds the pypdf and `pdftotext` oracles); openpyxl waits for XLSX |
+| D147 | Lean | Built (PR A; PR B's dialog sends each confirmed count) |
 
 ## Logging
 
