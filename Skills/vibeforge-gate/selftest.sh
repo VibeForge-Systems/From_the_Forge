@@ -473,8 +473,12 @@ run_to() {  # OUTFILE CMD...  — run, capture output and exit code
   "$@" > "$out" 2>&1 || rc=$?
   printf '%s\n' "$rc" > "$out.rc"
 }
+# A deny list configured in the caller's environment (as agent environments do)
+# would satisfy the "no list" case and leak into every other one, so the
+# deny-list variables are scrubbed too; cases that need one set it themselves.
 gate_env() { env -u VF_GATE_MANIFEST -u VF_GATE_ALLOW_SKIP -u VF_OUTGOING -u VF_OUTGOING_TIPS \
-               -u VF_PUSH_UPDATES -u VF_PUSH_REMOTE VF_GATE_NO_COLOR=1 "$@"; }
+               -u VF_PUSH_UPDATES -u VF_PUSH_REMOTE -u VF_LEAK_DENYLIST -u VF_LEAK_DENYLIST_PATTERNS \
+               VF_GATE_NO_COLOR=1 "$@"; }
 
 OMAN='meta:
   name: t
