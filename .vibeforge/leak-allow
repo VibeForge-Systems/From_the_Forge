@@ -1,0 +1,11 @@
+# Reviewed lines the leak-scan gate check may let through. One extended regex
+# per line, matched against "path:line" (or "path (merge):line").
+#
+# Keep entries narrow — a whole file only when the file exists to hold planted
+# examples — and say why. Documentation should use RFC 5737 addresses and
+# example.com names instead of needing an entry here.
+
+# Selftests that plant internal-looking values on purpose, to prove the
+# sweep and the gate catch them.
+^Skills/repo-publication-readiness/selftest\.sh:
+^Skills/vibeforge-gate/selftest\.sh:

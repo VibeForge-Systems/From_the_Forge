@@ -1,0 +1,20 @@
+# Identities that may appear in commits pushed to this PUBLIC repository.
+# One extended regex per line, matched case-insensitively against each author,
+# committer, tagger and trailer email in every outgoing commit
+# (the identity-check gate check).
+#
+# Every entry below is ALREADY public in this repository's history, so this
+# file publishes nothing new. Adding an identity is a reviewed decision: an
+# employer or client address is exactly what this check exists to stop.
+
+# GitHub noreply addresses, for anyone
+@users\.noreply\.github\.com$
+^noreply@github\.com$
+
+# maintainers, as already published
+^nagual69@gmail\.com$
+^vibemaster@vibeforgesystems\.com$
+
+# agents
+^noreply@anthropic\.com$
+^copilot@github\.com$

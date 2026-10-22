@@ -26,6 +26,18 @@
 #   - Behavior on non-Linux. The fetch examples in the catalog use linux_x64
 #     release URLs and have not been exercised elsewhere.
 #   - Whether the doctrine is any good. That is a review question, not a check.
+#   - Credential scanning by a second engine. The gate runs gitleaks; TruffleHog
+#     (live verification) is part of Skills/repo-publication-readiness, not of
+#     every push. gitleaks' fetch: is linux_x64 only; elsewhere, install 8.30.1.
+#   - Employer, client and codename terms, unless THIS MACHINE has a private
+#     deny list (~/.config/vibeforge/leak-denylist, or $VF_LEAK_DENYLIST_PATTERNS
+#     in agent environments). Without one, denylist-scan SKIPs and the run is
+#     not green — deliberately: the names cannot live in this public repository.
+#
+# THIS REPOSITORY IS PUBLIC. The checks below that read $VF_OUTGOING judge every
+# commit a push would publish — not just the working tree — for credentials
+# (merge resolutions and messages included), identities, internal details,
+# deny-list terms and credential-bearing files.
 # =============================================================================
 
 meta:
@@ -115,25 +127,54 @@ checks:
     why: |
       The whole value of this package is that green means every declared check
       actually ran. That property lives in the exit-code and SKIP semantics, so
-      those are tested rather than documented and hoped for: 32 cases covering
+      those are tested rather than documented and hoped for: 48 cases covering
       exit 0/1/2/3, SKIP-blocks vs deliberate-skip-does-not, version pin and
       sha256 enforcement, timeouts, shadow-mode deadlines, advisory mode,
-      stage selection, parser strictness, and sign-off trailer parsing.
+      stage selection, parser strictness, sign-off trailer parsing, and the
+      outgoing-commit set ($VF_OUTGOING) through real pushes at pre-push and
+      pre-receive, plus the catalog checks that read it.
     run: ./Skills/vibeforge-gate/selftest.sh
 
+  - id: rpr-selftest
+    desc: the publication-readiness scripts find what they claim to find
+    stage: push
+    probe: command -v git-filter-repo && python3 -c 'import tomllib'
+    install: "pip install git-filter-repo  (and python3 >= 3.11)"
+    why: |
+      Skills/repo-publication-readiness/ ships scripts whose whole value is
+      that a clean report means clean. Its selftest plants one example of every
+      leak class in a throwaway repo (credential-shaped values generated at run
+      time, never committed), asserts the sweep reports each, performs a real
+      git filter-repo --sensitive-data-removal rewrite, and proves the verifier
+      passes it and FAILS when old history is smuggled back. The scanner
+      end-to-end cases need gitleaks >= 8.19 and TruffleHog; without them the
+      selftest says NOT RUN for those cases rather than passing them.
+    run: ./Skills/repo-publication-readiness/selftest.sh
+
   - id: skill-frontmatter
-    desc: SKILL.md has the frontmatter a skill loader needs
+    desc: every SKILL.md has the frontmatter a skill loader needs
     stage: commit
     why: |
       A skill with a malformed or missing `name`/`description` silently never
-      triggers, which looks exactly like the skill being unhelpful.
+      triggers, which looks exactly like the skill being unhelpful. Checked for
+      every skill under Skills/*/skills/: the name must equal its directory
+      (the Agent Skills spec requires it), and the description must be
+      substantive but within the 1024-character limit loaders enforce.
     run: |
-      f=Skills/vibeforge-gate/skills/vibeforge-gate/SKILL.md
-      head -1 "$f" | grep -qx -- '---' || { echo "no opening frontmatter fence"; exit 1; }
-      grep -qE '^name: vibeforge-gate$' "$f" || { echo "missing or wrong 'name:'"; exit 1; }
-      grep -qE '^description: .{40,}' "$f" || { echo "missing or too-thin 'description:'"; exit 1; }
-      grep -qE '^---$' <(tail -n +2 "$f") || { echo "no closing frontmatter fence"; exit 1; }
-      echo "SKILL.md frontmatter ok"
+      bad=0
+      for f in Skills/*/skills/*/SKILL.md; do
+        [ -f "$f" ] || continue
+        d="$(basename "$(dirname "$f")")"
+        head -1 "$f" | grep -qx -- '---' || { echo "  $f: no opening frontmatter fence"; bad=1; continue; }
+        grep -qE '^---$' <(tail -n +2 "$f") || { echo "  $f: no closing frontmatter fence"; bad=1; continue; }
+        fm="$(awk 'NR>1 && /^---$/ {exit} NR>1 {print}' "$f")"
+        grep -qxF "name: $d" <<<"$fm" || { echo "  $f: name is not '$d'"; bad=1; }
+        desc="$(sed -n 's/^description: //p' <<<"$fm")"
+        n="${#desc}"
+        if [ "$n" -lt 40 ] || [ "$n" -gt 1024 ]; then echo "  $f: description is $n chars (40..1024)"; bad=1; fi
+        [ "$bad" -eq 0 ] && echo "  ok    $f ($n-char description)"
+      done
+      [ "$bad" -eq 0 ] || exit 1
 
   - id: plugin-json
     desc: plugin.json and marketplace.json are valid, and every source path exists
@@ -292,3 +333,315 @@ checks:
       [ "${#files[@]}" -eq 0 ] && { echo "no shell scripts"; exit 0; }
       "$VF_TOOL" -S warning "${files[@]}"
       echo "shellcheck: clean (${#files[@]} scripts)"
+
+  - id: secret-scan-staged
+    desc: no credential values in what this commit adds
+    stage: commit
+    tool: gitleaks
+    tool_version: "8.30.1"
+    version_cmd: gitleaks version
+    install: "go install github.com/gitleaks/gitleaks/v8@v8.30.1"
+    fetch_sha256: "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509"
+    why: |
+      The cheapest moment to stop a credential is before it is a commit at all:
+      once committed, removing it means rewriting history, and once pushed, it
+      means rotating it. `--pre-commit --staged` scans exactly the staged diff,
+      so it is fast enough for every commit. Keys on the shape and entropy of
+      credential values, not identifier names. Allowlist synthetic test vectors
+      in .gitleaks.toml (gitleaks loads <repo>/.gitleaks.toml on its own) rather
+      than loosening a rule: an allowlist entry is reviewable, a loosened rule
+      is not.
+    fetch: |
+      d="$(mktemp -d)"
+      curl -fsSL --max-time 90 \
+        "https://github.com/gitleaks/gitleaks/releases/download/v${VF_TOOL_VERSION}/gitleaks_${VF_TOOL_VERSION}_linux_x64.tar.gz" \
+        -o "$d/gl.tgz"
+      tar xzf "$d/gl.tgz" -C "$d" gitleaks
+      mv "$d/gitleaks" "$VF_TOOL_DEST"
+      rm -rf "$d"
+    run: |
+      "$VF_TOOL" git --pre-commit --staged --redact --no-banner "$VF_ROOT"
+
+  - id: secret-scan-outgoing
+    desc: no credential values in any commit this push would publish
+    stage: push
+    tool: gitleaks
+    tool_version: "8.30.1"
+    version_cmd: gitleaks version
+    install: "go install github.com/gitleaks/gitleaks/v8@v8.30.1"
+    fetch_sha256: "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509"
+    why: |
+      This is the check that matches what a push actually does. $VF_OUTGOING is
+      every commit the destination does not have yet — computed by the runner
+      from the refs git hands the pre-push hook, so `git push origin topic` is
+      gated on topic, not on whatever is checked out. Three passes over those
+      commits: their diffs; each merge replayed with --remerge-diff (git 2.36+,
+      --cc before), because no history scanner reads merge resolutions; and
+      their messages, which are not diffs. A finding here means the value is
+      about to become public: rotate it first, then rewrite the commit.
+    fetch: |
+      d="$(mktemp -d)"
+      curl -fsSL --max-time 90 \
+        "https://github.com/gitleaks/gitleaks/releases/download/v${VF_TOOL_VERSION}/gitleaks_${VF_TOOL_VERSION}_linux_x64.tar.gz" \
+        -o "$d/gl.tgz"
+      tar xzf "$d/gl.tgz" -C "$d" gitleaks
+      mv "$d/gitleaks" "$VF_TOOL_DEST"
+      rm -rf "$d"
+    run: |
+      n="$(wc -l < "$VF_OUTGOING" | tr -d ' ')"
+      [ "$n" -gt 0 ] || { echo "no outgoing commits"; exit 0; }
+      w="$(mktemp -d)"; trap 'rm -rf "$w"' EXIT
+      bad=0
+      # 1. diffs. gitleaks splits --log-opts on single spaces into git log
+      #    arguments, so the SHAs go in as one space-joined string, chunked.
+      split -l 1000 "$VF_OUTGOING" "$w/chunk."
+      for c in "$w"/chunk.*; do
+        "$VF_TOOL" git --redact --no-banner \
+          --log-opts "--no-walk $(paste -sd' ' "$c")" "$VF_ROOT" || bad=1
+      done
+      # 2. merge resolutions
+      md=--remerge-diff
+      git show --remerge-diff -s --format= HEAD >/dev/null 2>&1 || md=--cc
+      while read -r c; do
+        [ "$(git rev-list --parents -n 1 "$c" | wc -w)" -gt 2 ] || continue
+        printf '=== merge %s\n' "$c"; git show "$md" -p --no-color --format= "$c"
+      done < "$VF_OUTGOING" > "$w/merges"
+      if [ -s "$w/merges" ]; then
+        "$VF_TOOL" stdin --redact --no-banner < "$w/merges" || { echo "in a merge resolution (see the === merge lines)"; bad=1; }
+      fi
+      # 3. commit messages
+      git log --no-walk=unsorted --stdin --format='=== commit %H%n%B' < "$VF_OUTGOING" > "$w/messages"
+      "$VF_TOOL" stdin --redact --no-banner < "$w/messages" || { echo "in a commit message"; bad=1; }
+      if [ "$bad" -ne 0 ]; then
+        echo "a credential is in a commit this push would publish: rotate it, then rewrite the commit"
+        exit 1
+      fi
+      echo "no credentials in $n outgoing commit(s), their merge resolutions, or their messages"
+
+  - id: identity-check
+    desc: every identity in the outgoing commits may be published
+    stage: push
+    probe: test -r .vibeforge/allowed-identities
+    install: "create .vibeforge/allowed-identities: one extended regex per line, e.g. @users\.noreply\.github\.com$"
+    why: |
+      An author, committer, tagger or Co-authored-by email is published with the
+      commit and can never be taken back without rewriting history. The usual
+      accident is a commit made with an employer or client address on a
+      machine configured for work. GitHub's "block command line pushes that
+      expose my email" setting checks only the most recent commit of a push,
+      and only your own private address; this checks every outgoing commit
+      against the identities you decided may be public. The file holds
+      patterns for identities that are ALREADY public, so it publishes nothing.
+    run: |
+      allowed() { grep -qiE -f <(grep -vE '^[[:space:]]*(#|$)' .vibeforge/allowed-identities) <<<"$1"; }
+      bad=0
+      while read -r e; do
+        [ -n "$e" ] || continue
+        allowed "$e" || { echo "   not in .vibeforge/allowed-identities: $e"; bad=1; }
+      done < <(
+        while read -r c; do
+          git show -s --format='%ae%n%ce%n%(trailers:only,unfold)' "$c"
+        done < "$VF_OUTGOING" | grep -oE '[^<> :]+@[^<> ]+\.[A-Za-z]{2,}' | sort -u
+        while read -r t; do
+          [ "$(git cat-file -t "$t" 2>/dev/null)" = tag ] && git cat-file -p "$t" | sed -n 's/^tagger .*<\(.*\)>.*/\1/p'
+        done < "$VF_OUTGOING_TIPS"
+      )
+      [ "$bad" -eq 0 ] || { echo "fix the commit identity (git commit --amend --reset-author), or add a pattern if it is meant to be public"; exit 1; }
+      echo "every outgoing identity is allowed"
+
+  - id: leak-scan
+    desc: no private IPs, internal hostnames, UNC shares or home paths in what this push adds
+    stage: push
+    why: |
+      Internal topology is not a credential, so no secret scanner reports it:
+      an RFC 1918 or CGNAT address, a host under .lan/.internal/.corp/
+      .intranet/.localdomain/.home.arpa/.local, a \\server\share path, or a
+      C:\Users\<name> or /home/<name> path that names a real account. Each is a
+      map of where the code came from. Only ADDED lines of outgoing commits,
+      their merge resolutions and their messages are read. Documentation should
+      use the RFC 5737 ranges (192.0.2/24, 198.51.100/24, 203.0.113/24) and
+      example.com names, which never match. Suppress a reviewed line by adding
+      an extended regex for "path:line" to .vibeforge/leak-allow. Blocking here:
+      this public repository's history is clean of these, and its docs use RFC
+      5737 addresses and example.com names (reviewed fixtures: .vibeforge/leak-allow).
+    run: |
+      w="$(mktemp -d)"; trap 'rm -rf "$w"' EXIT
+      [ -s "$VF_OUTGOING" ] || { echo "no outgoing commits"; exit 0; }
+      md=--remerge-diff
+      git show --remerge-diff -s --format= HEAD >/dev/null 2>&1 || md=--cc
+      while read -r c; do
+        git show -p -U0 --no-color --no-ext-diff --format='%n=== %H%n%B' "$c" \
+          | awk '/^=== /{f="(message)"; next} /^diff --/{f="(diff)"; next}
+                 /^\+\+\+ /{sub(/^\+\+\+ (b\/)?/,""); f=$0; next}
+                 f=="(message)"{print "(message):" $0; next} /^\+/{print f ":" substr($0,2)}'
+        if [ "$(git rev-list --parents -n 1 "$c" | wc -w)" -gt 2 ]; then
+          git show "$md" -p --no-color --format= "$c" \
+            | awk '/^\+\+\+ /{sub(/^\+\+\+ (b\/)?/,""); f=$0; next} /^\+/{print f " (merge):" substr($0,2)}'
+        fi
+      done < "$VF_OUTGOING" > "$w/added"
+      ip='(^|[^0-9.])(10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3}|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3})([^0-9.]|$)'
+      host='(^|[^A-Za-z0-9.-])[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.(lan|internal|intranet|corp|localdomain|home\.arpa|local)([^A-Za-z0-9.(-]|$)'
+      unc='\\\\[A-Za-z][A-Za-z0-9._-]{2,}\\[A-Za-z0-9$._-]{2,}'
+      home='([A-Za-z]:\\{1,2}Users\\{1,2}|(^|[^A-Za-z0-9._-])/(home|Users)/)[A-Za-z0-9._-]{2,}'
+      generic='host\.docker\.internal|cluster\.local|localhost\.localdomain|\\\\(server|localhost|wsl\$)\\|/(home|Users)/(user|username|runner|ubuntu|root|you|me|example|name)([^A-Za-z0-9._-]|$)|Users\\{1,2}([Uu]ser|[Uu]sername|USER|USERNAME|Public|Default|runneradmin)|(^|[^A-Za-z0-9_])(self|this|cls|obj|ctx|config|settings|super|threading|os|sys)\.(local|lan|internal|intranet|corp)'
+      # strip the conventions every repo shares, then look for what is left
+      sed -E "s#($generic)##g" "$w/added" | grep -E -e "$ip" -e "$host" -e "$unc" -e "$home" > "$w/hits" || true
+      if [ -f .vibeforge/leak-allow ]; then
+        grep -vE -f <(grep -vE '^[[:space:]]*(#|$)' .vibeforge/leak-allow) "$w/hits" > "$w/kept" || true
+      else cp "$w/hits" "$w/kept"; fi
+      if [ -s "$w/kept" ]; then
+        cut -c1-200 "$w/kept" | sed 's/^/   /'
+        echo "internal details in lines this push adds: replace them, or allow a reviewed line in .vibeforge/leak-allow"
+        exit 1
+      fi
+      echo "no internal addresses, hostnames, shares or home paths in $(wc -l < "$VF_OUTGOING" | tr -d ' ') outgoing commit(s)"
+
+  - id: denylist-scan
+    desc: no employer, client or codename terms in what this push adds
+    stage: push
+    probe: f="${VF_LEAK_DENYLIST:-$HOME/.config/vibeforge/leak-denylist}"; test -s "$f" || test -n "${VF_LEAK_DENYLIST_PATTERNS:-}"
+    install: "create ~/.config/vibeforge/leak-denylist (one extended regex per line; NEVER inside the repo), or export VF_LEAK_DENYLIST_PATTERNS"
+    why: |
+      The names you must not publish — an employer, its clients, internal
+      product codenames — cannot live in the repository, because committing
+      the list publishes the names. So the list lives outside it: a file at
+      ~/.config/vibeforge/leak-denylist (or $VF_LEAK_DENYLIST), or a
+      newline-separated $VF_LEAK_DENYLIST_PATTERNS for environments that hold
+      secrets in variables. The check refuses a list inside the repository.
+      With no list configured the check SKIPs and blocks: a deny list nobody
+      wrote is a gap you should see, not a pass. Reads added lines, merge
+      resolutions, messages, and the names of the refs being pushed.
+    run: |
+      w="$(mktemp -d)"; trap 'rm -rf "$w"' EXIT
+      f="${VF_LEAK_DENYLIST:-$HOME/.config/vibeforge/leak-denylist}"
+      { [ -s "$f" ] && cat "$f"; printf '%s\n' "${VF_LEAK_DENYLIST_PATTERNS:-}"; } \
+        | grep -vE '^[[:space:]]*(#|$)' > "$w/deny" || true
+      if [ -s "$f" ]; then
+        case "$(cd "$(dirname "$f")" && pwd -P)/" in "$(cd "$VF_ROOT" && pwd -P)"/*)
+          echo "the deny list $f is inside the repository: move it out (publishing the repo would publish it)"; exit 1 ;;
+        esac
+      fi
+      [ -s "$w/deny" ] || { echo "deny list is empty"; exit 1; }
+      md=--remerge-diff
+      git show --remerge-diff -s --format= HEAD >/dev/null 2>&1 || md=--cc
+      while read -r c; do
+        git show -p -U0 --no-color --no-ext-diff --format='(message) %B' "$c" | grep -E '^(\+|\(message\))' || true
+        if [ "$(git rev-list --parents -n 1 "$c" | wc -w)" -gt 2 ]; then
+          git show "$md" -p --no-color --format= "$c" | grep '^+' || true
+        fi
+      done < "$VF_OUTGOING" > "$w/added"
+      if [ -n "${VF_PUSH_UPDATES:-}" ] && [ -r "$VF_PUSH_UPDATES" ]; then
+        awk '{print "(ref) " $1 " " $3}' "$VF_PUSH_UPDATES" >> "$w/added"
+      fi
+      if grep -inE -f "$w/deny" "$w/added" > "$w/hits"; then
+        echo "$(wc -l < "$w/hits" | tr -d ' ') added line(s) match the private deny list (terms are not printed: gate output can land in shared logs)"
+        echo "see them locally: git rev-list HEAD --not --remotes | while read -r c; do git show -p \"\$c\"; done | grep -inE -f <your deny list>"
+        exit 1
+      fi
+      echo "no deny-list terms in $(wc -l < "$VF_OUTGOING" | tr -d ' ') outgoing commit(s)"
+
+  - id: outgoing-files
+    desc: no oversized, credential-bearing or output-laden files in any outgoing commit
+    stage: push
+    why: |
+      no-large-files reads the working tree, so a file added in one commit and
+      deleted in the next passes it and is published anyway. This reads every
+      file an outgoing commit adds or modifies (merges included, against their
+      first parent) and refuses three kinds:
+        * blobs over the limit — permanent in every clone once pushed;
+        * names that are the finding by themselves: .env and *.env (examples
+          exempt), private keys, keystores, .kdbx, .tfstate, .har and .pcap
+          captures, credentials*.json, .netrc, .git-credentials;
+        * Jupyter notebooks committed with cell outputs, which carry data,
+          tokens printed while debugging, and local paths.
+      Allow a reviewed path with an extended regex in .vibeforge/files-allow.
+    run: |
+      limit=$((5 * 1024 * 1024))
+      [ -s "$VF_OUTGOING" ] || { echo "no outgoing commits"; exit 0; }
+      dm=--diff-merges=first-parent
+      git log -1 --format= "$dm" HEAD >/dev/null 2>&1 || dm=-m
+      sens='(^|/)(\.env(\.[^/]+)?|[^/]+\.env|id_(rsa|dsa|ecdsa|ed25519)|[^/]+\.(pem|key|p12|pfx|jks|keystore|kdbx|ovpn|tfstate|har|pcap|pcapng)|credentials[^/]*\.json|service[-_]account[^/]*\.json|\.netrc|_netrc|\.pypirc|\.htpasswd|\.git-credentials)$'
+      safe='(^|/)(\.env\.(example|sample|template|dist|defaults?)|(example|sample|template)\.env|[^/]*\.pub)$'
+      allow() { [ -f .vibeforge/files-allow ] && grep -qE -f <(grep -vE '^[[:space:]]*(#|$)' .vibeforge/files-allow) <<<"$1"; }
+      bad=0
+      while IFS=$'\t' read -r meta path; do
+        set -- $meta; blob="$4"
+        [ "$2" = 160000 ] && continue                    # submodule gitlink
+        allow "$path" && continue
+        if grep -qE "$sens" <<<"$path" && ! grep -qE "$safe" <<<"$path"; then
+          echo "   credential-bearing file name: $path"; bad=1
+        fi
+        size="$(git cat-file -s "$blob")"
+        if [ "$size" -gt "$limit" ]; then echo "   $path is $size bytes (limit $limit)"; bad=1; fi
+        case "$path" in *.ipynb)
+          if [ "$(git cat-file -p "$blob" | grep -c '"outputs":')" -gt "$(git cat-file -p "$blob" | grep -cE '"outputs": *\[\]')" ]; then
+            echo "   notebook committed with outputs: $path (nbstripout, or jupyter nbconvert --clear-output)"; bad=1
+          fi ;;
+        esac
+      done < <(git log --no-walk=unsorted --stdin --raw --no-abbrev --no-renames --diff-filter=AM "$dm" --format= < "$VF_OUTGOING" | grep '^:' | sort -u)
+      [ "$bad" -eq 0 ] || { echo "these would be published by this push: remove them from the commits, or allow a reviewed path in .vibeforge/files-allow"; exit 1; }
+      echo "no oversized, credential-bearing or output-laden files in $(wc -l < "$VF_OUTGOING" | tr -d ' ') outgoing commit(s)"
+
+  - id: workflow-hardening
+    desc: hosted-CI workflows are not exploitable from a public pull request
+    stage: push
+    tool: zizmor
+    tool_version: "1.31.1"
+    version_cmd: zizmor --version
+    install: "pipx install zizmor==1.31.1  (or: pip install zizmor==1.31.1)"
+    why: |
+      actionlint checks that a workflow is valid; this checks that it is safe,
+      which matters the moment a repository is public and strangers can open
+      pull requests. zizmor's audits cover the known ways in: actions referenced
+      by a movable tag instead of a full commit SHA (a retagged action runs
+      with your token), pull_request_target and workflow_run checking out
+      untrusted code, template injection from PR titles and branch names,
+      credentials persisted into the workspace by actions/checkout, excessive
+      GITHUB_TOKEN permissions, and self-hosted runners. --offline keeps it
+      local; medium and above blocks, informational findings do not. Pin the
+      version: new audits arrive with releases, and a release that adds one
+      should be a reviewed one-line bump, not a surprise red.
+    run: |
+      ls .github/workflows/*.yml .github/workflows/*.yaml >/dev/null 2>&1 \
+        || { echo "no workflow files"; exit 0; }
+      "$VF_TOOL" --offline --no-progress --min-severity medium .github/workflows/
+
+  - id: secret-scan-history
+    desc: no credential values anywhere in git history, on any ref
+    stage: manual
+    tool: gitleaks
+    tool_version: "8.30.1"
+    version_cmd: gitleaks version
+    install: "go install github.com/gitleaks/gitleaks/v8@v8.30.1"
+    fetch_sha256: "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509"
+    why: |
+      Every ref, every commit: what an attacker cloning the repo gets. Run it
+      when adopting the gate, after any incident, and before a repository is
+      made public (for that, the repo-publication-readiness skill goes further:
+      a mirror clone, so refs/pull/* are included, and a second scanner). No
+      --log-opts on purpose: gitleaks' default is `--full-history --all`, and
+      any --log-opts value would replace it. Merges and messages get their own
+      passes, as in secret-scan-outgoing. Slow on a large history, hence manual.
+    fetch: |
+      d="$(mktemp -d)"
+      curl -fsSL --max-time 90 \
+        "https://github.com/gitleaks/gitleaks/releases/download/v${VF_TOOL_VERSION}/gitleaks_${VF_TOOL_VERSION}_linux_x64.tar.gz" \
+        -o "$d/gl.tgz"
+      tar xzf "$d/gl.tgz" -C "$d" gitleaks
+      mv "$d/gitleaks" "$VF_TOOL_DEST"
+      rm -rf "$d"
+    run: |
+      w="$(mktemp -d)"; trap 'rm -rf "$w"' EXIT
+      bad=0
+      "$VF_TOOL" git --redact --no-banner "$VF_ROOT" || bad=1
+      md=--remerge-diff
+      git show --remerge-diff -s --format= HEAD >/dev/null 2>&1 || md=--cc
+      git rev-list --merges --all | while read -r c; do
+        printf '=== merge %s\n' "$c"; git show "$md" -p --no-color --format= "$c"
+      done > "$w/merges"
+      if [ -s "$w/merges" ]; then "$VF_TOOL" stdin --redact --no-banner < "$w/merges" || bad=1; fi
+      { git log --all --format='=== commit %H%n%B'
+        git for-each-ref refs/tags --format='=== tag %(refname)%0a%(contents)'; } > "$w/messages"
+      "$VF_TOOL" stdin --redact --no-banner < "$w/messages" || bad=1
+      [ "$bad" -eq 0 ] || { echo "credentials in history: rotate every one, then see the repo-publication-readiness skill"; exit 1; }
+      echo "no credentials in any ref's history, merge resolutions or messages"
