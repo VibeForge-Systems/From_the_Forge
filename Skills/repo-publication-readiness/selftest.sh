@@ -45,6 +45,10 @@ has() {  # NAME FILE TEXT
   if grep -qF -- "$3" "$2"; then ok "$1"; else bad "$1 (missing: $3)"; show "$2"; fi
 }
 
+# A deny list configured in the caller's environment must not leak into cases
+# that assert on what the sweep finds without one; cases that want one set it.
+unset RPR_DENYLIST VF_LEAK_DENYLIST VF_LEAK_DENYLIST_PATTERNS
+
 for t in git python3 git-filter-repo; do
   command -v "$t" >/dev/null 2>&1 || { echo "selftest needs $t on PATH (git-filter-repo: pip install git-filter-repo)"; exit 2; }
 done
