@@ -279,7 +279,7 @@ checks:
     desc: no employer, client or codename terms in what this push adds
     stage: push
     probe: f="${VF_LEAK_DENYLIST:-$HOME/.config/vibeforge/leak-denylist}"; test -s "$f" || test -n "${VF_LEAK_DENYLIST_PATTERNS:-}"
-    install: "create ~/.config/vibeforge/leak-denylist (one extended regex per line; NEVER inside the repo), or export VF_LEAK_DENYLIST_PATTERNS"
+    install: "cp <vibeforge-gate>/skills/vibeforge-gate/templates/leak-denylist.example ~/.config/vibeforge/leak-denylist, fill in section 1 (NEVER keep it inside the repo), or export VF_LEAK_DENYLIST_PATTERNS"
     why: |
       The names you must not publish — an employer, its clients, internal
       product codenames — cannot live in the repository, because committing
@@ -290,6 +290,9 @@ checks:
       With no list configured the check SKIPs and blocks: a deny list nobody
       wrote is a gap you should see, not a pass. Reads added lines, merge
       resolutions, messages, and the names of the refs being pushed.
+      templates/leak-denylist.example is a starting point: a section for your
+      own names, and active generic patterns for confidentiality markings,
+      SaaS tenant hostnames that name a customer, and cloud account ids.
     run: |
       w="$(mktemp -d)"; trap 'rm -rf "$w"' EXIT
       f="${VF_LEAK_DENYLIST:-$HOME/.config/vibeforge/leak-denylist}"

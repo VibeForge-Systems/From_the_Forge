@@ -93,8 +93,11 @@ PowerShell.
   identities against `.vibeforge/allowed-identities`, internal IPs and
   hostnames, oversized or credential-bearing files, and a private deny list of
   employer and client names that lives outside the repo
-  (`~/.config/vibeforge/leak-denylist` or `$VF_LEAK_DENYLIST_PATTERNS`). Never
-  add a deny-list term to any file in this repository.
+  (`~/.config/vibeforge/leak-denylist` or `$VF_LEAK_DENYLIST_PATTERNS`;
+  start from `Skills/vibeforge-gate/skills/vibeforge-gate/templates/leak-denylist.example`).
+  Never add a deny-list term to any file in this repository — the example
+  carries placeholders and generic patterns only, and its two copies must stay
+  identical (`templates-in-sync`).
 - Generate credential-shaped test values at run time; never commit one, even
   a fake.
 - `.claude/` is gitignored on purpose; per-clone agent settings stay local.

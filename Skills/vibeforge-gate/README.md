@@ -62,7 +62,7 @@ Four rules keep that true:
    visible is not the same as never-ran and unknown.
 4. **Claim only what you check.** See *Honest limits*.
 
-The runner's own [`selftest.sh`](selftest.sh) asserts all of this — 48 cases
+The runner's own [`selftest.sh`](selftest.sh) asserts all of this — 51 cases
 covering the exit codes, the SKIP semantics, version-pin and sha256
 enforcement, timeouts, shadow-mode deadlines, stage selection, parser
 strictness, sign-off trailer parsing, the outgoing-commit set through real
@@ -158,7 +158,7 @@ resolve them per repository: `.claude-plugin/marketplace.json` (points here) and
 ```
 .claude-plugin/plugin.json
 commands/gate.md                     ->  /vibeforge-gate:gate
-selftest.sh                          48 cases pinning the runtime contract
+selftest.sh                          51 cases pinning the runtime contract
 skills/vibeforge-gate/
   SKILL.md                           doctrine + when to use it
   references/
@@ -175,6 +175,7 @@ skills/vibeforge-gate/
     gate.sh                          the runner
     gates.yaml                       annotated starter manifest
     hooks/{pre-commit,pre-push,pre-receive}
+    leak-denylist.example            starter private deny list for denylist-scan
   examples/go-sacp/                  a real migration, with its equivalence audit
 ```
 

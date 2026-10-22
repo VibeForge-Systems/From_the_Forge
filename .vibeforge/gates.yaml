@@ -104,7 +104,9 @@ checks:
     why: |
       This repo dogfoods the runner it ships by copying the template into
       .vibeforge/. Two copies drift: a fix lands in one and ships from the
-      other. This check makes the drift impossible to commit.
+      other. This check makes the drift impossible to commit. The same holds
+      for leak-denylist.example, which both vibeforge-gate and
+      repo-publication-readiness ship because each installs on its own.
     run: |
       T=Skills/vibeforge-gate/skills/vibeforge-gate/templates
       if ! diff -q "$T/gate.sh" .vibeforge/gate.sh >/dev/null; then
@@ -119,7 +121,14 @@ checks:
           exit 1
         fi
       done
-      echo "runner and hooks match their templates"
+      # the example deny list ships in both skills, which install separately
+      R=Skills/repo-publication-readiness/skills/repo-publication-readiness/templates
+      if ! diff -q "$T/leak-denylist.example" "$R/leak-denylist.example" >/dev/null; then
+        echo "the two copies of leak-denylist.example differ:"
+        diff -u "$T/leak-denylist.example" "$R/leak-denylist.example" || true
+        exit 1
+      fi
+      echo "runner, hooks and the example deny list match their templates"
 
   - id: selftest
     desc: the runner's contract holds
@@ -127,7 +136,7 @@ checks:
     why: |
       The whole value of this package is that green means every declared check
       actually ran. That property lives in the exit-code and SKIP semantics, so
-      those are tested rather than documented and hoped for: 48 cases covering
+      those are tested rather than documented and hoped for: 51 cases covering
       exit 0/1/2/3, SKIP-blocks vs deliberate-skip-does-not, version pin and
       sha256 enforcement, timeouts, shadow-mode deadlines, advisory mode,
       stage selection, parser strictness, sign-off trailer parsing, and the
@@ -500,7 +509,7 @@ checks:
     desc: no employer, client or codename terms in what this push adds
     stage: push
     probe: f="${VF_LEAK_DENYLIST:-$HOME/.config/vibeforge/leak-denylist}"; test -s "$f" || test -n "${VF_LEAK_DENYLIST_PATTERNS:-}"
-    install: "create ~/.config/vibeforge/leak-denylist (one extended regex per line; NEVER inside the repo), or export VF_LEAK_DENYLIST_PATTERNS"
+    install: "cp <vibeforge-gate>/skills/vibeforge-gate/templates/leak-denylist.example ~/.config/vibeforge/leak-denylist, fill in section 1 (NEVER keep it inside the repo), or export VF_LEAK_DENYLIST_PATTERNS"
     why: |
       The names you must not publish — an employer, its clients, internal
       product codenames — cannot live in the repository, because committing
@@ -511,6 +520,9 @@ checks:
       With no list configured the check SKIPs and blocks: a deny list nobody
       wrote is a gap you should see, not a pass. Reads added lines, merge
       resolutions, messages, and the names of the refs being pushed.
+      templates/leak-denylist.example is a starting point: a section for your
+      own names, and active generic patterns for confidentiality markings,
+      SaaS tenant hostnames that name a customer, and cloud account ids.
     run: |
       w="$(mktemp -d)"; trap 'rm -rf "$w"' EXIT
       f="${VF_LEAK_DENYLIST:-$HOME/.config/vibeforge/leak-denylist}"
