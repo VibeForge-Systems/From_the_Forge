@@ -21,12 +21,14 @@ specifics.
 
   Edit the canonical file, and never paste content into the pointer.
 - **This repository is a plugin marketplace.** The plugins it lists are
-  `vibeforge-gate` and `coroner`. To exercise them as a user would:
+  `vibeforge-gate`, `coroner` and `repo-publication-readiness`. To exercise
+  them as a user would:
 
   ```
   /plugin marketplace add VibeForge-Systems/From_the_Forge
   /plugin install vibeforge-gate@from-the-forge
   /plugin install coroner@from-the-forge
+  /plugin install repo-publication-readiness@from-the-forge
   ```
 
   Changes to a plugin directory show up only after reinstalling from a

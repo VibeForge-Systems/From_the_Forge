@@ -1,0 +1,58 @@
+[
+  {
+    "query": "I want to make my private repo public next week. What do I need to check first?",
+    "should_trigger": true
+  },
+  {
+    "query": "Can you audit this repo before we open-source it? I'm worried there are old API keys in the history.",
+    "should_trigger": true
+  },
+  {
+    "query": "Should I just flip the visibility to public or create a new repo? We have two years of PRs in there.",
+    "should_trigger": true
+  },
+  {
+    "query": "I wrote this tool partly on my work laptop. Before I put it on GitHub publicly, what should I check?",
+    "should_trigger": true
+  },
+  {
+    "query": "We found a customer's hostname in an old commit. The repo goes public on Monday. How do we scrub it properly?",
+    "should_trigger": true
+  },
+  {
+    "query": "Help me use git-filter-repo to remove a .env file from every commit before we release this.",
+    "should_trigger": true
+  },
+  {
+    "query": "We just made the repo public and someone says there's a token in a closed PR. What now?",
+    "should_trigger": true
+  },
+  {
+    "query": "Prepare this project for its first public release on GitHub: license, security policy, branch protection, the works.",
+    "should_trigger": true
+  },
+  {
+    "query": "Add a secret scanner to our pre-push hook.",
+    "should_trigger": false
+  },
+  {
+    "query": "Our CI minutes ran out; set up local checks before merge.",
+    "should_trigger": false
+  },
+  {
+    "query": "Rotate the AWS keys in our production account.",
+    "should_trigger": false
+  },
+  {
+    "query": "Write a README for this library.",
+    "should_trigger": false
+  },
+  {
+    "query": "Which open source license is most popular for JavaScript libraries?",
+    "should_trigger": false
+  },
+  {
+    "query": "Squash my last three commits into one.",
+    "should_trigger": false
+  }
+]
