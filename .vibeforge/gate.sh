@@ -39,7 +39,7 @@
 
 set -uo pipefail
 
-VF_VERSION="1.0.0"
+VF_VERSION="1.1.0"
 
 # --- locate repo + manifest ---------------------------------------------------
 # SELF is resolved before any cd so --pristine can re-run this same script from
@@ -355,7 +355,8 @@ run_check() {
 
   # env: KEY=VALUE per line. Seeded with the runner's own exports so the array is
   # never empty (an empty "${a[@]}" is an unbound-variable error on bash < 4.4).
-  local -a envs=("VF_TOOL=$VF_TOOL" "VF_ROOT=$ROOT" "VF_CACHE_DIR=$CACHE_DIR")
+  local -a envs=("VF_TOOL=$VF_TOOL" "VF_ROOT=$ROOT" "VF_CACHE_DIR=$CACHE_DIR"
+                 "VF_OUTGOING=$VF_OUTGOING" "VF_OUTGOING_TIPS=$VF_OUTGOING_TIPS")
   local envblock="${F[$i.env]:-}" el
   if [ -n "$envblock" ]; then
     while IFS= read -r el; do
@@ -525,9 +526,80 @@ case "$MODE" in
     exit 0 ;;
 esac
 
+# =============================================================================
+# Outgoing commits — what this push would publish
+#
+# A working-tree check sees the tree as it is now. A push publishes COMMITS: a
+# credential committed in one commit and deleted in the next leaves a clean
+# tree and a published secret, and `git push origin topic` publishes `topic`
+# whatever HEAD happens to be. So the runner works out which commits the
+# destination does not have and gives every check two files:
+#
+#   $VF_OUTGOING       one commit SHA per line — what would be published
+#   $VF_OUTGOING_TIPS  one SHA per line — the tips being pushed
+#
+# In pre-push (the hook exports VF_PUSH_UPDATES and VF_PUSH_REMOTE): each
+# pushed ref's commits, minus what that remote's tracking refs already hold
+# and the remote's current tip. Commits other remotes already have still
+# count — publishing to a new public remote is exactly when they matter. A
+# remote given as a bare URL has no tracking refs, so everything counts: that
+# over-scans, never under-scans. A deletion contributes nothing.
+# Outside a push: HEAD minus every remote-tracking ref.
+# A caller that has computed the set already (pre-receive) exports
+# VF_OUTGOING itself, and it is used as-is.
+# =============================================================================
+VF_TMP="$(mktemp -d)"
+trap 'rm -rf "$VF_TMP"' EXIT
+OUTGOING_FROM=""
+
+is_zero_sha() { case "$1" in *[!0]*) return 1 ;; *) return 0 ;; esac; }
+
+compute_outgoing() {
+  if [ -n "${VF_OUTGOING:-}" ]; then
+    [ -r "$VF_OUTGOING" ] || die "VF_OUTGOING=$VF_OUTGOING is not a readable file"
+    if [ -z "${VF_OUTGOING_TIPS:-}" ] || [ ! -r "$VF_OUTGOING_TIPS" ]; then
+      VF_OUTGOING_TIPS="$VF_TMP/tips"
+      git rev-parse --verify -q HEAD > "$VF_OUTGOING_TIPS" 2>/dev/null || : > "$VF_OUTGOING_TIPS"
+    fi
+    OUTGOING_FROM="provided by the caller"
+    return 0
+  fi
+  local out="$VF_TMP/outgoing" tips="$VF_TMP/tips"
+  : > "$out"; : > "$tips"
+  if [ -n "${VF_PUSH_UPDATES:-}" ]; then
+    [ -r "$VF_PUSH_UPDATES" ] || die "VF_PUSH_UPDATES=$VF_PUSH_UPDATES is not a readable file"
+    local _lref lsha _rref rsha
+    local -a known=()
+    [ -n "${VF_PUSH_REMOTE:-}" ] && known=("--remotes=$VF_PUSH_REMOTE")
+    while read -r _lref lsha _rref rsha; do
+      [ -n "${lsha:-}" ] || continue
+      is_zero_sha "$lsha" && continue                      # a deletion publishes nothing
+      printf '%s\n' "$lsha" >> "$tips"
+      local -a have=()
+      # ^rsha must come BEFORE --not: after --not, git reads ^X as inclusion
+      if [ -n "${rsha:-}" ] && ! is_zero_sha "$rsha" && git cat-file -e "$rsha^{commit}" 2>/dev/null; then
+        have=("^$rsha")
+      fi
+      git rev-list "$lsha" ${have[@]+"${have[@]}"} --not ${known[@]+"${known[@]}"} >> "$out" \
+        || die "cannot list the commits being pushed for $lsha"
+    done < "$VF_PUSH_UPDATES"
+    OUTGOING_FROM="this push to ${VF_PUSH_REMOTE:-a remote}"
+  elif git rev-parse --verify -q HEAD >/dev/null 2>&1; then
+    git rev-parse HEAD > "$tips"
+    git rev-list HEAD --not --remotes >> "$out"
+    OUTGOING_FROM="HEAD, minus every remote-tracking ref"
+  else
+    OUTGOING_FROM="no commits yet"
+  fi
+  sort -u -o "$out" "$out"
+  VF_OUTGOING="$out"; VF_OUTGOING_TIPS="$tips"
+}
+compute_outgoing
+
 # --- run ----------------------------------------------------------------------
 printf '%s%s%s — local merge bar, stage: %s%s%s\n' \
   "$bold" "${META[name]:-$(basename "$ROOT")}" "$rst" "$cyn" "$STAGE" "$rst"
+printf '%soutgoing: %s commit(s) — %s%s\n' "$dim" "$(wc -l < "$VF_OUTGOING" | tr -d ' ')" "$OUTGOING_FROM" "$rst"
 
 ran=0
 for ((i = 0; i < N; i++)); do

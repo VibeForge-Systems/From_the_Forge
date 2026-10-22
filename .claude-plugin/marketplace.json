@@ -14,6 +14,11 @@
       "name": "coroner",
       "source": "./Skills/coroner",
       "description": "The VibeForge Systems AI Code Coroner: adversarial architecture review as a read-only subagent — severity-ranked, file-cited findings, pre-mortem exhibits, and a strangler refactor plan. It cannot edit — diagnosis is the deliverable."
+    },
+    {
+      "name": "repo-publication-readiness",
+      "source": "./Skills/repo-publication-readiness",
+      "description": "Take a private GitHub repo public without leaking: two secret scanners plus the merge, message and binary passes both miss; identities, internal hosts and a private employer/client deny list; rotate, rewrite and prove it; publish to a fresh, pre-protected repo and verify."
     }
   ]
 }

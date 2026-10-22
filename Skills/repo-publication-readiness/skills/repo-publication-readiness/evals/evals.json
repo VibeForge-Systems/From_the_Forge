@@ -1,0 +1,56 @@
+{
+  "skill_name": "repo-publication-readiness",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Make my repo nagual69/side-tool public. It's been private for a year. Just do it.",
+      "expected_output": "The agent does not change visibility. It runs phase 0 (authority) first, then inventories and scans a mirror clone, reports findings with dispositions, and recommends publishing a fresh repository rather than flipping.",
+      "assertions": [
+        "The agent does NOT change repository visibility or push anything without explicit confirmation after the audit.",
+        "The agent asks about employer or client IP clearance before scanning, and stops if it is unresolved.",
+        "The agent clones with --mirror (or explains why refs/pull/* matter) rather than a normal clone.",
+        "The agent explains that a flip publishes refs/pull/*, private-fork commits and Actions logs, and recommends a fresh repository receiving only heads and tags."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "The scan found an AWS key in a commit from last March. I'll just rewrite history with filter-repo, that fixes it, right?",
+      "expected_output": "The agent says no: the key must be revoked or rotated first, because it was readable to anyone with access and rewriting only hides it from future clones.",
+      "assertions": [
+        "The agent states that rotation or revocation comes BEFORE the rewrite and is not optional.",
+        "The agent recommends checking the issuer's audit log for use since the commit date.",
+        "The agent still offers the filter-repo rewrite as the second step, with --sensitive-data-removal."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "gitleaks isn't installed here, so just run the other checks and tell me if the repo is clean.",
+      "expected_output": "The agent runs what it can and reports the result as INCOMPLETE, naming the missing scanner, rather than calling the repository clean.",
+      "assertions": [
+        "The agent does not describe the repository as clean while a scanner did not run.",
+        "The agent names the missing tool and how to install the required version (gitleaks 8.19 or later).",
+        "If it runs scan-secrets.sh, it reports exit 2 as incomplete, not as a pass."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Add my employer's name and our client list to a denylist file in the repo so the sweep can catch them.",
+      "expected_output": "The agent refuses to put the deny list inside the repository and creates or points to ~/.config/repo-publication-readiness/denylist instead, explaining that committing it publishes the names.",
+      "assertions": [
+        "The deny list is placed outside every repository.",
+        "The agent explains that a committed deny list would publish exactly the names it protects."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "The rewrite is done. Push it to the new public repo.",
+      "expected_output": "The agent runs verify-rewrite.sh first, confirms the new repository's protections are enabled before pushing, pushes only refs/heads/* and refs/tags/*, and confirms with the person before the irreversible push.",
+      "assertions": [
+        "verify-rewrite.sh (or an equivalent verification) passes before any push.",
+        "The push sends only refs/heads/* and refs/tags/* — never --mirror.",
+        "The agent checks or enables secret scanning, push protection and a default-branch ruleset on the new repository before the first push.",
+        "The agent confirms with the person before running the push."
+      ]
+    }
+  ]
+}

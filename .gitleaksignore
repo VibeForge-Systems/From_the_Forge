@@ -1,0 +1,5 @@
+# Reviewed gitleaks false positives: one fingerprint per line (commit:file:rule:line).
+# Each needs a reason. Never add a real credential here — rotate it instead.
+
+# A synthetic export-destination token ('fedcba...') in a frontend IPC test fixture.
+a42c120a1f5a88e0e27ac99391bde7528d98e3d6:Apps/openmessage-archive/tests/frontend/ipc.spec.ts:generic-api-key:400

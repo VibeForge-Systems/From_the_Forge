@@ -38,6 +38,7 @@ Read `references/doctrine.md` before making a judgment call about any of these.
 | "install the hook" | `git config core.hooksPath .vibeforge/hooks`. See `references/hooks.md`. |
 | "why is this check here?" | `.vibeforge/gate.sh --explain <id>` — every check carries its own rationale and provenance. |
 | a check reports SKIP | Do **not** paper over it. Install the tool, or make the operator's acceptance of the gap explicit. |
+| "make sure nothing leaks when we push" / "a secret got through" | Add the outgoing-aware checks from `catalog/supply-chain.yaml` and `catalog/universal.yaml`; they read `$VF_OUTGOING`. Preparing a private repo to go public is a different job: the `repo-publication-readiness` skill. |
 
 ## Standing one up
 
@@ -67,12 +68,14 @@ Then tell the user, in plain terms, what the gate does and does not cover.
       Keys on the shape and entropy of credential values, not on identifier
       names, so it distinguishes a stored secret from a doc comment naming one.
     run: |
-      "$VF_TOOL" detect --source "$VF_ROOT" --no-git --redact
+      "$VF_TOOL" dir --redact --no-banner "$VF_ROOT"
 ```
 
 Also available: `needs:` (comma-separated binaries that must exist), `probe:` (any command whose success means "ready" — use it for a library, e.g. `python3 -c 'import jsonschema'`), `env:` (`KEY=VALUE` per line), `skip_env:` (name of an env var that deliberately skips this check), `enforce: false` (advisory — runs, reports WARN on failure, never blocks), `enforce_after:` (the shadow-mode deadline — advisory until the date, blocking after), `timeout:` (seconds before a hung `run:` is killed and reported FAIL), `fetch_sha256:` (the bytes the fetched tool must hash to), `mirrors:` (provenance).
 
-`run:` is bash, executed with `-euo pipefail` in `dir:`. `$VF_TOOL` is the resolved pinned binary, `$VF_ROOT` the repo root. Full field reference: `references/manifest.md`.
+`run:` is bash, executed with `-euo pipefail` in `dir:`. `$VF_TOOL` is the resolved pinned binary, `$VF_ROOT` the repo root, and `$VF_OUTGOING` a file listing every commit the push would publish (`$VF_OUTGOING_TIPS`: the tips being pushed). Full field reference: `references/manifest.md`.
+
+**Check what is published, not what is checked out.** A push publishes commits, not a tree. A value committed in one commit and deleted in the next leaves a clean tree and a published value; `git push origin topic` publishes `topic` whatever is checked out. Any check about *what must not leak* — secrets, identities, internal addresses, oversized or credential-bearing files — should read `$VF_OUTGOING`, as the catalog's `secret-scan-outgoing`, `identity-check`, `leak-scan`, `denylist-scan` and `outgoing-files` do. A working-tree scan alone is a gap; see `references/doctrine.md`.
 
 **Shadow mode.** A new check that would fail today goes in with `enforce: false`, gets tuned against real runs, and is promoted by deleting that line. Introducing a check in blocking mode on day one is how gates get disabled wholesale. Give it `enforce_after: YYYY-MM-DD` — the runner keeps it advisory until that date and blocks after it, so the promotion cannot be forgotten indefinitely.
 
@@ -95,4 +98,5 @@ Say all of this plainly when you install a gate; do not let the user discover it
 - **A local hook is a convenience, not an enforced boundary.** Anyone can `--no-verify`, and a contributor who never installs the hook is never gated. Only a server-side check that runs on receipt is unbypassable. If the repo has somewhere that can run one — a self-hosted forge, a shared runner, a post-receive hook — say so.
 - **The gate reproduces *commands*, not an environment.** It runs on your machine, your OS, your toolchain, your architecture. A matrix across OS or language versions, a container build, a deployment step, or anything needing credentials the repo does not have, is not reproduced. Declare those `stage: manual` or leave them out and *say* they are out.
 - **A green gate means the declared checks passed.** It does not mean the manifest declares the right checks. The manifest is a claim about what matters, and it is only as good as the last time someone thought about it.
+- **The outgoing set is as good as your remote-tracking refs.** Outside a push it is `HEAD` minus every `refs/remotes/*`; inside one it is the pushed refs minus that remote's tracking refs. Stale tracking refs over-scan (safe); a first push to a new remote scans everything (correct — none of it is there yet). It covers commits, not everything a push can carry: a lightweight tag's name and an annotated tag's tagger are checked, a tag message is checked only by `secret-scan-history`.
 - **The runner parses a small YAML subset**, and errors with a line number on anything outside it. It will never silently misread a manifest — but a construct you expect from a full YAML library may simply be rejected.

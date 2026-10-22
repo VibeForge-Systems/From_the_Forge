@@ -16,9 +16,24 @@
 # A non-zero exit refuses the push. Exit 2 means a check was SKIPPED rather than
 # failed — the run is weaker than the bar this repository declares, so it stops
 # you the same way a failure would.
+#
+# WHAT IS PUSHED, NOT WHAT IS CHECKED OUT. git hands this hook the refs being
+# pushed on stdin ("<local ref> <local sha> <remote ref> <remote sha>" per
+# line) and the remote's name as $1. The hook passes all of it to the runner
+# (VF_PUSH_UPDATES, VF_PUSH_REMOTE, VF_PUSH_URL), which turns it into
+# $VF_OUTGOING: every commit this push would publish. Without that, a gate
+# sees only the working tree — and `git push origin topic` from main, or a
+# secret added and deleted inside one push, sails through.
 
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
+updates="$(mktemp)"
+trap 'rm -f "$updates"' EXIT
+cat > "$updates"
+
 echo "pre-push: running the local merge bar (.vibeforge/gate.sh) — bypass with 'git push --no-verify'"
-exec "$ROOT/.vibeforge/gate.sh"
+rc=0
+VF_PUSH_REMOTE="${1:-}" VF_PUSH_URL="${2:-}" VF_PUSH_UPDATES="$updates" \
+  "$ROOT/.vibeforge/gate.sh" || rc=$?
+exit "$rc"

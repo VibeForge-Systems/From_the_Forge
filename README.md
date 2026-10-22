@@ -8,6 +8,7 @@ Collection of Interesting Tips, Tricks and Reference Cards, Quick Code Snipits a
 |---|---|
 | [`Skills/vibeforge-gate/`](Skills/vibeforge-gate/) | A repository-owned merge bar — a local pre-commit/pre-push gate that runs the checks a hosted CI service would have, without needing one. Also a Claude Code plugin and skill. |
 | [`Skills/coroner/`](Skills/coroner/) | The Coroner Protocol — adversarial architecture review as a read-only subagent. Severity-ranked, file-cited findings; it diagnoses and never edits. Also a Claude Code plugin. |
+| [`Skills/repo-publication-readiness/`](Skills/repo-publication-readiness/) | Take a private GitHub repo public without leaking: audits every ref with two secret scanners plus the passes both miss, sweeps identities, internal details and a private employer/client deny list, then guides rotation, a verified history rewrite, hardening and a fresh, pre-protected publication. Also a Claude Code plugin and skill. |
 | [`Apps/openmessage-archive/`](Apps/openmessage-archive/) | OpenMessage Archive — a local-first Tauri 2 / Rust / Vue 3 desktop app for archiving iPhone Messages from local backups (Windows 11 and Linux). Milestone 3 (the extraction check) implemented; its sign-off is pending. |
 | [`Skills/`](Skills/) | Packaged Claude skills (`.skill` / `.zip`) |
 | [`Tips_and_Tricks/`](Tips_and_Tricks/) | MCP quick-reference cards |
@@ -25,6 +26,7 @@ This repository is a Claude Code plugin marketplace:
 /plugin marketplace add VibeForge-Systems/From_the_Forge
 /plugin install vibeforge-gate@from-the-forge
 /plugin install coroner@from-the-forge
+/plugin install repo-publication-readiness@from-the-forge
 ```
 
 ## This repository gates itself
@@ -47,7 +49,7 @@ opt-in per clone, so they are a convenience rather than an enforced boundary.
 
 ## Licensing
 
-This repository is **AGPL-3.0** ([`LICENSE`](LICENSE)), with three exceptions:
+This repository is **AGPL-3.0** ([`LICENSE`](LICENSE)), with four exceptions:
 
 - **[`Skills/vibeforge-gate/`](Skills/vibeforge-gate/) is Apache-2.0** — see
   [`Skills/vibeforge-gate/LICENSE`](Skills/vibeforge-gate/LICENSE). It is kept
@@ -61,6 +63,12 @@ This repository is **AGPL-3.0** ([`LICENSE`](LICENSE)), with three exceptions:
   ones that could not accept copyleft. Contributions to that directory are
   inbound = outbound under Apache-2.0 per
   [`Skills/coroner/DCO`](Skills/coroner/DCO).
+
+- **[`Skills/repo-publication-readiness/`](Skills/repo-publication-readiness/) is
+  Apache-2.0** — see [`Skills/repo-publication-readiness/LICENSE`](Skills/repo-publication-readiness/LICENSE).
+  Permissive so its scripts can be dropped into any repository being prepared
+  for release; contributions are inbound = outbound under Apache-2.0 per
+  [`Skills/repo-publication-readiness/DCO`](Skills/repo-publication-readiness/DCO).
 
 - **[`Apps/openmessage-archive/`](Apps/openmessage-archive/) is Apache-2.0** — see
   [`Apps/openmessage-archive/LICENSE`](Apps/openmessage-archive/LICENSE). It is a

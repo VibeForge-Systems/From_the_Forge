@@ -62,10 +62,12 @@ Four rules keep that true:
    visible is not the same as never-ran and unknown.
 4. **Claim only what you check.** See *Honest limits*.
 
-The runner's own [`selftest.sh`](selftest.sh) asserts all of this — 32 cases
+The runner's own [`selftest.sh`](selftest.sh) asserts all of this — 48 cases
 covering the exit codes, the SKIP semantics, version-pin and sha256
 enforcement, timeouts, shadow-mode deadlines, stage selection, parser
-strictness, and sign-off trailer parsing.
+strictness, sign-off trailer parsing, the outgoing-commit set through real
+`git push` runs at both pre-push and pre-receive, and the catalog checks that
+read it.
 
 ## Install
 
@@ -140,7 +142,7 @@ git config core.hooksPath .vibeforge/hooks   # enforce it
       Keys on the shape and entropy of credential values rather than identifier
       names, so it distinguishes a stored secret from a doc comment naming one.
     run: |
-      "$VF_TOOL" detect --source "$VF_ROOT" --no-git --redact --no-banner
+      "$VF_TOOL" dir --redact --no-banner "$VF_ROOT"
 ```
 
 Adding a check is editing one block. Full field reference:
@@ -156,7 +158,7 @@ resolve them per repository: `.claude-plugin/marketplace.json` (points here) and
 ```
 .claude-plugin/plugin.json
 commands/gate.md                     ->  /vibeforge-gate:gate
-selftest.sh                          32 cases pinning the runtime contract
+selftest.sh                          48 cases pinning the runtime contract
 skills/vibeforge-gate/
   SKILL.md                           doctrine + when to use it
   references/

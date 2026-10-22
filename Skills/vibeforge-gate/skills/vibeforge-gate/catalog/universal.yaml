@@ -118,6 +118,48 @@ checks:
       [ "$bad" -eq 0 ] || { echo "use git-lfs or keep these out of the repo"; exit 1; }
       echo "no oversized tracked files"
 
+  - id: outgoing-files
+    desc: no oversized, credential-bearing or output-laden files in any outgoing commit
+    stage: push
+    why: |
+      no-large-files reads the working tree, so a file added in one commit and
+      deleted in the next passes it and is published anyway. This reads every
+      file an outgoing commit adds or modifies (merges included, against their
+      first parent) and refuses three kinds:
+        * blobs over the limit — permanent in every clone once pushed;
+        * names that are the finding by themselves: .env and *.env (examples
+          exempt), private keys, keystores, .kdbx, .tfstate, .har and .pcap
+          captures, credentials*.json, .netrc, .git-credentials;
+        * Jupyter notebooks committed with cell outputs, which carry data,
+          tokens printed while debugging, and local paths.
+      Allow a reviewed path with an extended regex in .vibeforge/files-allow.
+    run: |
+      limit=$((5 * 1024 * 1024))
+      [ -s "$VF_OUTGOING" ] || { echo "no outgoing commits"; exit 0; }
+      dm=--diff-merges=first-parent
+      git log -1 --format= "$dm" HEAD >/dev/null 2>&1 || dm=-m
+      sens='(^|/)(\.env(\.[^/]+)?|[^/]+\.env|id_(rsa|dsa|ecdsa|ed25519)|[^/]+\.(pem|key|p12|pfx|jks|keystore|kdbx|ovpn|tfstate|har|pcap|pcapng)|credentials[^/]*\.json|service[-_]account[^/]*\.json|\.netrc|_netrc|\.pypirc|\.htpasswd|\.git-credentials)$'
+      safe='(^|/)(\.env\.(example|sample|template|dist|defaults?)|(example|sample|template)\.env|[^/]*\.pub)$'
+      allow() { [ -f .vibeforge/files-allow ] && grep -qE -f <(grep -vE '^[[:space:]]*(#|$)' .vibeforge/files-allow) <<<"$1"; }
+      bad=0
+      while IFS=$'\t' read -r meta path; do
+        set -- $meta; blob="$4"
+        [ "$2" = 160000 ] && continue                    # submodule gitlink
+        allow "$path" && continue
+        if grep -qE "$sens" <<<"$path" && ! grep -qE "$safe" <<<"$path"; then
+          echo "   credential-bearing file name: $path"; bad=1
+        fi
+        size="$(git cat-file -s "$blob")"
+        if [ "$size" -gt "$limit" ]; then echo "   $path is $size bytes (limit $limit)"; bad=1; fi
+        case "$path" in *.ipynb)
+          if [ "$(git cat-file -p "$blob" | grep -c '"outputs":')" -gt "$(git cat-file -p "$blob" | grep -cE '"outputs": *\[\]')" ]; then
+            echo "   notebook committed with outputs: $path (nbstripout, or jupyter nbconvert --clear-output)"; bad=1
+          fi ;;
+        esac
+      done < <(git log --no-walk=unsorted --stdin --raw --no-abbrev --no-renames --diff-filter=AM "$dm" --format= < "$VF_OUTGOING" | grep '^:' | sort -u)
+      [ "$bad" -eq 0 ] || { echo "these would be published by this push: remove them from the commits, or allow a reviewed path in .vibeforge/files-allow"; exit 1; }
+      echo "no oversized, credential-bearing or output-laden files in $(wc -l < "$VF_OUTGOING" | tr -d ' ') outgoing commit(s)"
+
   - id: no-trailing-whitespace
     desc: no trailing whitespace in tracked text files
     stage: commit
@@ -286,3 +328,27 @@ checks:
       ls .github/workflows/*.yml .github/workflows/*.yaml >/dev/null 2>&1 \
         || { echo "no workflow files"; exit 0; }
       "$VF_TOOL"
+
+  - id: workflow-hardening
+    desc: hosted-CI workflows are not exploitable from a public pull request
+    stage: push
+    tool: zizmor
+    tool_version: "1.31.1"
+    version_cmd: zizmor --version
+    install: "pipx install zizmor==1.31.1  (or: pip install zizmor==1.31.1)"
+    why: |
+      actionlint checks that a workflow is valid; this checks that it is safe,
+      which matters the moment a repository is public and strangers can open
+      pull requests. zizmor's audits cover the known ways in: actions referenced
+      by a movable tag instead of a full commit SHA (a retagged action runs
+      with your token), pull_request_target and workflow_run checking out
+      untrusted code, template injection from PR titles and branch names,
+      credentials persisted into the workspace by actions/checkout, excessive
+      GITHUB_TOKEN permissions, and self-hosted runners. --offline keeps it
+      local; medium and above blocks, informational findings do not. Pin the
+      version: new audits arrive with releases, and a release that adds one
+      should be a reviewed one-line bump, not a surprise red.
+    run: |
+      ls .github/workflows/*.yml .github/workflows/*.yaml >/dev/null 2>&1 \
+        || { echo "no workflow files"; exit 0; }
+      "$VF_TOOL" --offline --no-progress --min-severity medium .github/workflows/

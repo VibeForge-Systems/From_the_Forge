@@ -450,6 +450,137 @@ dco_case "Signed-off-by under the subject with no blank line is not a trailer" \
 dco_case "a trailer followed by more prose is not a trailer block" \
   "$(printf 'feat: thing\n\nSigned-off-by: A B <a@b.com>\n\nmore prose here')" 1 "missing Signed-off-by"
 
+# --- outgoing commits: the gate checks what a push PUBLISHES -------------------
+# A working-tree check misses a value committed in one commit and deleted in the
+# next, and a gate keyed to HEAD misses `git push origin topic` run from main.
+# These cases pin $VF_OUTGOING, the pre-push stdin plumbing, and the
+# pre-receive computation — each through a real `git push`.
+T="$HERE/skills/vibeforge-gate/templates"
+check_case() {  # NAME WANT_RC OUTFILE TEXT
+  local rc_file="$3.rc" rc; rc="$(cat "$rc_file")"
+  if [ "$rc" = "$2" ] && grep -qF -- "$4" "$3"; then
+    printf '%s  ok  %s%s\n' "$grn" "$rst" "$1"; PASS=$((PASS + 1))
+  else
+    printf '%s  FAIL%s %s %s(exit %s, wanted %s; text: %s)%s\n' "$red" "$rst" "$1" "$dim" "$rc" "$2" "$4" "$rst"
+    FAIL=$((FAIL + 1)); VERBOSE=1
+  fi
+  [ "$VERBOSE" = 1 ] && sed 's/^/      /' "$3"
+  return 0
+}
+run_to() {  # OUTFILE CMD...  — run, capture output and exit code
+  local out="$1"; shift
+  local rc=0
+  "$@" > "$out" 2>&1 || rc=$?
+  printf '%s\n' "$rc" > "$out.rc"
+}
+gate_env() { env -u VF_GATE_MANIFEST -u VF_GATE_ALLOW_SKIP -u VF_OUTGOING -u VF_OUTGOING_TIPS \
+               -u VF_PUSH_UPDATES -u VF_PUSH_REMOTE VF_GATE_NO_COLOR=1 "$@"; }
+
+OMAN='meta:
+  name: t
+checks:
+  - id: count
+    run: echo "outgoing-count=$(wc -l < "$VF_OUTGOING" | tr -d " ")"
+  - id: planted
+    run: |
+      while read -r c; do git show --format= -p "$c"; done < "$VF_OUTGOING" > "$VF_OUTGOING.patch"
+      m="PLANTED"; m="$m-MARKER"   # built at run time so this manifest never matches itself
+      if grep -q "$m" "$VF_OUTGOING.patch"; then echo "planted value in an outgoing commit"; exit 1; fi
+      echo clean-outgoing'
+
+new_gated_repo() {  # DIR — a repo with the template runner, hooks and OMAN committed on main
+  local d="$1"
+  mkdir -p "$d/.vibeforge/hooks"
+  git -C "$d" init -q -b main
+  git -C "$d" config user.email t@t; git -C "$d" config user.name t
+  cp "$T/gate.sh" "$d/.vibeforge/gate.sh"; cp "$T/hooks/pre-push" "$T/hooks/pre-commit" "$d/.vibeforge/hooks/"
+  chmod +x "$d/.vibeforge/gate.sh" "$d/.vibeforge/hooks/"*
+  printf '%s\n' "$OMAN" > "$d/.vibeforge/gates.yaml"
+  git -C "$d" add -A; git -C "$d" commit -qm "gate"
+}
+
+orepo="$WORK/outgoing"; new_gated_repo "$orepo"
+git init -q --bare "$WORK/outgoing-remote.git"
+git -C "$orepo" remote add origin "$WORK/outgoing-remote.git"
+git -C "$orepo" push -q origin main
+( cd "$orepo" && echo a > a && git add a && git commit -qm a && echo b > b && git add b && git commit -qm b )
+run_to "$WORK/o1" bash -c "cd '$orepo' && $(declare -f gate_env); gate_env VF_GATE_CACHE='$orepo/.c' bash .vibeforge/gate.sh"
+check_case "outgoing = commits no remote-tracking ref has" 0 "$WORK/o1" "outgoing-count=2"
+
+nrepo="$WORK/no-remote"; new_gated_repo "$nrepo"
+( cd "$nrepo" && echo a > a && git add a && git commit -qm a )
+run_to "$WORK/o2" bash -c "cd '$nrepo' && $(declare -f gate_env); gate_env VF_GATE_CACHE='$nrepo/.c' bash .vibeforge/gate.sh"
+check_case "with no remote every commit is outgoing" 0 "$WORK/o2" "outgoing-count=2"
+
+printf 'deadbeef\ncafef00d\nfeedface\n' > "$WORK/given-outgoing"
+run_to "$WORK/o3" bash -c "cd '$nrepo' && $(declare -f gate_env); gate_env VF_GATE_CACHE='$nrepo/.c' VF_OUTGOING='$WORK/given-outgoing' bash .vibeforge/gate.sh --only count"
+check_case "a VF_OUTGOING supplied by the caller is used as-is" 0 "$WORK/o3" "outgoing-count=3"
+
+# the real pre-push path: push a branch that is NOT checked out, whose tip is clean
+# but whose history adds and then deletes the planted value
+# hooks are wired per push (-c core.hooksPath) so fixture commits stay ungated
+HP="-c core.hooksPath=.vibeforge/hooks"
+( cd "$orepo" && git push -q origin main 2>/dev/null; git checkout -q -b topic \
+  && echo "PLANTED-MARKER" > leak.txt && git add leak.txt && git commit -qm "add" \
+  && git rm -q leak.txt && git commit -qm "remove" && git checkout -q main )
+run_to "$WORK/o4" bash -c "cd '$orepo' && $(declare -f gate_env); gate_env VF_GATE_CACHE='$orepo/.c' git $HP push origin topic"
+check_case "pre-push gates the pushed ref, history included, not HEAD" 1 "$WORK/o4" "planted value in an outgoing commit"
+if git --git-dir="$WORK/outgoing-remote.git" rev-parse -q --verify refs/heads/topic >/dev/null; then
+  printf '%s  FAIL%s %s\n' "$red" "$rst" "the refused branch did not reach the remote"; FAIL=$((FAIL + 1))
+else
+  printf '%s  ok  %s%s\n' "$grn" "$rst" "the refused branch did not reach the remote"; PASS=$((PASS + 1))
+fi
+( cd "$orepo" && git checkout -q -b side main && echo s > s && git add s && git commit -qm side && git checkout -q main )
+run_to "$WORK/o5" bash -c "cd '$orepo' && $(declare -f gate_env); gate_env VF_GATE_CACHE='$orepo/.c' git $HP push origin side"
+check_case "pre-push passes a clean branch and counts only its new commit" 0 "$WORK/o5" "outgoing-count=1"
+run_to "$WORK/o6" bash -c "cd '$orepo' && $(declare -f gate_env); gate_env VF_GATE_CACHE='$orepo/.c' git $HP push origin :side"
+check_case "a deleted ref publishes nothing" 0 "$WORK/o6" "outgoing-count=0"
+
+# the receiving end: pre-receive computes the new commits where the refs live
+srv="$WORK/pr-server.git"; git init -q --bare "$srv"
+cp "$T/hooks/pre-receive" "$srv/hooks/pre-receive"; chmod +x "$srv/hooks/pre-receive"
+prepo="$WORK/pr-client"; new_gated_repo "$prepo"
+git -C "$prepo" remote add origin "$srv"
+run_to "$WORK/o7" bash -c "cd '$prepo' && $(declare -f gate_env); gate_env VF_GATE_CACHE='$prepo/.c' git push origin main"
+check_case "pre-receive accepts a clean first push and sees its commits" 0 "$WORK/o7" "outgoing-count=1"
+( cd "$prepo" && echo "PLANTED-MARKER" > leak.txt && git add leak.txt && git commit -qm add \
+  && git rm -q leak.txt && git commit -qm remove )
+run_to "$WORK/o8" bash -c "cd '$prepo' && $(declare -f gate_env); gate_env VF_GATE_CACHE='$prepo/.c' git push --no-verify origin main"
+check_case "pre-receive refuses history the tip no longer shows" 1 "$WORK/o8" "planted value in an outgoing commit"
+
+# --- catalog checks that read $VF_OUTGOING (the tool-free ones) ---------------
+# The catalog files are valid manifests, so the real runner executes each block
+# straight from the catalog. Every leak below is added and then deleted, so the
+# tip tree is clean: these checks pass only if they read history, not the tree.
+C="$HERE/skills/vibeforge-gate/catalog"
+crepo="$WORK/catalog"; mkdir -p "$crepo/.vibeforge" "$WORK/home"
+( cd "$crepo" && git init -q -b main && git config user.email "jane@corp.invalid" && git config user.name Jane \
+  && echo base > README && git add -A && git commit -qm base \
+  && printf 'host: 10.42.7.19\n' > deploy.yaml && echo "Initech rollout" > notes.md && echo "DB=x" > .env \
+  && git add -A && git commit -qm add && git rm -q deploy.yaml notes.md .env && git commit -qm remove )
+cat_run() {  # OUT CATALOG ID [ENV...]
+  local out="$1" cat="$2" id="$3"; shift 3
+  run_to "$out" bash -c "cd '$crepo' && $(declare -f gate_env); gate_env HOME='$WORK/home' VF_GATE_CACHE='$crepo/.c' VF_GATE_MANIFEST='$C/$cat' $* bash '$RUNNER' --only $id"
+}
+printf '@users\\.noreply\\.github\\.com$\n' > "$crepo/.vibeforge/allowed-identities"
+cat_run "$WORK/c1" supply-chain.yaml identity-check
+check_case "identity-check refuses an identity not on the list" 1 "$WORK/c1" "not in .vibeforge/allowed-identities: jane@corp.invalid"
+printf '@corp\\.invalid$\n' >> "$crepo/.vibeforge/allowed-identities"
+cat_run "$WORK/c2" supply-chain.yaml identity-check
+check_case "identity-check passes once the identity is listed" 0 "$WORK/c2" "every outgoing identity is allowed"
+cat_run "$WORK/c3" universal.yaml outgoing-files
+check_case "outgoing-files catches a .env added and deleted in the push" 1 "$WORK/c3" "credential-bearing file name: .env"
+cat_run "$WORK/c4" supply-chain.yaml denylist-scan
+check_case "denylist-scan with no list is a blocking SKIP" 2 "$WORK/c4" "probe failed"
+cat_run "$WORK/c5" supply-chain.yaml denylist-scan VF_LEAK_DENYLIST_PATTERNS=initech
+check_case "denylist-scan catches a term the tip no longer shows" 1 "$WORK/c5" "match the private deny list"
+echo initech > "$crepo/denylist-inside"
+cat_run "$WORK/c6" supply-chain.yaml denylist-scan VF_LEAK_DENYLIST="$crepo/denylist-inside"
+check_case "denylist-scan refuses a list kept inside the repo" 1 "$WORK/c6" "is inside the repository"
+rm -f "$crepo/denylist-inside"
+cat_run "$WORK/c7" supply-chain.yaml leak-scan
+check_case "leak-scan reports a private IP from history (advisory)" 0 "$WORK/c7" "deploy.yaml:host: 10.42.7.19"
+
 # --- summary ------------------------------------------------------------------
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

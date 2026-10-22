@@ -15,6 +15,7 @@ it explicitly spans several.
 | `Apps/openmessage-archive/` | Tauri 2 / Rust / Vue 3 desktop app that archives iPhone Messages from local backups | **Apache-2.0** | GitHub Actions (`.github/workflows/openmessage-archive.yml`) | [`Apps/openmessage-archive/AGENTS.md`](Apps/openmessage-archive/AGENTS.md) |
 | `Skills/vibeforge-gate/` | Repository-owned merge bar: a bash runner, YAML manifests, and a Claude plugin and skill | **Apache-2.0** | `./Skills/vibeforge-gate/selftest.sh` and the root gate | [`Skills/vibeforge-gate/CLAUDE.md`](Skills/vibeforge-gate/CLAUDE.md) |
 | `Skills/coroner/` | Read-only adversarial architecture-review subagent, shipped as a Claude plugin | **Apache-2.0** | The root gate (`plugin-json` check); otherwise prose, reviewed by hand | This file, below |
+| `Skills/repo-publication-readiness/` | Audit, clean and publish a private repo as public: scanners, leak sweep, rewrite verifier, settings checker; a Claude plugin and skill | **Apache-2.0** | `./Skills/repo-publication-readiness/selftest.sh` and the root gate | This file, below |
 | `Skills/*.zip`, `Skills/*.skill`, `Skills/ballast-operations/` | Packaged Claude skills (build outputs) | AGPL-3.0 | None | This file, below |
 | `Tips_and_Tricks/` | MCP reference cards (Markdown) | AGPL-3.0 | None | `Tips_and_Tricks/README.md` |
 | `windows-env-bundle/` | PowerShell bundle that sets up a Windows 11 workstation | AGPL-3.0 | Nothing lints or tests PowerShell here | `windows-env-bundle/docs/ARCHITECTURE.md` |
@@ -25,7 +26,8 @@ them per repository:
 - **`.vibeforge/`** holds the gate this repo runs on itself: `gates.yaml`,
   `gate.sh`, and the hooks.
 - **`.claude-plugin/marketplace.json`** makes this repo a plugin
-  marketplace. It lists `vibeforge-gate` and `coroner`.
+  marketplace. It lists `vibeforge-gate`, `coroner` and
+  `repo-publication-readiness`.
 - **`.github/workflows/`** holds one workflow per deliverable, each scoped
   with path filters.
 
@@ -33,9 +35,10 @@ them per repository:
 
 ### Licensing
 
-The root is **AGPL-3.0**. Three directories are **Apache-2.0** and carry
+The root is **AGPL-3.0**. Four directories are **Apache-2.0** and carry
 their own `LICENSE` and `DCO` files: `Skills/vibeforge-gate/`,
-`Skills/coroner/`, and `Apps/openmessage-archive/`.
+`Skills/coroner/`, `Skills/repo-publication-readiness/`, and
+`Apps/openmessage-archive/`.
 
 - Keep those files where they are.
 - Never copy code across a license boundary. AGPL code must not go into an
@@ -85,6 +88,15 @@ PowerShell.
 
 - Never commit secrets, credentials, or real personal data. That includes
   real iPhone backups and messages: test fixtures must be synthetic.
+- This repository is **public**. The gate checks every commit a push would
+  publish — credentials (including merge resolutions and messages), commit
+  identities against `.vibeforge/allowed-identities`, internal IPs and
+  hostnames, oversized or credential-bearing files, and a private deny list of
+  employer and client names that lives outside the repo
+  (`~/.config/vibeforge/leak-denylist` or `$VF_LEAK_DENYLIST_PATTERNS`). Never
+  add a deny-list term to any file in this repository.
+- Generate credential-shaped test values at run time; never commit one, even
+  a fake.
 - `.claude/` is gitignored on purpose; per-clone agent settings stay local.
 
 ### Claims
@@ -118,6 +130,19 @@ command in `commands/coroner-review.md`.
 - When behaviour changes, bump `version` in `.claude-plugin/plugin.json`.
 - The `name` in `plugin.json` must match the plugin's entry in the root
   `marketplace.json`. The `plugin-json` gate check enforces this.
+
+### `Skills/repo-publication-readiness/`
+
+- The scripts are read-only toward GitHub and never push; keep it that way.
+  Publishing is the one irreversible step, and the skill leaves it to a person.
+- Every script refuses report, deny-list and output paths inside the
+  repository it inspects. Do not add a mode that writes into it.
+- Behaviour changes to a script need a `selftest.sh` case. Planted leaks in the
+  selftest are built at run time; the two literal fixture values it does carry
+  are listed in `.vibeforge/leak-allow`.
+- Claims in `references/` that depend on a tool or platform version are
+  recorded in `references/verification-log.md` with how and when they were
+  checked. Update the log when you re-verify or change one.
 
 ### Packaged skills (`Skills/*.zip`, `Skills/*.skill`, `Skills/ballast-operations/*.zip`)
 
