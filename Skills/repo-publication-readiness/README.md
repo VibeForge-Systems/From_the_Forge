@@ -54,6 +54,7 @@ skills/repo-publication-readiness/
   references/                          platform behavior, scanners, rewriting, identities,
                                        licensing, hardening, employer IP, verification log
   templates/SECURITY.md
+  templates/leak-denylist.example      starter deny list, shared with vibeforge-gate
   evals/                               trigger and behavior evals
 ```
 

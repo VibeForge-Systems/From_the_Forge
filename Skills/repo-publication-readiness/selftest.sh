@@ -116,6 +116,33 @@ rm -f "$F/denylist"
 expect_rc "a report path inside the repo is refused" 3 "$W/sweep-json-inside.log" -- \
   python3 "$SCRIPTS/sweep-leaks.py" --repo "$F" --json "$F/report.json"
 
+# one deny list serves both tools: the gate's location and inline patterns count too
+mkdir -p "$W/home/.config/vibeforge" "$W/empty-home"
+printf 'initech\n' > "$W/home/.config/vibeforge/leak-denylist"
+env -u RPR_DENYLIST -u VF_LEAK_DENYLIST -u VF_LEAK_DENYLIST_PATTERNS HOME="$W/home" \
+  python3 "$SCRIPTS/sweep-leaks.py" --repo "$OLD" > "$W/sweep-gateloc.log" 2>&1
+has "sweep reads vibeforge-gate's deny list location" "$W/sweep-gateloc.log" "Initech  —  README.md"
+env -u RPR_DENYLIST -u VF_LEAK_DENYLIST HOME="$W/empty-home" VF_LEAK_DENYLIST_PATTERNS=initech \
+  python3 "$SCRIPTS/sweep-leaks.py" --repo "$OLD" > "$W/sweep-inline.log" 2>&1
+has "sweep reads VF_LEAK_DENYLIST_PATTERNS" "$W/sweep-inline.log" "Initech  —  README.md"
+
+# the shipped example deny list
+EX="$HERE/skills/repo-publication-readiness/templates/leak-denylist.example"
+expect_rc "the example deny list compiles and never matches its own text" 0 "$W/example.log" -- \
+  python3 -c '
+import re, sys
+text = open(sys.argv[1]).read()
+pats = [re.compile(l.strip(), re.I) for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]
+assert len(pats) >= 15, f"only {len(pats)} active patterns"
+hits = [p.pattern for p in pats for line in text.splitlines() if p.search(line)]
+sys.exit(f"self-matching: {hits}") if hits else print(f"{len(pats)} patterns, no self-match")' "$EX"
+T="$W/tenant"; mkdir -p "$T"; git -C "$T" init -q -b main
+git -C "$T" config user.email t@t; git -C "$T" config user.name t; git -C "$T" config commit.gpgsign false
+printf 'instance: https://acmeprod.%s.com/nav_to.do\n' "service-now" > "$T/notes.md"
+git -C "$T" add -A; git -C "$T" commit -qm add; git -C "$T" rm -q notes.md; git -C "$T" commit -qm remove
+python3 "$SCRIPTS/sweep-leaks.py" --repo "$T" --denylist "$EX" > "$W/sweep-example.log" 2>&1
+has "the example catches a SaaS tenant hostname the tip no longer shows" "$W/sweep-example.log" "[denylist]"
+
 cat > "$W/allow.toml" <<'EOF'
 [[allow]]
 category = "large-blob"

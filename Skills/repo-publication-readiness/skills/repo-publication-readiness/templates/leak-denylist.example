@@ -1,0 +1,90 @@
+# leak-denylist — what must never reach a public repository
+#
+# COPY THIS FILE OUT OF THE REPOSITORY BEFORE YOU FILL IT IN:
+#
+#   mkdir -p ~/.config/vibeforge
+#   cp leak-denylist.example ~/.config/vibeforge/leak-denylist
+#
+# A deny list committed to a repository publishes exactly what it lists. Both
+# tools that read it refuse a list kept inside the repository they check.
+#
+# Read by:
+#   vibeforge-gate               denylist-scan: ~/.config/vibeforge/leak-denylist,
+#                                $VF_LEAK_DENYLIST, or newline-separated
+#                                $VF_LEAK_DENYLIST_PATTERNS (agent environments)
+#   repo-publication-readiness   sweep-leaks.py: the same three, plus its own
+#                                --denylist, $RPR_DENYLIST and
+#                                ~/.config/repo-publication-readiness/denylist
+#
+# FORMAT. One extended regular expression per line, matched case-insensitively.
+# A line starting with '#' is a comment. Write in the subset that BOTH grep -E
+# and Python's re understand:
+#
+#   [0-9] not \d       [a-z0-9_] not \w      (^|[^a-z0-9]) not \b
+#   no lookarounds     no (?i)               no {,n} without a lower bound
+#
+# Write a literal dot as [.] and a word separator as [ _-]. [.] cannot drift
+# into "any character", [ _-] also catches kebab-case and snake_case
+# spellings, and together they keep a pattern from matching its own text when
+# a copy of this file passes through a scan.
+#
+# Everything active below is generic and safe to share. Section 1 is the part
+# that matters most, and only you can write it.
+
+# --- 1. Your organizations — FILL IN: uncomment, then replace the placeholders
+#
+# Your employer: legal name, short name, ticker or abbreviation, email and
+# web domains.
+# example[ _-]?corp(oration)?
+# (^|[^a-z0-9])excorp([^a-z0-9]|$)
+# @example-corp[.]com
+#
+# Clients, past and present, by every name your team uses for them.
+# client[ _-]?one
+# client[ _-]?two
+#
+# Internal product, project and programme codenames. Anchor short or common
+# words so they do not fire on ordinary prose.
+# (^|[^a-z0-9])bluebird([^a-z0-9]|$)
+#
+# Internal hostnames that are not under an internal-only suffix (the gate's
+# leak-scan already catches .corp, .internal, .lan and friends).
+# [a-z0-9-]+[.]corp-example[.]com
+
+# --- 2. Confidentiality markings
+# Text pasted out of a document that was never meant to leave the building.
+(strictly|company|highly)[ _-]confidential
+proprietary[ _-](and|&)[ _-]confidential
+privileged[ _-](and|&)[ _-]confidential
+internal[ _-]use[ _-]only
+for[ _-]internal[ _-](use|distribution)
+not[ _-]for[ _-](public[ _-])?(distribution|release|disclosure)
+do[ _-]not[ _-](distribute|forward|disclose)
+attorney[ _-]client[ _-]privilege
+(subject[ _-]to|covered[ _-]by|under)[ _-](an[ _-])?(nda|non[ _-]disclosure)
+(contains|includes|constitutes)[ _-](confidential[ _-])?trade[ _-]secrets?
+embargoed[ _-](until|till)
+
+# --- 3. SaaS tenants whose hostname is the customer's name
+# A tenant URL in a public repository names the organization that owns it.
+# Delete a line if your public work legitimately shows that platform, and add
+# the platforms you actually work in.
+[a-z0-9-]+[.]service-now[.]com
+[a-z0-9-]+[.]servicenowservices[.]com
+[a-z0-9-]+[.](my[.]salesforce|lightning[.]force|my[.]site)[.]com
+[a-z0-9-]+[.]atlassian[.]net
+[a-z0-9-]+[.]sharepoint[.]com
+[a-z0-9-]+[.]onmicrosoft[.]com
+[a-z0-9-]+[.]snowflakecomputing[.]com
+dev[.]azure[.]com/[a-z0-9-]+
+
+# --- 4. Cloud account identifiers
+# Not credentials, but each one maps a piece of someone's estate: an AWS ARN
+# carries a 12-digit account id, an Azure resource path a subscription id.
+arn:aws[a-z-]*:[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:
+/subscriptions/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
+
+# --- 5. Record numbers from systems of record — uncomment if you work in one
+# ServiceNow's default numbering. A real incident or change number in a public
+# repository ties it to the customer whose instance issued it.
+# (^|[^a-z0-9])(inc|chg|prb|ritm|req|sctask|task)[0-9]{7}([^a-z0-9]|$)
