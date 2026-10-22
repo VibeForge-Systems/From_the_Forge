@@ -473,8 +473,12 @@ run_to() {  # OUTFILE CMD...  — run, capture output and exit code
   "$@" > "$out" 2>&1 || rc=$?
   printf '%s\n' "$rc" > "$out.rc"
 }
+# A deny list configured in the caller's environment (as agent environments do)
+# would satisfy the "no list" case and leak into every other one, so the
+# deny-list variables are scrubbed too; cases that need one set it themselves.
 gate_env() { env -u VF_GATE_MANIFEST -u VF_GATE_ALLOW_SKIP -u VF_OUTGOING -u VF_OUTGOING_TIPS \
-               -u VF_PUSH_UPDATES -u VF_PUSH_REMOTE VF_GATE_NO_COLOR=1 "$@"; }
+               -u VF_PUSH_UPDATES -u VF_PUSH_REMOTE -u VF_LEAK_DENYLIST -u VF_LEAK_DENYLIST_PATTERNS \
+               VF_GATE_NO_COLOR=1 "$@"; }
 
 OMAN='meta:
   name: t
@@ -580,6 +584,33 @@ check_case "denylist-scan refuses a list kept inside the repo" 1 "$WORK/c6" "is 
 rm -f "$crepo/denylist-inside"
 cat_run "$WORK/c7" supply-chain.yaml leak-scan
 check_case "leak-scan reports a private IP from history (advisory)" 0 "$WORK/c7" "deploy.yaml:host: 10.42.7.19"
+
+# --- the shipped example deny list --------------------------------------------
+# People copy it to ~/.config/vibeforge/leak-denylist, so it has to load in the
+# engine denylist-scan uses (grep -E), and it must never match its own text: a
+# later edit to the example, scanned by a list copied from it, would otherwise
+# block its own push.
+EX="$HERE/skills/vibeforge-gate/templates/leak-denylist.example"
+grep -vE '^[[:space:]]*(#|$)' "$EX" > "$WORK/deny-example"
+bad_re=""
+while IFS= read -r p; do
+  echo | grep -E -- "$p" >/dev/null 2>&1; [ $? -eq 2 ] && bad_re="$bad_re [$p]"
+done < "$WORK/deny-example"
+if [ -z "$bad_re" ] && [ "$(wc -l < "$WORK/deny-example")" -ge 15 ]; then
+  printf '%s  ok  %s%s\n' "$grn" "$rst" "every example deny-list pattern compiles under grep -E"; PASS=$((PASS + 1))
+else
+  printf '%s  FAIL%s %s %s(%s)%s\n' "$red" "$rst" "every example deny-list pattern compiles under grep -E" "$dim" "${bad_re:-too few patterns}" "$rst"; FAIL=$((FAIL + 1))
+fi
+if grep -qiE -f "$WORK/deny-example" "$EX"; then
+  printf '%s  FAIL%s %s\n' "$red" "$rst" "the example deny list never matches its own text"; FAIL=$((FAIL + 1))
+  grep -inE -f "$WORK/deny-example" "$EX" | sed 's/^/      /'
+else
+  printf '%s  ok  %s%s\n' "$grn" "$rst" "the example deny list never matches its own text"; PASS=$((PASS + 1))
+fi
+( cd "$crepo" && printf 'see https://acmeprod.%s.com/nav_to.do\n' "service-now" > tenant.md \
+  && git add -A && git commit -qm tenant && git rm -q tenant.md && git commit -qm untenant )
+cat_run "$WORK/c8" supply-chain.yaml denylist-scan VF_LEAK_DENYLIST="$EX"
+check_case "denylist-scan with the example catches a SaaS tenant in history" 1 "$WORK/c8" "match the private deny list"
 
 # --- summary ------------------------------------------------------------------
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"

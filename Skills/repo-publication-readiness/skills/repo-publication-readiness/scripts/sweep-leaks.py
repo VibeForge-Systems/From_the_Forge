@@ -30,8 +30,12 @@ Exit codes: 0 nothing needing review · 1 findings · 2 incomplete (a git comman
 failed, so the sweep did not cover what it claims) · 3 usage error.
 
 The private deny list holds the names you must not publish — an employer, its
-clients, internal product codenames. It is read from --denylist, then
-$RPR_DENYLIST, then ~/.config/repo-publication-readiness/denylist. It must
+clients, internal product codenames. With --denylist, only those files are
+read. Otherwise every configured source is: $RPR_DENYLIST, $VF_LEAK_DENYLIST,
+~/.config/repo-publication-readiness/denylist, ~/.config/vibeforge/leak-denylist
+and newline-separated $VF_LEAK_DENYLIST_PATTERNS — the last three are where
+vibeforge-gate's denylist-scan looks, so one list serves both. A commented
+example ships in templates/leak-denylist.example. It must
 never be committed to the repository it protects: committing it publishes
 exactly the names it exists to keep out. This script refuses a deny list that
 lives inside the repository being swept.
@@ -223,14 +227,20 @@ def git_version(repo: Path) -> tuple[int, ...]:
 
 
 def load_denylist(paths: list[str], repo: Path, report: Report) -> list[re.Pattern]:
+    """Patterns from every configured source; one file can serve this sweep and
+    vibeforge-gate's denylist-scan, which read the same format."""
+    explicit = bool(paths)
     candidates = list(paths)
-    if not candidates and os.environ.get("RPR_DENYLIST"):
-        candidates = [os.environ["RPR_DENYLIST"]]
-    if not candidates:
-        default = Path.home() / ".config" / "repo-publication-readiness" / "denylist"
-        if default.is_file():
-            candidates = [str(default)]
+    if not explicit:
+        for var in ("RPR_DENYLIST", "VF_LEAK_DENYLIST"):     # named by the person: must exist
+            if os.environ.get(var):
+                candidates.append(os.environ[var])
+        for default in (Path.home() / ".config" / "repo-publication-readiness" / "denylist",
+                        Path.home() / ".config" / "vibeforge" / "leak-denylist"):
+            if default.is_file() and str(default) not in candidates:
+                candidates.append(str(default))
     pats: list[re.Pattern] = []
+    sources: list[str] = []
     repo_real = repo.resolve()
     for p in candidates:
         path = Path(p).expanduser().resolve()
@@ -243,6 +253,7 @@ def load_denylist(paths: list[str], repo: Path, report: Report) -> list[re.Patte
         if not path.is_file():
             sys.stderr.write(f"sweep-leaks: deny list {path} does not exist\n")
             sys.exit(3)
+        before = len(pats)
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             line = line.strip()
             if not line or line.startswith("#"):
@@ -252,10 +263,27 @@ def load_denylist(paths: list[str], repo: Path, report: Report) -> list[re.Patte
             except re.error as e:
                 sys.stderr.write(f"sweep-leaks: {path}:{n}: bad regex ({e})\n")
                 sys.exit(3)
+        sources.append(f"{path} ({len(pats) - before})")
+    # inline patterns, as vibeforge-gate accepts them, for environments that hold
+    # secrets in variables rather than files
+    if not explicit and os.environ.get("VF_LEAK_DENYLIST_PATTERNS"):
+        before = len(pats)
+        for n, line in enumerate(os.environ["VF_LEAK_DENYLIST_PATTERNS"].splitlines(), 1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            try:
+                pats.append(re.compile(line, re.I))
+            except re.error as e:
+                sys.stderr.write(f"sweep-leaks: $VF_LEAK_DENYLIST_PATTERNS line {n}: bad regex ({e})\n")
+                sys.exit(3)
+        sources.append(f"$VF_LEAK_DENYLIST_PATTERNS ({len(pats) - before})")
+    if pats:
+        report.notes.append(f"deny list: {len(pats)} pattern(s) from " + ", ".join(sources))
     if not pats:
         report.notes.append(
             "NO PRIVATE DENY LIST — employer, client and codename terms were NOT checked. "
-            "Create ~/.config/repo-publication-readiness/denylist (one regex per line)."
+            "Copy templates/leak-denylist.example to ~/.config/vibeforge/leak-denylist and fill it in."
         )
     return pats
 

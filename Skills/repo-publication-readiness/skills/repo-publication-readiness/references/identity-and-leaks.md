@@ -29,18 +29,20 @@ Every author, committer and tagger email, and every address in a `Signed-off-by`
 
 ## The private deny list
 
-The names you must not publish — your employer, its clients, internal product and project codenames, internal domains — are the findings no tool can guess. Write them down:
+The names you must not publish — your employer, its clients, internal product and project codenames, internal domains — are the findings no tool can guess. Start from the shipped example and write them down:
 
-```
-# ~/.config/repo-publication-readiness/denylist — one extended regex per line, case-insensitive
-initech
-\bproject[- ]?bluebird\b
-corp\.example-employer\.com
+```sh
+mkdir -p ~/.config/vibeforge
+cp templates/leak-denylist.example ~/.config/vibeforge/leak-denylist
+$EDITOR ~/.config/vibeforge/leak-denylist        # fill in section 1
 ```
 
-- **It never lives inside a repository.** Committing it publishes exactly the names it exists to protect. `sweep-leaks.py` refuses a deny list inside the repository it sweeps, and vibeforge-gate's `denylist-scan` refuses one inside the repo it gates.
-- **Resolution order:** `--denylist`, then `$RPR_DENYLIST`, then `~/.config/repo-publication-readiness/denylist`. With none, the sweep prints that these names were **not** checked.
-- **Reports name matched terms** (they are local files outside the repository). The gate's `denylist-scan` prints only a count, because gate output can end up in shared logs.
+The example's section 1 is yours to fill in (employer, clients, codenames, internal domains). The rest is generic and active: the classic document confidentiality and privilege markings, SaaS tenant hostnames that carry a customer's name (ServiceNow, Salesforce, Atlassian Cloud, SharePoint, Entra ID, Snowflake, Azure DevOps), AWS ARNs and Azure subscription paths, and — commented out — ServiceNow record numbers. Across one real repository's full history (every ref, binaries included) the active generic set raised no false positives.
+
+- **One list for both tools.** vibeforge-gate's `denylist-scan` and `sweep-leaks.py` read the same format and the same places: `~/.config/vibeforge/leak-denylist`, `$VF_LEAK_DENYLIST`, and newline-separated `$VF_LEAK_DENYLIST_PATTERNS` (for agent environments that hold secrets in variables). The sweep also reads `$RPR_DENYLIST` and `~/.config/repo-publication-readiness/denylist`, and with `--denylist` reads only the files named. Its output names every source it loaded; with none, it says these names were **not** checked.
+- **Write portable patterns.** One extended regex per line, case-insensitive, `#` for comments, in the subset both `grep -E` and Python's `re` accept: `[0-9]` not `\d`, `(^|[^a-z0-9])word([^a-z0-9]|$)` not `\bword\b`, no lookarounds, no `(?i)`. Write a literal dot as `[.]` and a separator as `[ _-]` — they also keep a pattern from matching its own text if a copy of the list is ever scanned.
+- **It never lives inside a repository.** Committing it publishes exactly the names it exists to protect. Both tools refuse a deny list inside the repository they check.
+- **Reports name matched terms** (they are local files outside the repository). The gate's `denylist-scan` prints only a count and the command to see them, because gate output can end up in shared logs.
 
 ## Internal details
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "repo-publication-readiness",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Prepare a private GitHub repository for public release: audit every ref with two secret scanners plus the merge-resolution, commit-message and binary-content passes both miss; sweep identities, internal hosts and IPs, and a private deny list of employer and client names; rotate, rewrite with git-filter-repo and prove the rewrite; decide the non-code surfaces; clear licensing and employer IP; harden Actions and branches; publish to a fresh, pre-protected repository and verify it.",
   "author": {
     "name": "VibeForge Systems"
