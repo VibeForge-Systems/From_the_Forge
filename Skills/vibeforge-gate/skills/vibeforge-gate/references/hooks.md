@@ -24,8 +24,8 @@ Uninstall with `git config --unset core.hooksPath`.
 | Hook | Runs | Why that stage |
 |---|---|---|
 | `pre-commit` | `gate.sh --stage commit` | Fast checks only. A pre-commit hook that takes 30 seconds is a hook people uninstall — and an uninstalled hook checks nothing. |
-| `pre-push` | `gate.sh` (full bar) | The last moment before work leaves the machine. Slow checks belong here. |
-| `pre-receive` | the full bar, at each pushed tip, on the *receiving* repo | The unbypassable tier — `--no-verify` does not exist on the receiving end. See below. |
+| `pre-push` | `gate.sh` (full bar), with the pushed refs | The last moment before work leaves the machine. Slow checks belong here. The hook passes git's list of pushed refs to the runner, which turns it into `$VF_OUTGOING`, so checks judge the commits being published — not whatever is checked out. |
+| `pre-receive` | the full bar, at each pushed tip, on the *receiving* repo | The unbypassable tier — `--no-verify` does not exist on the receiving end. Computes `$VF_OUTGOING` there (new tip minus every existing ref). See below. |
 
 Both refuse the operation on a non-zero exit — including exit 2, a SKIP. That is
 the point: a coverage gap stops the push the same as a failure, until you install

@@ -84,7 +84,11 @@ checks:
   #     mv "$d/gitleaks" "$VF_TOOL_DEST"
   #     rm -rf "$d"
   #   run: |
-  #     "$VF_TOOL" detect --source "$VF_ROOT" --no-git --redact --no-banner
+  #     "$VF_TOOL" dir --redact --no-banner "$VF_ROOT"
+  #
+  # That block scans the working tree. To judge what a push PUBLISHES — every
+  # commit, merge resolutions and messages included — copy secret-scan-outgoing
+  # from catalog/supply-chain.yaml as well.
 
   # --- a slow check the operator may skip ------------------------------------
   # Reported on screen when skipped, and does NOT block — a gap you chose and

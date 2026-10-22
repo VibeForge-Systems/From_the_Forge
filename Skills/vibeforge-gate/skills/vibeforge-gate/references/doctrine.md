@@ -121,6 +121,30 @@ becomes decorative. Give it a deadline — and make the runner hold you to it:
 blocking on and after it, so promotion happens on the date rather than when
 someone remembers.
 
+## Gate what is published, not what is checked out
+
+A push does not publish a tree. It publishes commits — every one the
+destination does not already have — and it publishes the refs you name, which
+need not be the one checked out. A gate that inspects only the working tree is
+therefore checking the wrong object, and the gap is not theoretical:
+
+- a credential committed in one commit and deleted in the next leaves a clean
+  tree, passes every tree scan, and is published — permanently, in every clone;
+- `git push origin topic` from `main` gates `main`;
+- `git log -p`, which history scanners build on, prints no diff for a merge
+  commit, so a value introduced while resolving a conflict is invisible to a
+  plain history scan (demonstrated against gitleaks 8.30.1 and TruffleHog
+  3.99.3, both of which reported nothing);
+- commit and tag messages are not diffs, and neither scanner's history mode
+  reads them.
+
+So the runner computes `$VF_OUTGOING` before any check runs, from the refs git
+hands the pre-push hook (or, on the receiving end, from what the existing refs
+do not reach), and the catalog's leak-shaped checks read it, add a
+`--remerge-diff` pass for merges, and scan messages. A tree scan still has a
+place — it sees untracked files about to be added — but on its own it is a
+coverage claim the gate cannot back, and rule 4 says not to make those.
+
 ## Staging
 
 - `stage: commit` — fast, always-on. Format, lint, structural invariants, fast

@@ -5,13 +5,17 @@ adjust the paths, keep the `why:`.
 
 | File | Contents |
 |---|---|
-| `universal.yaml` | Works in any repo: sign-off (DCO), commit subjects, conflict markers, oversized files, trailing whitespace, CRLF line endings, JSON/TOML validity, spell check (the shadow-mode-with-deadline example), shell syntax, shellcheck, workflow lint for coexisting hosted CI, and a check that the manifest itself still parses |
+| `universal.yaml` | Works in any repo: sign-off (DCO), commit subjects, conflict markers, oversized files, oversized/credential-bearing/output-laden files in *outgoing commits*, trailing whitespace, CRLF line endings, JSON/TOML validity, spell check (the shadow-mode-with-deadline example), shell syntax, shellcheck, workflow lint and workflow hardening (zizmor) for coexisting hosted CI, and a check that the manifest itself still parses |
 | `languages.yaml` | Go (format, build, race, lint, mod tidy, codegen freshness), Node/TypeScript, Python, Rust, containers (Dockerfile lint, image build) |
-| `supply-chain.yaml` | Secret scanning, SAST, dependency vulnerabilities, license policy, SBOM freshness — the tier most often sold as a paid add-on |
+| `supply-chain.yaml` | Secret scanning at four scopes (staged, every outgoing commit, tree, all history), publishable identities, internal-detail and private deny-list scans of what a push adds, SAST, dependency vulnerabilities, license policy, SBOM freshness — the tier most often sold as a paid add-on |
 
 These are not a menu to adopt wholesale. Every check costs runtime on every
 push, and a gate people find slow or noisy is a gate people bypass. Take the
 ones you can justify.
+
+Checks marked as reading `$VF_OUTGOING` judge the commits a push would
+publish rather than the working tree. Prefer them for anything about what must
+not leak: a tree scan cannot see a value committed and then deleted.
 
 ## Two rules when copying
 

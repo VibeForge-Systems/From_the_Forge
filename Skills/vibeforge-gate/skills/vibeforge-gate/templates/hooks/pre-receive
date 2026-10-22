@@ -15,6 +15,9 @@
 # For every pushed branch tip, the hook checks that tip out into a throwaway
 # repository and runs the .vibeforge/gate.sh COMMITTED AT THAT TIP — the same
 # manifest and runner the pusher ran locally, so the two bars cannot disagree.
+# It also hands the gate $VF_OUTGOING: the commits this push adds, computed in
+# the receiving repository, so history checks see every new commit and not
+# just the tip.
 #
 # Properties worth knowing before you install it:
 #   * The bar travels with the tree: a push that weakens the manifest is gated
@@ -67,6 +70,13 @@ while read -r _old new ref; do
     rm -rf "$parent"; rc=1; continue
   fi
 
+  # The commits this push adds to the receiving repository: the new tip minus
+  # everything its existing refs already reach. Computed HERE, where the refs
+  # live; the throwaway checkout has none. The gate reads it as $VF_OUTGOING.
+  git rev-list "$new" --not --all > "$parent/outgoing" 2>/dev/null \
+    || { echo "vibeforge-gate: cannot list the commits pushed to $ref" >&2; rm -rf "$parent"; rc=1; continue; }
+  printf '%s\n' "$new" > "$parent/tips"
+
   if [ ! -f "$wt/.vibeforge/gates.yaml" ]; then
     echo "vibeforge-gate: $ref@${new:0:8} carries no .vibeforge/gates.yaml — refusing" >&2
     rc=1
@@ -74,6 +84,7 @@ while read -r _old new ref; do
     echo "vibeforge-gate: running the merge bar for $ref@${new:0:8}"
     if ! ( cd "$wt" && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
              -u GIT_QUARANTINE_PATH -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+             VF_OUTGOING="$parent/outgoing" VF_OUTGOING_TIPS="$parent/tips" \
              bash .vibeforge/gate.sh ); then
       echo "vibeforge-gate: $ref refused — the bar is red at ${new:0:8}" >&2
       rc=1

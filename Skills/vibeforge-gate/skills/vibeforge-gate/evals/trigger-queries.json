@@ -12,6 +12,10 @@
     "should_trigger": true
   },
   {
+    "query": "A token got through even though the pre-push secret scan was green: it was added in one commit and removed in the next. Make the gate catch that.",
+    "should_trigger": true
+  },
+  {
     "query": "I want the dependency vulnerability scanning that's behind the paid tier, but running locally for free.",
     "should_trigger": true
   },

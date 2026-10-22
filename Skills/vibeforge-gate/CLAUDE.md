@@ -53,7 +53,7 @@ to say about them.
 The selftest runs from this directory and works from anywhere:
 
 ```sh
-./selftest.sh                        # 32 cases pinning the runner's contract
+./selftest.sh                        # 48 cases pinning the runner's contract
 ./selftest.sh -v                     # ...with the runner output for each case
 ```
 
@@ -95,13 +95,17 @@ is what gets copied into a target repo's `.vibeforge/`. Changes to how a gate
 behaves go in the machinery; changes to how an agent reasons about gates go in the
 skill prose.
 
-**The runner is one file, ~480 lines, no dependencies.**
+**The runner is one file, ~620 lines, no dependencies.**
 `skills/vibeforge-gate/templates/gate.sh` is: a hand-written parser for a strict
 YAML subset (fields land in the associative array `F["<index>.<field>"]`, meta in
 `META[]`), `resolve_tool` (cached pinned build → `PATH` copy whose `version_cmd`
 output contains the pin → `fetch:` → blocking SKIP), `run_check` (skip_env →
 `needs` → `probe` → tool resolution → `dir` exists → `bash -euo pipefail -c` the
-`run:` block), then verdict recording and the exit-code decision. It carries no
+`run:` block), then verdict recording and the exit-code decision. Before any check runs,
+`compute_outgoing` writes `$VF_OUTGOING` (the commits a push would publish) from
+the refs the pre-push hook passes in `VF_PUSH_UPDATES`, or from `HEAD` minus the
+remote-tracking refs outside a push; pre-receive computes it in the receiving
+repo and passes it in. It carries no
 repo-specific content, which is why updating an installed gate is a `cp`.
 
 **The parser rejects rather than guesses.** No nested maps, no inline flow

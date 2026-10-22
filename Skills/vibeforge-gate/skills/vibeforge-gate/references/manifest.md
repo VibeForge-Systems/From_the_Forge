@@ -59,6 +59,9 @@ Each item needs at minimum `id` and `run`.
 | `$VF_TOOL` | The resolved pinned binary (empty if the check declares no `tool`) |
 | `$VF_ROOT` | Absolute path to the repo root |
 | `$VF_CACHE_DIR` | Where pinned tools are cached |
+| `$VF_OUTGOING` | A file: one commit SHA per line — every commit the current push would publish. In pre-push: each pushed ref's commits minus that remote's tracking refs and current tip (deletions contribute nothing). Outside a push: `HEAD` minus every remote-tracking ref. Set by the caller (pre-receive does) to override. |
+| `$VF_OUTGOING_TIPS` | A file: the SHAs being pushed (just `HEAD` outside a push). Annotated tags appear here as tag objects. |
+| `$VF_PUSH_UPDATES`, `$VF_PUSH_REMOTE`, `$VF_PUSH_URL` | Set only during pre-push: git's stdin lines, the remote name, its URL. |
 
 Use `$VF_TOOL` rather than the bare tool name — that is what guarantees the check
 runs the pinned build and not whatever is on `PATH`.
@@ -129,6 +132,8 @@ read is the one committed at `HEAD`.
 | `VF_GATE_MANIFEST` | Use a different manifest |
 | `VF_GATE_CACHE` | Where pinned tools are cached (default `~/.cache/vibeforge-gate`) |
 | `VF_GATE_NO_COLOR=1` | Plain output. `NO_COLOR` is honored too |
+| `VF_OUTGOING=path` | Use this commit list instead of computing one (pre-receive passes it) |
+| `VF_PUSH_UPDATES=path`, `VF_PUSH_REMOTE=name` | What the pre-push hook sets; set them by hand to reproduce a push's bar |
 
 ## The parser's accepted subset
 
