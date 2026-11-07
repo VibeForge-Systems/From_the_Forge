@@ -4,13 +4,17 @@ import json, sys
 from pathlib import Path
 
 S = Path(sys.argv[1])
+ITER = int(sys.argv[2]) if len(sys.argv) > 2 else 1
+ONLY = sys.argv[3:]   # optional run keys to limit to
 # The skill-creator plugin's grader instructions. Point SKILL_CREATOR_DIR at the
 # installed skill-creator skill (the directory holding agents/grader.md).
 import os
 GRADER_MD = os.path.join(os.environ.get("SKILL_CREATOR_DIR", "/path/to/skill-creator"), "agents", "grader.md")
-runs = json.loads((S / "runs.json").read_text())
+runs = json.loads((S / f"runs-iteration-{ITER}.json").read_text())
 n = 0
 for key, r in runs.items():
+    if ONLY and key not in ONLY:
+        continue
     run = Path(r["run_dir"])
     exp = "\n".join(f"  {i+1}. {a}" for i, a in enumerate(r["assertions"]))
     skill = key.split("/")[0]
