@@ -629,4 +629,13 @@ if [ "$BLOCKING_SKIP" -ne 0 ] && [ "${VF_GATE_ALLOW_SKIP:-0}" != "1" ]; then
   printf '   Install the tool it named, or accept the gap explicitly with VF_GATE_ALLOW_SKIP=1.\n'
   exit 2
 fi
+if [ "$BLOCKING_SKIP" -ne 0 ]; then
+  # Exit 0 is the documented contract for an accepted gap; the sentence must not
+  # claim more than that. Name the checks that did not run, so the gap is on screen.
+  gapped=""
+  for i in "${!R_ID[@]}"; do [ "${R_VERDICT[$i]}" = SKIP ] && gapped="$gapped ${R_ID[$i]}"; done
+  printf '\n%s✓ GATE PASSED WITH A GAP%s — every check that ran passed, but%s did not run (SKIP, accepted with VF_GATE_ALLOW_SKIP=1).\n' "$ylw" "$rst" "$gapped"
+  printf '   Not every declared check for stage '\''%s'\'' ran; this is weaker than the bar you declared.\n' "$STAGE"
+  exit 0
+fi
 printf '\n%s✓ GATE PASSED%s — every declared check for stage '\''%s'\'' ran and passed.\n' "$grn" "$rst" "$STAGE"

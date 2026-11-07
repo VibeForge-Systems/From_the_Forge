@@ -53,7 +53,7 @@ to say about them.
 The selftest runs from this directory and works from anywhere:
 
 ```sh
-./selftest.sh                        # 51 cases pinning the runner's contract
+./selftest.sh                        # 52 cases pinning the runner's contract
 ./selftest.sh -v                     # ...with the runner output for each case
 ```
 

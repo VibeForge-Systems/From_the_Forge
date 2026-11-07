@@ -113,14 +113,26 @@ checks:
 "apt install nothing"
 
 # --- the gap can be accepted, but only explicitly ----------------------------
-ok "VF_GATE_ALLOW_SKIP=1 accepts the gap -> exit 0" 0 \
+ok "VF_GATE_ALLOW_SKIP=1 accepts the gap -> exit 0, and the verdict says so" 0 \
 'meta:
   name: t
 checks:
   - id: needs-absent-tool
     needs: definitely-not-installed-xyz
     run: true' \
-"GATE PASSED" VF_GATE_ALLOW_SKIP=1
+"GATE PASSED WITH A GAP" VF_GATE_ALLOW_SKIP=1
+
+# ...and names the check that did not run, instead of claiming every check ran
+ok "an accepted gap names the skipped check in the verdict" 0 \
+'meta:
+  name: t
+checks:
+  - id: needs-absent-tool
+    needs: definitely-not-installed-xyz
+    run: true
+  - id: fine
+    run: true' \
+"but needs-absent-tool did not run" VF_GATE_ALLOW_SKIP=1
 
 # --- a version pin that is not met is also a coverage gap --------------------
 mkdir -p "$WORK/fakebin"
