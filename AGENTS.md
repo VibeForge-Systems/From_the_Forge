@@ -16,6 +16,7 @@ it explicitly spans several.
 | `Skills/vibeforge-gate/` | Repository-owned merge bar: a bash runner, YAML manifests, and a Claude plugin and skill | **Apache-2.0** | `./Skills/vibeforge-gate/selftest.sh` and the root gate | [`Skills/vibeforge-gate/CLAUDE.md`](Skills/vibeforge-gate/CLAUDE.md) |
 | `Skills/coroner/` | Read-only adversarial architecture-review subagent, shipped as a Claude plugin | **Apache-2.0** | The root gate (`plugin-json` check); otherwise prose, reviewed by hand | This file, below |
 | `Skills/repo-publication-readiness/` | Audit, clean and publish a private repo as public: scanners, leak sweep, rewrite verifier, settings checker; a Claude plugin and skill | **Apache-2.0** | `./Skills/repo-publication-readiness/selftest.sh` and the root gate | This file, below |
+| `Skills/eval-harness/` | Fixture, workspace and grader-brief builders for running the three plugins' evals with the skill-creator loop | AGPL-3.0 | The root gate (`shell-syntax`, `shellcheck`); otherwise driven by hand | `Skills/eval-harness/README.md` |
 | `Skills/*.zip`, `Skills/*.skill`, `Skills/ballast-operations/` | Packaged Claude skills (build outputs) | AGPL-3.0 | None | This file, below |
 | `Tips_and_Tricks/` | MCP reference cards (Markdown) | AGPL-3.0 | None | `Tips_and_Tricks/README.md` |
 | `windows-env-bundle/` | PowerShell bundle that sets up a Windows 11 workstation | AGPL-3.0 | Nothing lints or tests PowerShell here | `windows-env-bundle/docs/ARCHITECTURE.md` |
@@ -149,6 +150,16 @@ command in `commands/coroner-review.md`.
 - Claims in `references/` that depend on a tool or platform version are
   recorded in `references/verification-log.md` with how and when they were
   checked. Update the log when you re-verify or change one.
+
+### `Skills/eval-harness/`
+
+- `build-fixtures.sh` plants internal-looking hostnames, addresses and client
+  names in throwaway repositories on purpose; the file is allowed whole in
+  `.vibeforge/leak-allow`. Keep credential-shaped values generated at run time.
+- Write grader briefs only after the executor runs finish: they contain the
+  assertions, and an executor can read its run directory.
+- A baseline run on the same machine can find the skills under `Skills/`; say
+  so when reporting a comparison, or run baselines from a checkout without them.
 
 ### Packaged skills (`Skills/*.zip`, `Skills/*.skill`, `Skills/ballast-operations/*.zip`)
 

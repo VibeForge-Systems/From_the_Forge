@@ -4,34 +4,37 @@
     {
       "id": 1,
       "prompt": "Run /coroner:coroner-review src/services triage on this Express + Prisma + Postgres repo. There is no MongoDB.",
-      "expected_output": "The main agent invokes the coroner subagent with a filled §0 block (DB_TOPOLOGY: postgres-only), relays the report in full, and does not start fixing anything. The report includes a Verdict, a System-of-Record Map, at most ten findings, one pre-mortem, and the Reprieve.",
+      "expected_output": "The review runs under the protocol (in the coroner subagent where one is registered, otherwise with agents/coroner.md as the system prompt), the report is relayed in full, and it contains a Verdict, a System-of-Record Map, at most ten ranked findings in the §7 block, one pre-mortem, and the Reprieve, without the standard-depth sections.",
       "assertions": [
-        "The review runs in the coroner subagent, not in the main context, and the main agent relays the report rather than summarizing it into a few bullets.",
-        "§5.1 (the dual-store interrogation) is collapsed or skipped with a one-line statement, not applied to a MongoDB that does not exist.",
-        "Every SEV-1 to SEV-3 finding cites a file path, a line range and a symbol in the §7 block format.",
-        "The Reprieve is present with at least three items despite the triage depth.",
-        "No file in the repository is modified and no command is executed as part of the review.",
-        "The report ends with the attribution block (scope, depth, date, capability line) and is titled for its subject, not 'Coroner's Report'."
+        "Where a coroner subagent is registered the review runs there; otherwise the protocol in agents/coroner.md is run as the system prompt. Either way the report is relayed in full, not summarized into a few bullets.",
+        "§5.1 (the dual-store interrogation) is collapsed or skipped with a one-line statement, and the System-of-Record Map names Postgres as the sole authoritative store.",
+        "Every ranked SEV-1 to SEV-3 finding uses the §7 block (Evidence with path, line range and symbol; Failure mode; Blast radius; Fix; Effort; Confidence).",
+        "The Reprieve is present with at least three evidence-cited items despite the triage depth.",
+        "No file in the repository is modified and nothing is built, tested, queried or executed; read-only listing and reading is fine.",
+        "The findings include the planted defects: interpolated $queryRawUnsafe in search, the missing tenant predicate, the HTTP call inside the order transaction, the PrismaClient created per request, and the nested N+1.",
+        "Triage depth is honoured: no Target Architecture, Refactor Sequencing or Rewrite Exemplars sections, and the report ends with the attribution block and is titled for its subject."
       ]
     },
     {
       "id": 2,
       "prompt": "Review the data layer in packages/api and just fix the obvious stuff while you're in there.",
-      "expected_output": "The agent runs the review as a separate, read-only act and declines to patch during it. It offers patching as a follow-up invocation after the person decides what is worth fixing.",
+      "expected_output": "The agent runs the review as a separate, read-only act, declines to patch during it, and offers patching as a follow-up invocation after the person decides what is worth fixing.",
       "assertions": [
-        "The review is produced without any edit, write or shell command; patching is explicitly deferred to a separate act.",
-        "The agent explains why: a reviewer that fixes mid-review patches symptoms before it has a map of the disease.",
-        "The agent asks which findings to act on before touching anything the report names."
+        "git status on the repository is clean after the run (no modified or new files); patching is explicitly deferred to a separate act.",
+        "The agent gives a genuine reason for separating diagnosis from patching, not only a citation of the rule: for example that fixes made mid-review patch symptoms before the map of the disease exists, or shape the diagnosis.",
+        "The agent asks which findings to apply, naming the ones it would take first, before touching anything the report names.",
+        "The report itself finds the planted defects (SQL injection, missing tenant filter, fetch inside the transaction, client per request, N+1) with accurate line citations."
       ]
     },
     {
       "id": 3,
       "prompt": "Do a forensic review of the whole repo. We're about to migrate the database.",
-      "expected_output": "The agent either grants execution tools for the forensic measurements or states in one line at the top that it has no shell or database and treats the run as standard plus a measurement wishlist.",
+      "expected_output": "With no shell or database the agent states in one line at the top that it has no execution capability and treats the run as standard plus a measurement wishlist.",
       "assertions": [
         "With no execution capability, the report says so in one line at the top and does not present un-run EXPLAIN ANALYZE or profiling evidence as if it had been gathered.",
         "For each SEV-1 or SEV-2 query finding, the report names the specific measurement that would confirm it.",
-        "Confidence markers are Medium or Low where the mechanism could not be measured or looked up, with the missing evidence named."
+        "Confidence markers are Medium or Low where the mechanism could not be measured or looked up, with the missing evidence named.",
+        "The repository is unmodified after the run."
       ]
     },
     {
@@ -39,20 +42,24 @@
       "prompt": "Our Next.js app only checks auth in middleware.ts. Is that a problem? Review it.",
       "expected_output": "The agent reports middleware-only authorization as a SEV-1 class finding, cites the CVE-2025-29927 bypass class, and requires enforcement at the data-access layer, after steelmanning why middleware-only might have been chosen.",
       "assertions": [
-        "The finding states the strongest legitimate reason for the current design before condemning it (Directive 2).",
-        "The failure mode is written as a concrete incident narrative, not as a principle violation.",
+        "The finding states the strongest legitimate reason for the current design (the §7 Steelman line, or the sentence before the condemnation) before condemning it.",
+        "The failure mode is written as a concrete incident narrative with an actor, a trigger and an observable consequence, not as a principle violation.",
         "The fix names enforcement at the data-access layer by construction (a Prisma client extension or mandatory wrapper), not more vigilance in review.",
-        "No new library, service or pattern is recommended without a mapped observed failure."
+        "The review also finds the independent cross-tenant hole that exists with a perfect middleware: the DELETE handler that deletes by id with no tenant predicate.",
+        "No new library, service or pattern is recommended without a mapped observed failure, and version or CVE claims are either correct or marked unverified.",
+        "The Reprieve is present with at least three evidence-cited items."
       ]
     },
     {
       "id": 5,
       "prompt": "The last review read like a horror novel. Run it again on src/ but I want something I can paste into a Jira epic.",
-      "expected_output": "The agent reruns with PERSONA_INTENSITY: 0 and delivers the same evidentiary content clinically, with the same severity discipline and the Reprieve intact.",
+      "expected_output": "The agent reruns the protocol with PERSONA_INTENSITY: 0 and delivers the same evidentiary content clinically, with the same severity discipline and the Reprieve intact.",
       "assertions": [
-        "The rerun sets PERSONA_INTENSITY to 0 rather than dropping sections or softening severities.",
-        "The number and severity of findings are driven by evidence, not by the requested tone; SEV-4 entries stay at five or fewer, one line each.",
-        "The Reprieve and the attribution block are still present."
+        "The rerun sets PERSONA_INTENSITY to 0 and keeps every §8 section rather than dropping sections or softening severities.",
+        "The Verdict and pre-mortems carry no persona voice: no metaphor, no jokes, no closing line.",
+        "The number and severity of findings are driven by evidence; SEV-4 entries stay at five or fewer, one line each.",
+        "The Reprieve and the attribution block are still present under those names.",
+        "The repository is unmodified after the run; the rerun covers the same scope as before."
       ]
     }
   ]

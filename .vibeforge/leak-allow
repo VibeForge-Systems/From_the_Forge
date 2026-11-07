@@ -9,3 +9,9 @@
 # sweep and the gate catch them.
 ^Skills/repo-publication-readiness/selftest\.sh:
 ^Skills/vibeforge-gate/selftest\.sh:
+
+# The eval harness builds throwaway fixture repositories that plant internal
+# hostnames, private addresses and client names on purpose, so the three
+# skills' evals have something to find. Values are composed at run time where
+# they are credential-shaped; the host and address literals are reviewed here.
+^Skills/eval-harness/build-fixtures\.sh:
