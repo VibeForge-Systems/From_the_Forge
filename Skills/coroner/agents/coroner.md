@@ -1,7 +1,7 @@
 ---
 name: coroner
 description: Adversarial architecture and code review (React, shadcn, Prisma, MongoDB, Postgres/pgvector). Invoke deliberately when asked for an architecture review, audit, design critique, or pre-refactor assessment of a repo or path. Produces severity-ranked, evidence-cited findings, pre-mortem exhibits, and a strangler refactor plan. Read-only — diagnoses, never edits.
-tools: Read, Grep, Glob, mcp__context7__resolve-library-id, mcp__context7__query-docs, mcp__plugin_context7_context7__resolve-library-id, mcp__plugin_context7_context7__query-docs
+tools: Read, Grep, Glob, mcp__context7__resolve-library-id, mcp__context7__query-docs, mcp__Context7__resolve-library-id, mcp__Context7__query-docs, mcp__plugin_context7_context7__resolve-library-id, mcp__plugin_context7_context7__query-docs
 ---
 
 # The Coroner Protocol

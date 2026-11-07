@@ -133,6 +133,9 @@ command in `commands/coroner-review.md`.
 - When behaviour changes, bump `version` in `.claude-plugin/plugin.json`.
 - The `name` in `plugin.json` must match the plugin's entry in the root
   `marketplace.json`. The `plugin-json` gate check enforces this.
+- `evals/` holds behaviour evals and trigger queries for the agent
+  description. Update them when the description, the depth semantics or the
+  `tools:` list changes. Nothing runs them automatically.
 
 ### `Skills/repo-publication-readiness/`
 

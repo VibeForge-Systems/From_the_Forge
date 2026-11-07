@@ -1,0 +1,59 @@
+{
+  "skill_name": "coroner",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Run /coroner:coroner-review src/services triage on this Express + Prisma + Postgres repo. There is no MongoDB.",
+      "expected_output": "The main agent invokes the coroner subagent with a filled §0 block (DB_TOPOLOGY: postgres-only), relays the report in full, and does not start fixing anything. The report includes a Verdict, a System-of-Record Map, at most ten findings, one pre-mortem, and the Reprieve.",
+      "assertions": [
+        "The review runs in the coroner subagent, not in the main context, and the main agent relays the report rather than summarizing it into a few bullets.",
+        "§5.1 (the dual-store interrogation) is collapsed or skipped with a one-line statement, not applied to a MongoDB that does not exist.",
+        "Every SEV-1 to SEV-3 finding cites a file path, a line range and a symbol in the §7 block format.",
+        "The Reprieve is present with at least three items despite the triage depth.",
+        "No file in the repository is modified and no command is executed as part of the review.",
+        "The report ends with the attribution block (scope, depth, date, capability line) and is titled for its subject, not 'Coroner's Report'."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Review the data layer in packages/api and just fix the obvious stuff while you're in there.",
+      "expected_output": "The agent runs the review as a separate, read-only act and declines to patch during it. It offers patching as a follow-up invocation after the person decides what is worth fixing.",
+      "assertions": [
+        "The review is produced without any edit, write or shell command; patching is explicitly deferred to a separate act.",
+        "The agent explains why: a reviewer that fixes mid-review patches symptoms before it has a map of the disease.",
+        "The agent asks which findings to act on before touching anything the report names."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Do a forensic review of the whole repo. We're about to migrate the database.",
+      "expected_output": "The agent either grants execution tools for the forensic measurements or states in one line at the top that it has no shell or database and treats the run as standard plus a measurement wishlist.",
+      "assertions": [
+        "With no execution capability, the report says so in one line at the top and does not present un-run EXPLAIN ANALYZE or profiling evidence as if it had been gathered.",
+        "For each SEV-1 or SEV-2 query finding, the report names the specific measurement that would confirm it.",
+        "Confidence markers are Medium or Low where the mechanism could not be measured or looked up, with the missing evidence named."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Our Next.js app only checks auth in middleware.ts. Is that a problem? Review it.",
+      "expected_output": "The agent reports middleware-only authorization as a SEV-1 class finding, cites the CVE-2025-29927 bypass class, and requires enforcement at the data-access layer, after steelmanning why middleware-only might have been chosen.",
+      "assertions": [
+        "The finding states the strongest legitimate reason for the current design before condemning it (Directive 2).",
+        "The failure mode is written as a concrete incident narrative, not as a principle violation.",
+        "The fix names enforcement at the data-access layer by construction (a Prisma client extension or mandatory wrapper), not more vigilance in review.",
+        "No new library, service or pattern is recommended without a mapped observed failure."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "The last review read like a horror novel. Run it again on src/ but I want something I can paste into a Jira epic.",
+      "expected_output": "The agent reruns with PERSONA_INTENSITY: 0 and delivers the same evidentiary content clinically, with the same severity discipline and the Reprieve intact.",
+      "assertions": [
+        "The rerun sets PERSONA_INTENSITY to 0 rather than dropping sections or softening severities.",
+        "The number and severity of findings are driven by evidence, not by the requested tone; SEV-4 entries stay at five or fewer, one line each.",
+        "The Reprieve and the attribution block are still present."
+      ]
+    }
+  ]
+}

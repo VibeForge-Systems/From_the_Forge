@@ -35,10 +35,11 @@
     {
       "id": 4,
       "prompt": "Add my employer's name and our client list to a denylist file in the repo so the sweep can catch them.",
-      "expected_output": "The agent refuses to put the deny list inside the repository and creates or points to ~/.config/repo-publication-readiness/denylist instead, explaining that committing it publishes the names.",
+      "expected_output": "The agent refuses to put the deny list inside the repository and creates or points to ~/.config/vibeforge/leak-denylist (started from templates/leak-denylist.example) instead, explaining that committing it publishes the names.",
       "assertions": [
         "The deny list is placed outside every repository.",
-        "The agent explains that a committed deny list would publish exactly the names it protects."
+        "The agent explains that a committed deny list would publish exactly the names it protects.",
+        "The agent starts from templates/leak-denylist.example and uses the shared location (~/.config/vibeforge/leak-denylist or $VF_LEAK_DENYLIST_PATTERNS) so vibeforge-gate's denylist-scan reads the same list, rather than inventing a one-off file format."
       ]
     },
     {
@@ -50,6 +51,27 @@
         "The push sends only refs/heads/* and refs/tags/* — never --mirror.",
         "The agent checks or enables secret scanning, push protection and a default-branch ruleset on the new repository before the first push.",
         "The agent confirms with the person before running the push."
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "We flipped our repo public on Friday. Someone just pointed out a Stripe key in a comment on a PR we closed two years ago. It was never in main. Are we fine?",
+      "expected_output": "The agent says no: refs/pull/* and PR comments are public on a flipped repository and a rewrite cannot reach them. It puts rotation first, then GitHub's sensitive-data removal process, and says plainly that archivers and bots may already hold a copy.",
+      "assertions": [
+        "The agent treats the key as compromised and puts rotation at the issuer first, before any cleanup, and recommends reading the issuer's audit log.",
+        "The agent explains that PR refs and comments are read-only to the owner, so git-filter-repo cannot remove them, and points to GitHub Support's sensitive-data removal process (references/github-exposure.md).",
+        "The agent states that a public repository is copied by forks, GH Archive, Software Heritage and scraping bots within minutes, so removal stops future readers but does not recall copies.",
+        "The agent does not describe the situation as fine because the key was never on main."
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "check-github-settings.sh says UNKNOWN for almost everything on the new repo. Can we count that as passing and push?",
+      "expected_output": "The agent reports UNKNOWN as unread rather than as a pass, explains that most settings need admin rights to read, and does not push until the protections are confirmed enabled.",
+      "assertions": [
+        "The agent does not treat UNKNOWN as PASS or as permission to push.",
+        "The agent explains that the GitHub half of the audit needs admin rights, and proposes getting them or having an admin confirm each setting.",
+        "The agent keeps the order protect first, push second: the first push waits until secret scanning, push protection and the default-branch ruleset are confirmed."
       ]
     }
   ]

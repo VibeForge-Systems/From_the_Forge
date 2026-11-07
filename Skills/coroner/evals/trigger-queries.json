@@ -1,0 +1,66 @@
+[
+  {
+    "query": "Can you do an architecture review of this repo before we start the refactor? It's Next.js with Prisma on Postgres and some pgvector stuff for search.",
+    "should_trigger": true
+  },
+  {
+    "query": "We have both MongoDB and Postgres in this service and nobody can tell me which one is the source of truth for users. Audit it.",
+    "should_trigger": true
+  },
+  {
+    "query": "pre-acquisition technical due diligence on packages/api — I need severity-ranked findings I can hand to the board, not a list of lint warnings",
+    "should_trigger": true
+  },
+  {
+    "query": "Review our shadcn components directory. We've been editing them in place and also wrapping some of them and I think it's a mess.",
+    "should_trigger": true
+  },
+  {
+    "query": "Design critique of the data layer please. We're on serverless (Vercel) and I'm worried about Prisma connection counts.",
+    "should_trigger": true
+  },
+  {
+    "query": "Before we migrate off this monolith, tell me what's actually load-bearing in src/ and what's safe to delete. Don't change anything.",
+    "should_trigger": true
+  },
+  {
+    "query": "Something is wrong with how embeddings get regenerated when documents change. Can you look at the whole lifecycle and tell me where it breaks?",
+    "should_trigger": true
+  },
+  {
+    "query": "I want a pre-mortem on this checkout flow. Where does it fail in production in a year?",
+    "should_trigger": true
+  },
+  {
+    "query": "Fix the N+1 query in getOrdersForUser in src/services/orders.ts.",
+    "should_trigger": false
+  },
+  {
+    "query": "Review this PR diff for bugs before I merge it. It's about 40 lines in the auth middleware.",
+    "should_trigger": false
+  },
+  {
+    "query": "Write an ADR for choosing Postgres over MongoDB for the new events service.",
+    "should_trigger": false
+  },
+  {
+    "query": "Refactor components/ui/button.tsx to use cva variants instead of the className ternaries.",
+    "should_trigger": false
+  },
+  {
+    "query": "Design a system for ingesting 10k documents a day and serving vector search over them. Greenfield, nothing exists yet.",
+    "should_trigger": false
+  },
+  {
+    "query": "Our Postgres query on the embeddings table is slow. Here's the EXPLAIN ANALYZE output, what index do I need?",
+    "should_trigger": false
+  },
+  {
+    "query": "Run the tests in packages/api and tell me why the Prisma transaction test is flaky.",
+    "should_trigger": false
+  },
+  {
+    "query": "Add a Zod schema to the /api/upload route handler.",
+    "should_trigger": false
+  }
+]
