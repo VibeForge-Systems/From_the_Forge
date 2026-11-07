@@ -27,9 +27,13 @@ Uninstall with `git config --unset core.hooksPath`.
 | `pre-push` | `gate.sh` (full bar), with the pushed refs | The last moment before work leaves the machine. Slow checks belong here. The hook passes git's list of pushed refs to the runner, which turns it into `$VF_OUTGOING`, so checks judge the commits being published — not whatever is checked out. |
 | `pre-receive` | the full bar, at each pushed tip, on the *receiving* repo | The unbypassable tier — `--no-verify` does not exist on the receiving end. Computes `$VF_OUTGOING` there (new tip minus every existing ref). See below. |
 
-Both refuse the operation on a non-zero exit — including exit 2, a SKIP. That is
-the point: a coverage gap stops the push the same as a failure, until you install
-the missing tool or accept the gap out loud.
+All three refuse the operation on a non-zero exit — including exit 2, a SKIP.
+That is the point: a coverage gap stops the commit or push the same as a
+failure, until you install the missing tool or accept the gap out loud.
+
+`pre-commit` and `pre-push` are the two that go into a repository's
+`.vibeforge/hooks/`. `pre-receive` is installed on the repository being pushed
+*to*, never alongside them (see below).
 
 ## Bypassing
 

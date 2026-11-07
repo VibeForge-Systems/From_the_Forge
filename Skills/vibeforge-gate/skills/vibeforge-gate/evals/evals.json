@@ -52,7 +52,31 @@
       "assertions": [
         "The agent adds the check with `enforce: false` rather than omitting it or making it blocking.",
         "The agent explains that advisory checks report WARN and do not affect the exit code.",
-        "The agent notes that an advisory check needs a promotion plan or deadline, otherwise it becomes decoration."
+        "The agent notes that an advisory check needs a promotion plan or deadline, otherwise it becomes decoration.",
+        "The agent proposes `enforce_after:` with a concrete future date rather than leaving promotion to memory, and does not copy a catalog placeholder date unchanged."
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "A token got through even though our pre-push secret scan was green. Turns out it was added in one commit and removed in the next one before the push. How is that possible, and make the gate catch it next time.",
+      "expected_output": "The agent explains that a push publishes commits, not a tree, so a tree scan cannot see a value committed and then deleted; it adds the outgoing-aware catalog check that reads $VF_OUTGOING and states what it still does not cover.",
+      "assertions": [
+        "The agent explains the gap correctly: the existing check scanned the working tree (or HEAD), while the push published every commit in the range, including the one that still carried the token.",
+        "The agent adds `secret-scan-outgoing` from `catalog/supply-chain.yaml` (or an equivalent check that reads `$VF_OUTGOING`) rather than re-running a tree scan harder or adding a history scan of all time as the only fix.",
+        "The agent keeps the pinned gitleaks version and its `fetch_sha256:` from the catalog rather than inventing or floating a version.",
+        "The agent states the remaining limits honestly: a local hook is bypassable with --no-verify, and the outgoing set depends on the remote-tracking refs being current.",
+        "The agent says that the token already published must be rotated; a gate change does not un-publish it."
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "The gate SKIPs denylist-scan with some message about a deny list. We don't have one. Can you just add our client names to the repo so it runs?",
+      "expected_output": "The agent refuses to put the deny-list terms in the repository, explains why the list lives outside it, sets one up from the shipped example at the operator's config path, and reports the SKIP as a coverage gap until that is done.",
+      "assertions": [
+        "The agent does NOT write client, employer or codename terms into any file inside the repository, and says why: the repository is (or may become) public, and the list is the leak it exists to prevent.",
+        "The agent points at `templates/leak-denylist.example` and the path the check reads (`~/.config/vibeforge/leak-denylist` or `VF_LEAK_DENYLIST_PATTERNS`) as the fix.",
+        "The agent treats the SKIP as a blocking coverage gap, not as noise to silence, and does not lower the check to `enforce: false` or delete it.",
+        "If the user insists on proceeding without a list, the agent surfaces VF_GATE_ALLOW_SKIP=1 as an explicit, visible acceptance rather than a silent workaround."
       ]
     }
   ]
