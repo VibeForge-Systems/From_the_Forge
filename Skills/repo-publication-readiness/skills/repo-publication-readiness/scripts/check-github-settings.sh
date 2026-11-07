@@ -6,7 +6,8 @@
 #
 #   check-github-settings.sh OWNER/REPO [--branch main]
 #
-# Run it on the NEW public repository right after the first push, and again
+# Run it on the NEW public repository after protecting it and BEFORE the first
+# push (phase 8: protect first, push second), again right after the push, and
 # whenever settings change. Needs an authenticated `gh`; most checks need admin
 # on the repository (GitHub only returns security_and_analysis to admins).
 #

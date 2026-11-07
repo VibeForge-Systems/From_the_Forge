@@ -128,7 +128,7 @@ read is the one committed at `HEAD`.
 
 | Environment | Effect |
 |---|---|
-| `VF_GATE_ALLOW_SKIP=1` | Exit 0 despite blocking SKIPs |
+| `VF_GATE_ALLOW_SKIP=1` | Exit 0 despite blocking SKIPs; the verdict reads `GATE PASSED WITH A GAP` and names the checks that did not run |
 | `VF_GATE_MANIFEST` | Use a different manifest |
 | `VF_GATE_CACHE` | Where pinned tools are cached (default `~/.cache/vibeforge-gate`) |
 | `VF_GATE_NO_COLOR=1` | Plain output. `NO_COLOR` is honored too |

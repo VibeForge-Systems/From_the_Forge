@@ -25,6 +25,7 @@ Two findings shaped it, both verified rather than assumed:
 
 - **A plain history scan misses merge resolutions.** `git log -p` prints no diff for a merge commit, and both gitleaks and TruffleHog build on it, so a value introduced while resolving a conflict passes a full history scan. Replaying merges with `--remerge-diff` finds it.
 - **`trufflehog git file://…` clones before scanning**, which drops `refs/pull/*`; on GitHub those are public after a flip. Scanning a mirror in place needs `--trust-local-git-config`.
+- **TruffleHog's JSON report carries every secret in full** (`Raw`, `RawV2`, `SecretParts`), and it has no `--redact`. `scan-secrets.sh` rewrites the report in place to a prefix and a length, so a saved report cannot become the next leak.
 
 ## Install
 

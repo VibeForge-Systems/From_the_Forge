@@ -67,6 +67,7 @@ Format: `Proper Name <proper@email> <commit@email>`. The GitHub noreply form is 
 
 - **Every commit after the first change gets a new SHA**, so signatures on those commits are stripped. Re-sign if you need signed history.
 - **The `origin` remote is removed**, deliberately, so the rewritten repository cannot be pushed back over the original by accident.
+- **It ends by telling you to force-push.** git-filter-repo's closing message (and `--sdr`'s cleanup instructions) describe re-adding the remote and running `git push --force` to the *original* repository. That is the flip path. On the fresh-repository path, ignore it: the old repository stays private and is archived, and the rewritten clone is pushed to the **new** repository as heads and tags only (SKILL.md, phase 8). Following the hint pushes a rewrite over a repository whose `refs/pull/*` cannot be rewritten anyway, and advertises to every existing clone that something was removed.
 - **Abbreviated hashes in commit messages are rewritten** to the new SHAs.
 - **refs/pull/\* are rewritten locally** by `--sdr` (it fetched them). Never push them: they are read-only on GitHub, and on a new repository they would be noise. Push only heads and tags.
 

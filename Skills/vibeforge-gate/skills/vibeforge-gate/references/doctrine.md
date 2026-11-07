@@ -45,6 +45,8 @@ the command that would install it — and the run exits **2**. Not 0.
 The gap can be accepted. `VF_GATE_ALLOW_SKIP=1` exits 0 despite skips. That is
 the right escape hatch precisely because someone had to type it, and it shows up
 in shell history and CI logs. What is not available is skipping *by accident*.
+The verdict line keeps the sentence honest even then: it reads `GATE PASSED WITH
+A GAP` and names the checks that did not run, never "every declared check ran".
 
 **Corollary:** never "fix" a SKIP by deleting the check, wrapping it in
 `|| true`, or lowering it to `enforce: false`. Those turn a visible gap into an

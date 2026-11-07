@@ -98,6 +98,36 @@ checks:
       done
       [ "$bad" -eq 0 ] || exit 1
 
+  - id: catalog-deadlines
+    desc: no catalog shadow-mode deadline has already passed
+    stage: commit
+    why: |
+      The catalog's shadow-mode examples carry a literal enforce_after date,
+      because the parser needs a real one. A date that has passed turns the
+      example into a check that blocks on its first run in someone else's
+      repo, which is the opposite of what the example teaches. This fails on
+      the calendar rather than on a diff, deliberately: the thing that shipped
+      is stale, and the fix is a one-line date bump. Only the catalog and the
+      template manifest are checked; this repo's own manifest promotes checks
+      by deleting the line, not by waiting for a date.
+    run: |
+      today="$(date +%F)"
+      bad=0
+      while IFS=: read -r f n line; do
+        d="$(sed -E 's/^[[:space:]]*enforce_after:[[:space:]]*//; s/[[:space:]]*$//' <<<"$line")"
+        if [[ "$d" < "$today" || "$d" == "$today" ]]; then
+          echo "  LAPSED  $f:$n  enforce_after: $d (today is $today) — bump it"
+          bad=1
+        else
+          echo "  ok      $f:$n  enforce_after: $d"
+        fi
+      done < <(grep -nE '^[[:space:]]*enforce_after:' \
+                 Skills/vibeforge-gate/skills/vibeforge-gate/catalog/*.yaml \
+                 Skills/vibeforge-gate/skills/vibeforge-gate/templates/gates.yaml \
+                 /dev/null)
+      [ "$bad" -eq 0 ] || exit 1
+      echo "every catalog deadline is still ahead"
+
   - id: templates-in-sync
     desc: the installed runner matches the shipped template
     stage: commit

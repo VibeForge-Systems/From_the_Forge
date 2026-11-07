@@ -13,7 +13,9 @@ If the final token is `triage`, `standard`, or `forensic`, it is `DEPTH` and eve
 before it is `SCOPE`. Otherwise the whole string is `SCOPE` and `DEPTH` defaults to
 `standard`. Empty `$ARGUMENTS` means `SCOPE: entire repository`.
 
-- `triage` — Phases 0–1 only. Right for pull-request-scale scope.
+- `triage` — Phases 0–1, then the Verdict, System-of-Record Map, top-ten findings, top
+  pre-mortem, and the Reprieve (Directive 4 makes it mandatory at every depth). Right for
+  pull-request-scale scope.
 - `standard` — everything. The default.
 - `forensic` — everything, plus per-module autopsies and the specific profiling evidence
   it would request for each SEV-1/SEV-2 query finding. Right for pre-migration or

@@ -214,10 +214,27 @@ expect_rc "inventory refuses an --out inside the repo" 3 "$W/inv-bad.log" -- "$S
 echo; echo "scan-secrets.sh"
 expect_rc "scan-secrets refuses a report dir inside the repo" 3 "$W/scan-inside.log" -- \
   "$SCRIPTS/scan-secrets.sh" --repo "$F" --out "$F/reports"
+# a PATH with git and python3 but neither scanner: the gap must name the tool, the floor and an install path
+NOSCAN="$W/noscan-bin"; mkdir -p "$NOSCAN"
+for t in git python3; do ln -sf "$(command -v "$t")" "$NOSCAN/$t"; done
+if ! PATH="$NOSCAN:/usr/bin:/bin" command -v gitleaks >/dev/null 2>&1 && ! PATH="$NOSCAN:/usr/bin:/bin" command -v trufflehog >/dev/null 2>&1; then
+  PATH="$NOSCAN:/usr/bin:/bin" "$SCRIPTS/scan-secrets.sh" --repo "$OLD" --out "$W/scan-noscan" > "$W/scan-noscan.log" 2>&1
+  [ $? -eq 2 ] && ok "scan-secrets exits 2 INCOMPLETE with no scanner on PATH" || { bad "scan-secrets exits 2 INCOMPLETE with no scanner on PATH"; show "$W/scan-noscan.log"; }
+  has "the gap names the gitleaks floor and an install path" "$W/scan-noscan.log" "need >= 8.19) — install gitleaks"
+  has "the gap names a trufflehog install path" "$W/scan-noscan.log" "install trufflehog v3"
+  PATH="$NOSCAN:/usr/bin:/bin" "$SCRIPTS/scan-secrets.sh" --repo "$OLD" --out "$W/scan-accepted" --allow-missing gitleaks,trufflehog > "$W/scan-accepted.log" 2>&1
+  [ $? -eq 0 ] && ok "--allow-missing both scanners exits 0" || { bad "--allow-missing both scanners exits 0"; show "$W/scan-accepted.log"; }
+  has "an accepted gap is reported as CLEAN WITH A GAP, not CLEAN" "$W/scan-accepted.log" "CLEAN WITH A GAP"
+else
+  printf '%s  NOT RUN%s missing-scanner cases (a scanner is installed under /usr/bin or /bin)\n' "$ylw" "$rst"; NOTRUN=1
+fi
 if [ "${RPR_SELFTEST_SCANNERS:-0}" = 1 ]; then
   expect_rc "scan-secrets finds the deleted credentials in history" 1 "$W/scan-old.log" -- \
     "$SCRIPTS/scan-secrets.sh" --repo "$OLD" --out "$W/scan-old" --no-verification
   has "gitleaks history pass reports findings" "$W/scan-old.log" "history: see"
+  if [ -s "$W/scan-old/trufflehog.jsonl" ] && ! grep -qF -e "$AKID" -e "$GHTOK" "$W/scan-old/trufflehog.jsonl" \
+     && grep -q '\[redacted, ' "$W/scan-old/trufflehog.jsonl"; then ok "trufflehog report is redacted (no planted value survives)"
+  else bad "trufflehog report is redacted (no planted value survives)"; fi
   expect_rc "scan-secrets is clean after the rewrite" 0 "$W/scan-new.log" -- \
     "$SCRIPTS/scan-secrets.sh" --repo "$NEW" --out "$W/scan-new" --no-verification --trust
   # a credential that exists ONLY in a merge resolution: invisible to a plain history scan

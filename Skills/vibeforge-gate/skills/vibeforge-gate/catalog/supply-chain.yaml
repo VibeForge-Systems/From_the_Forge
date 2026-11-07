@@ -231,7 +231,10 @@ checks:
     desc: no private IPs, internal hostnames, UNC shares or home paths in what this push adds
     stage: push
     enforce: false
-    enforce_after: 2026-12-31
+    # Placeholder deadline. Set your own when you copy this block; a date that
+    # has passed makes the check block on its first run, which is the opposite
+    # of shadow mode. The collection repo's gate fails if this one lapses.
+    enforce_after: 2027-06-30
     why: |
       Internal topology is not a credential, so no secret scanner reports it:
       an RFC 1918 or CGNAT address, a host under .lan/.internal/.corp/

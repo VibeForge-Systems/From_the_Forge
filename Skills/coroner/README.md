@@ -52,7 +52,7 @@ See the worked example in [`commands/coroner-review.md`](commands/coroner-review
 
 | Depth | Covers | Use for |
 |---|---|---|
-| `triage` | Phases 0–1, verdict, top-ten findings, top pre-mortem | Pull-request scale |
+| `triage` | Phases 0–1, verdict, System-of-Record map, top-ten findings, top pre-mortem, and the Reprieve (never optional) | Pull-request scale |
 | `standard` | Everything | The default |
 | `forensic` | Everything, plus per-module autopsies and requested profiling evidence | Pre-migration, pre-acquisition |
 
@@ -64,6 +64,9 @@ See the worked example in [`commands/coroner-review.md`](commands/coroner-review
   one-line consequence. Stack-specific checks belong in the §5 lenses as bullets.
 - **Leave §2 and §7 alone.** They are the calibration and evidence rules — what keeps the
   review honest rather than merely confident.
+- `evals/` holds behaviour evals (what a run must and must not do) and trigger queries for
+  the agent description. Update them when the description, the depth semantics, or the
+  tool set changes.
 
 ## Report identity
 

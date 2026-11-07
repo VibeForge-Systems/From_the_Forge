@@ -21,8 +21,12 @@ Target and step: `$ARGUMENTS`.
    identities, internal details, deny-list terms, files, surfaces. Report every
    `INCOMPLETE`, `UNKNOWN` and `NOT RUN` as exactly that — never as clean.
 5. If no private deny list exists, say that employer and client names were not
-   checked, and offer to help the person write one at
-   `~/.config/repo-publication-readiness/denylist` (outside every repository).
+   checked, and offer to help the person write one from
+   `templates/leak-denylist.example` at `~/.config/vibeforge/leak-denylist`
+   (outside every repository). That is the location vibeforge-gate's
+   `denylist-scan` reads too, so one list serves the audit and the standing
+   gate; the sweep also still reads `~/.config/repo-publication-readiness/denylist`
+   and `$RPR_DENYLIST` if that is where a list already lives.
 
 Do not rewrite history, change GitHub settings, or push anything as part of the
 audit. Those are phase 4 and 8, each confirmed with the person first.

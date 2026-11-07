@@ -240,7 +240,10 @@ checks:
     desc: no misspellings in sources and docs
     stage: commit
     enforce: false
-    enforce_after: 2026-11-01
+    # Placeholder deadline. Set your own when you copy this block; a date that
+    # has passed makes the check block on its first run, which is the opposite
+    # of shadow mode. The collection repo's gate fails if this one lapses.
+    enforce_after: 2027-06-30
     tool: typos
     tool_version: "1.28.4"
     install: "cargo install typos-cli --locked --version 1.28.4"

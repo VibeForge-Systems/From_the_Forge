@@ -1,6 +1,6 @@
 ---
 name: vibeforge-gate
-description: Use this skill to stand up, extend, or run a repository-owned merge bar — a local pre-commit/pre-push gate that runs the checks a hosted CI service would have run, without depending on one. Trigger when the user says CI is unavailable, unfunded, out of minutes, disabled, or too slow; when they want checks to run before a commit, push, merge, or PR; when they ask to add a check (lint, format, tests, secret scan, SAST, dependency/vulnerability scan, license or SBOM check) to a local gate; when they want to migrate off hosted CI or replicate gates that sit behind a paid tier; when they mention a pre-commit or pre-push hook, a "merge bar", or "green locally means green"; and when a gate reports SKIP, a tool version pin drifts, or a check needs to run in shadow/advisory mode. Also use it to audit an existing local gate for silent coverage gaps. Do not use it to author hosted CI provider config, or for one-off ad-hoc test runs that are not part of a standing gate.
+description: Use this skill to stand up, extend, or run a repository-owned merge bar: a local pre-commit/pre-push gate that runs the checks a hosted CI service would have run, without depending on one. Trigger when the user says CI is unavailable, unfunded, out of minutes, disabled, or too slow; when they want checks before a commit, push, merge, or PR; when they ask to add a check (lint, format, tests, secret scan, SAST, dependency/vulnerability scan, license or SBOM check) to a local gate; when they want to migrate off hosted CI or replicate gates behind a paid tier; when they mention a pre-commit or pre-push hook, a "merge bar", or "green locally means green"; and when a gate reports SKIP, a tool pin drifts, a secret slipped past a green scan, or a check needs shadow/advisory mode. Also use it to audit an existing local gate for silent coverage gaps. Not for authoring hosted-CI config, forge branch protection, one-off ad-hoc test or scanner runs, or taking a private repo public (that is repo-publication-readiness).
 compatibility: Needs bash 4+, coreutils and git in the target repo. No YAML library, language runtime, package manager, network, or hosted-CI account is required.
 metadata:
   owner: VibeForge-Systems/vibeforge-gate
@@ -38,7 +38,9 @@ Read `references/doctrine.md` before making a judgment call about any of these.
 | "install the hook" | `git config core.hooksPath .vibeforge/hooks`. See `references/hooks.md`. |
 | "why is this check here?" | `.vibeforge/gate.sh --explain <id>` — every check carries its own rationale and provenance. |
 | a check reports SKIP | Do **not** paper over it. Install the tool, or make the operator's acceptance of the gap explicit. |
-| "make sure nothing leaks when we push" / "a secret got through" | Add the outgoing-aware checks from `catalog/supply-chain.yaml` and `catalog/universal.yaml`; they read `$VF_OUTGOING`. Preparing a private repo to go public is a different job: the `repo-publication-readiness` skill. |
+| "make sure nothing leaks when we push" / "a secret got through" | Add the outgoing-aware checks from `catalog/supply-chain.yaml` and `catalog/universal.yaml`; they read `$VF_OUTGOING`. `denylist-scan` needs a private list *outside* the repo (`templates/leak-denylist.example` is the starting point); without one it SKIPs, which is correct. Preparing a private repo to go public is a different job: the `repo-publication-readiness` skill. |
+| "it passes for me but fails for everyone else" | `.vibeforge/gate.sh --pristine` re-runs the bar in a clean worktree of `HEAD`, without untracked files or local edits. A check that passes only in the working tree is checking the wrong thing. |
+| "a shadow check has been advisory for months" | Give it `enforce_after:`, or promote it by deleting `enforce: false`. An advisory check with no deadline is decoration. |
 
 ## Standing one up
 
@@ -46,7 +48,7 @@ Read `references/doctrine.md` before making a judgment call about any of these.
 2. **Harvest the checks that already exist.** In order of authority: an existing hosted-CI config (`.github/workflows/*.yml`, `.gitlab-ci.yml`, `.woodpecker.yml`, `Jenkinsfile`), then the repo's own `Makefile`/`justfile`/`package.json` scripts, then its contributor docs. Do not invent a bar when the repo already states one — the existing checks are the ones people expect to pass.
 3. **Add what the vendor was charging for.** `catalog/supply-chain.yaml` holds the checks commonly gated behind a paid tier — secret scanning, SAST, dependency vulnerabilities, licenses, SBOM — with free, pinnable local equivalents. This is usually where a locally-owned gate becomes *better* than what was being rented, not merely equal.
 4. **Split by stage.** `stage: commit` = fast and always-on (format, lint, fast unit tests, structural invariants). `stage: push` = the full bar. `stage: manual` = slow or occasional. `--stage push` runs commit checks too, so the full bar is always a superset.
-5. **Copy the machinery in.** `templates/gate.sh` → `.vibeforge/gate.sh`, `templates/hooks/*` → `.vibeforge/hooks/`, `templates/gates.yaml` → `.vibeforge/gates.yaml` as the starting point. Then `git config core.hooksPath .vibeforge/hooks`.
+5. **Copy the machinery in.** `templates/gate.sh` → `.vibeforge/gate.sh`, `templates/hooks/pre-commit` and `pre-push` → `.vibeforge/hooks/`, `templates/gates.yaml` → `.vibeforge/gates.yaml` as the starting point. (`templates/hooks/pre-receive` goes on the repository being pushed *to*, if there is one; it does not belong in the local hooks directory.) Then ask before running `git config core.hooksPath .vibeforge/hooks`: it replaces whatever `.git/hooks` already does.
 6. **Run it, and show the user the summary.** Including the SKIPs. A first run with three SKIPs is a *correct* result and a to-do list; a first run doctored to be green is a lie you will both rely on later.
 
 Then tell the user, in plain terms, what the gate does and does not cover.
@@ -88,7 +90,8 @@ Also available: `needs:` (comma-separated binaries that must exist), `probe:` (a
 | `references/adapting-stacks.md` | Working out the checks and version pins for Go, Node, Python, Rust, or a mixed repo |
 | `references/importing-existing-ci.md` | Migrating off a hosted CI config, including steps that cannot run locally |
 | `references/hooks.md` | Installing, staging, or bypassing the git hooks |
-| `catalog/*.yaml` | Adding a check — copy a written one rather than composing from scratch |
+| `catalog/*.yaml` | Adding a check — copy a written one rather than composing from scratch. `catalog/README.md` says what each file holds and the two rules for copying: keep the `why:`, check the pin. Set your own `enforce_after:` on any shadow-mode block; the catalog's dates are placeholders. |
+| `templates/leak-denylist.example` | Setting up `denylist-scan` — the operator's private employer/client/codename list, kept outside the repository |
 | `examples/go-sacp/` | A full worked example, plus its equivalence audit against a hand-written predecessor |
 
 ## Honest scope

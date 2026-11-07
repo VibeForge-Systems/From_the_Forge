@@ -32,6 +32,22 @@
     "should_trigger": true
   },
   {
+    "query": "ok so my manager said I can open source the internal cli we built but 'make sure nothing from the client engagements is in there'. the repo is acme-corp/ops-cli, private, about 900 commits. where do I even start",
+    "should_trigger": true
+  },
+  {
+    "query": "The new public repo is up and the old private one is still there. Walk me through re-scanning the public clone and checking the settings before we announce it.",
+    "should_trigger": true
+  },
+  {
+    "query": "We're moving a repo from our company GitHub org to my personal account and making it public at the same time. Does author email matter? Half the commits are from my work address.",
+    "should_trigger": true
+  },
+  {
+    "query": "Our research code has a notebook with cell outputs showing patient IDs. It's going on GitHub with the paper. How do I make sure none of that ships?",
+    "should_trigger": true
+  },
+  {
     "query": "Add a secret scanner to our pre-push hook.",
     "should_trigger": false
   },
@@ -53,6 +69,22 @@
   },
   {
     "query": "Squash my last three commits into one.",
+    "should_trigger": false
+  },
+  {
+    "query": "Our repo is already public. Make the GitHub Actions workflows safe for pull requests from forks and pin the actions to SHAs.",
+    "should_trigger": false
+  },
+  {
+    "query": "Someone accidentally committed a 400 MB dataset to our private monorepo last year and clones are slow. Remove it from history.",
+    "should_trigger": false
+  },
+  {
+    "query": "Change the license of our public project from MIT to Apache-2.0 and update the headers.",
+    "should_trigger": false
+  },
+  {
+    "query": "Set up gitleaks in GitHub Actions so it runs on every PR to our public repo.",
     "should_trigger": false
   }
 ]

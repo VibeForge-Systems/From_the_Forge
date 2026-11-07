@@ -43,10 +43,13 @@ Ask Claude Code what subagents it sees, or check that `coroner` appears in the a
 with a read-only tool set.
 
 The shipped frontmatter grants `Read`, `Grep`, `Glob` and Context7's two documentation-lookup
-tools. **Adjust that list to your host.** The Context7 entries are named for a specific MCP
-server — if you do not run it, or yours is registered under a different name, edit or remove
-them. They are worth keeping where available: they are what lets a finding about library
-behaviour carry High confidence rather than Medium.
+tools, under the three names hosts have been seen to register them: `mcp__context7__*` (a
+user-level MCP server), `mcp__Context7__*` (a claude.ai connector) and
+`mcp__plugin_context7_context7__*` (the Context7 plugin). Tool names are matched exactly, so
+a variant that does not match your host is simply unavailable; it does no harm. **Adjust
+that list to your host.** If you do not run Context7, or yours is registered under yet
+another name, edit or remove the entries. They are worth keeping where available: they are
+what lets a finding about library behaviour carry High confidence rather than Medium.
 
 **The most common failure is missing or malformed frontmatter.** An agent file without a
 leading `---` block containing `name:` and `description:` is not registered as an

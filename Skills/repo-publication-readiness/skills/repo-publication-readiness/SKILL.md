@@ -67,7 +67,9 @@ scripts/sweep-leaks.py  --repo /work/REPO.git --identities /work/private/identit
                         --json /work/audit/sweep.json
 ```
 
-`scan-secrets.sh` runs gitleaks over every ref, then the two passes both scanners' history modes miss — merge resolutions (`git log -p` shows no diff for a merge; replayed with `--remerge-diff`) and commit/tag messages — then TruffleHog, scanning the mirror in place so refs/pull/* are included, with live verification. **Verification sends each candidate to its issuer**; use `--no-verification` where that is not acceptable.
+`scan-secrets.sh` runs gitleaks over every ref, then the two passes both scanners' history modes miss — merge resolutions (`git log -p` shows no diff for a merge; replayed with `--remerge-diff`) and commit/tag messages — then TruffleHog, scanning the mirror in place so refs/pull/* are included, with live verification. **Verification sends each candidate to its issuer**; use `--no-verification` where that is not acceptable. Its reports are redacted (gitleaks `--redact`; the TruffleHog JSON is rewritten to prefix and length), and so is yours: cite a finding by commit, path and line, never by value, and keep every report outside the repository.
+
+**A scanner that did not run is a gap, not a pass.** If gitleaks (8.19+) or TruffleHog (v3) is missing and cannot be installed, the script exits 2 INCOMPLETE; your report then names the tool, the version floor and the install path (`references/secret-scanning.md`, "Installing"), runs everything else, and says the repository is unscanned by that engine — not clean.
 
 `sweep-leaks.py` finds what credential scanners are not built for: identities that are not on your publishable list, private and CGNAT addresses, internal hostnames and UNC shares, home-directory paths that name an account, terms from your private deny list, sensitive file names (`.env`, keys, keystores, HAR captures), notebooks with outputs, oversized blobs, and the same classes inside binary blobs (extracted strings, Office XML, EXIF GPS). The **deny list** — employer, clients, codenames — starts from `templates/leak-denylist.example`, lives at `~/.config/vibeforge/leak-denylist` (the same file vibeforge-gate's `denylist-scan` reads), and is refused if it sits inside the repository. Without one, the sweep says in its output that those names were not checked.
 
@@ -121,7 +123,7 @@ Order matters: **protect first, push second.**
 
 1. Create a **new, empty, public** repository (not a fork, not from a template that carries history).
 2. Before pushing anything, enable: secret scanning and push protection, private vulnerability reporting, Dependabot alerts, code scanning default setup, a ruleset on the default branch (block deletion and force-push, require PRs), default `GITHUB_TOKEN` read-only, "require actions pinned to a full SHA", and the strictest fork-PR approval. `scripts/check-github-settings.sh OWNER/NEW` reports each one.
-3. Push only branches and tags from the verified clone. Never `--mirror` (it would send refs/pull/*, refs/replace and anything else lying around):
+3. Push only branches and tags from the verified clone. Never `--mirror` (it would send refs/pull/*, refs/replace and anything else lying around), and never the `git push --force` that git-filter-repo's closing message suggests — that hint is written for pushing a rewrite back over the original repository, which is the flip path, not this one:
 
 ```sh
 git -C /work/rewrite push git@github.com:OWNER/NEW.git 'refs/heads/*:refs/heads/*' 'refs/tags/*:refs/tags/*'

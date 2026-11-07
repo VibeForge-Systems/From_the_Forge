@@ -56,11 +56,20 @@ SACP_CI_SKIP_RACE=1 VF_GATE_MANIFEST=<here>/gates.yaml \
 
 ## This repository's own gate
 
-The other worked example is `.vibeforge/gates.yaml` at the root of this package.
+The other worked example is `.vibeforge/gates.yaml` at the root of the
+From_the_Forge collection repository, two levels above this package (git
+resolves hooks per repository, so the gate cannot live inside the package).
 It gates the package with the package: shell syntax, shellcheck against a pinned
-fetched build, the 32-case runner selftest, skill frontmatter validity, and a
-check that every catalog and example manifest parses with the real parser — so a
-broken example cannot ship.
+fetched build, the 51-case runner selftest, skill frontmatter and plugin
+manifest validity, a check that every catalog and example manifest parses with
+the real parser, and a check that no catalog shadow-mode deadline has lapsed —
+so a broken or stale example cannot ship.
+
+It is also the worked example of gating what a push *publishes*: the
+`secret-scan-outgoing`, `identity-check`, `leak-scan`, `denylist-scan` and
+`outgoing-files` blocks from the catalog run there on every push, reading
+`$VF_OUTGOING` rather than the working tree, because the repository is public.
 
 It also has a `templates-in-sync` check, because this repo keeps two copies of
-the runner (the shipped template and the one it dogfoods), and two copies drift.
+the runner, the hooks and the example deny list (the shipped template and the
+one it dogfoods), and two copies drift.

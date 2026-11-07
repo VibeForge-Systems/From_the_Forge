@@ -48,6 +48,14 @@
     "should_trigger": true
   },
   {
+    "query": "the gate keeps saying SKIP denylist-scan, probe failed, something about ~/.config/vibeforge. we don't have one of those. what do I do, just drop the check?",
+    "should_trigger": true
+  },
+  {
+    "query": "Our monorepo has a Go service under api/, a Vite frontend under web/ and a Python worker under jobs/. I want one set of checks that runs before push and only the fast ones before commit.",
+    "should_trigger": true
+  },
+  {
     "query": "Write me a GitHub Actions workflow that builds and tests this Go service on push.",
     "should_trigger": false
   },
@@ -61,6 +69,30 @@
   },
   {
     "query": "Refactor this bash script so it's easier to read.",
+    "should_trigger": false
+  },
+  {
+    "query": "Our private repo is going public next week. Scan the whole history for secrets and tell me what has to be rotated or rewritten before we flip it.",
+    "should_trigger": false
+  },
+  {
+    "query": "Set up branch protection on main so PRs need two approvals and the 'build' status check before merging.",
+    "should_trigger": false
+  },
+  {
+    "query": "Just run gitleaks once over this checkout so I can see what it flags. I don't want anything permanent.",
+    "should_trigger": false
+  },
+  {
+    "query": "The 'test' job in our GitHub Actions workflow started failing yesterday with 'actions/setup-node@v3 is deprecated'. Fix the workflow.",
+    "should_trigger": false
+  },
+  {
+    "query": "Add a pytest for the new retry logic in jobs/worker.py and make sure it covers the backoff cap.",
+    "should_trigger": false
+  },
+  {
+    "query": "Our Jenkins pipeline takes 40 minutes. Split the test stage across parallel agents and cache the Maven repo between runs.",
     "should_trigger": false
   }
 ]

@@ -82,6 +82,18 @@ The original research cited a Comparitech "1 minute" figure; it was not traced t
 | North Dakota as an employer-default state | secondary, single source — **unverified** |
 | Release-process practices (Google, Microsoft, TODO Group, OpenSSF Concise Guide) | primary: TODO Group and OpenSSF source repositories (2026-10-22); Google's open source release docs (read during the original research, not re-read); Microsoft's releasing page could not be loaded — its program summary page was used |
 
+## Re-verification, 2026-11-07
+
+A partial pass, limited to what could be run in a Linux container with package-registry access.
+
+| Claim | Method | Notes |
+|---|---|---|
+| The selftest's scanner end-to-end cases pass (deleted credentials found in history; clean after the rewrite; a credential only in a merge resolution is caught by the merge pass) | ran, `RPR_SELFTEST_SCANNERS=1 ./selftest.sh`, 46 passed | gitleaks 8.30.1 from vibeforge-gate's cache (sha256 matched the catalog pin); TruffleHog 3.99.3 `linux_amd64` release tarball, extracted binary sha256 `f315489f…` — not checked against the release's checksums file or cosign this time |
+| zizmor newest on PyPI is 1.32.0; typos-cli newest is 1.52.0 | primary (`pip index versions`) | Supersedes the currency of the "zizmor 1.31.1" row above; the pin itself is unchanged and still runs |
+| gitleaks, TruffleHog, git-filter-repo, Scorecard, reuse, grant newest releases | **not re-checked** | Web search returned no authoritative latest-tag result; the 2026-10-22 rows stand as of that date |
+| TruffleHog 3.99.3 `--json` output holds the full value under `Raw`, `RawV2` and `SecretParts`, and the CLI has no redaction flag | ran (a planted-token scan; field names read from the output, values not copied) | Motivates the in-place redaction in `scan-secrets.sh`; the selftest now asserts no planted value survives in `trufflehog.jsonl` |
+| gitleaks and TruffleHog release pages publish a per-release checksums file; the Go module paths are `github.com/zricethezav/gitleaks/v8` and `github.com/trufflesecurity/trufflehog/v3` | secondary (module paths from each project's `go.mod` as read during the original research; release-asset layout as seen on 2026-10-22) | The install paths named in "Installing" and in the script's INCOMPLETE message; re-check the asset names before scripting a download |
+
 ## Still open
 
 - Whether opting a repository out of the GitHub Archive Program also stops Software Heritage's own crawl.
