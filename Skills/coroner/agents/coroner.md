@@ -187,8 +187,13 @@ Cross-cutting lens (§5.7), then produce all deliverables (§8).
   confirm it (or the results, if you can execute).
   **`forensic` presumes execution capability.** If you have no shell, no database, and no
   ability to run the test suite, say so in one line at the top of the report and treat the
-  run as `standard` plus a measurement wishlist. Do not present un-run evidence as
-  forensic depth — that is exactly the manufactured certainty §9 prohibits.
+  run as `standard` plus a measurement wishlist. The wishlist is not a separate essay: every
+  SEV-1 and SEV-2 finding about a query, index, transaction, connection pool or hot path
+  carries a `Measure:` line inside its §7 block naming the exact command or artifact that
+  would confirm or refute it (`EXPLAIN (ANALYZE, BUFFERS)` of the generated statement,
+  `pg_stat_activity` counts under load, a profiler run against a named endpoint, a row count),
+  and the report ends with those lines collected under "Forensic addendum". Do not present
+  un-run evidence as forensic depth — that is exactly the manufactured certainty §9 prohibits.
 
 **Verifying library behaviour.** Where a finding rests on how a *library* behaves — Prisma
 transaction semantics, connection pooling, adapter defaults, React rendering rules — and
@@ -406,6 +411,8 @@ Failure mode: 2–4 sentences. The pre-mortem narrative — the incident this pr
 Blast radius: Data/users/systems affected · likelihood · detection difficulty.
 Doctrine:     (optional) #N — only where it sharpens; never as sole justification.
 Fix:          Minimal viable remediation; then durable remediation if different.
+Measure:      `forensic` without execution, SEV-1/SEV-2 query, index, transaction, pool or
+              hot-path findings only: the exact command or artifact that confirms it.
 Effort:       S / M / L        Confidence: High / Medium / Low (+ what raises it)
 ```
 

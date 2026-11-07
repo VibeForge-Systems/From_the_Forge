@@ -31,6 +31,11 @@
 #                      refuses to use it on a repo with a working tree you did
 #                      not create as a mirror unless --trust is given.
 #
+# EVERY REPORT IS REDACTED. gitleaks runs with --redact; TruffleHog's JSON (which
+# carries each secret in full under Raw, RawV2 and SecretParts) is rewritten in
+# place so that only a short prefix and the length survive. A report that holds
+# the value is itself a leak waiting for a `git add`.
+#
 # VERIFICATION SENDS DATA. TruffleHog verifies a candidate by calling the
 # issuing provider's API with it. That is how "verified" means "live". Pass
 # --no-verification to keep candidates on this machine.
@@ -39,7 +44,8 @@
 #       3 usage. Reports go to --out, which must be OUTSIDE the repository.
 #
 # Tool floor: gitleaks >= 8.19 (the `git`/`dir`/`stdin` subcommands; `detect`
-# and `protect` are deprecated and hidden), trufflehog v3, git >= 2.22.
+# and `protect` are deprecated and hidden), trufflehog v3, git >= 2.22,
+# python3 (redaction). Install paths: references/secret-scanning.md, "Installing".
 
 set -uo pipefail
 
@@ -70,6 +76,9 @@ gap()   { printf '  INCOMPLETE: %s\n' "$*"; INCOMPLETE=1; }
 found() { printf '  FINDINGS:   %s\n' "$*"; FINDINGS=1; }
 
 allowed_missing() { case ",$ALLOW_MISSING," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
+ACCEPTED=""   # tools whose absence --allow-missing accepted; named in the verdict
+GL_INSTALL="install gitleaks >= 8.19: a release asset from https://github.com/gitleaks/gitleaks/releases with its sha256 checked against that release's checksums file, or 'go install github.com/zricethezav/gitleaks/v8@<tag>'"
+TH_INSTALL="install trufflehog v3: a release asset from https://github.com/trufflesecurity/trufflehog/releases with its sha256 checked against that release's checksums file, or 'go install github.com/trufflesecurity/trufflehog/v3@<tag>'"
 
 ver_ge() {  # ver_ge HAVE WANT  (dotted numeric compare)
   [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]
@@ -89,9 +98,9 @@ if command -v gitleaks >/dev/null 2>&1; then
   GLV="$("$GL" version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 fi
 if [ -z "$GL" ]; then
-  if allowed_missing gitleaks; then note "gitleaks not installed — accepted with --allow-missing"; else gap "gitleaks not installed (need >= 8.19)"; fi
+  if allowed_missing gitleaks; then note "gitleaks not installed — accepted with --allow-missing"; ACCEPTED="$ACCEPTED gitleaks"; else gap "gitleaks not installed (need >= 8.19) — $GL_INSTALL"; fi
 elif [ -z "$GLV" ] || ! ver_ge "$GLV" 8.19.0; then
-  gap "gitleaks ${GLV:-of unknown version} predates 8.19 (no 'git'/'stdin' subcommands) — install a current release"
+  gap "gitleaks ${GLV:-of unknown version} predates 8.19 (no 'git'/'stdin' subcommands) — $GL_INSTALL"
 else
   note "gitleaks $GLV"
   # 1. history. Exit code 99 = leaks found, so a tool error cannot read as "clean".
@@ -139,7 +148,7 @@ echo; echo "== trufflehog"
 TH=""
 command -v trufflehog >/dev/null 2>&1 && TH="$(command -v trufflehog)"
 if [ -z "$TH" ]; then
-  if allowed_missing trufflehog; then note "trufflehog not installed — accepted with --allow-missing"; else gap "trufflehog v3 not installed"; fi
+  if allowed_missing trufflehog; then note "trufflehog not installed — accepted with --allow-missing"; ACCEPTED="$ACCEPTED trufflehog"; else gap "trufflehog v3 not installed — $TH_INSTALL"; fi
 else
   THV="$("$TH" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
   note "trufflehog ${THV:-unknown version}"
@@ -158,10 +167,45 @@ else
   fi
   "$TH" "${args[@]}" > "$OUT/trufflehog.jsonl" 2>"$OUT/trufflehog.log"
   rc=$?
+  # TruffleHog has no --redact: its JSON carries the full value under Raw, RawV2 and
+  # SecretParts. Rewrite the report so only a 6-character prefix and the length remain;
+  # SourceMetadata (commit, file, line) is what triage needs and is kept whole.
+  if [ -s "$OUT/trufflehog.jsonl" ]; then
+    if ! python3 -I - "$OUT/trufflehog.jsonl" <<'PYREDACT'
+import json, sys
+path = sys.argv[1]
+def red(v):
+    if isinstance(v, str):
+        return v if not v else f"{v[:6]}…[redacted, {len(v)} chars]"
+    if isinstance(v, dict):
+        return {k: red(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [red(x) for x in v]
+    return v
+out = []
+with open(path, encoding="utf-8") as fh:
+    for line in fh:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+        except json.JSONDecodeError:
+            out.append(json.dumps({"unparsed": "…[redacted]"})); continue
+        for k in ("Raw", "RawV2", "SecretParts"):
+            if k in d:
+                d[k] = red(d[k])
+        out.append(json.dumps(d))
+with open(path, "w", encoding="utf-8") as fh:
+    fh.write("\n".join(out) + ("\n" if out else ""))
+PYREDACT
+    then gap "could not redact $OUT/trufflehog.jsonl (python3 missing or failed) — it holds full credential values; delete it"
+    fi
+  fi
   case $rc in
     0) note "clean" ;;
     183) v="$(grep -c '"Verified":true' "$OUT/trufflehog.jsonl" || true)"
-         found "trufflehog: $(wc -l < "$OUT/trufflehog.jsonl") result(s), $v VERIFIED LIVE — rotate those first ($OUT/trufflehog.jsonl)" ;;
+         found "trufflehog: $(wc -l < "$OUT/trufflehog.jsonl") result(s), $v VERIFIED LIVE — rotate those first ($OUT/trufflehog.jsonl, values redacted)" ;;
     *) gap "trufflehog exited $rc (see trufflehog.log)" ;;
   esac
 fi
@@ -176,6 +220,10 @@ fi
 if [ "$FINDINGS" = 1 ]; then
   echo "FINDINGS — every credential found is rotated or revoked BEFORE any rewrite. A rewrite hides; only rotation makes it dead."
   exit 1
+fi
+if [ -n "$ACCEPTED" ]; then
+  echo "CLEAN WITH A GAP — nothing found by what ran, but$ACCEPTED did not run (accepted with --allow-missing). Not a complete scan."
+  exit 0
 fi
 echo "CLEAN — both scanners and every supplementary pass ran and found nothing."
 exit 0

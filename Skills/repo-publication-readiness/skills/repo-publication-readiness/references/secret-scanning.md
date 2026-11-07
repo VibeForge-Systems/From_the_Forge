@@ -7,6 +7,7 @@ How `scripts/scan-secrets.sh` uses gitleaks and TruffleHog, what each misses on 
 - Why two scanners
 - gitleaks (v8.30.1)
 - TruffleHog (v3.99.3)
+- Installing, and what a missing scanner means
 - The blind spots both share
 - Scope: which refs
 - Triage
@@ -33,6 +34,17 @@ They fail differently. gitleaks is a fast, offline pattern-and-entropy engine wi
 - **Verification is a network call** to the issuer with the candidate value. `--no-verification` keeps candidates local.
 - **Beyond git.** `trufflehog github --repo=URL --issue-comments --pr-comments --include-wikis` scans issue and PR text and the wiki — the surfaces a flip publishes that a git scan never sees. Needs a token with read access.
 - **Ranges.** `--since-commit BASE --branch HEAD` limits a git scan.
+
+## Installing, and what a missing scanner means
+
+Both scanners ship as single static binaries on their GitHub releases pages, with a checksums file per release:
+
+- gitleaks: `https://github.com/gitleaks/gitleaks/releases` — download the asset for your platform, check its sha256 against that release's checksums file, put the binary on `PATH`. Or build the tag: `go install github.com/zricethezav/gitleaks/v8@v8.30.1`. The floor is **8.19** (the `git`/`dir`/`stdin` subcommands).
+- TruffleHog: `https://github.com/trufflesecurity/trufflehog/releases` — same procedure. Or `go install github.com/trufflesecurity/trufflehog/v3@v3.99.3`. Any v3 release works.
+
+When one of them cannot be installed, `scan-secrets.sh` exits 2 and prints INCOMPLETE naming the tool, the floor and this install path. Report it that way: **the repository is not clean, it is unscanned by that engine.** `--allow-missing TOOL` records that you accepted the gap on purpose; the verdict then reads CLEAN WITH A GAP, never CLEAN. Do not describe either result as a clean scan.
+
+Reports are redacted. gitleaks runs with `--redact`; TruffleHog has no such flag and writes each secret in full under `Raw`, `RawV2` and `SecretParts`, so the script rewrites `trufflehog.jsonl` in place to a six-character prefix plus the length. Location (`SourceMetadata`: commit, file, line) is kept, which is what triage needs. A report that carries the value is one `git add` away from being the next leak.
 
 ## The blind spots both share
 

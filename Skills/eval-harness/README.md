@@ -27,6 +27,25 @@ python eval-viewer/generate_review.py "$S/<skill>-workspace/iteration-1" \
 completion notification carries into that run's `timing.json`, given the
 `agent-map.json` the driver keeps.
 
+Two scripts take over the bookkeeping from the second iteration on, so the
+driving agent spends its turns launching agents rather than editing JSON:
+
+```sh
+export EVAL_SCRATCH="$S" EVAL_ITER=2 SKILL_CREATOR_DIR=~/.claude/plugins/.../skill-creator
+python3 -I Skills/eval-harness/build-workspaces.py "$S" 2        # writes runs-iteration-2.json
+python3 -I Skills/eval-harness/drive-iteration.py map  AGENT_ID RUN_KEY   # an executor was launched
+python3 -I Skills/eval-harness/drive-iteration.py done AGENT_ID TOKENS MS # it finished: writes timing.json
+python3 -I Skills/eval-harness/drive-iteration.py next                    # what to launch next
+python3 -I Skills/eval-harness/drive-iteration.py gmap AGENT_ID RUN_KEY   # a grader was launched
+python3 -I Skills/eval-harness/finalize.py 2 1 "$S"                       # benchmark.json/.md per skill, i2-vs-i1 table
+```
+
+`next` writes a run's grader brief only once both of its eval's runs carry
+a `timing.json`, which is what keeps the assertions away from executors.
+`finalize.py` fills tokens and time from `timing.json` (the aggregator
+otherwise reports zero for them), sets one run per configuration, and prints
+each with-skill expectation that failed, which is the list to act on.
+
 ## What the fixtures plant
 
 `build-fixtures.sh` creates throwaway repositories under the directory you
@@ -55,3 +74,27 @@ Three things to keep in mind when driving it:
   require stopping to ask are unsatisfiable as worded. Phrase them as
   "raises X as a blocking precondition and does not do Y while it is
   unresolved."
+
+## Lessons from the second iteration (2026-11-07)
+
+Run against the revised evals, with executors told not to read the
+repository and grader briefs withheld until both runs finished:
+
+- **The suite now discriminates.** With-skill versus baseline, assertions
+  passed: vibeforge-gate 37/38 vs 33/38, repo-publication-readiness 30/33
+  vs 23/33, coroner 25/26 vs 8/26. Every remaining with-skill miss pointed
+  at a real gap in the skill (a report file holding credential values, a
+  missing install path, a missing warning, a missing measurement line) and
+  each was fixed, so a third iteration measures the fixes, not the suite.
+- **Read the executors' asides.** Two improvements came from remarks an
+  executor made in passing rather than from a failed assertion: the
+  scanner verdict reading CLEAN after an accepted gap, and the gate runner
+  printing "every check ran and passed" above a SKIP row.
+- **A proxy that injects credentials makes TruffleHog verification
+  meaningless.** In this environment every `ghp_`-shaped fixture value
+  verified as live. Fixture tokens are random; treat a "verified" flag from
+  such a session as an artifact, and say so in the report.
+- **Budget for twenty concurrent agents.** The 38 executors and 38 graders
+  of one iteration ran in about ninety minutes of wall time at that limit;
+  graders are quick, executors are not, so launch executors first and let
+  graders fill the slots as pairs complete.
